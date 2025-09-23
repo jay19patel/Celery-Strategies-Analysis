@@ -1,6 +1,5 @@
 import random
 import time
-from typing import Any, Dict, Optional
 from core.base_strategy import BaseStrategy
 from models.strategy_models import StrategyResult, SignalType
 
@@ -8,7 +7,7 @@ class RSIStrategy(BaseStrategy):
     def __init__(self):
         super().__init__("RSI Strategy")
 
-    def execute(self, data: Optional[Dict[str, Any]] = None) -> StrategyResult:
+    def execute(self) -> StrategyResult:
         start_time = time.time()
 
         # Dummy execution time with random sleep between 5-10 seconds
@@ -27,5 +26,5 @@ class RSIStrategy(BaseStrategy):
             signal_type=random_signal_type,
             confidence=confidence,
             execution_time=execution_time,
-            price=random.uniform(100, 500) if data is None else data.get('price', 100)
+            price=random.uniform(100, 500)
         )

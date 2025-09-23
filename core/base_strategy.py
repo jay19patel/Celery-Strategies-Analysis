@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 import time
-from typing import Any, Dict, Optional
 from models.strategy_models import StrategyResult
 
 class BaseStrategy(ABC):
@@ -8,7 +7,7 @@ class BaseStrategy(ABC):
         self.name = name
 
     @abstractmethod
-    def execute(self, data: Optional[Dict[str, Any]] = None) -> StrategyResult:
+    def execute(self) -> StrategyResult:
         """
         Abstract method that must be implemented by all strategy classes.
         Returns StrategyResult with signal, confidence, and execution time.
