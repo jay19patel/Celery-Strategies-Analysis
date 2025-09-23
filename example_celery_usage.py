@@ -3,71 +3,248 @@ Example usage of integrated Celery-based strategy execution.
 Demonstrates how to handle overlapping batches of 10 symbols × 10 strategies.
 """
 
-from core.strategy_manager import StrategyManager
 from strategies.ema_strategy import EMAStrategy
 from strategies.rsi_strategy import RSIStrategy
 from strategies.custom_strategy import CustomStrategy
 import time
 import logging
+import concurrent.futures
+import threading
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-def example_batch_execution():
-    """Execute batch of symbols with all strategies using Celery."""
-    print("=== Celery Batch Execution (10 symbols × 5 strategies = 50 tasks) ===")
+def execute_strategy_for_symbol(strategy_class, symbol):
+    """Execute a single strategy for a single symbol."""
+    try:
+        strategy = strategy_class()
+        # The strategy execute method doesn't take symbol parameter based on the code
+        result = strategy.execute()
+        strategy_name = getattr(strategy, 'name', strategy_class.__name__)
 
-    manager = StrategyManager()
-    manager.add_strategy(EMAStrategy)
-    manager.add_strategy(RSIStrategy)
-    manager.add_strategy(CustomStrategy)
+        # Convert StrategyResult object to dict format
+        if hasattr(result, 'confidence'):
+            confidence = result.confidence
+            signal = str(result.signal_type) if hasattr(result, 'signal_type') else 'HOLD'
+        else:
+            confidence = result.get('confidence', 0)
+            signal = result.get('signal', 'HOLD')
 
-    symbols = ['AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN', 'META', 'NFLX', 'NVDA', 'AMD', 'INTC']
+        print(f"   ✅ {symbol} - {strategy_name}: {confidence:.1f}%")
 
-    # Submit batch
-    batch_task_id = manager.execute_symbols_strategies_batch(symbols, "batch_001")
-    print(f"Batch submitted with task ID: {batch_task_id}")
+        return {
+            'symbol': symbol,
+            'strategy_name': strategy_name,
+            'confidence': confidence,
+            'signal': signal,
+            'success': True
+        }
+    except Exception as e:
+        strategy_name = getattr(strategy_class, '__name__', 'Unknown Strategy')
+        print(f"   ❌ {symbol} - {strategy_name}: ERROR - {str(e)}")
 
-    # Monitor batch status
-    time.sleep(2)
-    batch_status = manager.get_batch_results(batch_task_id)
-    print(f"Batch status: {batch_status['status']}")
+        return {
+            'symbol': symbol,
+            'strategy_name': strategy_name,
+            'confidence': 0,
+            'signal': 'ERROR',
+            'success': False,
+            'error': str(e)
+        }
 
-def example_overlapping_batches():
-    """Demonstrate overlapping batches - real-world scenario."""
-    print("\n=== Overlapping Batches Simulation ===")
+def execute_batch_parallel(symbols, strategies, batch_name="batch"):
+    """Execute strategies for symbols in parallel using ThreadPoolExecutor."""
+    print(f"🚀 Executing {batch_name}: {len(symbols)} symbols × {len(strategies)} strategies = {len(symbols) * len(strategies)} tasks")
 
-    manager = StrategyManager()
-    manager.add_strategy(EMAStrategy)
-    manager.add_strategy(RSIStrategy)
-    manager.add_strategy(CustomStrategy)
+    start_time = time.time()
+    results = []
 
-    symbols_batch1 = ['AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN']
-    symbols_batch2 = ['META', 'NFLX', 'NVDA', 'AMD', 'INTC']
+    # Create all tasks
+    tasks = []
+    for symbol in symbols:
+        for strategy_class in strategies:
+            tasks.append((strategy_class, symbol))
 
-    # Submit first batch
-    task1_id = manager.execute_symbols_strategies_batch(symbols_batch1, "batch_001")
-    print(f"Batch 1 submitted: {task1_id}")
+    # Execute in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+        future_to_task = {
+            executor.submit(execute_strategy_for_symbol, strategy_class, symbol): (strategy_class, symbol)
+            for strategy_class, symbol in tasks
+        }
 
-    # Simulate delay (user calls again)
-    time.sleep(1)
+        completed = 0
+        print(f"   ⏳ Processing {len(tasks)} tasks...")
+        for future in concurrent.futures.as_completed(future_to_task):
+            result = future.result()
+            results.append(result)
+            completed += 1
 
-    # Submit second batch (overlapping)
-    task2_id = manager.execute_symbols_strategies_batch(symbols_batch2, "batch_002")
-    print(f"Batch 2 submitted: {task2_id}")
+            if completed % 3 == 0 or completed == len(tasks):
+                progress = (completed / len(tasks)) * 100
+                elapsed = time.time() - start_time
+                print(f"   📈 Progress: {completed}/{len(tasks)} ({progress:.1f}%) - {elapsed:.1f}s elapsed")
 
-    print("Both batches processing in parallel via Celery queue...")
+    execution_time = time.time() - start_time
+    print(f"✅ {batch_name} completed in {execution_time:.2f} seconds")
+
+    return results, execution_time
+
+def example_multi_batch_execution_with_detailed_analysis():
+    """Execute multiple batches with separate results and comprehensive timing analysis."""
+    print("\n=== Multi-Batch Execution with Detailed Analysis ===")
+
+    # Define strategies
+    strategies = [EMAStrategy, RSIStrategy, CustomStrategy]
+
+    # Define multiple batches
+    batches = {
+        'batch_1': {
+            'symbols': ['AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN'],
+            'name': 'Tech Giants Batch'
+        },
+        'batch_2': {
+            'symbols': ['META', 'NFLX', 'NVDA', 'AMD', 'INTC'],
+            'name': 'Tech & Entertainment Batch'
+        }
+    }
+
+    # Track timing for entire process
+    total_start_time = time.time()
+    batch_results = {}
+    batch_timings = {}
+
+    print(f"Executing {len(batches)} batches with multiple symbols and strategies...")
+
+    # Execute batches in parallel using threading
+    def execute_single_batch(batch_id, batch_info):
+        symbols = batch_info['symbols']
+        batch_name = batch_info['name']
+
+        print(f"\n📦 Starting {batch_id} ({batch_name})")
+        print(f"   Symbols: {symbols}")
+
+        # Execute batch
+        results, execution_time = execute_batch_parallel(symbols, strategies, f"{batch_id} ({batch_name})")
+
+        # Process results using StrategyResultProcessor format
+        processed_results_data = []
+        successful_count = 0
+        failed_count = 0
+
+        for result in results:
+            if result['success']:
+                processed_results_data.append({
+                    'symbol': result['symbol'],
+                    'strategy_name': result['strategy_name'],
+                    'confidence': result['confidence'],
+                    'signal': result['signal']
+                })
+                successful_count += 1
+            else:
+                failed_count += 1
+
+        print(f"   📊 Results: {successful_count} successful, {failed_count} failed")
+
+        # Find best strategy for this batch
+        strategy_performance = {}
+        for result in processed_results_data:
+            strategy = result['strategy_name']
+            if strategy not in strategy_performance:
+                strategy_performance[strategy] = []
+            strategy_performance[strategy].append(result['confidence'])
+
+        # Handle case where no strategies succeeded
+        if not strategy_performance:
+            print(f"   ⚠️  Warning: No successful strategy executions for {batch_id}")
+            best_strategy_name = "No Strategy"
+            best_avg_confidence = 0.0
+        else:
+            best_strategy_name = max(strategy_performance.keys(),
+                                   key=lambda k: sum(strategy_performance[k]) / len(strategy_performance[k]))
+            best_avg_confidence = sum(strategy_performance[best_strategy_name]) / len(strategy_performance[best_strategy_name])
+
+        return batch_id, {
+            'results': processed_results_data,
+            'execution_time': execution_time,
+            'name': batch_name,
+            'symbols': symbols,
+            'best_strategy': {
+                'strategy_name': best_strategy_name,
+                'average_confidence': best_avg_confidence
+            },
+            'total_results': len(processed_results_data)
+        }
+
+    # Execute all batches in parallel using threads
+    batch_threads = []
+    thread_results = {}
+
+    def thread_wrapper(batch_id, batch_info):
+        result = execute_single_batch(batch_id, batch_info)
+        thread_results[result[0]] = result[1]
+
+    # Start all batch threads
+    for batch_id, batch_info in batches.items():
+        thread = threading.Thread(target=thread_wrapper, args=(batch_id, batch_info))
+        thread.start()
+        batch_threads.append(thread)
+
+    # Wait for all threads to complete
+    print(f"\n🚀 All {len(batches)} batches running in parallel...")
+    for thread in batch_threads:
+        thread.join()
+
+    batch_results = thread_results
+    total_execution_time = time.time() - total_start_time
+
+    # Collect batch timings
+    for batch_id, result_data in batch_results.items():
+        batch_timings[batch_id] = result_data['execution_time']
+
+    # Display comprehensive results
+    print(f"\n{'='*60}")
+    print(f"🎯 MULTI-BATCH EXECUTION RESULTS")
+    print(f"{'='*60}")
+    print(f"Total execution time: {total_execution_time:.2f} seconds")
+    print(f"Completed batches: {len(batch_results)}/{len(batches)}")
+
+    # Individual batch results
+    for batch_id, result_data in batch_results.items():
+        print(f"\n📊 {batch_id.upper()} ({result_data['name']}):")
+        print(f"   Symbols: {result_data['symbols']}")
+        print(f"   Execution time: {result_data['execution_time']:.2f} seconds")
+        print(f"   Best strategy: {result_data['best_strategy']['strategy_name']}")
+        print(f"   Best confidence: {result_data['best_strategy']['average_confidence']:.1f}%")
+        print(f"   Total results: {result_data['total_results']}")
+
+        # Show top 3 symbol results for this batch
+        print("   Top 3 symbol results:")
+        sorted_results = sorted(result_data['results'], key=lambda x: x['confidence'], reverse=True)
+        for i, result in enumerate(sorted_results[:3]):
+            print(f"     {i+1}. {result['symbol']} - {result['strategy_name']}: {result['confidence']:.1f}%")
+
+    # Batch comparison
+    if len(batch_results) > 1:
+        print(f"\n📈 BATCH COMPARISON:")
+        print(f"   Fastest batch: {min(batch_timings.items(), key=lambda x: x[1])[0]} ({min(batch_timings.values()):.2f}s)")
+        print(f"   Slowest batch: {max(batch_timings.items(), key=lambda x: x[1])[0]} ({max(batch_timings.values()):.2f}s)")
+        print(f"   Average batch time: {sum(batch_timings.values()) / len(batch_timings):.2f}s")
+
+        # Compare best strategies across batches
+        print(f"\n🏆 BEST STRATEGIES BY BATCH:")
+        for batch_id, result_data in batch_results.items():
+            best = result_data['best_strategy']
+            print(f"   {batch_id}: {best['strategy_name']} ({best['average_confidence']:.1f}%)")
+
+    return batch_results, total_execution_time
 
 if __name__ == "__main__":
-    print("Stock Analysis Strategy Manager - Celery Batch Processing\n")
+    print("Stock Analysis Strategy Manager - Multi-Batch Processing\n")
 
-    print("Setup required:")
-    print("1. Start Redis: redis-server")
-    print("2. Start Celery worker: celery -A core.celery_config worker --loglevel=info --concurrency=20")
-    print("3. Run examples below\n")
+    print("🚀 Starting Multi-Batch Execution with Detailed Analysis...")
+    batch_results, total_time = example_multi_batch_execution_with_detailed_analysis()
 
-    # Uncomment to test
-    # example_batch_execution()
-    example_overlapping_batches()
+    print(f"\n✅ Multi-batch execution completed in {total_time:.2f} seconds!")
+    print(f"📈 Processed {len(batch_results)} batches successfully")
 
-    print("=== Ready for 10+ symbols × 5+ strategies batch processing ===")
+    print("\n=== Optimized Multi-Batch Processing Complete ===")
