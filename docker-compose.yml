@@ -1,0 +1,56 @@
+version: '3.8'  # Docker Compose file format version
+
+services:
+  # Redis service - acts as message broker and result backend
+  redis:
+    image: redis:7-alpine  # Lightweight Redis image (Alpine Linux base)
+    container_name: stockanalysis_redis
+    ports:
+      - "6379:6379"  # Expose Redis port for external connections
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # --maxmemory 256mb: Limit Redis memory usage to 256MB (sufficient for task queue)
+    # --maxmemory-policy allkeys-lru: Remove least recently used keys when memory full
+    restart: unless-stopped  # Restart Redis if it crashes
+    healthcheck:
+      # Check if Redis is responding properly
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s  # Check every 10 seconds
+      timeout: 5s    # Timeout after 5 seconds
+      retries: 3     # Retry 3 times before marking as unhealthy
+
+  # Celery worker - processes strategy execution tasks
+  worker:
+    build: .  # Build from local Dockerfile
+    container_name: stockanalysis_worker
+    depends_on:
+      redis:
+        condition: service_healthy  # Wait for Redis to be healthy before starting
+    environment:
+      # Redis connection URL for Celery broker and backend
+      - REDIS_URL=redis://redis:6379/0
+      # Python module search path
+      - PYTHONPATH=/app
+    # Override default command to run Celery worker
+    command: celery -A core.celery_config worker --loglevel=info --concurrency=20
+    restart: unless-stopped  # Restart worker if it crashes
+    volumes:
+      # Mount source code for development (remove for production)
+      - .:/app
+
+  # Client service - for running your main application and submitting tasks
+  client:
+    build: .  # Same image as worker
+    container_name: stockanalysis_client
+    depends_on:
+      - redis
+      - worker  # Wait for worker to be ready
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
+    # Keep container running for interactive use
+    command: tail -f /dev/null
+    volumes:
+      - .:/app
+    # Enable interactive mode for executing commands
+    stdin_open: true  # Keep STDIN open
+    tty: true         # Allocate pseudo-TTY for interactive shell

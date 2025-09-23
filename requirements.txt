@@ -1,0 +1,5 @@
+# Celery dependencies for parallel strategy execution
+pydantic==1.10.7      # Data validation and settings management
+celery==5.3.4          # Task queue for parallel processing
+redis==5.0.1           # Redis client (broker + backend)
+kombu==5.3.4           # Celery messaging library

@@ -1,32 +1,25 @@
-import asyncio
-import concurrent.futures
-from typing import List, Dict, Any, Optional, Type
-from datetime import datetime
+from typing import List, Dict, Any, Type
 import logging
+import uuid
 
 from core.base_strategy import BaseStrategy
 from models.strategy_models import StrategyResult
+from core.celery_config import celery_app
+from core.celery_tasks import execute_symbol_batch
 
 class StrategyManager:
     """
     Professional Strategy Manager for executing multiple trading strategies in parallel.
 
-    This class manages a collection of trading strategies and provides methods to:
-    - Add strategies dynamically
-    - Execute all strategies in parallel for optimal performance
-    - Collect and aggregate results from all strategies
+    Designed for high-volume batch processing:
+    - 10+ symbols × 5+ strategies = 50+ parallel tasks
+    - Uses Celery + Redis for efficient task queuing
+    - Handles overlapping batch requests automatically
     """
 
-    def __init__(self, max_workers: Optional[int] = None):
-        """
-        Initialize the Strategy Manager.
-
-        Args:
-            max_workers: Maximum number of worker threads for parallel execution.
-                        If None, uses default ThreadPoolExecutor behavior.
-        """
+    def __init__(self):
+        """Initialize the Strategy Manager."""
         self.strategies: List[BaseStrategy] = []
-        self.max_workers = max_workers
         self.logger = logging.getLogger(__name__)
 
     def add_strategy(self, strategy_class: Type[BaseStrategy], *args, **kwargs) -> None:
@@ -50,113 +43,6 @@ class StrategyManager:
             self.logger.error(f"Failed to add strategy {strategy_class.__name__}: {str(e)}")
             raise
 
-    def add_strategy_instance(self, strategy: BaseStrategy) -> None:
-        """
-        Add a strategy instance directly to the manager.
-
-        Args:
-            strategy: An instance of a class that inherits from BaseStrategy
-        """
-        if not isinstance(strategy, BaseStrategy):
-            raise TypeError(f"Strategy must inherit from BaseStrategy, got {type(strategy)}")
-
-        self.strategies.append(strategy)
-        self.logger.info(f"Added strategy instance: {strategy.name}")
-
-    def execute_all_strategies_parallel(self) -> List[StrategyResult]:
-        """
-        Execute all registered strategies in parallel using ThreadPoolExecutor.
-
-        This method provides the best performance for I/O bound operations and
-        strategies that may involve network calls or file operations.
-
-        Returns:
-            List of StrategyResult objects from all executed strategies
-        """
-        if not self.strategies:
-            self.logger.warning("No strategies registered for execution")
-            return []
-
-        start_time = datetime.now()
-        results = []
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Submit all strategy executions
-            future_to_strategy = {
-                executor.submit(strategy.execute): strategy
-                for strategy in self.strategies
-            }
-
-            # Collect results as they complete
-            for future in concurrent.futures.as_completed(future_to_strategy):
-                strategy = future_to_strategy[future]
-                try:
-                    result = future.result()
-                    results.append(result)
-                    self.logger.info(f"Strategy '{strategy.name}' completed successfully")
-
-                except Exception as e:
-                    self.logger.error(f"Strategy '{strategy.name}' failed: {str(e)}")
-                    # Continue with other strategies even if one fails
-
-        end_time = datetime.now()
-        total_execution_time = (end_time - start_time).total_seconds()
-
-        self.logger.info(f"Executed {len(results)} strategies in {total_execution_time:.2f} seconds")
-        return results
-
-    async def execute_all_strategies_async(self) -> List[StrategyResult]:
-        """
-        Execute all registered strategies asynchronously using asyncio.
-
-        This method is ideal for truly asynchronous operations and provides
-        better resource utilization for concurrent execution.
-
-        Returns:
-            List of StrategyResult objects from all executed strategies
-        """
-        if not self.strategies:
-            self.logger.warning("No strategies registered for execution")
-            return []
-
-        start_time = datetime.now()
-
-        # Create tasks for all strategy executions
-        tasks = []
-        for strategy in self.strategies:
-            task = asyncio.create_task(self._execute_strategy_async(strategy))
-            tasks.append(task)
-
-        # Wait for all tasks to complete
-        results = []
-        completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for i, result in enumerate(completed_tasks):
-            strategy = self.strategies[i]
-            if isinstance(result, Exception):
-                self.logger.error(f"Strategy '{strategy.name}' failed: {str(result)}")
-            else:
-                results.append(result)
-                self.logger.info(f"Strategy '{strategy.name}' completed successfully")
-
-        end_time = datetime.now()
-        total_execution_time = (end_time - start_time).total_seconds()
-
-        self.logger.info(f"Executed {len(results)} strategies in {total_execution_time:.2f} seconds")
-        return results
-
-    async def _execute_strategy_async(self, strategy: BaseStrategy) -> StrategyResult:
-        """
-        Helper method to execute a single strategy asynchronously.
-
-        Args:
-            strategy: The strategy to execute
-
-        Returns:
-            StrategyResult from the executed strategy
-        """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, strategy.execute)
 
     def get_strategy_summary(self) -> Dict[str, Any]:
         """
@@ -167,30 +53,56 @@ class StrategyManager:
         """
         return {
             "total_strategies": len(self.strategies),
-            "strategy_names": [strategy.name for strategy in self.strategies],
-            "max_workers": self.max_workers
+            "strategy_names": [strategy.name for strategy in self.strategies]
         }
 
-    def clear_strategies(self) -> None:
-        """Remove all registered strategies from the manager."""
-        self.strategies.clear()
-        self.logger.info("All strategies cleared from manager")
 
-    def remove_strategy(self, strategy_name: str) -> bool:
+    # === CELERY BATCH PROCESSING FOR HIGH-VOLUME EXECUTION ===
+
+    def execute_symbols_strategies_batch(self, symbols: List[str], batch_id: str = None) -> str:
         """
-        Remove a specific strategy by name.
+        Execute all registered strategies for multiple symbols using Celery.
+        Designed for 10+ symbols × 5+ strategies = 50+ parallel tasks.
 
         Args:
-            strategy_name: Name of the strategy to remove
+            symbols: List of stock symbols (e.g., ['AAPL', 'GOOGL', 'MSFT'])
+            batch_id: Optional batch identifier for tracking
 
         Returns:
-            True if strategy was removed, False if not found
+            str: Batch task ID for monitoring progress
         """
-        for i, strategy in enumerate(self.strategies):
-            if strategy.name == strategy_name:
-                removed_strategy = self.strategies.pop(i)
-                self.logger.info(f"Removed strategy: {removed_strategy.name}")
-                return True
+        if not self.strategies:
+            self.logger.warning("No strategies registered for execution")
+            return None
 
-        self.logger.warning(f"Strategy '{strategy_name}' not found")
-        return False
+        if not symbols:
+            self.logger.warning("No symbols provided for execution")
+            return None
+
+        # Generate batch ID if not provided
+        if not batch_id:
+            batch_id = f"batch_{uuid.uuid4().hex[:8]}"
+
+        # Submit batch processing task
+        task = execute_symbol_batch.delay(symbols, [s.name for s in self.strategies], batch_id)
+
+        self.logger.info(f"Submitted batch {batch_id} with {len(symbols) * len(self.strategies)} tasks")
+        return task.id
+
+    def get_batch_results(self, task_id: str) -> Dict[str, Any]:
+        """
+        Get results from batch execution.
+
+        Args:
+            task_id: Batch task ID to check
+
+        Returns:
+            Dict containing batch status and results
+        """
+        task_result = celery_app.AsyncResult(task_id)
+        return {
+            'status': task_result.status,
+            'result': task_result.result if task_result.successful() else None,
+            'error': str(task_result.result) if task_result.failed() else None
+        }
+
