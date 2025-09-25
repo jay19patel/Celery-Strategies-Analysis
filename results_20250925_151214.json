@@ -1,0 +1,105 @@
+{
+  "summary": {
+    "total_symbols": 3,
+    "total_strategies": 3,
+    "total_tasks": 9
+  },
+  "results": [
+    {
+      "symbol": "AAPL",
+      "strategies": [
+        {
+          "strategy_name": "EMA Strategy",
+          "symbol": "AAPL",
+          "signal_type": "BUY",
+          "confidence": 0.94,
+          "execution_time": 6.227679014205933,
+          "timestamp": "2025-09-25T09:42:03.734335+00:00",
+          "price": 131.79323976428822
+        },
+        {
+          "strategy_name": "RSI Strategy",
+          "symbol": "AAPL",
+          "signal_type": "BUY",
+          "confidence": 0.85,
+          "execution_time": 6.950784683227539,
+          "timestamp": "2025-09-25T09:42:03.734335+00:00",
+          "price": 202.7502273627313
+        },
+        {
+          "strategy_name": "Custom Strategy",
+          "symbol": "AAPL",
+          "signal_type": "HOLD",
+          "confidence": 0.73,
+          "execution_time": 8.797383069992065,
+          "timestamp": "2025-09-25T09:42:03.734335+00:00",
+          "price": 170.0160286017184
+        }
+      ]
+    },
+    {
+      "symbol": "GOOG",
+      "strategies": [
+        {
+          "strategy_name": "EMA Strategy",
+          "symbol": "GOOG",
+          "signal_type": "BUY",
+          "confidence": 0.94,
+          "execution_time": 5.068865060806274,
+          "timestamp": "2025-09-25T09:42:03.734335+00:00",
+          "price": 489.76110491954984
+        },
+        {
+          "strategy_name": "RSI Strategy",
+          "symbol": "GOOG",
+          "signal_type": "HOLD",
+          "confidence": 0.46,
+          "execution_time": 5.750783205032349,
+          "timestamp": "2025-09-25T09:42:03.734335+00:00",
+          "price": 269.200687463401
+        },
+        {
+          "strategy_name": "Custom Strategy",
+          "symbol": "GOOG",
+          "signal_type": "HOLD",
+          "confidence": 0.51,
+          "execution_time": 8.733264923095703,
+          "timestamp": "2025-09-25T09:42:03.734335+00:00",
+          "price": 473.4284938128193
+        }
+      ]
+    },
+    {
+      "symbol": "MSFT",
+      "strategies": [
+        {
+          "strategy_name": "EMA Strategy",
+          "symbol": "MSFT",
+          "signal_type": "SELL",
+          "confidence": 0.51,
+          "execution_time": 8.444190979003906,
+          "timestamp": "2025-09-25T09:42:03.734335+00:00",
+          "price": 151.39750100623232
+        },
+        {
+          "strategy_name": "RSI Strategy",
+          "symbol": "MSFT",
+          "signal_type": "BUY",
+          "confidence": 0.75,
+          "execution_time": 8.981337070465088,
+          "timestamp": "2025-09-25T09:42:03.734335+00:00",
+          "price": 499.8757343389682
+        },
+        {
+          "strategy_name": "Custom Strategy",
+          "symbol": "MSFT",
+          "signal_type": "BUY",
+          "confidence": 0.38,
+          "execution_time": 9.120495080947876,
+          "timestamp": "2025-09-25T09:42:03.734335+00:00",
+          "price": 461.697186273901
+        }
+      ]
+    }
+  ]
+}

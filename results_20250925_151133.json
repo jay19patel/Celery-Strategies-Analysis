@@ -1,0 +1,17 @@
+{
+  "summary": {
+    "total_symbols": 3,
+    "total_strategies": 3,
+    "total_tasks": 9
+  },
+  "results": [
+    {
+      "symbol": "AAPL",
+      "strategies": [
+        {
+          "strategy_name": "EMA Strategy",
+          "symbol": "AAPL",
+          "signal_type": "SELL",
+          "confidence": 0.87,
+          "execution_time": 8.978538990020752,
+          "timestamp": 
