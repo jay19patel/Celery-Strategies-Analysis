@@ -7,7 +7,7 @@ from core.settings import get_symbols, get_strategies
 from core.strategy_manager import StrategyManager
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _load_strategy_class(dotted_path: str):
@@ -44,7 +44,7 @@ def run_all_batch_task(self) -> Dict[str, Any]:
 
     # Save to results directory
     os.makedirs("results", exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_file = os.path.join("results", f"results_{timestamp}.json")
     with open(output_file, "w") as f:
         json.dump(result, f, indent=2)
