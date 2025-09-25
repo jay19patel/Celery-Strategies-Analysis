@@ -4,3 +4,5 @@ celery==5.3.4          # Task queue for parallel processing
 redis==5.0.1           # Redis client (broker + backend)
 kombu==5.3.4           # Celery messaging library
 flower==1.2.0          # Celery monitoring UI
+Flask==3.0.3           # Web UI and API
+python-dotenv==1.0.1   # Load .env for Pydantic BaseSettings

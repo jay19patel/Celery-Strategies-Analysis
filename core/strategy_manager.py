@@ -2,8 +2,6 @@ from typing import List, Dict, Any
 from celery.result import GroupResult
 from celery import group
 
-from core.tasks import execute_strategy_task
-
 
 class StrategyManager:
     def __init__(self):
@@ -17,6 +15,9 @@ class StrategyManager:
         self._symbols.extend(symbols)
 
     def run_all(self) -> Dict[str, Any]:
+        # Lazy import to avoid circular dependency with core.tasks
+        from core.tasks import execute_strategy_task
+
         tasks = []
         for symbol in self._symbols:
             for strategy_path in self._strategy_class_paths:

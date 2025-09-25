@@ -14,11 +14,27 @@ class Settings(BaseSettings):
     task_acks_late: bool = Field(True, env="CELERY_TASK_ACKS_LATE")
     broker_connection_retry_on_startup: bool = Field(True, env="CELERY_BROKER_RETRY_ON_STARTUP")
 
+    # App defaults
+    symbols: str = Field("AAPL,GOOG,MSFT", env="APP_SYMBOLS")  # comma-separated
+    strategies: str = Field(
+        "strategies.ema_strategy.EMAStrategy,strategies.rsi_strategy.RSIStrategy,strategies.custom_strategy.CustomStrategy",
+        env="APP_STRATEGIES",
+    )
+
+    # Scheduling
+    schedule_seconds: int = Field(30, env="APP_SCHEDULE_SECONDS")
+
     class Config:
         env_file = ".env"
         case_sensitive = False
 
 
 settings = Settings()
+
+def get_symbols() -> list[str]:
+    return [s.strip() for s in settings.symbols.split(",") if s.strip()]
+
+def get_strategies() -> list[str]:
+    return [s.strip() for s in settings.strategies.split(",") if s.strip()]
 
 
