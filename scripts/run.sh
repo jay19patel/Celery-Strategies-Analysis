@@ -4,11 +4,11 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 cd "$PROJECT_ROOT"
 
-export CELERY_BROKER_URL=${CELERY_BROKER_URL:-amqp://guest:guest@localhost:5672//}
-export CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://localhost:6379/0}
+export CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://localhost:6379/0}
+export CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://localhost:6379/1}
 export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 
-echo "[1/4] Bringing up RabbitMQ, Redis, Flower via docker compose..."
+echo "[1/4] Bringing up Redis and Flower via docker compose..."
 docker compose up -d
 
 echo "[2/4] Installing deps..."

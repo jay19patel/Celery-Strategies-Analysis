@@ -3,12 +3,12 @@
 This project runs multiple strategies in parallel across multiple symbols using Celery with RabbitMQ as broker and Redis as result backend.
 
 ### Services (via Docker Compose)
-- RabbitMQ (broker) at `amqp://guest:guest@localhost:5672//` (UI: `http://localhost:15672`)
-- Redis (result backend) at `redis://localhost:6379/0`
+- Redis (broker) at `redis://localhost:6379/0`
+- Redis (result backend) at `redis://localhost:6379/1`
 - Flower (Celery UI) at `http://localhost:5555`
 
 ### Quick Start
-1) Bring up infra, start worker (9 procs), and run batch:
+1) Bring up infra (Redis + Flower), start worker (9 procs), and run batch:
 ```bash
 ./scripts/run.sh
 ```
@@ -21,8 +21,8 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-CELERY_BROKER_URL=amqp://guest:guest@localhost:5672// \
-CELERY_RESULT_BACKEND=redis://localhost:6379/0 \
+CELERY_BROKER_URL=redis://localhost:6379/0 \
+CELERY_RESULT_BACKEND=redis://localhost:6379/1 \
 celery -A core.celery_app.celery_app worker --loglevel=INFO --pool=prefork --concurrency=9
 
 # In another terminal
@@ -53,8 +53,7 @@ strategies = [
   - Ensure worker uses `-A core.celery_app.celery_app` and that `core.tasks` is importable.
   - Confirm `core/celery_app.py` includes `include=["core.tasks"]` and imports `core.tasks`.
 - Connection issues
-  - Ensure Docker is running and ports 5672, 6379, 5555 are free.
-  - Check RabbitMQ UI at `http://localhost:15672` for broker health.
+  - Ensure Docker is running and ports 6379, 5555 are free.
 - Slow or queued batches
   - Increase worker `--concurrency` to match tasks (N symbols × M strategies).
   - Launch additional workers if needed.

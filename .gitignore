@@ -1,6 +1,35 @@
-.claude
-.pyc
+# macOS
+.DS_Store
+
+# Python
 __pycache__/
-env/
-venv/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtual envs
 .venv/
+venv/
+env/
+
+# IDE/editor
+.vscode/
+.idea/
+*.code-workspace
+
+# Docker
+*.log
+
+# Local environment/config
+.env
+.env.*
+
+# Project outputs
+results_*.json
+
+# Misc
+.claude

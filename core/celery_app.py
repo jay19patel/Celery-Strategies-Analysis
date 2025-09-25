@@ -1,19 +1,11 @@
 from celery import Celery
-import os
-
-
-def _get_broker_url() -> str:
-    return os.getenv("CELERY_BROKER_URL", "amqp://guest:guest@localhost:5672//")
-
-
-def _get_backend_url() -> str:
-    return os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+from core.settings import settings
 
 
 celery_app = Celery(
     "stockanalysis",
-    broker=_get_broker_url(),
-    backend=_get_backend_url(),
+    broker=settings.broker_url,
+    backend=settings.result_backend,
     include=["core.tasks"],
 )
 
@@ -22,12 +14,12 @@ celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
-    timezone="UTC",
-    enable_utc=True,
-    task_ignore_result=False,
-    worker_prefetch_multiplier=1,  # fair scheduling
-    task_acks_late=True,  # in case of worker crash, requeue
-    broker_connection_retry_on_startup=True,
+    timezone=settings.timezone,
+    enable_utc=settings.enable_utc,
+    task_ignore_result=settings.task_ignore_result,
+    worker_prefetch_multiplier=settings.worker_prefetch_multiplier,  # fair scheduling
+    task_acks_late=settings.task_acks_late,  # in case of worker crash, requeue
+    broker_connection_retry_on_startup=settings.broker_connection_retry_on_startup,
 )
 
 # Ensure tasks are registered when worker starts
