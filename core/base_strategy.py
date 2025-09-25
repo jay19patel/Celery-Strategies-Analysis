@@ -7,7 +7,7 @@ class BaseStrategy(ABC):
         self.name = name
 
     @abstractmethod
-    def execute(self) -> StrategyResult:
+    def execute(self, symbol: str) -> StrategyResult:
         """
         Abstract method that must be implemented by all strategy classes.
         Returns StrategyResult with signal, confidence, and execution time.

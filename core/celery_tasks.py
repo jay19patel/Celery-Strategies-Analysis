@@ -40,7 +40,7 @@ def execute_symbol_strategy(self, symbol: str, strategy_name: str):
 
         # Execute strategy
         strategy = strategy_class()
-        result = strategy.execute()
+        result = strategy.execute(symbol)
 
         execution_time = time.time() - start_time
 

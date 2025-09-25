@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 class SignalType(str, Enum):
@@ -10,10 +10,11 @@ class SignalType(str, Enum):
 
 class StrategyResult(BaseModel):
     strategy_name: str
+    symbol: str
     signal_type: SignalType
     confidence: float
     execution_time: float
-    timestamp: datetime = datetime.now()
+    timestamp: datetime = datetime.now(timezone.utc)
     price: Optional[float] = None
 
     class Config:

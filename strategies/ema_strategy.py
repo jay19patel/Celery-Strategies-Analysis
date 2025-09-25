@@ -7,7 +7,7 @@ class EMAStrategy(BaseStrategy):
     def __init__(self):
         super().__init__("EMA Strategy")
 
-    def execute(self) -> StrategyResult:
+    def execute(self, symbol: str) -> StrategyResult:
         start_time = time.time()
 
         # Dummy execution time with random sleep between 5-10 seconds
@@ -23,6 +23,7 @@ class EMAStrategy(BaseStrategy):
 
         return StrategyResult(
             strategy_name=self.name,
+            symbol=symbol,
             signal_type=random_signal_type,
             confidence=confidence,
             execution_time=execution_time,
