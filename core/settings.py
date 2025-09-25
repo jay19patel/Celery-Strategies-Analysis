@@ -3,26 +3,29 @@ from pydantic import BaseSettings, Field
 
 class Settings(BaseSettings):
     # Celery connection
-    broker_url: str = Field("redis://localhost:6379/0", env="CELERY_BROKER_URL")
-    result_backend: str = Field("redis://localhost:6379/1", env="CELERY_RESULT_BACKEND")
+    broker_url: str = Field("redis://localhost:6379/0")
+    result_backend: str = Field("redis://localhost:6379/1")
 
     # Celery behavior
-    timezone: str = Field("UTC", env="CELERY_TIMEZONE")
-    enable_utc: bool = Field(True, env="CELERY_ENABLE_UTC")
-    task_ignore_result: bool = Field(False, env="CELERY_TASK_IGNORE_RESULT")
-    worker_prefetch_multiplier: int = Field(1, env="CELERY_WORKER_PREFETCH_MULTIPLIER")
-    task_acks_late: bool = Field(True, env="CELERY_TASK_ACKS_LATE")
-    broker_connection_retry_on_startup: bool = Field(True, env="CELERY_BROKER_RETRY_ON_STARTUP")
+    timezone: str = Field("UTC")
+    enable_utc: bool = Field(True)
+    task_ignore_result: bool = Field(False)
+    worker_prefetch_multiplier: int = Field(1)
+    task_acks_late: bool = Field(True)
+    broker_connection_retry_on_startup: bool = Field(True)
 
     # App defaults
-    symbols: str = Field("AAPL,GOOG,MSFT", env="APP_SYMBOLS")  # comma-separated
+    symbols: str = Field("BTC-USD,ETH-USD,SOL-USD")  # comma-separated
     strategies: str = Field(
-        "strategies.ema_strategy.EMAStrategy,strategies.rsi_strategy.RSIStrategy,strategies.custom_strategy.CustomStrategy",
-        env="APP_STRATEGIES",
+        "strategies.ema_strategy.EMAStrategy," \
+        "strategies.rsi_strategy.RSIStrategy," \
+        "strategies.bollinger_bands_strategy.BollingerBandsStrategy," \
+        "strategies.macd_strategy.MACDStrategy," \
+        "strategies.volume_breakout_strategy.VolumeBreakoutStrategy"
     )
 
     # Scheduling
-    schedule_seconds: int = Field(30, env="APP_SCHEDULE_SECONDS")
+    schedule_seconds: int = Field(60*10) # in seconds
 
     class Config:
         env_file = ".env"

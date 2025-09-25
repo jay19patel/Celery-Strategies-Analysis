@@ -6,3 +6,5 @@ kombu==5.3.4           # Celery messaging library
 flower==1.2.0          # Celery monitoring UI
 Flask==3.0.3           # Web UI and API
 python-dotenv==1.0.1   # Load .env for Pydantic BaseSettings
+pandas-ta
+yfinance
