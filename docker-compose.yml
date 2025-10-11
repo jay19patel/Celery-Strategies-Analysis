@@ -1,11 +1,39 @@
 services:
+  # Redis for Celery broker, result backend, and pub/sub
   redis:
-    image: redis:7
+    image: redis:7-alpine
     container_name: stockanalysis-redis
     ports:
       - "6379:6379"
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--databases", "16"]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # MongoDB for persistent storage
+  mongodb:
+    image: mongo:7
+    container_name: stockanalysis-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: stockanalysis
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Flower for Celery monitoring
   flower:
     image: mher/flower:latest
     container_name: stockanalysis-flower
@@ -15,45 +43,58 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
+  # Celery worker for task execution
   worker:
     build: .
     container_name: stockanalysis-worker
-    command: celery -A core.celery_app.celery_app worker --loglevel=INFO --pool=prefork --concurrency=9
+    command: uv run celery -A core.celery_app.celery_app worker --loglevel=INFO --pool=prefork --concurrency=9
     environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: 27017
+      MONGODB_DATABASE: stockanalysis
       PYTHONPATH: /app
     volumes:
       - .:/app
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
 
+  # Celery beat for periodic task scheduling
   beat:
     build: .
     container_name: stockanalysis-beat
-    command: celery -A core.celery_app.celery_app beat --loglevel=INFO
+    command: uv run celery -A core.celery_app.celery_app beat --loglevel=INFO
     environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: 27017
+      MONGODB_DATABASE: stockanalysis
       PYTHONPATH: /app
     volumes:
       - .:/app
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
 
-  web:
-    build: .
-    container_name: stockanalysis-web
-    command: python -m web.app
-    environment:
-      PYTHONPATH: /app
-    ports:
-      - "8000:8000"
-    volumes:
-      - .:/app
-    depends_on:
-      - redis
+volumes:
+  redis_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
 
 

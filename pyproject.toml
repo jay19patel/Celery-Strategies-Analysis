@@ -1,0 +1,15 @@
+[project]
+name = "stockanalysis"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "celery>=5.5.3",
+    "pandas-ta>=0.4.71b0",
+    "pydantic>=2.12.0",
+    "pydantic-settings>=2.11.0",
+    "pymongo>=4.15.3",
+    "redis>=6.4.0",
+    "yfinance>=0.2.66",
+]
