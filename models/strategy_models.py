@@ -16,6 +16,7 @@ class StrategyResult(BaseModel):
     execution_time: float
     timestamp: datetime = datetime.now(timezone.utc)
     price: Optional[float] = None
+    sucess: Optional[bool] = False
 
     class Config:
         use_enum_values = True

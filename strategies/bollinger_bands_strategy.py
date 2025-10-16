@@ -112,7 +112,8 @@ class BollingerBandsStrategy(BaseStrategy):
                 signal_type=signal_type,
                 confidence=round(confidence / 100.0, 3),
                 execution_time=execution_time,
-                price=round(current_price, 2)
+                price=round(current_price, 2),
+                sucscess=True
             )
 
         except Exception as e:
