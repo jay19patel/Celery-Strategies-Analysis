@@ -15,24 +15,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # MongoDB for persistent storage
-  mongodb:
-    image: mongo:7
-    container_name: stockanalysis-mongodb
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_DATABASE: stockanalysis
-    volumes:
-      - mongodb_data:/data/db
-      - mongodb_config:/data/configdb
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # Flower for Celery monitoring
   flower:
     image: mher/flower:latest
@@ -51,20 +33,38 @@ services:
   worker:
     build: .
     container_name: stockanalysis-worker
-    command: uv run celery -A core.celery_app.celery_app worker --loglevel=INFO --pool=prefork --concurrency=9
+    command: uv run celery -A app.core.celery_app.celery_app worker --loglevel=INFO --pool=prefork --concurrency=9
     environment:
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      MONGODB_HOST: mongodb
-      MONGODB_PORT: 27017
-      MONGODB_DATABASE: stockanalysis
+      # Redis URLs
+      REDIS_BROKER_URL: redis://redis:6379/0
+      REDIS_RESULT_URL: redis://redis:6379/1
+      REDIS_PUBSUB_URL: redis://default:3oG2lFmElfB1xt1fI0LchEWpHXYky9Pj@redis-10597.c85.us-east-1-2.ec2.redns.redis-cloud.com:10597
+      
+      # MongoDB Atlas Configuration
+      MONGODB_URL: mongodb+srv://justj:admin@cluster0.fsgzjrl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
+      
+      # Application Configuration
+      SYMBOLS: BTC-USD,ETH-USD,SOL-USD
+      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy,app.strategies.bollinger_bands_strategy.BollingerBandsStrategy,app.strategies.macd_strategy.MACDStrategy,app.strategies.volume_breakout_strategy.VolumeBreakoutStrategy
+      SCHEDULE_SECONDS: 60
+      
+      # Redis Pub/Sub Channels
+      PUBSUB_CHANNEL_STRATEGY: stockanalysis:strategy_result
+      PUBSUB_CHANNEL_BATCH: stockanalysis:batch_complete
+      
+      # Celery Configuration
+      TIMEZONE: UTC
+      ENABLE_UTC: true
+      TASK_IGNORE_RESULT: false
+      WORKER_PREFETCH_MULTIPLIER: 1
+      TASK_ACKS_LATE: true
+      BROKER_CONNECTION_RETRY_ON_STARTUP: true
+      
       PYTHONPATH: /app
     volumes:
       - .:/app
     depends_on:
       redis:
-        condition: service_healthy
-      mongodb:
         condition: service_healthy
     restart: unless-stopped
 
@@ -72,29 +72,43 @@ services:
   beat:
     build: .
     container_name: stockanalysis-beat
-    command: uv run celery -A core.celery_app.celery_app beat --loglevel=INFO
+    command: uv run celery -A app.core.celery_app.celery_app beat --loglevel=INFO
     environment:
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      MONGODB_HOST: mongodb
-      MONGODB_PORT: 27017
-      MONGODB_DATABASE: stockanalysis
+      # Redis URLs
+      REDIS_BROKER_URL: redis://redis:6379/0
+      REDIS_RESULT_URL: redis://redis:6379/1
+      REDIS_PUBSUB_URL: redis://default:3oG2lFmElfB1xt1fI0LchEWpHXYky9Pj@redis-10597.c85.us-east-1-2.ec2.redns.redis-cloud.com:10597
+      
+      # MongoDB Atlas Configuration
+      MONGODB_URL: mongodb+srv://justj:admin@cluster0.fsgzjrl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
+      
+      # Application Configuration
+      SYMBOLS: BTC-USD,ETH-USD,SOL-USD
+      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy,app.strategies.bollinger_bands_strategy.BollingerBandsStrategy,app.strategies.macd_strategy.MACDStrategy,app.strategies.volume_breakout_strategy.VolumeBreakoutStrategy
+      SCHEDULE_SECONDS: 60
+      
+      # Redis Pub/Sub Channels
+      PUBSUB_CHANNEL_STRATEGY: stockanalysis:strategy_result
+      PUBSUB_CHANNEL_BATCH: stockanalysis:batch_complete
+      
+      # Celery Configuration
+      TIMEZONE: UTC
+      ENABLE_UTC: true
+      TASK_IGNORE_RESULT: false
+      WORKER_PREFETCH_MULTIPLIER: 1
+      TASK_ACKS_LATE: true
+      BROKER_CONNECTION_RETRY_ON_STARTUP: true
+      
       PYTHONPATH: /app
     volumes:
       - .:/app
     depends_on:
       redis:
         condition: service_healthy
-      mongodb:
-        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   redis_data:
-    driver: local
-  mongodb_data:
-    driver: local
-  mongodb_config:
     driver: local
 
 

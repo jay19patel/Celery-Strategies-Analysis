@@ -16,7 +16,7 @@ class StrategyManager:
 
     def run_all(self) -> Dict[str, Any]:
         # Lazy import to avoid circular dependency with core.tasks
-        from core.tasks import execute_strategy_task
+        from app.core.tasks import execute_strategy_task
 
         tasks = []
         for symbol in self._symbols:

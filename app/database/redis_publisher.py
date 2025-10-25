@@ -5,7 +5,7 @@ Publishes strategy results and batch completion events to Redis channels.
 import json
 import redis
 from typing import Any, Dict
-from core.settings import settings
+from app.core.settings import settings
 
 
 class RedisPublisher:
@@ -24,10 +24,8 @@ class RedisPublisher:
 
     def _connect(self):
         """Establish connection to Redis for pub/sub."""
-        self._redis_client = redis.Redis(
-            host=settings.redis_host,
-            port=settings.redis_port,
-            db=settings.redis_pubsub_db,
+        self._redis_client = redis.from_url(
+            settings.redis_pubsub_url,
             decode_responses=True,
             socket_connect_timeout=5,
             socket_keepalive=True,

@@ -1,7 +1,7 @@
 import time
-from core.base_strategy import BaseStrategy
-from models.strategy_models import StrategyResult, SignalType
-from utility.data_provider import fetch_historical_data
+from app.core.base_strategy import BaseStrategy
+from app.models.strategy_models import StrategyResult, SignalType
+from app.utility.data_provider import fetch_historical_data
 import numpy as np
 
 class MACDStrategy(BaseStrategy):

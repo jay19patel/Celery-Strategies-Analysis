@@ -7,7 +7,7 @@ from pymongo import MongoClient, DESCENDING
 from pymongo.collection import Collection
 from pymongo.database import Database
 from datetime import datetime, timezone
-from core.settings import settings
+from app.core.settings import settings
 
 
 class MongoDBConnection:
@@ -32,7 +32,9 @@ class MongoDBConnection:
             serverSelectionTimeoutMS=5000,
             connectTimeoutMS=10000,
         )
-        self._db = self._client[settings.mongodb_database]
+        # Extract database name from URL or use default
+        db_name = settings.mongodb_url.split('/')[-1].split('?')[0] or "stockanalysis"
+        self._db = self._client[db_name]
         # Create indexes for better query performance
         self._create_indexes()
 

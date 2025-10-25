@@ -1,13 +1,13 @@
 from celery import Celery
 from celery.schedules import schedule
-from core.settings import settings
+from app.core.settings import settings
 
 
 celery_app = Celery(
     "stockanalysis",
     broker=settings.broker_url,
     backend=settings.result_backend,
-    include=["core.tasks"],
+    include=["app.core.tasks"],
 )
 
 # Keep tasks discovery explicit to avoid import-time side effects

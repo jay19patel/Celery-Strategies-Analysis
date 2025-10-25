@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import time
-from models.strategy_models import StrategyResult
+from app.models.strategy_models import StrategyResult
 
 class BaseStrategy(ABC):
     def __init__(self, name: str):

@@ -38,6 +38,37 @@ A comprehensive stock analysis system using Celery for distributed task processi
 - **Monitoring**: Flower provides real-time monitoring of Celery workers
 - **Scheduled Execution**: Celery Beat runs batch analysis periodically
 
+## Project Structure
+
+```
+stockanalysis/
+├── app/                          # Main application code
+│   ├── core/                     # Core functionality
+│   │   ├── base_strategy.py      # Base strategy class
+│   │   ├── celery_app.py         # Celery configuration
+│   │   ├── settings.py           # Application settings
+│   │   ├── strategy_manager.py   # Strategy management
+│   │   └── tasks.py              # Celery tasks
+│   ├── database/                 # Database layer
+│   │   ├── mongodb.py            # MongoDB operations
+│   │   └── redis_publisher.py    # Redis pub/sub
+│   ├── models/                   # Data models
+│   │   ├── analysis_models.py    # Analysis data models
+│   │   └── strategy_models.py    # Strategy data models
+│   ├── strategies/               # Trading strategies
+│   │   ├── ema_strategy.py       # EMA strategy
+│   │   ├── rsi_strategy.py       # RSI strategy
+│   │   ├── macd_strategy.py      # MACD strategy
+│   │   ├── bollinger_bands_strategy.py  # Bollinger Bands
+│   │   └── volume_breakout_strategy.py  # Volume Breakout
+│   └── utility/                  # Utility functions
+│       └── data_provider.py      # Data fetching utilities
+├── docker-compose.yml            # Docker services configuration
+├── Dockerfile                    # Docker image definition
+├── pyproject.toml               # Python dependencies
+└── README.md                    # This file
+```
+
 ## Components
 
 ### 1. Redis
@@ -150,11 +181,11 @@ STRATEGY RESULTS BY SYMBOL:
 
 Execute a single strategy:
 ```python
-from core.tasks import execute_strategy_task
+from app.core.tasks import execute_strategy_task
 
 # Execute EMA strategy for BTC-USD
 result = execute_strategy_task.delay(
-    "strategies.ema_strategy.EMAStrategy",
+    "app.strategies.ema_strategy.EMAStrategy",
     "BTC-USD"
 )
 print(result.get())
@@ -162,7 +193,7 @@ print(result.get())
 
 Execute batch analysis:
 ```python
-from core.tasks import run_all_batch_task
+from app.core.tasks import run_all_batch_task
 
 # Run all strategies for all symbols
 result = run_all_batch_task.delay()
@@ -173,7 +204,7 @@ print(result.get())
 
 Access MongoDB data:
 ```python
-from database.mongodb import get_latest_strategy_results, get_latest_batch_results
+from app.database.mongodb import get_latest_strategy_results, get_latest_batch_results
 
 # Get latest 100 strategy results
 results = get_latest_strategy_results(limit=100)
@@ -187,41 +218,41 @@ batches = get_latest_batch_results(limit=10)
 
 ## Configuration
 
-### Environment Variables
+All configuration is managed through environment variables in `docker-compose.yml`:
 
-All configuration is managed through environment variables (see `.env.example`):
+**Redis URLs**:
+- `REDIS_BROKER_URL`: Redis URL for Celery broker (default: redis://redis:6379/0)
+- `REDIS_RESULT_URL`: Redis URL for Celery results (default: redis://redis:6379/1)
+- `REDIS_PUBSUB_URL`: Redis URL for pub/sub (default: redis://redis:6379/2)
 
-**Redis**:
-- `REDIS_HOST`: Redis hostname (default: localhost)
-- `REDIS_PORT`: Redis port (default: 6379)
-- `REDIS_BROKER_DB`: Database for Celery broker (default: 0)
-- `REDIS_RESULT_DB`: Database for Celery results (default: 1)
-- `REDIS_PUBSUB_DB`: Database for pub/sub (default: 2)
-
-**MongoDB**:
-- `MONGODB_HOST`: MongoDB hostname (default: localhost)
-- `MONGODB_PORT`: MongoDB port (default: 27017)
-- `MONGODB_DATABASE`: Database name (default: stockanalysis)
-- `MONGODB_USERNAME`: Optional authentication
-- `MONGODB_PASSWORD`: Optional authentication
+**MongoDB Atlas**:
+- `MONGODB_URL`: Complete MongoDB Atlas connection string (e.g., mongodb+srv://username:password@cluster.mongodb.net/stockanalysis)
 
 **Application**:
 - `SYMBOLS`: Comma-separated list of symbols to analyze
 - `STRATEGIES`: Comma-separated list of strategy class paths
-- `SCHEDULE_SECONDS`: Batch execution interval (default: 600)
+- `SCHEDULE_SECONDS`: Batch execution interval (default: 60)
 
-**Pub/Sub**:
+**Redis Pub/Sub**:
 - `PUBSUB_CHANNEL_STRATEGY`: Channel for strategy results
 - `PUBSUB_CHANNEL_BATCH`: Channel for batch completion
+
+**Celery**:
+- `TIMEZONE`: Timezone for Celery (default: UTC)
+- `ENABLE_UTC`: Enable UTC timezone (default: true)
+- `TASK_IGNORE_RESULT`: Ignore task results (default: false)
+- `WORKER_PREFETCH_MULTIPLIER`: Worker prefetch multiplier (default: 1)
+- `TASK_ACKS_LATE`: Acknowledge tasks late (default: true)
+- `BROKER_CONNECTION_RETRY_ON_STARTUP`: Retry broker connection on startup (default: true)
 
 ## Development
 
 ### Adding New Strategies
 
-1. Create strategy class in `strategies/` directory:
+1. Create strategy class in `app/strategies/` directory:
 ```python
-from core.base_strategy import BaseStrategy
-from models.strategy_models import StrategyResult
+from app.core.base_strategy import BaseStrategy
+from app.models.strategy_models import StrategyResult
 
 class MyStrategy(BaseStrategy):
     def execute(self, symbol: str) -> StrategyResult:
@@ -237,7 +268,7 @@ class MyStrategy(BaseStrategy):
 
 2. Add to `.env` file:
 ```
-STRATEGIES=strategies.my_strategy.MyStrategy,...
+STRATEGIES=app.strategies.my_strategy.MyStrategy,...
 ```
 
 ### Database Schema
@@ -338,11 +369,11 @@ PUBLISH stockanalysis:strategy_result '{"type":"test","data":"hello"}'
 ### Celery Worker Concurrency
 Adjust in `docker-compose.yml`:
 ```yaml
-command: celery -A core.celery_app.celery_app worker --concurrency=9
+command: celery -A app.core.celery_app.celery_app worker --concurrency=9
 ```
 
 ### MongoDB Indexes
-Additional indexes can be created in `database/mongodb.py`:
+Additional indexes can be created in `app/database/mongodb.py`:
 ```python
 collection.create_index([("field_name", 1)])
 ```

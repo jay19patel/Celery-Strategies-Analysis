@@ -1,12 +1,12 @@
 import importlib
 from typing import Any, Dict
 
-from models.strategy_models import StrategyResult
-from core.celery_app import celery_app
-from core.settings import get_symbols, get_strategies
-from core.strategy_manager import StrategyManager
-from database.mongodb import save_strategy_result, save_batch_results
-from database.redis_publisher import publish_strategy_result, publish_batch_complete
+from app.models.strategy_models import StrategyResult
+from app.core.celery_app import celery_app
+from app.core.settings import get_symbols, get_strategies
+from app.core.strategy_manager import StrategyManager
+from app.database.mongodb import save_strategy_result, save_batch_results
+from app.database.redis_publisher import publish_strategy_result, publish_batch_complete
 
 
 def _load_strategy_class(dotted_path: str):
