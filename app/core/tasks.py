@@ -5,7 +5,7 @@ from app.models.strategy_models import StrategyResult
 from app.core.celery_app import celery_app
 from app.core.settings import get_symbols, get_strategies
 from app.core.strategy_manager import StrategyManager
-from app.database.mongodb import save_strategy_result, save_batch_results
+from app.database.mongodb import save_batch_results
 from app.database.redis_publisher import publish_strategy_result, publish_batch_complete
 
 
@@ -28,10 +28,6 @@ def execute_strategy_task(self, strategy_class_path: str, symbol: str) -> Dict[s
             result_dict["timestamp"] = result.timestamp.isoformat()
         except Exception:
             pass
-
-    # Save to MongoDB
-    doc_id = save_strategy_result(result_dict)
-    result_dict["_id"] = str(doc_id)
 
     # Publish to Redis pub/sub for real-time subscribers
     publish_strategy_result(result_dict)

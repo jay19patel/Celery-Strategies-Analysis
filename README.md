@@ -17,10 +17,8 @@ A comprehensive stock analysis system using Celery for distributed task processi
         ▼               └──────────────┘
 ┌─────────────────┐             │
 │    MongoDB      │ ◄───────────┘
-│  - strategy_    │     Real-time
+│  - batch_       │     Real-time
 │    results      │     Publishing
-│  - batch_       │
-│    results      │
 └─────────────────┘
         │
         ▼
@@ -32,7 +30,7 @@ A comprehensive stock analysis system using Celery for distributed task processi
 ## Features
 
 - **Distributed Task Processing**: Celery workers execute trading strategies in parallel
-- **Persistent Storage**: MongoDB stores all strategy results and batch execution data
+- **Persistent Storage**: MongoDB stores batch execution data
 - **Real-time Updates**: Redis pub/sub publishes results instantly to subscribers
 - **Task Queuing**: Redis manages Celery task queue and result backend
 - **Monitoring**: Flower provides real-time monitoring of Celery workers
@@ -77,21 +75,17 @@ stockanalysis/
 - **Database 2**: Pub/Sub for real-time broadcasting
 
 ### 2. MongoDB Collections
-- **strategy_results**: Individual strategy execution results
-  - Indexed by: symbol, strategy_name, timestamp
 - **batch_results**: Batch execution summaries
   - Indexed by: created_at
 
 ### 3. Celery Tasks
 - **execute_strategy_task**: Executes a single strategy for a symbol
-  - Saves result to MongoDB
   - Publishes to Redis pub/sub channel
 - **run_all_batch_task**: Runs all strategies for all symbols
   - Saves batch summary to MongoDB
   - Publishes completion event to Redis pub/sub
 
 ### 4. Redis Pub/Sub Channels
-- **stockanalysis:strategy_result**: Individual strategy results
 - **stockanalysis:batch_complete**: Batch completion notifications
 
 ## Installation
@@ -204,13 +198,7 @@ print(result.get())
 
 Access MongoDB data:
 ```python
-from app.database.mongodb import get_latest_strategy_results, get_latest_batch_results
-
-# Get latest 100 strategy results
-results = get_latest_strategy_results(limit=100)
-
-# Get results for specific symbol
-btc_results = get_latest_strategy_results(symbol="BTC-USD", limit=50)
+from app.database.mongodb import get_latest_batch_results
 
 # Get latest batch executions
 batches = get_latest_batch_results(limit=10)
@@ -272,22 +260,6 @@ STRATEGIES=app.strategies.my_strategy.MyStrategy,...
 ```
 
 ### Database Schema
-
-**strategy_results** collection:
-```json
-{
-  "_id": ObjectId,
-  "symbol": "BTC-USD",
-  "strategy_name": "EMA Strategy",
-  "signal": "BUY",
-  "confidence": 0.85,
-  "current_price": 50000.0,
-  "timestamp": "2025-01-15T10:30:00",
-  "created_at": ISODate,
-  "indicators": {...},
-  "metadata": {...}
-}
-```
 
 **batch_results** collection:
 ```json

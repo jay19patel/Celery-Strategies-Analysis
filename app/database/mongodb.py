@@ -40,12 +40,6 @@ class MongoDBConnection:
 
     def _create_indexes(self):
         """Create indexes on collections for optimal query performance."""
-        # Strategy results indexes
-        strategy_collection = self._db.strategy_results
-        strategy_collection.create_index([("symbol", 1), ("timestamp", DESCENDING)])
-        strategy_collection.create_index([("strategy_name", 1), ("timestamp", DESCENDING)])
-        strategy_collection.create_index([("timestamp", DESCENDING)])
-
         # Batch results indexes
         batch_collection = self._db.batch_results
         batch_collection.create_index([("created_at", DESCENDING)])
@@ -78,29 +72,6 @@ def get_db() -> Database:
     return _mongo.db
 
 
-def save_strategy_result(result_data: Dict[str, Any]) -> Any:
-    """
-    Save individual strategy result to MongoDB.
-
-    Args:
-        result_data: Dictionary containing strategy execution result
-
-    Returns:
-        ObjectId of the inserted document
-    """
-    collection = get_db().strategy_results
-
-    # Ensure timestamp is present
-    if "timestamp" not in result_data:
-        result_data["timestamp"] = datetime.now(timezone.utc).isoformat()
-
-    # Add created_at for tracking
-    result_data["created_at"] = datetime.now(timezone.utc)
-
-    result = collection.insert_one(result_data)
-    return result.inserted_id
-
-
 def save_batch_results(batch_data: Dict[str, Any]) -> Any:
     """
     Save batch execution results to MongoDB.
@@ -121,27 +92,6 @@ def save_batch_results(batch_data: Dict[str, Any]) -> Any:
     return result.inserted_id
 
 
-def get_latest_strategy_results(symbol: Optional[str] = None, limit: int = 100) -> list:
-    """
-    Retrieve latest strategy results from MongoDB.
-
-    Args:
-        symbol: Optional symbol to filter results
-        limit: Maximum number of results to return
-
-    Returns:
-        List of strategy result documents
-    """
-    collection = get_db().strategy_results
-
-    query = {}
-    if symbol:
-        query["symbol"] = symbol
-
-    results = collection.find(query).sort("timestamp", DESCENDING).limit(limit)
-    return list(results)
-
-
 def get_latest_batch_results(limit: int = 10) -> list:
     """
     Retrieve latest batch execution results.
@@ -157,29 +107,3 @@ def get_latest_batch_results(limit: int = 10) -> list:
     return list(results)
 
 
-def get_strategy_results_by_date_range(start_date: datetime, end_date: datetime, symbol: Optional[str] = None) -> list:
-    """
-    Get strategy results within a date range.
-
-    Args:
-        start_date: Start datetime
-        end_date: End datetime
-        symbol: Optional symbol filter
-
-    Returns:
-        List of strategy result documents
-    """
-    collection = get_db().strategy_results
-
-    query = {
-        "created_at": {
-            "$gte": start_date,
-            "$lte": end_date
-        }
-    }
-
-    if symbol:
-        query["symbol"] = symbol
-
-    results = collection.find(query).sort("created_at", DESCENDING)
-    return list(results)
