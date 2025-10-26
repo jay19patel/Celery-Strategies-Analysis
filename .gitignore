@@ -24,6 +24,10 @@ env/
 # Docker
 *.log
 
+# Logs directory
+logs/
+*.log
+
 # Local environment/config
 .env
 .env.*

@@ -8,6 +8,9 @@ from pymongo.collection import Collection
 from pymongo.database import Database
 from datetime import datetime, timezone
 from app.core.settings import settings
+from app.core.logger import get_mongodb_logger
+
+logger = get_mongodb_logger()
 
 
 class MongoDBConnection:
@@ -27,27 +30,39 @@ class MongoDBConnection:
 
     def _connect(self):
         """Establish connection to MongoDB."""
-        self._client = MongoClient(
-            settings.mongodb_uri,
-            serverSelectionTimeoutMS=5000,
-            connectTimeoutMS=10000,
-        )
-        # Extract database name from URL or use default
-        db_name = settings.mongodb_url.split('/')[-1].split('?')[0] or "stockanalysis"
-        self._db = self._client[db_name]
-        # Create indexes for better query performance
-        self._create_indexes()
+        try:
+            logger.info(f"Connecting to MongoDB at {settings.mongodb_uri}")
+            self._client = MongoClient(
+                settings.mongodb_uri,
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=10000,
+            )
+            # Extract database name from URL or use default
+            db_name = settings.mongodb_url.split('/')[-1].split('?')[0] or "stockanalysis"
+            self._db = self._client[db_name]
+            logger.info(f"Connected to MongoDB database: {db_name}")
+            # Create indexes for better query performance
+            self._create_indexes()
+        except Exception as e:
+            logger.error(f"Failed to connect to MongoDB: {str(e)}", exc_info=True)
+            raise
 
     def _create_indexes(self):
         """Create indexes on collections for optimal query performance."""
-        # Batch results indexes
-        batch_collection = self._db.batch_results
-        batch_collection.create_index([("created_at", DESCENDING)])
+        try:
+            logger.debug("Creating indexes on collections")
+            # Batch results indexes
+            batch_collection = self._db.batch_results
+            batch_collection.create_index([("created_at", DESCENDING)])
+            logger.debug("Indexes created successfully")
+        except Exception as e:
+            logger.warning(f"Error creating indexes: {str(e)}")
 
     @property
     def db(self) -> Database:
         """Get database instance."""
         if self._db is None:
+            logger.debug("MongoDB database not initialized, reconnecting...")
             self._connect()
         return self._db
 
@@ -58,6 +73,7 @@ class MongoDBConnection:
     def close(self):
         """Close MongoDB connection."""
         if self._client:
+            logger.info("Closing MongoDB connection")
             self._client.close()
             self._client = None
             self._db = None
@@ -82,14 +98,22 @@ def save_batch_results(batch_data: Dict[str, Any]) -> Any:
     Returns:
         ObjectId of the inserted document
     """
-    collection = get_db().batch_results
+    try:
+        logger.info("Saving batch results to MongoDB")
+        collection = get_db().batch_results
 
-    # Add metadata
-    batch_data["created_at"] = datetime.now(timezone.utc)
-    batch_data["total_results"] = len(batch_data.get("results", []))
+        # Add metadata
+        batch_data["created_at"] = datetime.now(timezone.utc)
+        batch_data["total_results"] = len(batch_data.get("results", []))
+        
+        logger.debug(f"Saving batch with {batch_data['total_results']} results")
 
-    result = collection.insert_one(batch_data)
-    return result.inserted_id
+        result = collection.insert_one(batch_data)
+        logger.info(f"Successfully saved batch results to MongoDB with ID: {result.inserted_id}")
+        return result.inserted_id
+    except Exception as e:
+        logger.error(f"Error saving batch results to MongoDB: {str(e)}", exc_info=True)
+        raise
 
 
 def get_latest_batch_results(limit: int = 10) -> list:
@@ -102,8 +126,15 @@ def get_latest_batch_results(limit: int = 10) -> list:
     Returns:
         List of batch result documents
     """
-    collection = get_db().batch_results
-    results = collection.find().sort("created_at", DESCENDING).limit(limit)
-    return list(results)
+    try:
+        logger.debug(f"Retrieving latest {limit} batch results from MongoDB")
+        collection = get_db().batch_results
+        results = collection.find().sort("created_at", DESCENDING).limit(limit)
+        results_list = list(results)
+        logger.debug(f"Retrieved {len(results_list)} batch results from MongoDB")
+        return results_list
+    except Exception as e:
+        logger.error(f"Error retrieving batch results from MongoDB: {str(e)}", exc_info=True)
+        raise
 
 
