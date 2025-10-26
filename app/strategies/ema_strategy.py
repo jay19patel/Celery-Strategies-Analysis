@@ -100,7 +100,7 @@ class EMAStrategy(BaseStrategy):
                 confidence=round(confidence / 100.0, 3),
                 execution_time=execution_time,
                 price=round(current_price, 2),
-                sucess=True
+                success=True
                 
             )
 

@@ -44,8 +44,8 @@ services:
       MONGODB_URL: mongodb+srv://justj:admin@cluster0.fsgzjrl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
       
       # Application Configuration
-      SYMBOLS: BTC-USD,ETH-USD,SOL-USD
-      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy,app.strategies.bollinger_bands_strategy.BollingerBandsStrategy,app.strategies.macd_strategy.MACDStrategy,app.strategies.volume_breakout_strategy.VolumeBreakoutStrategy
+      SYMBOLS: ADA-USD,SHIB-USD
+      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy,app.strategies.volume_breakout_strategy.VolumeBreakoutStrategy
       SCHEDULE_SECONDS: 60
       
       # Redis Pub/Sub Channels
@@ -83,8 +83,8 @@ services:
       MONGODB_URL: mongodb+srv://justj:admin@cluster0.fsgzjrl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
       
       # Application Configuration
-      SYMBOLS: BTC-USD,ETH-USD,SOL-USD
-      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy,app.strategies.bollinger_bands_strategy.BollingerBandsStrategy,app.strategies.macd_strategy.MACDStrategy,app.strategies.volume_breakout_strategy.VolumeBreakoutStrategy
+      SYMBOLS: ADA-USD,SHIB-USD
+      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy,app.strategies.volume_breakout_strategy.VolumeBreakoutStrategy
       SCHEDULE_SECONDS: 60
       
       # Redis Pub/Sub Channels

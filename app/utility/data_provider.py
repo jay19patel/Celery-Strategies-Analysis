@@ -25,10 +25,10 @@ def fetch_historical_data(symbol: str, period: str = "5d", interval: str = "5m")
     ema_list = [9, 15]
     for ema_length in ema_list:
         ema_name = f'{ema_length}EMA'
-        df[ema_name] = ta.trend.EMAIndicator(close=df['Close'], window=ema_length, fillna=False).ema_indicator()
+        df[ema_name] = ta.ema(df['Close'], length=ema_length)
 
     # Add RSI indicator
-    df['RSI'] = ta.momentum.RSIIndicator(close=df['Close'], window=14, fillna=False).rsi()
+    df['RSI'] = ta.rsi(df['Close'], length=14)
 
     # Candle color
     df['Candle'] = df.apply(lambda row: 'Green' if row['Close'] >= row['Open'] else 'Red', axis=1)
@@ -66,18 +66,5 @@ def fetch_historical_data(symbol: str, period: str = "5d", interval: str = "5m")
         shadow_choices,
         default="Neutral"
     )
-
-    return df
-
-    """
-    Analyze a crypto symbol and return data with signals and confidence
-    """
-    df = fetch_historical_data(symbol, period, interval)
-
-    # Add confidence scores
-    df['Confidence'] = 0
-    for i in range(len(df)):
-        if df['Action'].iloc[i] in ['buy', 'sell']:
-            df.loc[df.index[i], 'Confidence'] = get_signal_confidence(df, i)
 
     return df

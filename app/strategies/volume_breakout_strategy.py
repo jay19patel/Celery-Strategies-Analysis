@@ -115,7 +115,7 @@ class VolumeBreakoutStrategy(BaseStrategy):
                 confidence=round(confidence / 100.0, 3),
                 execution_time=execution_time,
                 price=round(current_price, 2),
-                sucscess=True
+                success=True
             )
 
         except Exception as e:
