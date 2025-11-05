@@ -7,6 +7,7 @@ from pymongo import MongoClient, DESCENDING
 from pymongo.collection import Collection
 from pymongo.database import Database
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from app.core.settings import settings
 from app.core.logger import get_mongodb_logger
 
@@ -102,8 +103,9 @@ def save_batch_results(batch_data: Dict[str, Any]) -> Any:
         logger.info("Saving batch results to MongoDB")
         collection = get_db().batch_results
 
-        # Add metadata
-        batch_data["created_at"] = datetime.now(timezone.utc)
+        # Add metadata - Convert UTC to IST (Indian Standard Time)
+        ist_timezone = ZoneInfo("Asia/Kolkata")
+        batch_data["created_at"] = datetime.now(timezone.utc).astimezone(ist_timezone)
         batch_data["total_results"] = len(batch_data.get("results", []))
         
         logger.debug(f"Saving batch with {batch_data['total_results']} results")

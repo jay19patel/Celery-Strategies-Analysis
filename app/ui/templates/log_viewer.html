@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Log Viewer - {{ filename }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+        
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .back-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .back-btn:hover {
+            background: #0056b3;
+        }
+        
+        .filename {
+            color: #d4d4d4;
+            font-size: 16px;
+        }
+        
+        .info-badge {
+            background: #3e3e42;
+            color: #d4d4d4;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: auto;
+        }
+        
+        .download-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .download-btn:hover {
+            background: #218838;
+        }
+        
+        .log-content {
+            background: #252526;
+            border-radius: 8px;
+            padding: 20px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 13px;
+            line-height: 1.6;
+            max-height: calc(100vh - 100px);
+            overflow-y: auto;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #858585;
+        }
+        
+        .error {
+            text-align: center;
+            padding: 40px;
+            color: #f48771;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="/logs" class="back-btn">← Back</a>
+            <span class="filename">{{ filename }}</span>
+            <a href="/api/logs/{{ filename }}/download" class="download-btn">⬇ Download Full Log</a>
+            <span class="info-badge" id="info-badge"></span>
+        </div>
+        
+        <div class="log-content" id="log-content">
+            <div class="loading">Loading...</div>
+        </div>
+    </div>
+    
+    <script>
+        async function loadLogContent() {
+            try {
+                const response = await fetch(`/api/logs/{{ filename }}`);
+                const result = await response.json();
+                
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+                
+                // Update info badge
+                const infoBadge = document.getElementById('info-badge');
+                if (result.total_lines && result.showing_lines) {
+                    if (result.total_lines > result.showing_lines) {
+                        infoBadge.textContent = `Showing last ${result.showing_lines} of ${result.total_lines} lines (latest first)`;
+                    } else {
+                        infoBadge.textContent = `Showing all ${result.showing_lines} lines (latest first)`;
+                    }
+                }
+                
+                document.getElementById('log-content').textContent = result.content;
+            } catch (error) {
+                document.getElementById('log-content').innerHTML = 
+                    `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        loadLogContent();
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Analysis Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+        
+        .sidebar {
+            position: fixed;
+            left: 20px;
+            top: 20px;
+            z-index: 1000;
+        }
+        
+        .logs-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.2s;
+        }
+        
+        .logs-btn:hover {
+            background: #0056b3;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        
+        .main-content {
+            margin-left: 120px;
+        }
+        
+        .filters {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .filter-group label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .filter-group input,
+        .filter-group select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .filter-group input:focus,
+        .filter-group select:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        
+        .table-container {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - 200px);
+        }
+        
+        .table-wrapper {
+            overflow-x: auto;
+            overflow-y: auto;
+            flex: 1;
+        }
+        
+        table {
+            width: 100%;
+            min-width: 1200px;
+            border-collapse: collapse;
+            table-layout: auto;
+        }
+        
+        thead {
+            background: #f8f9fa;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        th {
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            color: #333;
+            border-bottom: 2px solid #dee2e6;
+            white-space: nowrap;
+        }
+        
+        th:nth-child(1) { min-width: 120px; } /* Batch ID */
+        th:nth-child(2) { min-width: 180px; } /* Date Time */
+        th:nth-child(3) { min-width: 100px; } /* PubSub */
+        th:nth-child(4) { min-width: 200px; } /* Strategy Name */
+        th:nth-child(5) { min-width: 100px; } /* Symbol */
+        th:nth-child(6) { min-width: 100px; } /* Signal */
+        th:nth-child(7) { min-width: 100px; } /* Confidence */
+        th:nth-child(8) { min-width: 100px; } /* Price */
+        th:nth-child(9) { min-width: 120px; } /* Execution Time */
+        th:nth-child(10) { min-width: 80px; }  /* Success */
+        
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 14px;
+            color: #555;
+            white-space: nowrap;
+        }
+        
+        td:nth-child(1) { min-width: 120px; } /* Batch ID */
+        td:nth-child(2) { min-width: 180px; } /* Date Time */
+        td:nth-child(3) { min-width: 100px; } /* PubSub */
+        td:nth-child(4) { min-width: 200px; } /* Strategy Name */
+        td:nth-child(5) { min-width: 100px; } /* Symbol */
+        td:nth-child(6) { min-width: 100px; } /* Signal */
+        td:nth-child(7) { min-width: 100px; } /* Confidence */
+        td:nth-child(8) { min-width: 100px; } /* Price */
+        td:nth-child(9) { min-width: 120px; } /* Execution Time */
+        td:nth-child(10) { min-width: 80px; }  /* Success */
+        
+        /* Batch grouping colors - alternating gray and white */
+        tbody tr.batch-gray {
+            background: #f5f5f5;
+        }
+        
+        tbody tr.batch-white {
+            background: #ffffff;
+        }
+        
+        tbody tr.batch-gray:hover {
+            background: #e9ecef;
+        }
+        
+        tbody tr.batch-white:hover {
+            background: #f8f9fa;
+        }
+        
+        .signal-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .signal-buy {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .signal-sell {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .signal-hold {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .pagination {
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .pagination button {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .pagination button:hover:not(:disabled) {
+            background: #f8f9fa;
+        }
+        
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .pagination .page-info {
+            padding: 0 15px;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .empty {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <button class="logs-btn" onclick="window.location.href='/logs'">Logs</button>
+        </div>
+        
+        <div class="main-content">
+            <div class="filters">
+                <div class="filter-group">
+                    <label>Search</label>
+                    <input type="text" id="search" placeholder="Search by symbol, strategy...">
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Batch ID</th>
+                                <th>Date Time</th>
+                                <th>PubSub</th>
+                                <th>Strategy Name</th>
+                                <th>Symbol</th>
+                                <th>Signal</th>
+                                <th>Confidence</th>
+                                <th>Price</th>
+                                <th>Execution Time</th>
+                                <th>Success</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-body">
+                            <tr>
+                                <td colspan="10" class="loading">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination" id="pagination"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentPage = 1;
+        const perPage = 20;
+        
+        // Debounce function
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+        
+        // Load data
+        async function loadData(page = 1) {
+            const params = new URLSearchParams({
+                page: page,
+                per_page: perPage,
+                search: document.getElementById('search').value
+            });
+            
+            try {
+                const response = await fetch(`/api/data?${params}`);
+                const result = await response.json();
+                
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+                
+                renderTable(result.data);
+                renderPagination(result.pagination);
+                currentPage = page;
+            } catch (error) {
+                document.getElementById('table-body').innerHTML = 
+                    `<tr><td colspan="10" class="empty">Error: ${error.message}</td></tr>`;
+            }
+        }
+        
+        // Render table
+        function renderTable(data) {
+            const tbody = document.getElementById('table-body');
+            
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" class="empty">No data found</td></tr>';
+                return;
+            }
+            
+            // Track batch IDs and assign alternating colors
+            let batchColorMap = new Map();
+            let seenBatchIds = [];
+            
+            // First pass: identify unique batch IDs in order
+            data.forEach(row => {
+                const batchId = row.batch_id || '';
+                if (batchId && !seenBatchIds.includes(batchId)) {
+                    seenBatchIds.push(batchId);
+                }
+            });
+            
+            // Assign alternating colors to batches
+            seenBatchIds.forEach((batchId, index) => {
+                batchColorMap.set(batchId, index % 2 === 0 ? 'gray' : 'white');
+            });
+            
+            // Second pass: render rows with batch colors
+            tbody.innerHTML = data.map((row, index) => {
+                let dateTime = 'N/A';
+                try {
+                    // Convert UTC datetime to IST (Asia/Kolkata)
+                    const date = new Date(row.datetime);
+                    dateTime = date.toLocaleString('en-IN', { 
+                        timeZone: 'Asia/Kolkata',
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: true
+                    });
+                } catch (e) {
+                    dateTime = row.datetime || 'N/A';
+                }
+                const signalType = (row.signal_type || 'HOLD').toUpperCase();
+                const signalClass = `signal-${signalType.toLowerCase()}`;
+                
+                const batchId = row.batch_id || '';
+                const batchIdDisplay = batchId.length > 8 ? batchId.substring(0, 8) + '...' : batchId;
+                
+                // Get batch color
+                const batchColor = batchColorMap.get(batchId) || 'white';
+                const batchClass = `batch-${batchColor}`;
+                
+                return `
+                    <tr class="${batchClass}">
+                        <td>${batchIdDisplay}</td>
+                        <td>${dateTime}</td>
+                        <td>${row.pubsub !== undefined && row.pubsub !== null ? row.pubsub : 'N/A'}</td>
+                        <td>${row.strategy_name || ''}</td>
+                        <td>${row.symbol || ''}</td>
+                        <td><span class="signal-badge ${signalClass}">${signalType}</span></td>
+                        <td>${((row.confidence || 0) * 100).toFixed(2)}%</td>
+                        <td>$${(row.price || 0).toFixed(2)}</td>
+                        <td>${(row.execution_time || 0).toFixed(3)}s</td>
+                        <td>${row.success ? '✓' : '✗'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        
+        // Render pagination
+        function renderPagination(pagination) {
+            const paginationDiv = document.getElementById('pagination');
+            const { page, total_pages, total } = pagination;
+            
+            paginationDiv.innerHTML = `
+                <button onclick="loadData(1)" ${page === 1 ? 'disabled' : ''}>First</button>
+                <button onclick="loadData(${page - 1})" ${page === 1 ? 'disabled' : ''}>Previous</button>
+                <span class="page-info">Page ${page} of ${total_pages} (${total} total)</span>
+                <button onclick="loadData(${page + 1})" ${page >= total_pages ? 'disabled' : ''}>Next</button>
+                <button onclick="loadData(${total_pages})" ${page >= total_pages ? 'disabled' : ''}>Last</button>
+            `;
+        }
+        
+        // Event listeners
+        document.getElementById('search').addEventListener('input', debounce(() => loadData(1), 500));
+        
+        // Initial load
+        loadData(1);
+    </script>
+</body>
+</html>
+

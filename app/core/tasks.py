@@ -58,19 +58,21 @@ def run_all_batch_task(self) -> Dict[str, Any]:
 
         result = manager.run_all()
 
+        # Publish batch completion to Redis pub/sub FIRST and capture response
+        # No batch_id yet (we haven't saved), so publish summary and results only
+        logger.info("Publishing batch completion (pre-save)")
+        pubsub_response = publish_batch_complete({
+            "summary": result.get("summary", {}),
+            "total_results": len(result.get("results", [])),
+            "results": result.get("results", [])
+        })
+
+        # Store pub/sub response in the result payload so it persists to Mongo
+        result["pubsub"] = pubsub_response
+
         # Save batch results to MongoDB
         logger.info("Saving batch results to MongoDB")
         batch_id = save_batch_results(result)
-
-        # Publish batch completion to Redis pub/sub with complete data
-        # This includes all strategy results organized by symbol
-        logger.info(f"Publishing batch completion for batch_id: {batch_id}")
-        publish_batch_complete({
-            "batch_id": str(batch_id),
-            "summary": result.get("summary", {}),
-            "total_results": len(result.get("results", [])),
-            "results": result.get("results", [])  # All strategy results for all symbols
-        })
 
         logger.info(f"Batch task completed successfully: {batch_id}")
         return {"batch_id": str(batch_id), "summary": result.get("summary", {})}
