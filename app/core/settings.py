@@ -23,10 +23,7 @@ class Settings(BaseSettings):
     symbols: str = Field("BTC-USD,ETH-USD,SOL-USD")  # comma-separated
     strategies: str = Field(
         "app.strategies.ema_strategy.EMAStrategy," \
-        "app.strategies.rsi_strategy.RSIStrategy," \
-        "app.strategies.bollinger_bands_strategy.BollingerBandsStrategy," \
-        "app.strategies.macd_strategy.MACDStrategy," \
-        "app.strategies.volume_breakout_strategy.VolumeBreakoutStrategy"
+        "app.strategies.rsi_strategy.RSIStrategy"
     )
 
     # Scheduling

@@ -45,7 +45,7 @@ services:
       
       # Application Configuration
       SYMBOLS: ADA-USD,SHIB-USD
-      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy,app.strategies.volume_breakout_strategy.VolumeBreakoutStrategy
+      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy
       SCHEDULE_SECONDS: 600
       
       # Redis Pub/Sub Channels
@@ -85,7 +85,7 @@ services:
       
       # Application Configuration
       SYMBOLS: ADA-USD,SHIB-USD
-      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy,app.strategies.volume_breakout_strategy.VolumeBreakoutStrategy
+      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy
       SCHEDULE_SECONDS: 600
       
       # Redis Pub/Sub Channels

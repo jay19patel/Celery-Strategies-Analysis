@@ -13,31 +13,17 @@ class EMAStrategy(BaseStrategy):
 
         try:
             # Fetch data using our data provider
-            df = fetch_historical_data(symbol, period="5d", interval="5m")
+            df = fetch_historical_data(symbol, period="max", interval="15m")
 
-            def define_ema_buy_conditions(df):
-                # 9 EMA crosses above 15 EMA (Golden Cross) - buy signal
-                condition1 = (df['9EMA'].shift(1) <= df['15EMA'].shift(1)) & (df['9EMA'] > df['15EMA'])
-                # Additional confirmation: price above 9 EMA
-                condition2 = df['Close'] > df['9EMA']
-                # Volume confirmation (if available)
-                volume_condition = True
-                if 'Volume' in df.columns:
-                    volume_condition = df['Volume'] > df['Volume'].rolling(10).mean()
-                return condition1 & condition2 & volume_condition
-
-            def define_ema_sell_conditions(df):
-                # 9 EMA crosses below 15 EMA (Death Cross) - sell signal
-                condition1 = (df['9EMA'].shift(1) >= df['15EMA'].shift(1)) & (df['9EMA'] < df['15EMA'])
-                # Additional confirmation: price below 9 EMA
-                condition2 = df['Close'] < df['9EMA']
-                # Volume confirmation (if available)
-                volume_condition = True
-                if 'Volume' in df.columns:
-                    volume_condition = df['Volume'] > df['Volume'].rolling(10).mean()
-                return condition1 & condition2 & volume_condition
-
-            df['Action'] = np.select([define_ema_buy_conditions(df), define_ema_sell_conditions(df)], ['buy', 'sell'], default='hold')
+            # --- Identify Crossovers ---
+            # Buy Signal: 9EMA crosses above 15EMA (Golden Cross)
+            df['Buy_Signal'] = (df['9EMA'] > df['15EMA']) & (df['9EMA'].shift(1) <= df['15EMA'].shift(1))
+            
+            # Sell Signal: 9EMA crosses below 15EMA (Death Cross)
+            df['Sell_Signal'] = (df['9EMA'] < df['15EMA']) & (df['9EMA'].shift(1) >= df['15EMA'].shift(1))
+            
+            # --- Assign Actions ---
+            df['Action'] = np.select([df['Buy_Signal'], df['Sell_Signal']], ['buy', 'sell'], default=None)
 
             if df.empty:
                 execution_time = time.time() - start_time
@@ -68,13 +54,6 @@ class EMAStrategy(BaseStrategy):
                 ema_diff = abs(latest['9EMA'] - latest['15EMA'])
                 ema_separation_confidence = min(ema_diff / latest['Close'] * 1000, 40)  # Normalize
 
-                # RSI confirmation
-                rsi_confirmation = 0
-                if signal_type == SignalType.BUY and 30 < latest['RSI'] < 70:
-                    rsi_confirmation = 20
-                elif signal_type == SignalType.SELL and 30 < latest['RSI'] < 70:
-                    rsi_confirmation = 20
-
                 # Price position relative to EMAs
                 price_confirmation = 0
                 if signal_type == SignalType.BUY and latest['Close'] > latest['9EMA'] > latest['15EMA']:
@@ -89,7 +68,7 @@ class EMAStrategy(BaseStrategy):
                 elif signal_type == SignalType.SELL and latest['Candle'] == 'Red':
                     candle_confirmation = 15
 
-                confidence = min(ema_separation_confidence + rsi_confirmation + price_confirmation + candle_confirmation, 100)
+                confidence = min(ema_separation_confidence + price_confirmation + candle_confirmation, 100)
 
             execution_time = time.time() - start_time
 

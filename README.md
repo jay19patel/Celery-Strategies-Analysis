@@ -57,8 +57,7 @@ stockanalysis/
 │   │   ├── ema_strategy.py       # EMA strategy
 │   │   ├── rsi_strategy.py       # RSI strategy
 │   │   ├── macd_strategy.py      # MACD strategy
-│   │   ├── bollinger_bands_strategy.py  # Bollinger Bands
-│   │   └── volume_breakout_strategy.py  # Volume Breakout
+│   │   └── bollinger_bands_strategy.py  # Bollinger Bands
 │   └── utility/                  # Utility functions
 │       └── data_provider.py      # Data fetching utilities
 ├── docker-compose.yml            # Docker services configuration
