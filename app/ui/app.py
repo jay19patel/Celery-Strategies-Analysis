@@ -56,7 +56,8 @@ def get_data():
                 '$match': {
                     '$or': [
                         {'results.strategies.strategy_name': search_regex},
-                        {'results.symbol': search_regex}
+                        {'results.symbol': search_regex},
+                        {'results.strategies.signal_type': search_regex}
                     ]
                 }
             })
