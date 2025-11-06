@@ -368,18 +368,28 @@
                         dateTime = 'N/A';
                     } else {
                         let dateStr = String(row.datetime);
+                        let date;
                         
-                        // Parse the date string - JavaScript Date handles ISO strings with timezone correctly
-                        // Format: 2025-11-05T17:42:22.250779+05:30 (IST format)
-                        const date = new Date(dateStr);
+                        // Parse datetime string - handle different formats
+                        if (dateStr.includes('+') || dateStr.includes('Z') || dateStr.endsWith('Z')) {
+                            // Has timezone info - parse directly
+                            date = new Date(dateStr);
+                        } else {
+                            // No timezone info - assume UTC and add Z
+                            if (dateStr.includes('T')) {
+                                date = new Date(dateStr + 'Z');
+                            } else {
+                                date = new Date(dateStr);
+                            }
+                        }
                         
                         // Check if date is valid
                         if (isNaN(date.getTime())) {
-                            throw new Error('Invalid date');
+                            throw new Error('Invalid date: ' + dateStr);
                         }
                         
-                        // Convert to IST (Asia/Kolkata) timezone for display
-                        // JavaScript Date internally stores in UTC, so toLocaleString with timeZone will convert correctly
+                        // Always display in IST (Asia/Kolkata) timezone
+                        // JavaScript Date stores internally as UTC, so toLocaleString converts to IST
                         dateTime = date.toLocaleString('en-IN', { 
                             timeZone: 'Asia/Kolkata',
                             year: 'numeric',
@@ -388,8 +398,11 @@
                             hour: '2-digit',
                             minute: '2-digit',
                             second: '2-digit',
-                            hour12: true
+                            hour12: true  // 12-hour format with AM/PM
                         });
+                        
+                        // Remove timezone abbreviation if any (keep only date and time with AM/PM)
+                        dateTime = dateTime.replace(/\s+IST$/, '').replace(/\s+GMT\+5:30$/, '').replace(/\s+GMT\+0530$/, '').replace(/\s+GMT\+0530$/, '').trim();
                     }
                 } catch (e) {
                     console.error('Date conversion error:', e, 'datetime:', row.datetime);
