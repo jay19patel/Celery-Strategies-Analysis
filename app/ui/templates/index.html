@@ -364,20 +364,36 @@
             tbody.innerHTML = data.map((row, index) => {
                 let dateTime = 'N/A';
                 try {
-                    // Convert UTC datetime to IST (Asia/Kolkata)
-                    const date = new Date(row.datetime);
-                    dateTime = date.toLocaleString('en-IN', { 
-                        timeZone: 'Asia/Kolkata',
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                        hour12: true
-                    });
+                    if (!row.datetime) {
+                        dateTime = 'N/A';
+                    } else {
+                        let dateStr = String(row.datetime);
+                        
+                        // Parse the date string - JavaScript Date handles ISO strings with timezone correctly
+                        // Format: 2025-11-05T17:42:22.250779+05:30 (IST format)
+                        const date = new Date(dateStr);
+                        
+                        // Check if date is valid
+                        if (isNaN(date.getTime())) {
+                            throw new Error('Invalid date');
+                        }
+                        
+                        // Convert to IST (Asia/Kolkata) timezone for display
+                        // JavaScript Date internally stores in UTC, so toLocaleString with timeZone will convert correctly
+                        dateTime = date.toLocaleString('en-IN', { 
+                            timeZone: 'Asia/Kolkata',
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: true
+                        });
+                    }
                 } catch (e) {
-                    dateTime = row.datetime || 'N/A';
+                    console.error('Date conversion error:', e, 'datetime:', row.datetime);
+                    dateTime = row.datetime ? String(row.datetime) : 'N/A';
                 }
                 const signalType = (row.signal_type || 'HOLD').toUpperCase();
                 const signalClass = `signal-${signalType.toLowerCase()}`;
