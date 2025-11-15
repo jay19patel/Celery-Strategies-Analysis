@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     schedule_seconds: int = Field(60) # in seconds
 
     # Redis pub/sub channels
-    pubsub_channel_strategy: str = Field("stockanalysis:strategy_result")
     pubsub_channel_batch: str = Field("stockanalysis:batch_complete")
 
     model_config = {

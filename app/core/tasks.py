@@ -5,7 +5,7 @@ from app.core.celery_app import celery_app
 from app.core.settings import get_symbols, get_strategies
 from app.core.strategy_manager import StrategyManager
 from app.database.mongodb import save_batch_results
-from app.database.redis_publisher import publish_strategy_result, publish_batch_complete
+from app.database.redis_publisher import publish_batch_complete
 from app.core.logger import get_celery_logger
 
 logger = get_celery_logger()
@@ -32,9 +32,6 @@ def execute_strategy_task(self, strategy_class_path: str, symbol: str) -> Dict[s
                 result_dict["timestamp"] = result.timestamp.isoformat()
             except Exception:
                 pass
-
-        # Publish to Redis pub/sub for real-time subscribers
-        publish_strategy_result(result_dict)
         
         logger.info(f"Successfully executed strategy task for {symbol}")
         return result_dict

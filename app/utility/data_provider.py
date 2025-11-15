@@ -1,98 +1,143 @@
 import pandas as pd
 import pandas_ta as ta
-import yfinance as yf
 import numpy as np
+import requests
+import time
 from app.core.logger import get_data_provider_logger
 
 logger = get_data_provider_logger()
 
 
-def fetch_historical_data(symbol: str, period: str = "5d", interval: str = "5m"):
+def fetch_historical_data(symbol: str, period: int = 30, interval: str = "15m"):
     """
-    Fetch historical data for crypto symbols with technical indicators
-    
+    Fetch historical data for crypto symbols using Delta Exchange API
+    and calculate technical indicators.
+
     Args:
-        symbol: Ticker symbol (e.g., 'BTC-USD')
-        period: Period to fetch (default: '5d')
-        interval: Data interval (default: '5m')
-    
+        symbol: Crypto symbol (e.g., BTCUSD)
+        period: Time period (default: 5d)
+        interval: Candle interval (default: 5m)
+
     Returns:
-        DataFrame with historical data and technical indicators
+        DataFrame with historical data + indicators
     """
+
     try:
-        logger.info(f"Fetching data for {symbol} with period={period}, interval={interval}")
-        
-        # Download data from yfinance
-        df = yf.download(symbol, period=period, interval=interval)
-        
-        if df.empty:
-            logger.warning(f"Empty data returned for {symbol}")
-            return df
-        
-        logger.debug(f"Downloaded {len(df)} rows for {symbol}")
+        logger.info(f"Fetching data for {symbol} from Delta Exchange | period={period}, interval={interval}")
 
-        # Remove Ticker row (if present) by resetting columns
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.droplevel(1)
-            logger.debug(f"Removed MultiIndex from columns for {symbol}")
+        end_time = int(time.time())
+        start_time = end_time - (period * 86400)
 
-        df["DateTime"] = df.index
-        # Convert index to Asia/Kolkata timezone
-        df.index = df.index.tz_convert('Asia/Kolkata')
-        df['Date'] = df.index.date
-        df['Time'] = df.index.strftime('%I:%M %p')  # AM/PM format
+        params = {
+            'resolution': interval,
+            'symbol': symbol,
+            'start': str(start_time),
+            'end': str(end_time)
+        }
 
-        # Add EMA indicators
-        logger.debug(f"Calculating EMA indicators for {symbol}")
-        ema_list = [9, 15]
-        for ema_length in ema_list:
-            ema_name = f'{ema_length}EMA'
-            df[ema_name] = ta.ema(df['Close'], length=ema_length)
+        headers = {'Accept': 'application/json'}
 
-        # Add RSI indicator
-        logger.debug(f"Calculating RSI for {symbol}")
+        df = None
+        last_error = None
+
+        for attempt in range(3):
+            try:
+                response = requests.get(
+                    'https://api.india.delta.exchange/v2/history/candles',
+                    params=params,
+                    headers=headers,
+                    timeout=10
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+
+                    if data.get('success') and len(data.get('result', [])) > 0:
+                        candles = data['result']
+
+                        rows = []
+                        for c in candles:
+                            rows.append({
+                                'time': c['time'],
+                                'Open': float(c['open']),
+                                'High': float(c['high']),
+                                'Low': float(c['low']),
+                                'Close': float(c['close']),
+                                'Volume': float(c['volume'] or 0)
+                            })
+
+                        df = pd.DataFrame(rows)
+
+                        df['DateTime'] = pd.to_datetime(df['time'], unit='s', utc=True).dt.tz_convert('Asia/Kolkata')
+                        df = df.sort_values('DateTime')
+                        df.set_index('DateTime', inplace=True)
+                        df['DateTime'] = df.index
+
+                        df['Date'] = df.index.strftime('%d/%m/%Y')
+                        df['Time'] = df.index.strftime('%I:%M %p')
+
+                        break
+
+                    else:
+                        last_error = "API success=false or empty result"
+
+                else:
+                    last_error = f"Bad status code: {response.status_code}"
+
+            except Exception as e:
+                last_error = str(e)
+
+            if attempt < 2:
+                time.sleep(1)
+
+        if df is None:
+            raise Exception(f"Delta Exchange fetch failed: {last_error}")
+
+        # --------- INDICATORS ---------
+
+        logger.info("Processing indicators...")
+
+        # EMA
+        for ema_length in [9, 15, 50]:
+            df[f"{ema_length}EMA"] = ta.ema(df['Close'], length=ema_length)
+
+        # RSI
         df['RSI'] = ta.rsi(df['Close'], length=14)
 
         # Candle color
-        df['Candle'] = df.apply(lambda row: 'Green' if row['Close'] >= row['Open'] else 'Red', axis=1)
+        df['Candle'] = df.apply(lambda r: 'Green' if r['Close'] >= r['Open'] else 'Red', axis=1)
 
-        # Calculate body and shadows
+        # Body & Shadows
         Body = abs(df['Close'] - df['Open'])
         Upper_Shadow = df['High'] - df[['Close', 'Open']].max(axis=1)
         Lower_Shadow = df[['Close', 'Open']].min(axis=1) - df['Low']
         Total_Range = df['High'] - df['Low']
 
-        # Calculate body percentage
         df['Body'] = (Body / Total_Range) * 100
-
-        # Calculate shadow % temporarily
         df['Upper_Shadow'] = (Upper_Shadow / Total_Range) * 100
         df['Lower_Shadow'] = (Lower_Shadow / Total_Range) * 100
 
-        # Rolling average of previous 5 candles
         SEMA = 5
-        df['Avg_Upper_Shadow'] = df['Upper_Shadow'].rolling(window=SEMA, min_periods=1).mean()
-        df['Avg_Lower_Shadow'] = df['Lower_Shadow'].rolling(window=SEMA, min_periods=1).mean()
-        df["ALUS"] = df['Avg_Lower_Shadow'] / df['Avg_Upper_Shadow']
+        df['Avg_Upper_Shadow'] = df['Upper_Shadow'].rolling(SEMA, min_periods=1).mean()
+        df['Avg_Lower_Shadow'] = df['Lower_Shadow'].rolling(SEMA, min_periods=1).mean()
+        df['ALUS'] = df['Avg_Lower_Shadow'] / df['Avg_Upper_Shadow']
 
-        # Candle signal conditions
-        body_large_condition = df['Body'] >= 50
+        body_large = df['Body'] >= 50
 
-        shadow_conditions = [
-            np.logical_and(~body_large_condition, df['Upper_Shadow'] <= 30, df['Lower_Shadow'] >= 70),
-            np.logical_and(~body_large_condition, df['Upper_Shadow'] >= 70, df['Lower_Shadow'] <= 30)
-        ]
-        shadow_choices = ["Bullish", "Bearish"]
+        bull_condition = (~body_large) & (df['Upper_Shadow'] <= 30) & (df['Lower_Shadow'] >= 70)
+        bear_condition = (~body_large) & (df['Upper_Shadow'] >= 70) & (df['Lower_Shadow'] <= 30)
 
         df['Candle_Signal'] = np.select(
-            shadow_conditions,
-            shadow_choices,
+            [bull_condition, bear_condition],
+            ["Bullish", "Bearish"],
             default="Neutral"
         )
-        
-        logger.info(f"Successfully fetched and processed data for {symbol} - {len(df)} rows with indicators")
+
+        df.drop(columns=['time'], errors='ignore', inplace=True)
+
+        logger.info(f"Finished processing {symbol} | {len(df)} rows")
         return df
-        
+
     except Exception as e:
-        logger.error(f"Error fetching data for {symbol}: {str(e)}", exc_info=True)
+        logger.error(f"Error fetching Delta data: {str(e)}", exc_info=True)
         raise

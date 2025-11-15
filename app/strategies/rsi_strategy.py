@@ -13,7 +13,7 @@ class RSIStrategy(BaseStrategy):
 
         try:
             # Fetch data using our data provider
-            df = fetch_historical_data(symbol, period="max", interval="15m")
+            df = fetch_historical_data(symbol, period=30, interval="15m")
 
             def define_rsi_buy_conditions(df):
                 # RSI below 30 (oversold) - buy signal

@@ -1,3 +1,37 @@
+# Common environment variables
+x-common-env: &common-env
+  # Redis URLs
+  REDIS_BROKER_URL: redis://redis:6379/0
+  REDIS_RESULT_URL: redis://redis:6379/1
+  REDIS_PUBSUB_URL: redis://default:3oG2lFmElfB1xt1fI0LchEWpHXYky9Pj@redis-10597.c85.us-east-1-2.ec2.redns.redis-cloud.com:10597
+  
+  # MongoDB Atlas Configuration
+  MONGODB_URL: mongodb+srv://justj:admin@cluster0.fsgzjrl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
+  
+  # Application Configuration
+  SYMBOLS: ADAUSD,SHIBUSD
+  STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy
+  SCHEDULE_SECONDS: 600
+  
+  # Redis Pub/Sub Channels
+  PUBSUB_CHANNEL_BATCH: stockanalysis:batch_complete
+  
+  # Celery Configuration
+  TIMEZONE: UTC
+  ENABLE_UTC: true
+  TASK_IGNORE_RESULT: false
+  WORKER_PREFETCH_MULTIPLIER: 1
+  TASK_ACKS_LATE: true
+  BROKER_CONNECTION_RETRY_ON_STARTUP: true
+  
+  PYTHONPATH: /app
+
+x-ui-env: &ui-env
+  <<: *common-env
+  # Flask UI Configuration
+  FLASK_APP: app.ui.app
+  FLASK_ENV: production
+
 services:
   # Redis for Celery broker, result backend, and pub/sub
   redis:
@@ -35,32 +69,7 @@ services:
     container_name: stockanalysis-worker
     command: uv run celery -A app.core.celery_app.celery_app worker --loglevel=INFO --pool=prefork --concurrency=9
     environment:
-      # Redis URLs
-      REDIS_BROKER_URL: redis://redis:6379/0
-      REDIS_RESULT_URL: redis://redis:6379/1
-      REDIS_PUBSUB_URL: redis://default:3oG2lFmElfB1xt1fI0LchEWpHXYky9Pj@redis-10597.c85.us-east-1-2.ec2.redns.redis-cloud.com:10597
-      
-      # MongoDB Atlas Configuration
-      MONGODB_URL: mongodb+srv://justj:admin@cluster0.fsgzjrl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
-      
-      # Application Configuration
-      SYMBOLS: ADA-USD,SHIB-USD
-      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy
-      SCHEDULE_SECONDS: 600
-      
-      # Redis Pub/Sub Channels
-      PUBSUB_CHANNEL_STRATEGY: stockanalysis:strategy_result
-      PUBSUB_CHANNEL_BATCH: stockanalysis:batch_complete
-      
-      # Celery Configuration
-      TIMEZONE: UTC
-      ENABLE_UTC: true
-      TASK_IGNORE_RESULT: false
-      WORKER_PREFETCH_MULTIPLIER: 1
-      TASK_ACKS_LATE: true
-      BROKER_CONNECTION_RETRY_ON_STARTUP: true
-      
-      PYTHONPATH: /app
+      <<: *common-env
     volumes:
       - .:/app
       - ./logs:/app/logs
@@ -75,32 +84,7 @@ services:
     container_name: stockanalysis-beat
     command: uv run celery -A app.core.celery_app.celery_app beat --loglevel=INFO
     environment:
-      # Redis URLs
-      REDIS_BROKER_URL: redis://redis:6379/0
-      REDIS_RESULT_URL: redis://redis:6379/1
-      REDIS_PUBSUB_URL: redis://default:3oG2lFmElfB1xt1fI0LchEWpHXYky9Pj@redis-10597.c85.us-east-1-2.ec2.redns.redis-cloud.com:10597
-      
-      # MongoDB Atlas Configuration
-      MONGODB_URL: mongodb+srv://justj:admin@cluster0.fsgzjrl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
-      
-      # Application Configuration
-      SYMBOLS: ADA-USD,SHIB-USD
-      STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy
-      SCHEDULE_SECONDS: 600
-      
-      # Redis Pub/Sub Channels
-      PUBSUB_CHANNEL_STRATEGY: stockanalysis:strategy_result
-      PUBSUB_CHANNEL_BATCH: stockanalysis:batch_complete
-      
-      # Celery Configuration
-      TIMEZONE: UTC
-      ENABLE_UTC: true
-      TASK_IGNORE_RESULT: false
-      WORKER_PREFETCH_MULTIPLIER: 1
-      TASK_ACKS_LATE: true
-      BROKER_CONNECTION_RETRY_ON_STARTUP: true
-      
-      PYTHONPATH: /app
+      <<: *common-env
     volumes:
       - .:/app
       - ./logs:/app/logs
@@ -115,12 +99,7 @@ services:
     container_name: stockanalysis-ui
     command: uv run python -m app.ui.app
     environment:
-      # MongoDB Atlas Configuration
-      MONGODB_URL: mongodb+srv://justj:admin@cluster0.fsgzjrl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
-      
-      PYTHONPATH: /app
-      FLASK_APP: app.ui.app
-      FLASK_ENV: production
+      <<: *ui-env
     ports:
       - "5001:5000"
     volumes:

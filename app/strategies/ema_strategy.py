@@ -13,7 +13,7 @@ class EMAStrategy(BaseStrategy):
 
         try:
             # Fetch data using our data provider
-            df = fetch_historical_data(symbol, period="max", interval="15m")
+            df = fetch_historical_data(symbol, period=30, interval="15m")
 
             # --- Identify Crossovers ---
             # Buy Signal: 9EMA crosses above 15EMA (Golden Cross)

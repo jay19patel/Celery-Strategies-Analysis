@@ -83,24 +83,6 @@ class RedisPublisher:
 _publisher = RedisPublisher()
 
 
-def publish_strategy_result(result_data: Dict[str, Any]) -> int:
-    """
-    Publish individual strategy result to Redis pub/sub channel.
-
-    Args:
-        result_data: Strategy execution result
-
-    Returns:
-        Number of subscribers that received the message
-    """
-    channel = settings.pubsub_channel_strategy
-    logger.info(f"Publishing strategy result for {result_data.get('symbol')} - {result_data.get('strategy_name')}")
-    return _publisher.publish(channel, {
-        "type": "strategy_result",
-        "data": result_data
-    })
-
-
 def publish_batch_complete(batch_summary: Dict[str, Any]) -> int:
     """
     Publish batch completion notification to Redis pub/sub channel.
