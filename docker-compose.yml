@@ -19,7 +19,8 @@ x-common-env: &common-env
   # Celery Configuration
   TIMEZONE: UTC
   ENABLE_UTC: true
-  TASK_IGNORE_RESULT: false
+  TASK_IGNORE_RESULT: true
+  RESULT_EXPIRES: 900
   WORKER_PREFETCH_MULTIPLIER: 1
   TASK_ACKS_LATE: true
   BROKER_CONNECTION_RETRY_ON_STARTUP: true
@@ -110,5 +111,4 @@ services:
 volumes:
   redis_data:
     driver: local
-
 

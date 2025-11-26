@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     # Celery behavior
     timezone: str = Field("UTC")
     enable_utc: bool = Field(True)
-    task_ignore_result: bool = Field(False)
+    task_ignore_result: bool = Field(True)
+    result_expires: int = Field(900)
     worker_prefetch_multiplier: int = Field(1)
     task_acks_late: bool = Field(True)
     broker_connection_retry_on_startup: bool = Field(True)
@@ -27,7 +28,7 @@ class Settings(BaseSettings):
     )
 
     # Scheduling
-    schedule_seconds: int = Field(60) # in seconds
+    schedule_seconds: int = Field(60)  # in seconds
 
     # Redis pub/sub channels
     pubsub_channel_batch: str = Field("stockanalysis:batch_complete")

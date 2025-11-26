@@ -21,7 +21,7 @@ celery_app.conf.update(
     worker_prefetch_multiplier=settings.worker_prefetch_multiplier,  # fair scheduling
     task_acks_late=settings.task_acks_late,  # in case of worker crash, requeue
     broker_connection_retry_on_startup=settings.broker_connection_retry_on_startup,
-    result_expires=3600,
+    result_expires=settings.result_expires,
 )
 
 # Ensure tasks are registered when worker starts
