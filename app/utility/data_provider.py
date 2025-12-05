@@ -3,9 +3,25 @@ import pandas_ta as ta
 import numpy as np
 import requests
 import time
+from functools import lru_cache
+from datetime import datetime, timedelta
 from app.core.logger import get_data_provider_logger
 
 logger = get_data_provider_logger()
+
+# Cache storage with timestamp
+_data_cache = {}
+CACHE_DURATION = 300  # 5 minutes in seconds
+
+
+def _get_cache_key(symbol: str, period: int, interval: str) -> str:
+    """Generate cache key from parameters"""
+    return f"{symbol}_{period}_{interval}"
+
+
+def _is_cache_valid(timestamp: datetime) -> bool:
+    """Check if cached data is still valid (within 5 minutes)"""
+    return (datetime.now() - timestamp).total_seconds() < CACHE_DURATION
 
 
 def fetch_historical_data(symbol: str, period: int = 30, interval: str = "15m"):
@@ -20,7 +36,22 @@ def fetch_historical_data(symbol: str, period: int = 30, interval: str = "15m"):
 
     Returns:
         DataFrame with historical data + indicators
+
+    Note:
+        Data is cached for 5 minutes to avoid redundant API calls
     """
+
+    # Check cache first
+    cache_key = _get_cache_key(symbol, period, interval)
+    if cache_key in _data_cache:
+        cached_data, cached_time = _data_cache[cache_key]
+        if _is_cache_valid(cached_time):
+            logger.info(f"Returning cached data for {symbol} | period={period}, interval={interval}")
+            return cached_data.copy()  # Return copy to prevent modification
+        else:
+            # Cache expired, remove it
+            del _data_cache[cache_key]
+            logger.info(f"Cache expired for {symbol}, fetching fresh data")
 
     try:
         logger.info(f"Fetching data for {symbol} from Delta Exchange | period={period}, interval={interval}")
@@ -136,6 +167,10 @@ def fetch_historical_data(symbol: str, period: int = 30, interval: str = "15m"):
         df.drop(columns=['time'], errors='ignore', inplace=True)
 
         logger.info(f"Finished processing {symbol} | {len(df)} rows")
+
+        # Store in cache with current timestamp
+        _data_cache[cache_key] = (df.copy(), datetime.now())
+
         return df
 
     except Exception as e:

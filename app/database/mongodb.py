@@ -39,7 +39,7 @@ class MongoDBConnection:
                 connectTimeoutMS=10000,
             )
             # Extract database name from URL or use default
-            db_name = settings.mongodb_url.split('/')[-1].split('?')[0] or "stockanalysis"
+            db_name = settings.mongodb_url.split('/')[-1].split('?')[0] or "TBStockanAlysis"
             self._db = self._client[db_name]
             logger.info(f"Connected to MongoDB database: {db_name}")
             # Create indexes for better query performance

@@ -10,7 +10,7 @@ x-common-env: &common-env
   
   # Application Configuration
   SYMBOLS: ADAUSD,SHIBUSD
-  STRATEGIES: app.strategies.ema_strategy.EMAStrategy,app.strategies.rsi_strategy.RSIStrategy
+  STRATEGIES: "*"
   SCHEDULE_SECONDS: 600
   
   # Redis Pub/Sub Channels

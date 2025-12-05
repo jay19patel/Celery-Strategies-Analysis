@@ -1,6 +1,6 @@
 import importlib
 from typing import Any, Dict
-from app.models.strategy_models import StrategyResult
+from app.models.strategy_models import SignalType, StrategyResult
 from app.core.celery_app import celery_app
 from app.core.settings import get_symbols, get_strategies
 from app.core.strategy_manager import StrategyManager
@@ -15,6 +15,17 @@ def _load_strategy_class(dotted_path: str):
     module_path, class_name = dotted_path.rsplit(".", 1)
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
+
+
+def _has_actionable_signal(batch_result: Dict[str, Any]) -> bool:
+    """
+    Returns True if any strategy output contains a signal other than HOLD.
+    """
+    for symbol_block in batch_result.get("results", []):
+        for strategy_entry in symbol_block.get("strategies", []):
+            if strategy_entry.get("signal_type") != SignalType.HOLD.value:
+                return True
+    return False
 
 
 @celery_app.task(bind=True, name="execute_strategy_task", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
@@ -54,6 +65,15 @@ def run_all_batch_task(self) -> Dict[str, Any]:
         manager.add_strategies(strategies)
 
         result = manager.run_all()
+
+        if not _has_actionable_signal(result):
+            logger.info("All strategy outputs were HOLD; skipping publish/save")
+            return {
+                "batch_id": None,
+                "summary": result.get("summary", {}),
+                "skipped": True,
+                "reason": "No actionable signals detected"
+            }
 
         # Publish batch completion to Redis pub/sub FIRST and capture response
         # No batch_id yet (we haven't saved), so publish summary and results only
