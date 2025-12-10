@@ -99,6 +99,7 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
         if not has_signals:
             logger.info("=" * 80)
             logger.info("ℹ️  STEP 3 RESULT: All signals are HOLD - Skipping publish/save")
+            logger.info(aggregated_result.get("summary", {}))
             logger.info("=" * 80)
             return {
                 "batch_id": None,

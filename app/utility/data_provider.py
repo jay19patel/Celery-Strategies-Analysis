@@ -23,7 +23,7 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize Redis cache: {str(e)}")
     _redis_client = None
 
-CACHE_DURATION = 300  # 5 minutes in seconds
+CACHE_DURATION = 120  # 2 minutes in seconds
 
 
 def _get_cache_key(symbol: str, period: int, interval: str) -> str:

@@ -12,17 +12,8 @@ class StrategyManager:
     def add_symbols(self, symbols: List[str]) -> None:
         self._symbols.extend(symbols)
 
-    def create_task_signatures(self) -> List[Any]:
-        """
-        DEPRECATED: Use create_task_signatures_with_numbering instead
-        """
-        from app.core.tasks import execute_strategy_task
+    # DEPRECATED: create_task_signatures removed
 
-        signatures = []
-        for symbol in self._symbols:
-            for strategy_path in self._strategy_class_paths:
-                signatures.append(execute_strategy_task.s(strategy_path, symbol))
-        return signatures
 
     def create_task_signatures_with_numbering(self) -> List[Any]:
         """
@@ -83,17 +74,4 @@ class StrategyManager:
             "results": list(aggregated.values()),
         }
 
-    def run_all(self) -> Dict[str, Any]:
-        """
-        Legacy blocking method - DEPRECATED
-        Use Celery chord in tasks.py instead for non-blocking execution
-        """
-        from celery import group
-        
-        sigs = self.create_task_signatures()
-        if not sigs:
-            return {"summary": {}, "results": []}
-
-        job = group(sigs).apply_async()
-        results = job.get(disable_sync_subtasks=False)
-        return self.aggregate_results(results)
+    # DEPRECATED: run_all removed. Use celery tasks.
