@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify, send_file
-from app.database.mongodb import get_db
+from app.database.mongodb import get_database as get_db
 from bson import ObjectId
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo

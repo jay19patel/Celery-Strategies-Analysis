@@ -1,10 +1,7 @@
-"""
-Redis pub/sub publisher for real-time strategy result broadcasting.
-Publishes strategy results and batch completion events to Redis channels.
-"""
-import json
 import redis
-from typing import Any, Dict
+import json
+from typing import Dict, Any, Optional
+from datetime import datetime
 from app.core.settings import settings
 from app.core.logger import get_redis_logger
 
@@ -12,9 +9,13 @@ logger = get_redis_logger()
 
 
 class RedisPublisher:
-    """Singleton Redis publisher for pub/sub functionality."""
-    _instance: 'RedisPublisher' = None
-    _redis_client: redis.Redis = None
+    """
+    Singleton Redis publisher for pub/sub messaging
+    Ensures only one connection per process
+    """
+    _instance: Optional['RedisPublisher'] = None
+    _client: Optional[redis.Redis] = None
+    _initialized: bool = False
 
     def __new__(cls):
         if cls._instance is None:
@@ -22,87 +23,137 @@ class RedisPublisher:
         return cls._instance
 
     def __init__(self):
-        if self._redis_client is None:
+        """Initialize Redis connection only once"""
+        if not self._initialized:
             self._connect()
+            RedisPublisher._initialized = True
 
     def _connect(self):
-        """Establish connection to Redis for pub/sub."""
+        """Establish Redis connection"""
         try:
-            logger.info(f"Connecting to Redis at {settings.redis_pubsub_url}")
-            self._redis_client = redis.from_url(
+            logger.info("🔌 Initializing Redis Pub/Sub connection...")
+            
+            self._client = redis.from_url(
                 settings.redis_pubsub_url,
                 decode_responses=True,
                 socket_connect_timeout=5,
                 socket_keepalive=True,
+                health_check_interval=30
             )
+            
             # Test connection
-            self._redis_client.ping()
-            logger.info("Successfully connected to Redis")
-        except Exception as e:
-            logger.error(f"Failed to connect to Redis: {str(e)}", exc_info=True)
+            self._client.ping()
+            
+            logger.info("✅ Redis Pub/Sub connected successfully")
+            
+        except redis.ConnectionError as e:
+            logger.error(f"❌ Redis connection failed: {str(e)}")
             raise
-
-    @property
-    def client(self) -> redis.Redis:
-        """Get Redis client instance."""
-        if self._redis_client is None:
-            logger.debug("Redis client not initialized, reconnecting...")
-            self._connect()
-        return self._redis_client
+        except Exception as e:
+            logger.error(f"❌ Redis initialization error: {str(e)}")
+            raise
 
     def publish(self, channel: str, message: Dict[str, Any]) -> int:
         """
-        Publish message to a Redis channel.
-
+        Publish message to Redis channel
+        
         Args:
-            channel: Redis channel name
-            message: Message data to publish (will be JSON serialized)
-
+            channel: Channel name
+            message: Message data (will be JSON serialized)
+            
         Returns:
             Number of subscribers that received the message
         """
         try:
-            logger.debug(f"Publishing message to Redis channel: {channel}")
-            message_json = json.dumps(message, default=str)
-            subscribers = self.client.publish(channel, message_json)
-            logger.debug(f"Message published to {channel}, received by {subscribers} subscriber(s)")
-            return subscribers
+            # Add metadata
+            message_with_meta = {
+                **message,
+                "published_at": datetime.utcnow().isoformat(),
+                "channel": channel
+            }
+            
+            # Serialize to JSON
+            json_message = json.dumps(message_with_meta, default=str)
+            
+            # Publish
+            subscriber_count = self._client.publish(channel, json_message)
+            
+            logger.info(
+                f"📡 Published to '{channel}' | "
+                f"Subscribers: {subscriber_count} | "
+                f"Size: {len(json_message)} bytes"
+            )
+            
+            return subscriber_count
+            
         except Exception as e:
-            logger.error(f"Error publishing to Redis channel {channel}: {str(e)}", exc_info=True)
-            return 0
+            logger.error(f"❌ Error publishing to '{channel}': {str(e)}", exc_info=True)
+            raise
+
+    def get_client(self) -> redis.Redis:
+        """Get Redis client instance"""
+        if self._client is None:
+            raise RuntimeError("Redis not initialized")
+        return self._client
 
     def close(self):
-        """Close Redis connection."""
-        if self._redis_client:
-            logger.info("Closing Redis connection")
-            self._redis_client.close()
-            self._redis_client = None
+        """Close Redis connection"""
+        if self._client:
+            self._client.close()
+            logger.info("🔌 Redis connection closed")
 
 
-# Global publisher instance
-_publisher = RedisPublisher()
+# Global singleton instance
+_redis_publisher = RedisPublisher()
 
 
-def publish_batch_complete(batch_summary: Dict[str, Any]) -> int:
+def get_redis_client() -> redis.Redis:
+    """Get Redis client instance"""
+    return _redis_publisher.get_client()
+
+
+def publish_message(channel: str, message: Dict[str, Any]) -> int:
     """
-    Publish batch completion notification to Redis pub/sub channel.
-
+    Publish message to Redis channel
+    
     Args:
-        batch_summary: Batch execution summary
-
+        channel: Channel name
+        message: Message data
+        
     Returns:
         Number of subscribers that received the message
     """
-    channel = settings.pubsub_channel_batch
-    batch_id = batch_summary.get('batch_id', 'unknown')
-    total_results = batch_summary.get('total_results', 0)
-    logger.info(f"Publishing batch completion for batch_id: {batch_id} with {total_results} total results")
-    return _publisher.publish(channel, {
-        "type": "batch_complete",
-        "data": batch_summary
-    })
+    return _redis_publisher.publish(channel, message)
 
 
-def get_publisher() -> RedisPublisher:
-    """Get the global Redis publisher instance."""
-    return _publisher
+def publish_batch_complete(batch_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Publish batch completion notification
+    
+    Args:
+        batch_data: Batch execution data
+        
+    Returns:
+        Dictionary with publish details
+    """
+    try:
+        channel = settings.pubsub_channel_batch
+        
+        subscriber_count = publish_message(channel, batch_data)
+        
+        return {
+            "channel": channel,
+            "subscriber_count": subscriber_count,
+            "published_at": datetime.utcnow().isoformat(),
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error publishing batch complete: {str(e)}")
+        return {
+            "channel": settings.pubsub_channel_batch,
+            "subscriber_count": 0,
+            "published_at": datetime.utcnow().isoformat(),
+            "status": "failed",
+            "error": str(e)
+        }

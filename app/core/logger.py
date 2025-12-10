@@ -71,8 +71,8 @@ class StockAnalysisLogger:
         # Prevent propagation to root logger
         self.logger.propagate = False
         
-        # Log initialization
-        self.logger.info("StockAnalysisLogger initialized successfully")
+        # Log initialization (Debug only to reduce noise in workers)
+        self.logger.debug("StockAnalysisLogger initialized successfully")
     
     def _setup_file_handlers(self):
         """Setup file handlers for main and error logs"""

@@ -23,7 +23,7 @@ class PDHLStrategy(BaseStrategy):
 
         try:
             # Fetch data - need more days for previous day calculation
-            df = fetch_historical_data(symbol, period=7, interval="1m")
+            df = fetch_historical_data(symbol, period=30, interval="15m")
 
             if df.empty or len(df) < 2:
                 execution_time = time.time() - start_time

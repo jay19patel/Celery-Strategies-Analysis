@@ -7,6 +7,7 @@ from app.core.strategy_manager import StrategyManager
 from app.database.mongodb import save_batch_results
 from app.database.redis_publisher import publish_batch_complete
 from app.core.logger import get_celery_logger
+import time
 
 logger = get_celery_logger()
 
@@ -29,9 +30,16 @@ def _has_actionable_signal(batch_result: Dict[str, Any]) -> bool:
 
 
 @celery_app.task(bind=True, name="execute_strategy_task", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def execute_strategy_task(self, strategy_class_path: str, symbol: str) -> Dict[str, Any]:
+def execute_strategy_task(self, strategy_class_path: str, symbol: str, task_number: int, total_tasks: int) -> Dict[str, Any]:
+    """
+    Execute a single strategy for a symbol
+    """
+    start_time = time.time()
+    strategy_name = strategy_class_path.split('.')[-1]
+    
     try:
-        logger.info(f"Executing strategy task: {strategy_class_path} for symbol {symbol}")
+        logger.info(f"📊 STEP 2.{task_number}/{total_tasks} | Processing: {symbol} | Strategy: {strategy_name}")
+        
         StrategyClass = _load_strategy_class(strategy_class_path)
         strategy = StrategyClass()
         result: StrategyResult = strategy.execute(symbol)
@@ -44,57 +52,147 @@ def execute_strategy_task(self, strategy_class_path: str, symbol: str) -> Dict[s
             except Exception:
                 pass
         
-        logger.info(f"Successfully executed strategy task for {symbol}")
+        execution_time = time.time() - start_time
+        logger.info(
+            f"✅ STEP 2.{task_number}/{total_tasks} COMPLETED | {symbol} | {strategy_name} | "
+            f"Signal: {result_dict.get('signal_type')} | Confidence: {result_dict.get('confidence', 0):.2f} | "
+            f"Time: {execution_time:.2f}s"
+        )
         return result_dict
+        
     except Exception as e:
-        logger.error(f"Error executing strategy task for {symbol}: {str(e)}", exc_info=True)
+        execution_time = time.time() - start_time
+        logger.error(
+            f"❌ STEP 2.{task_number}/{total_tasks} FAILED | {symbol} | {strategy_name} | "
+            f"Error: {str(e)} | Time: {execution_time:.2f}s", 
+            exc_info=True
+        )
+        raise
+
+
+@celery_app.task(bind=True, name="process_batch_results")
+def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    STEP 3: Process all strategy results after completion
+    """
+    try:
+        logger.info("=" * 80)
+        logger.info("🔄 STEP 3: PROCESSING BATCH RESULTS")
+        logger.info("=" * 80)
+        
+        # Count successful results
+        valid_results = [r for r in results if r]
+        failed_count = len(results) - len(valid_results)
+        
+        if failed_count > 0:
+            logger.warning(f"⚠️  {failed_count} tasks failed during execution")
+        
+        logger.info(f"✅ Successfully completed: {len(valid_results)} tasks")
+        
+        # Aggregate results
+        manager = StrategyManager()
+        aggregated_result = manager.aggregate_results(valid_results)
+        
+        # Check for actionable signals
+        has_signals = _has_actionable_signal(aggregated_result)
+        
+        if not has_signals:
+            logger.info("=" * 80)
+            logger.info("ℹ️  STEP 3 RESULT: All signals are HOLD - Skipping publish/save")
+            logger.info("=" * 80)
+            return {
+                "batch_id": None,
+                "summary": aggregated_result.get("summary", {}),
+                "skipped": True,
+                "reason": "No actionable signals detected"
+            }
+
+        # STEP 3.1: Publish to Redis
+        logger.info("-" * 80)
+        logger.info("📡 STEP 3.1: Publishing to Redis Pub/Sub")
+        pubsub_response = publish_batch_complete({
+            "summary": aggregated_result.get("summary", {}),
+            "total_results": len(aggregated_result.get("results", [])),
+            "results": aggregated_result.get("results", [])
+        })
+        logger.info(f"✅ STEP 3.1 COMPLETED: Published to channel '{pubsub_response.get('channel')}'")
+        
+        aggregated_result["pubsub"] = pubsub_response
+
+        # STEP 3.2: Save to MongoDB
+        logger.info("-" * 80)
+        logger.info("💾 STEP 3.2: Saving to MongoDB")
+        batch_id = save_batch_results(aggregated_result)
+        logger.info(f"✅ STEP 3.2 COMPLETED: Batch saved with ID: {batch_id}")
+        
+        # Final summary
+        logger.info("=" * 80)
+        logger.info("🎉 STEP 3: BATCH PROCESSING COMPLETED SUCCESSFULLY")
+        logger.info(f"   Batch ID: {batch_id}")
+        logger.info(f"   Total Results: {len(valid_results)}")
+        logger.info(f"   Symbols Processed: {aggregated_result.get('summary', {}).get('total_symbols')}")
+        logger.info(f"   Strategies Used: {aggregated_result.get('summary', {}).get('total_strategies')}")
+        logger.info("=" * 80)
+        
+        return {"batch_id": str(batch_id), "summary": aggregated_result.get("summary", {})}
+        
+    except Exception as e:
+        logger.error("=" * 80)
+        logger.error(f"❌ STEP 3 FAILED: Error processing batch results: {str(e)}")
+        logger.error("=" * 80)
+        logger.error("Error details:", exc_info=True)
         raise
 
 
 @celery_app.task(bind=True, name="run_all_batch_task")
-def run_all_batch_task(self) -> Dict[str, Any]:
+def trigger_batch_execution(self) -> Dict[str, Any]:
+    """
+    STEP 1: Trigger batch execution using Celery Chord
+    """
     try:
-        logger.info("Starting batch task execution")
+        logger.info("=" * 80)
+        logger.info("🚀 STEP 1: INITIATING BATCH EXECUTION")
+        logger.info("=" * 80)
+        
         symbols = get_symbols()
         strategies = get_strategies()
-
-        logger.info(f"Batch task: {len(symbols)} symbols, {len(strategies)} strategies")
+        
+        logger.info(f"📋 Configuration:")
+        logger.info(f"   Symbols: {symbols}")
+        logger.info(f"   Strategies: {[s.split('.')[-1] for s in strategies]}")
+        logger.info(f"   Total combinations: {len(symbols)} symbols × {len(strategies)} strategies = {len(symbols) * len(strategies)} tasks")
         
         manager = StrategyManager()
         manager.add_symbols(symbols)
         manager.add_strategies(strategies)
 
-        result = manager.run_all()
+        # Create task signatures with numbering
+        tasks_sigs = manager.create_task_signatures_with_numbering()
 
-        if not _has_actionable_signal(result):
-            logger.info("All strategy outputs were HOLD; skipping publish/save")
-            return {
-                "batch_id": None,
-                "summary": result.get("summary", {}),
-                "skipped": True,
-                "reason": "No actionable signals detected"
-            }
+        if not tasks_sigs:
+            logger.warning("⚠️  No tasks to run (empty configuration)")
+            logger.info("=" * 80)
+            return {"status": "skipped", "reason": "empty_batch"}
 
-        # Publish batch completion to Redis pub/sub FIRST and capture response
-        # No batch_id yet (we haven't saved), so publish summary and results only
-        logger.info("Publishing batch completion (pre-save)")
-        pubsub_response = publish_batch_complete({
-            "summary": result.get("summary", {}),
-            "total_results": len(result.get("results", [])),
-            "results": result.get("results", [])
-        })
+        logger.info("-" * 80)
+        logger.info(f"✅ STEP 1 COMPLETED: Generated {len(tasks_sigs)} tasks")
+        logger.info("=" * 80)
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info(f"🔄 STEP 2: EXECUTING {len(tasks_sigs)} TASKS")
+        logger.info("=" * 80)
 
-        # Store pub/sub response in the result payload so it persists to Mongo
-        result["pubsub"] = pubsub_response
-
-        # Save batch results to MongoDB
-        logger.info("Saving batch results to MongoDB")
-        batch_id = save_batch_results(result)
-
-        logger.info(f"Batch task completed successfully: {batch_id}")
-        return {"batch_id": str(batch_id), "summary": result.get("summary", {})}
+        # Use Celery Chord: group(tasks) | callback
+        from celery import chord
+        
+        callback = process_batch_results.s(batch_metadata={"triggered_at": "now"})
+        chord(tasks_sigs)(callback)
+        
+        return {"status": "triggered", "tasks_count": len(tasks_sigs)}
+        
     except Exception as e:
-        logger.error(f"Error executing batch task: {str(e)}", exc_info=True)
+        logger.error("=" * 80)
+        logger.error(f"❌ STEP 1 FAILED: Error triggering batch task: {str(e)}")
+        logger.error("=" * 80)
+        logger.error("Error details:", exc_info=True)
         raise
-
-
