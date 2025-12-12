@@ -118,7 +118,7 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
         })
         logger.info(f"✅ STEP 3.1 COMPLETED: Published to channel '{pubsub_response.get('channel')}'")
         
-        aggregated_result["pubsub"] = pubsub_response
+        aggregated_result["pubsub"] = pubsub_response.get("subscriber_count", 0)
 
         # STEP 3.2: Save to MongoDB
         logger.info("-" * 80)
