@@ -76,7 +76,7 @@ def get_data():
                         '$project': {
                             '_id': 1,
                             'batch_id': {'$toString': '$_id'},
-                            'datetime': '$created_at',
+                            'datetime': '$stored_at',
                             'pubsub': '$pubsub',
                             'strategy_name': '$results.strategies.strategy_name',
                             'symbol': '$results.symbol',
