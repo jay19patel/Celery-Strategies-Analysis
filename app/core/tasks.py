@@ -174,6 +174,22 @@ def trigger_batch_execution(self) -> Dict[str, Any]:
         logger.info(f"   Strategies: {[s.split('.')[-1] for s in strategies]}")
         logger.info(f"   Total combinations: {len(symbols)} symbols × {len(strategies)} strategies = {len(symbols) * len(strategies)} tasks")
         
+        # Pre-cache data for all symbols
+        logger.info("-" * 80)
+        logger.info("💾 STEP 1.1: PRE-CACHING DATA")
+        from app.utility.data_provider import fetch_historical_data
+        
+        pre_cache_count = 0
+        for symbol in symbols:
+            try:
+                # Fetching data here will cache it in Redis
+                fetch_historical_data(symbol, period=30, interval="15m")
+                pre_cache_count += 1
+            except Exception as e:
+                logger.error(f"⚠️  Failed to pre-cache data for {symbol}: {str(e)}")
+        
+        logger.info(f"✅ STEP 1.1 COMPLETED: Pre-cached data for {pre_cache_count}/{len(symbols)} symbols")
+
         manager = StrategyManager()
         manager.add_symbols(symbols)
         manager.add_strategies(strategies)
@@ -187,7 +203,7 @@ def trigger_batch_execution(self) -> Dict[str, Any]:
             return {"status": "skipped", "reason": "empty_batch"}
 
         logger.info("-" * 80)
-        logger.info(f"✅ STEP 1 COMPLETED: Generated {len(tasks_sigs)} tasks")
+        logger.info(f"✅ STEP 1.2 COMPLETED: Generated {len(tasks_sigs)} tasks")
         logger.info("=" * 80)
         logger.info("")
         logger.info("=" * 80)
@@ -211,7 +227,8 @@ def trigger_batch_execution(self) -> Dict[str, Any]:
             "status": "triggered", 
             "tasks_count": len(tasks_sigs),
             "expected_symbols": len(symbols),
-            "expected_strategies": len(strategies)
+            "expected_strategies": len(strategies),
+            "pre_cached_count": pre_cache_count
         }
         
     except Exception as e:

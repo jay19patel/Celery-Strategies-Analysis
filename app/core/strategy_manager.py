@@ -3,23 +3,12 @@ from typing import List, Dict, Any
 
 class StrategyManager:
     """
-    Singleton StrategyManager class
-    Multiple objects create karne par bhi same instance milega
+    StrategyManager class
+    Responsible for managing symbols and strategies for batch execution.
     """
-    _instance = None
-    _initialized = False
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-    
     def __init__(self):
-        # Initialize only once
-        if not StrategyManager._initialized:
-            self._strategy_class_paths: List[str] = []
-            self._symbols: List[str] = []
-            StrategyManager._initialized = True
+        self._strategy_class_paths: List[str] = []
+        self._symbols: List[str] = []
     
     def add_strategies(self, strategy_class_paths: List[str]) -> None:
         self._strategy_class_paths.extend(strategy_class_paths)
@@ -89,32 +78,4 @@ class StrategyManager:
             "results": list(aggregated.values()),
         }
     
-    @classmethod
-    def reset_instance(cls):
-        """
-        Testing ke liye instance reset karne ka method
-        Production mein use na karein
-        """
-        cls._instance = None
-        cls._initialized = False
 
-
-# Usage Example:
-if __name__ == "__main__":
-    # Multiple objects create karne par bhi same instance milega
-    manager1 = StrategyManager()
-    manager1.add_symbols(["AAPL", "GOOGL"])
-    
-    manager2 = StrategyManager()
-    manager2.add_strategies(["strategy.momentum", "strategy.mean_reversion"])
-    
-    manager3 = StrategyManager()
-    
-    # Sab same instance hain
-    print(f"manager1 is manager2: {manager1 is manager2}")  # True
-    print(f"manager2 is manager3: {manager2 is manager3}")  # True
-    print(f"manager1 is manager3: {manager1 is manager3}")  # True
-    
-    # Data bhi shared hai
-    print(f"\nSymbols in manager3: {manager3._symbols}")  # ['AAPL', 'GOOGL']
-    print(f"Strategies in manager1: {manager1._strategy_class_paths}")  # ['strategy.momentum', 'strategy.mean_reversion']
