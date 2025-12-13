@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     mongodb_url: str = Field("mongodb://localhost:27017/stockanalysis")
 
     # Celery behavior
-    timezone: str = Field("UTC")
-    enable_utc: bool = Field(True)
+    timezone: str = Field("Asia/Kolkata")
+    enable_utc: bool = Field(False)
     task_ignore_result: bool = Field(True)
     result_expires: int = Field(900)
     worker_prefetch_multiplier: int = Field(1)

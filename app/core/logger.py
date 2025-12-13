@@ -8,6 +8,7 @@ import logging
 import logging.handlers
 import os
 import sys
+import threading
 from datetime import datetime
 from typing import Optional
 from pathlib import Path
@@ -26,17 +27,22 @@ class StockAnalysisLogger:
     """
     
     _instance: Optional['StockAnalysisLogger'] = None
+    _lock = threading.Lock()
     _initialized: bool = False
     
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
         return cls._instance
     
     def __init__(self):
         if not self._initialized:
-            self._setup_logging()
-            StockAnalysisLogger._initialized = True
+            with self._lock:
+                if not self._initialized:
+                    self._setup_logging()
+                    self._initialized = True
     
     def _setup_logging(self):
         """Setup centralized logging configuration"""

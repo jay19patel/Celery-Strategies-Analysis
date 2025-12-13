@@ -45,7 +45,7 @@ class StrategyManager:
         
         return signatures
     
-    def aggregate_results(self, flat_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def aggregate_results(self, flat_results: List[Dict[str, Any]], expected_symbols_count: int = None, expected_strategies_count: int = None) -> Dict[str, Any]:
         """
         Aggregates flat list of results into structured format
         Groups by symbol and includes all strategy results
@@ -72,12 +72,16 @@ class StrategyManager:
         # Calculate summary statistics
         unique_symbols = set(r["symbol"] for r in valid_results if "symbol" in r)
         
+        # Use provided expected counts if available, otherwise fallback to internal state (which might be empty in workers)
+        total_strategies = expected_strategies_count if expected_strategies_count is not None else len(self._strategy_class_paths)
+        expected_total_results = (expected_symbols_count * expected_strategies_count) if (expected_symbols_count is not None and expected_strategies_count is not None) else (len(self._symbols) * len(self._strategy_class_paths))
+
         summary = {
             "total_symbols": len(unique_symbols),
-            "total_strategies": len(self._strategy_class_paths),
+            "total_strategies": total_strategies,
             "total_results": len(valid_results),
-            "expected_results": len(self._symbols) * len(self._strategy_class_paths),
-            "failed_results": (len(self._symbols) * len(self._strategy_class_paths)) - len(valid_results)
+            "expected_results": expected_total_results,
+            "failed_results": expected_total_results - len(valid_results)
         }
         
         return {

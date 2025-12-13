@@ -29,7 +29,7 @@ def _has_actionable_signal(batch_result: Dict[str, Any]) -> bool:
     return False
 
 
-@celery_app.task(bind=True, name="execute_strategy_task", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+@celery_app.task(bind=True, name="execute_strategy_task")
 def execute_strategy_task(self, strategy_class_path: str, symbol: str, task_number: int, total_tasks: int) -> Dict[str, Any]:
     """
     Execute a single strategy for a symbol
@@ -67,7 +67,9 @@ def execute_strategy_task(self, strategy_class_path: str, symbol: str, task_numb
             f"Error: {str(e)} | Time: {execution_time:.2f}s", 
             exc_info=True
         )
-        raise
+        # Return a None or error dict so the chord continues and we can filter it later
+        # Returning None is standard for "failed but handled"
+        return None
 
 
 @celery_app.task(bind=True, name="process_batch_results")
@@ -91,7 +93,16 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
         
         # Aggregate results
         manager = StrategyManager()
-        aggregated_result = manager.aggregate_results(valid_results)
+        
+        # Extract expected counts from metadata if available
+        expected_skills = batch_metadata.get("expected_strategies_count") if batch_metadata else None
+        expected_symbols = batch_metadata.get("expected_symbols_count") if batch_metadata else None
+
+        aggregated_result = manager.aggregate_results(
+            valid_results, 
+            expected_symbols_count=expected_symbols, 
+            expected_strategies_count=expected_skills
+        )
         
         # Check for actionable signals
         has_signals = _has_actionable_signal(aggregated_result)
@@ -122,7 +133,7 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
 
         # STEP 3.2: Save to MongoDB
         logger.info("-" * 80)
-        logger.info("💾 STEP 3.2: Saving to MongoDB")
+        logger.info("📡 STEP 3.2: Saving to MongoDB")
         batch_id = save_batch_results(aggregated_result)
         logger.info(f"✅ STEP 3.2 COMPLETED: Batch saved with ID: {batch_id}")
         
@@ -186,10 +197,22 @@ def trigger_batch_execution(self) -> Dict[str, Any]:
         # Use Celery Chord: group(tasks) | callback
         from celery import chord
         
-        callback = process_batch_results.s(batch_metadata={"triggered_at": "now"})
+        # Pass expectation metadata to the callback because workers don't share state
+        batch_metadata = {
+            "triggered_at": "now",
+            "expected_symbols_count": len(symbols),
+            "expected_strategies_count": len(strategies)
+        }
+        
+        callback = process_batch_results.s(batch_metadata=batch_metadata)
         chord(tasks_sigs)(callback)
         
-        return {"status": "triggered", "tasks_count": len(tasks_sigs)}
+        return {
+            "status": "triggered", 
+            "tasks_count": len(tasks_sigs),
+            "expected_symbols": len(symbols),
+            "expected_strategies": len(strategies)
+        }
         
     except Exception as e:
         logger.error("=" * 80)
