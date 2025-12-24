@@ -1,460 +1,519 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stock Analysis Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f5;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 100%;
-            margin: 0 auto;
-        }
-        
-        .sidebar {
-            position: fixed;
-            left: 20px;
-            top: 20px;
-            z-index: 1000;
-        }
-        
-        .logs-btn {
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            transition: all 0.2s;
-        }
-        
-        .logs-btn:hover {
-            background: #0056b3;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-        }
-        
-        .main-content {
-            margin-left: 120px;
-        }
-        
-        .filters {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-        
-        .filter-group {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-        
-        .filter-group label {
-            font-size: 12px;
-            color: #666;
-            font-weight: 500;
-        }
-        
-        .filter-group input,
-        .filter-group select {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-            min-width: 400px;
-            width: 100%;
-        }
-        
-        .filter-group input:focus,
-        .filter-group select:focus {
-            outline: none;
-            border-color: #007bff;
-        }
-        
+{% extends "base.html" %}
+
+{% block title %}Dashboard | StockAI{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Dashboard specific styles */
+    .filters-card {
+        display: flex;
+        gap: 15px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .search-group {
+        flex: 1;
+        min-width: 300px;
+        position: relative;
+    }
+
+    .search-icon {
+        position: absolute;
+        left: 15px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-muted);
+    }
+
+    .search-input {
+        padding-left: 45px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        height: 50px;
+        border-radius: 12px;
+        width: 100%;
+        font-size: 16px;
+        transition: all 0.2s;
+    }
+
+    .search-input:focus {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: var(--primary);
+        box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+    }
+
+    /* Table Styling */
+    .table-container {
+        overflow-x: auto;
+        border-radius: 12px;
+        border: 1px solid var(--border-color);
+    }
+
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        white-space: nowrap;
+    }
+
+    .data-table th {
+        background: rgba(0, 0, 0, 0.2);
+        color: var(--text-secondary);
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 12px;
+        letter-spacing: 0.5px;
+        padding: 16px;
+        border-bottom: 2px solid var(--border-color);
+        text-align: left;
+    }
+
+    .data-table td {
+        padding: 16px;
+        border-bottom: 1px solid var(--border-color);
+        font-size: 14px;
+        color: var(--text-primary);
+        transition: background 0.2s;
+    }
+
+    .data-table tr:hover td {
+        background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* Batch Grouping */
+    .batch-group-odd td {
+        background: rgba(255, 255, 255, 0.01);
+    }
+
+    .batch-group-even td {
+        background: transparent;
+    }
+
+    /* Status Badges */
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        border: 1px solid transparent;
+    }
+
+    .status-buy {
+        background: rgba(16, 185, 129, 0.1);
+        color: var(--success);
+        border-color: rgba(16, 185, 129, 0.2);
+        box-shadow: 0 0 10px rgba(16, 185, 129, 0.1);
+    }
+
+    .status-sell {
+        background: rgba(239, 68, 68, 0.1);
+        color: var(--danger);
+        border-color: rgba(239, 68, 68, 0.2);
+        box-shadow: 0 0 10px rgba(239, 68, 68, 0.1);
+    }
+
+    .status-hold {
+        background: rgba(245, 158, 11, 0.1);
+        color: var(--warning);
+        border-color: rgba(245, 158, 11, 0.2);
+    }
+
+    /* Pagination */
+    .pagination-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        margin-top: 30px;
+    }
+
+    .page-btn {
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .page-btn:hover:not(:disabled) {
+        background: var(--primary);
+        border-color: var(--primary);
+    }
+
+    .page-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* Mobile Card View */
+    .mobile-card-view {
+        display: none;
+    }
+
+    @media (max-width: 768px) {
         .table-container {
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: none;
+            /* Hide table on mobile */
+        }
+
+        .mobile-card-view {
             display: flex;
             flex-direction: column;
-            max-height: calc(100vh - 200px);
+            gap: 15px;
         }
-        
-        .table-wrapper {
-            overflow-x: auto;
-            overflow-y: auto;
-            flex: 1;
-        }
-        
-        table {
-            width: 100%;
-            min-width: 1200px;
-            border-collapse: collapse;
-            table-layout: auto;
-        }
-        
-        thead {
-            background: #f8f9fa;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-        
-        th {
-            padding: 12px;
-            text-align: left;
-            font-weight: 600;
-            font-size: 13px;
-            color: #333;
-            border-bottom: 2px solid #dee2e6;
-            white-space: nowrap;
-        }
-        
-        th:nth-child(1) { min-width: 120px; } /* Batch ID */
-        th:nth-child(2) { min-width: 180px; } /* Date Time */
-        th:nth-child(3) { min-width: 100px; } /* PubSub */
-        th:nth-child(4) { min-width: 200px; } /* Strategy Name */
-        th:nth-child(5) { min-width: 100px; } /* Symbol */
-        th:nth-child(6) { min-width: 100px; } /* Signal */
-        th:nth-child(7) { min-width: 100px; } /* Confidence */
-        th:nth-child(8) { min-width: 100px; } /* Price */
-        th:nth-child(9) { min-width: 120px; } /* Execution Time */
-        th:nth-child(10) { min-width: 80px; }  /* Success */
-        
-        td {
-            padding: 12px;
-            border-bottom: 1px solid #e9ecef;
-            font-size: 14px;
-            color: #555;
-            white-space: nowrap;
-        }
-        
-        td:nth-child(1) { min-width: 120px; } /* Batch ID */
-        td:nth-child(2) { min-width: 180px; } /* Date Time */
-        td:nth-child(3) { min-width: 100px; } /* PubSub */
-        td:nth-child(4) { min-width: 200px; } /* Strategy Name */
-        td:nth-child(5) { min-width: 100px; } /* Symbol */
-        td:nth-child(6) { min-width: 100px; } /* Signal */
-        td:nth-child(7) { min-width: 100px; } /* Confidence */
-        td:nth-child(8) { min-width: 100px; } /* Price */
-        td:nth-child(9) { min-width: 120px; } /* Execution Time */
-        td:nth-child(10) { min-width: 80px; }  /* Success */
-        
-        /* Batch grouping colors - alternating gray and white */
-        tbody tr.batch-gray {
-            background: #f5f5f5;
-        }
-        
-        tbody tr.batch-white {
-            background: #ffffff;
-        }
-        
-        tbody tr.batch-gray:hover {
-            background: #e9ecef;
-        }
-        
-        tbody tr.batch-white:hover {
-            background: #f8f9fa;
-        }
-        
-        .signal-badge {
-            display: inline-block;
-            padding: 4px 10px;
+
+        .result-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
             border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
+            padding: 16px;
         }
-        
-        .signal-buy {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .signal-sell {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        
-        .signal-hold {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        .pagination {
-            padding: 20px;
+
+        .card-header {
             display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 10px;
-            background: white;
-            border-top: 1px solid #e9ecef;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
         }
-        
-        .pagination button {
-            padding: 8px 16px;
-            border: 1px solid #ddd;
-            background: white;
-            border-radius: 4px;
-            cursor: pointer;
+
+        .card-symbol {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .card-time {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .card-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
             font-size: 14px;
         }
-        
-        .pagination button:hover:not(:disabled) {
-            background: #f8f9fa;
+
+        .card-label {
+            color: var(--text-secondary);
         }
-        
-        .pagination button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+
+        .card-value {
+            font-weight: 500;
         }
-        
-        .pagination .page-info {
-            padding: 0 15px;
-            font-size: 14px;
-            color: #666;
+
+        .search-group {
+            min-width: 100%;
         }
-        
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-        }
-        
-        .empty {
-            text-align: center;
-            padding: 40px;
-            color: #999;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="sidebar">
-            <button class="logs-btn" onclick="window.location.href='/logs'">Logs</button>
-        </div>
-        
-        <div class="main-content">
-            <div class="filters">
-                <div class="filter-group">
-                    <label>Search</label>
-                    <input type="text" id="search" placeholder="Search by symbol, strategy, signal (BUY/SELL/HOLD)...">
-                </div>
-            </div>
-            
-            <div class="table-container">
-                <div class="table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Batch ID</th>
-                                <th>Date Time</th>
-                                <th>PubSub</th>
-                                <th>Strategy Name</th>
-                                <th>Symbol</th>
-                                <th>Signal</th>
-                                <th>Confidence</th>
-                                <th>Price</th>
-                                <th>Execution Time</th>
-                                <th>Success</th>
-                            </tr>
-                        </thead>
-                        <tbody id="table-body">
-                            <tr>
-                                <td colspan="10" class="loading">Loading...</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div class="pagination" id="pagination"></div>
-            </div>
-        </div>
+    }
+
+    .loading-state {
+        padding: 60px;
+        text-align: center;
+        color: var(--text-muted);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <p>Real-time stock analysis and strategy performance monitoring</p>
+</div>
+
+<!-- Filters -->
+<div class="card filters-card mb-4 glass-card">
+    <div class="search-group">
+        <i class="fas fa-search search-icon"></i>
+        <input type="text" id="search" class="search-input" placeholder="Search symbol, strategy, or signal type...">
     </div>
-    
-    <script>
-        let currentPage = 1;
-        const perPage = 20;
-        
-        // Debounce function
-        function debounce(func, wait) {
-            let timeout;
-            return function executedFunction(...args) {
-                const later = () => {
-                    clearTimeout(timeout);
-                    func(...args);
-                };
+
+    <div class="flex-center gap-2" style="color: var(--text-muted); font-size: 13px;">
+        <i class="fas fa-info-circle"></i>
+        <span>Live updates enabled</span>
+    </div>
+</div>
+
+<!-- Desktop Table View -->
+<div class="card table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Batch ID</th>
+                <th>Strategy</th>
+                <th>Symbol</th>
+                <th>Time</th>
+                <th>Signal</th>
+                <th>Confidence</th>
+                <th>Price</th>
+                <th>Exec Time</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody id="table-body">
+            <!-- Populated by JS -->
+            <tr>
+                <td colspan="9" class="loading-state">
+                    <div class="loading-spinner"></div>
+                    <div style="margin-top: 10px">Loading analysis data...</div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Mobile Card View -->
+<div class="mobile-card-view" id="mobile-list">
+    <!-- Populated by JS -->
+</div>
+
+<!-- Pagination -->
+<div class="pagination-container" id="pagination">
+    <!-- Populated by JS -->
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentPage = 1;
+    const perPage = 20;
+
+    // Debounce function
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
                 clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
+                func(...args);
             };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    // Load data
+    async function loadData(page = 1) {
+        // Show loading state
+        const tbody = document.getElementById('table-body');
+        const mobileList = document.getElementById('mobile-list');
+
+        if (page !== currentPage) {
+            // Optional: Scroll to top of results on page change
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
-        
-        // Load data
-        async function loadData(page = 1) {
+
+        try {
             const params = new URLSearchParams({
                 page: page,
                 per_page: perPage,
                 search: document.getElementById('search').value
             });
-            
-            try {
-                const response = await fetch(`/api/data?${params}`);
-                const result = await response.json();
-                
-                if (result.error) {
-                    throw new Error(result.error);
-                }
-                
-                renderTable(result.data);
-                renderPagination(result.pagination);
-                currentPage = page;
-            } catch (error) {
-                document.getElementById('table-body').innerHTML = 
-                    `<tr><td colspan="10" class="empty">Error: ${error.message}</td></tr>`;
-            }
-        }
-        
-        // Render table
-        function renderTable(data) {
-            const tbody = document.getElementById('table-body');
-            
-            if (data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="10" class="empty">No data found</td></tr>';
-                return;
-            }
-            
-            // Track batch IDs and assign alternating colors
-            let batchColorMap = new Map();
-            let seenBatchIds = [];
-            
-            // First pass: identify unique batch IDs in order
-            data.forEach(row => {
-                const batchId = row.batch_id || '';
-                if (batchId && !seenBatchIds.includes(batchId)) {
-                    seenBatchIds.push(batchId);
-                }
-            });
-            
-            // Assign alternating colors to batches
-            seenBatchIds.forEach((batchId, index) => {
-                batchColorMap.set(batchId, index % 2 === 0 ? 'gray' : 'white');
-            });
-            
-            // Second pass: render rows with batch colors
-            tbody.innerHTML = data.map((row, index) => {
-                let dateTime = 'N/A';
-                try {
-                    if (!row.datetime) {
-                        dateTime = 'N/A';
-                    } else {
-                        let dateStr = String(row.datetime);
-                        let date;
-                        
-                        // Parse datetime string - handle different formats
-                        if (dateStr.includes('+') || dateStr.includes('Z') || dateStr.endsWith('Z')) {
-                            // Has timezone info - parse directly
-                            date = new Date(dateStr);
-                        } else {
-                            // No timezone info - assume UTC and add Z
-                            if (dateStr.includes('T')) {
-                                date = new Date(dateStr + 'Z');
-                            } else {
-                                date = new Date(dateStr);
-                            }
-                        }
-                        
-                        // Check if date is valid
-                        if (isNaN(date.getTime())) {
-                            throw new Error('Invalid date: ' + dateStr);
-                        }
-                        
-                        // Always display in IST (Asia/Kolkata) timezone
-                        // JavaScript Date stores internally as UTC, so toLocaleString converts to IST
-                        dateTime = date.toLocaleString('en-IN', { 
-                            timeZone: 'Asia/Kolkata',
-                            year: 'numeric',
-                            month: '2-digit',
-                            day: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit',
-                            hour12: true  // 12-hour format with AM/PM
-                        });
-                        
-                        // Remove timezone abbreviation if any (keep only date and time with AM/PM)
-                        dateTime = dateTime.replace(/\s+IST$/, '').replace(/\s+GMT\+5:30$/, '').replace(/\s+GMT\+0530$/, '').replace(/\s+GMT\+0530$/, '').trim();
-                    }
-                } catch (e) {
-                    console.error('Date conversion error:', e, 'datetime:', row.datetime);
-                    dateTime = row.datetime ? String(row.datetime) : 'N/A';
-                }
-                const signalType = (row.signal_type || 'HOLD').toUpperCase();
-                const signalClass = `signal-${signalType.toLowerCase()}`;
-                
-                const batchId = row.batch_id || '';
-                const batchIdDisplay = batchId.length > 8 ? batchId.substring(0, 8) + '...' : batchId;
-                
-                // Get batch color
-                const batchColor = batchColorMap.get(batchId) || 'white';
-                const batchClass = `batch-${batchColor}`;
-                
-                return `
-                    <tr class="${batchClass}">
-                        <td>${batchIdDisplay}</td>
-                        <td>${dateTime}</td>
-                        <td>${row.pubsub !== undefined && row.pubsub !== null ? row.pubsub : 'N/A'}</td>
-                        <td>${row.strategy_name || ''}</td>
-                        <td>${row.symbol || ''}</td>
-                        <td><span class="signal-badge ${signalClass}">${signalType}</span></td>
-                        <td>${((row.confidence || 0) * 100).toFixed(2)}%</td>
-                        <td>$${(row.price || 0).toFixed(2)}</td>
-                        <td>${(row.execution_time || 0).toFixed(3)}s</td>
-                        <td>${row.success ? '✓' : '✗'}</td>
-                    </tr>
-                `;
-            }).join('');
-        }
-        
-        // Render pagination
-        function renderPagination(pagination) {
-            const paginationDiv = document.getElementById('pagination');
-            const { page, total_pages, total } = pagination;
-            
-            paginationDiv.innerHTML = `
-                <button onclick="loadData(1)" ${page === 1 ? 'disabled' : ''}>First</button>
-                <button onclick="loadData(${page - 1})" ${page === 1 ? 'disabled' : ''}>Previous</button>
-                <span class="page-info">Page ${page} of ${total_pages} (${total} total)</span>
-                <button onclick="loadData(${page + 1})" ${page >= total_pages ? 'disabled' : ''}>Next</button>
-                <button onclick="loadData(${total_pages})" ${page >= total_pages ? 'disabled' : ''}>Last</button>
-            `;
-        }
-        
-        // Event listeners
-        document.getElementById('search').addEventListener('input', debounce(() => loadData(1), 500));
-        
-        // Initial load
-        loadData(1);
-    </script>
-</body>
-</html>
 
+            const response = await fetch(`/api/data?${params}`);
+            const result = await response.json();
+
+            if (result.error) throw new Error(result.error);
+
+            renderData(result.data);
+            renderPagination(result.pagination);
+            currentPage = page;
+
+        } catch (error) {
+            const errorHtml = `
+                <tr>
+                    <td colspan="9" class="loading-state text-danger">
+                        <i class="fas fa-exclamation-circle"></i>
+                        <br>
+                        Error: ${error.message}
+                    </td>
+                </tr>`;
+
+            tbody.innerHTML = errorHtml;
+            mobileList.innerHTML = `<div class="card text-danger text-center p-4">Error: ${error.message}</div>`;
+        }
+    }
+
+    function renderData(data) {
+        const tbody = document.getElementById('table-body');
+        const mobileList = document.getElementById('mobile-list');
+
+        if (data.length === 0) {
+            const emptyHtml = `
+                <tr>
+                    <td colspan="9" class="loading-state">
+                        <i class="fas fa-inbox fa-2x mb-3"></i><br>
+                        No data found
+                    </td>
+                </tr>`;
+            tbody.innerHTML = emptyHtml;
+            mobileList.innerHTML = `<div class="card text-center text-muted p-4">No data found</div>`;
+            return;
+        }
+
+        // Batch identification for grouping
+        let batchColorMap = new Map();
+        let seenBatchIds = [];
+        data.forEach(row => {
+            const batchId = row.batch_id || '';
+            if (batchId && !seenBatchIds.includes(batchId)) {
+                seenBatchIds.push(batchId);
+            }
+        });
+        seenBatchIds.forEach((batchId, index) => {
+            batchColorMap.set(batchId, index % 2 === 0 ? 'even' : 'odd');
+        });
+
+        // Render Desktop Table
+        tbody.innerHTML = data.map(row => {
+            const dateTime = formatDateTime(row.datetime);
+            const signalClass = getSignalClass(row.signal_type);
+            const batchClass = `batch-group-${batchColorMap.get(row.batch_id || '')}`;
+            const shortBatchId = (row.batch_id || '').substring(0, 8);
+
+            return `
+                <tr class="${batchClass}">
+                    <td class="text-muted" title="${row.batch_id}">#${shortBatchId}</td>
+                    <td>${row.strategy_name || 'N/A'}</td>
+                    <td><b style="color: var(--text-primary)">${row.symbol || 'N/A'}</b></td>
+                    <td class="text-muted" style="font-size: 13px;">${dateTime}</td>
+                    <td>
+                        <span class="status-badge ${signalClass}">
+                            ${getSignalIcon(row.signal_type)}
+                            ${row.signal_type || 'HOLD'}
+                        </span>
+                    </td>
+                    <td>${((row.confidence || 0) * 100).toFixed(1)}%</td>
+                    <td>$${(row.price || 0).toFixed(2)}</td>
+                    <td class="text-muted">${(row.execution_time || 0).toFixed(3)}s</td>
+                    <td>${row.success ? '<i class="fas fa-check text-success"></i>' : '<i class="fas fa-times text-danger"></i>'}</td>
+                </tr>
+            `;
+        }).join('');
+
+        // Render Mobile Cards
+        mobileList.innerHTML = data.map(row => {
+            const dateTime = formatDateTime(row.datetime);
+            const signalClass = getSignalClass(row.signal_type);
+
+            return `
+                <div class="result-card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-symbol">${row.symbol || 'N/A'}</div>
+                            <div class="card-time">${dateTime}</div>
+                        </div>
+                        <span class="status-badge ${signalClass}">
+                            ${row.signal_type || 'HOLD'}
+                        </span>
+                    </div>
+                    
+                    <div class="card-row">
+                        <span class="card-label">Strategy</span>
+                        <span class="card-value">${row.strategy_name || 'N/A'}</span>
+                    </div>
+                    
+                    <div class="card-row">
+                        <span class="card-label">Price</span>
+                        <span class="card-value">$${(row.price || 0).toFixed(2)}</span>
+                    </div>
+                    
+                    <div class="card-row">
+                        <span class="card-label">Confidence</span>
+                        <span class="card-value">${((row.confidence || 0) * 100).toFixed(1)}%</span>
+                    </div>
+                    
+                    <div class="card-row">
+                        <span class="card-label">Batch ID</span>
+                        <span class="card-value text-muted" style="font-family: monospace">#${(row.batch_id || '').substring(0, 8)}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderPagination(pagination) {
+        const div = document.getElementById('pagination');
+        const { page, total_pages } = pagination;
+
+        if (total_pages <= 1) {
+            div.innerHTML = '';
+            return;
+        }
+
+        let html = `
+            <button class="page-btn" onclick="loadData(1)" ${page === 1 ? 'disabled' : ''}>
+                <i class="fas fa-angle-double-left"></i>
+            </button>
+            <button class="page-btn" onclick="loadData(${page - 1})" ${page === 1 ? 'disabled' : ''}>
+                <i class="fas fa-angle-left"></i>
+            </button>
+            
+            <span style="font-size: 14px; margin: 0 10px; color: var(--text-secondary)">
+                Page ${page} of ${total_pages}
+            </span>
+            
+            <button class="page-btn" onclick="loadData(${page + 1})" ${page >= total_pages ? 'disabled' : ''}>
+                <i class="fas fa-angle-right"></i>
+            </button>
+            <button class="page-btn" onclick="loadData(${total_pages})" ${page >= total_pages ? 'disabled' : ''}>
+                <i class="fas fa-angle-double-right"></i>
+            </button>
+        `;
+
+        div.innerHTML = html;
+    }
+
+    // Helpers
+    function formatDateTime(dateStr) {
+        if (!dateStr) return 'N/A';
+        try {
+            let date = new Date(dateStr);
+            // Check if valid
+            if (isNaN(date.getTime())) {
+                // Try appending Z if missing timezone
+                if (dateStr.indexOf('Z') === -1 && dateStr.indexOf('+') === -1) {
+                    date = new Date(dateStr + "Z");
+                }
+            }
+            if (isNaN(date.getTime())) return dateStr;
+
+            return date.toLocaleString('en-IN', {
+                month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit',
+                hour12: true
+            });
+        } catch (e) {
+            return dateStr;
+        }
+    }
+
+    function getSignalClass(signal) {
+        const s = (signal || '').toUpperCase();
+        if (s === 'BUY') return 'status-buy';
+        if (s === 'SELL') return 'status-sell';
+        return 'status-hold';
+    }
+
+    function getSignalIcon(signal) {
+        const s = (signal || '').toUpperCase();
+        if (s === 'BUY') return '<i class="fas fa-arrow-up"></i>';
+        if (s === 'SELL') return '<i class="fas fa-arrow-down"></i>';
+        return '<i class="fas fa-minus"></i>';
+    }
+
+    // Init
+    document.getElementById('search').addEventListener('input', debounce(() => loadData(1), 500));
+    loadData(1);
+</script>
+{% endblock %}
