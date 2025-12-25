@@ -257,13 +257,14 @@
                 <th>Confidence</th>
                 <th>Price</th>
                 <th>Exec Time</th>
+                <th>Subscribers</th>
                 <th>Status</th>
             </tr>
         </thead>
         <tbody id="table-body">
             <!-- Populated by JS -->
             <tr>
-                <td colspan="9" class="loading-state">
+                <td colspan="10" class="loading-state">
                     <div class="loading-spinner"></div>
                     <div style="margin-top: 10px">Loading analysis data...</div>
                 </td>
@@ -332,7 +333,7 @@
         } catch (error) {
             const errorHtml = `
                 <tr>
-                    <td colspan="9" class="loading-state text-danger">
+                    <td colspan="10" class="loading-state text-danger">
                         <i class="fas fa-exclamation-circle"></i>
                         <br>
                         Error: ${error.message}
@@ -351,7 +352,7 @@
         if (data.length === 0) {
             const emptyHtml = `
                 <tr>
-                    <td colspan="9" class="loading-state">
+                    <td colspan="10" class="loading-state">
                         <i class="fas fa-inbox fa-2x mb-3"></i><br>
                         No data found
                     </td>
@@ -396,6 +397,7 @@
                     <td>${((row.confidence || 0) * 100).toFixed(1)}%</td>
                     <td>$${(row.price || 0).toFixed(2)}</td>
                     <td class="text-muted">${(row.execution_time || 0).toFixed(3)}s</td>
+                    <td class="text-muted"><i class="fas fa-users" style="margin-right: 5px;"></i>${row.pubsub || 0}</td>
                     <td>${row.success ? '<i class="fas fa-check text-success"></i>' : '<i class="fas fa-times text-danger"></i>'}</td>
                 </tr>
             `;
@@ -431,6 +433,11 @@
                     <div class="card-row">
                         <span class="card-label">Confidence</span>
                         <span class="card-value">${((row.confidence || 0) * 100).toFixed(1)}%</span>
+                    </div>
+
+                    <div class="card-row">
+                        <span class="card-label">Subscribers</span>
+                        <span class="card-value"><i class="fas fa-users" style="margin-right: 5px; font-size: 10px;"></i>${row.pubsub || 0}</span>
                     </div>
                     
                     <div class="card-row">

@@ -1,5 +1,6 @@
 import importlib
 from typing import Any, Dict
+from bson import ObjectId
 from app.models.strategy_models import SignalType, StrategyResult
 from app.core.celery_app import celery_app
 from app.core.settings import get_symbols, get_strategies
@@ -119,21 +120,43 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
                 "reason": "No actionable signals detected"
             }
 
-        # STEP 3.1: Publish to Redis
+        # STEP 3.1: Prepare Data & Publish to Redis
         logger.info("-" * 80)
         logger.info("📡 STEP 3.1: Publishing to Redis Pub/Sub")
-        pubsub_response = publish_batch_complete({
-            "summary": aggregated_result.get("summary", {}),
-            "total_results": len(aggregated_result.get("results", [])),
-            "results": aggregated_result.get("results", [])
-        })
+        
+        # Generate Batch ID upfront
+        batch_oid = ObjectId()
+        batch_id_str = str(batch_oid)
+        
+        # Add IDs to results if needed (matching user request structure)
+        for symbol_res in aggregated_result.get("results", []):
+            for strategy_res in symbol_res.get("strategies", []):
+                if "_id" not in strategy_res:
+                    strategy_res["_id"] = str(ObjectId())
+
+        # Construct the requested payload structure
+        publish_payload = {
+            "type": "batch_complete",
+            "data": {
+                "batch_id": batch_id_str,
+                "summary": aggregated_result.get("summary", {}),
+                "total_results": len(aggregated_result.get("results", [])),
+                "results": aggregated_result.get("results", [])
+            }
+        }
+
+        pubsub_response = publish_batch_complete(publish_payload)
         logger.info(f"✅ STEP 3.1 COMPLETED: Published to channel '{pubsub_response.get('channel')}'")
         
+        # Update result with metadata for storage
+        aggregated_result["_id"] = batch_oid  # Use the pre-generated ID
         aggregated_result["pubsub"] = pubsub_response.get("subscriber_count", 0)
 
         # STEP 3.2: Save to MongoDB
         logger.info("-" * 80)
         logger.info("📡 STEP 3.2: Saving to MongoDB")
+        
+        # Save (this will use the _id we added to aggregated_result)
         batch_id = save_batch_results(aggregated_result)
         logger.info(f"✅ STEP 3.2 COMPLETED: Batch saved with ID: {batch_id}")
         
