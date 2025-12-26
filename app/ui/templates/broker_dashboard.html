@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}Broker Dashboard - Stock Analysis{% endblock %}
+
+{% block extra_css %}
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <div>
+            <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
+                Broker Dashboard
+            </h1>
+            <p class="text-gray-400 mt-1">Performance Overview & Analytics</p>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="loadStats()"
+                class="px-4 py-2 bg-dark-card border border-dark-border rounded-xl text-gray-300 hover:text-white hover:border-blue-500/50 transition-all flex items-center gap-2">
+                <i class="fas fa-sync-alt" id="refreshIcon"></i>
+                <span>Refresh</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <!-- Total PnL -->
+        <div class="glass-card p-6 rounded-2xl relative overflow-hidden group hover:border-blue-500/30 transition-all">
+            <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <i class="fas fa-wallet fa-3x"></i>
+            </div>
+            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-2">Total PnL</h3>
+            <div class="text-2xl font-bold font-mono" id="totalPnl">...</div>
+            <div class="text-xs text-gray-500 mt-1">Realized Profit/Loss</div>
+        </div>
+
+        <!-- Winning Trades -->
+        <div class="glass-card p-6 rounded-2xl relative overflow-hidden group hover:border-green-500/30 transition-all">
+            <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <i class="fas fa-check-circle fa-3x text-green-500"></i>
+            </div>
+            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-2">Winning Trades</h3>
+            <div class="flex items-baseline gap-2">
+                <div class="text-2xl font-bold font-mono text-green-400" id="winningTrades">...</div>
+                <div class="text-sm text-gray-500" id="winningTradesTotal">/ ...</div>
+            </div>
+            <div class="text-xs text-gray-500 mt-1">Profitable Exits</div>
+        </div>
+
+        <!-- Losing Trades -->
+        <div class="glass-card p-6 rounded-2xl relative overflow-hidden group hover:border-red-500/30 transition-all">
+            <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <i class="fas fa-times-circle fa-3x text-red-500"></i>
+            </div>
+            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-2">Losing Trades</h3>
+            <div class="flex items-baseline gap-2">
+                <div class="text-2xl font-bold font-mono text-red-400" id="losingTrades">...</div>
+                <div class="text-sm text-gray-500" id="losingTradesTotal">/ ...</div>
+            </div>
+            <div class="text-xs text-gray-500 mt-1">Loss-making Exits</div>
+        </div>
+    </div>
+
+    <!-- Main Graph -->
+    <div class="glass-card p-6 rounded-2xl mb-8">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+            <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                <i class="fas fa-chart-line text-blue-500"></i>
+                Daily PnL Performance
+            </h3>
+
+            <!-- Filters -->
+            <div class="flex bg-dark-bg rounded-lg p-1 border border-dark-border">
+                <button onclick="setFilter('5')" id="filter-5"
+                    class="filter-btn px-3 py-1 text-xs font-medium rounded-md text-white bg-blue-500 shadow-sm transition-all">5D</button>
+                <button onclick="setFilter('10')" id="filter-10"
+                    class="filter-btn px-3 py-1 text-xs font-medium rounded-md text-gray-400 hover:text-white transition-all">10D</button>
+                <button onclick="setFilter('30')" id="filter-30"
+                    class="filter-btn px-3 py-1 text-xs font-medium rounded-md text-gray-400 hover:text-white transition-all">30D</button>
+                <button onclick="setFilter('all')" id="filter-all"
+                    class="filter-btn px-3 py-1 text-xs font-medium rounded-md text-gray-400 hover:text-white transition-all">All</button>
+            </div>
+        </div>
+        <div class="relative h-[400px] w-full">
+            <canvas id="pnlChart"></canvas>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let pnlChart = null;
+    let fullDailyData = [];
+    let currentFilter = '5';
+
+    async function loadStats() {
+        const icon = document.getElementById('refreshIcon');
+        icon.classList.add('animate-spin');
+
+        try {
+            const response = await fetch('/api/broker/stats');
+            const data = await response.json();
+
+            if (data.error) throw new Error(data.error);
+
+            updateStatsUI(data.summary);
+
+            fullDailyData = data.daily;
+            renderChartWithFilter();
+
+        } catch (error) {
+            console.error("Failed to load stats:", error);
+        } finally {
+            setTimeout(() => icon.classList.remove('animate-spin'), 500);
+        }
+    }
+
+    function updateStatsUI(summary) {
+        // Total PnL
+        const pnlEl = document.getElementById('totalPnl');
+        const pnl = parseFloat(summary.total_pnl || 0);
+        pnlEl.textContent = (pnl > 0 ? '+' : '') + pnl.toFixed(2);
+        pnlEl.className = `text-2xl font-bold font-mono ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`;
+
+        // Counts
+        const total = summary.total_trades || 0;
+        document.getElementById('winningTrades').textContent = summary.winning_trades || 0;
+        document.getElementById('winningTradesTotal').textContent = `/ ${total}`;
+
+        document.getElementById('losingTrades').textContent = summary.losing_trades || 0;
+        document.getElementById('losingTradesTotal').textContent = `/ ${total}`;
+    }
+
+    function setFilter(filter) {
+        currentFilter = filter;
+
+        // Update UI buttons
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.classList.remove('bg-blue-500', 'text-white', 'shadow-sm');
+            btn.classList.add('text-gray-400');
+
+            if (btn.id === `filter-${filter}`) {
+                btn.classList.remove('text-gray-400');
+                btn.classList.add('bg-blue-500', 'text-white', 'shadow-sm');
+            }
+        });
+
+        renderChartWithFilter();
+    }
+
+    function renderChartWithFilter() {
+        if (!fullDailyData || fullDailyData.length === 0) return;
+
+        let dataToRender = [...fullDailyData];
+
+        if (currentFilter !== 'all') {
+            const count = parseInt(currentFilter);
+            dataToRender = dataToRender.slice(-count);
+        }
+
+        updateChart(dataToRender);
+    }
+
+    function updateChart(dailyData) {
+        const ctx = document.getElementById('pnlChart').getContext('2d');
+
+        // Prepare data
+        const labels = dailyData.map(item => item._id); // Date
+        const values = dailyData.map(item => parseFloat(item.daily_pnl));
+        const tradeCounts = dailyData.map(item => item.daily_trades || 0);
+
+        if (pnlChart) {
+            pnlChart.destroy();
+        }
+
+        // Create Gradient
+        const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+        gradient.addColorStop(0, 'rgba(59, 130, 246, 0.5)'); // Blue top
+        gradient.addColorStop(1, 'rgba(59, 130, 246, 0.0)'); // Transparent bottom
+
+        // Chart Config
+        pnlChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Daily PnL',
+                    data: values,
+                    borderColor: '#3b82f6', // Blue Line
+                    backgroundColor: gradient,
+                    fill: true,
+                    tension: 0.4, // Smooth curve
+                    pointBackgroundColor: values.map(v => v >= 0 ? '#4ade80' : '#f87171'), // Green/Red points
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 1,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(15, 17, 21, 0.9)',
+                        titleColor: '#fff',
+                        bodyColor: '#ccc',
+                        borderColor: 'rgba(255,255,255,0.1)',
+                        borderWidth: 1,
+                        padding: 10,
+                        displayColors: false, // Hide color box
+                        callbacks: {
+                            label: function (context) {
+                                let lines = [];
+
+                                // PnL Line
+                                let pnlLabel = 'PnL: ';
+                                if (context.parsed.y !== null) {
+                                    pnlLabel += new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(context.parsed.y);
+                                }
+                                lines.push(pnlLabel);
+
+                                // Trades Line
+                                const trades = tradeCounts[context.dataIndex];
+                                lines.push(`Trades: ${trades}`);
+
+                                return lines;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)',
+                        },
+                        ticks: {
+                            color: '#9ca3af'
+                        }
+                    },
+                    y: {
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)',
+                        },
+                        ticks: {
+                            color: '#9ca3af',
+                            callback: function (value) {
+                                return '$' + value;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Init
+    document.addEventListener('DOMContentLoaded', loadStats);
+</script>
+{% endblock %}

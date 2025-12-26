@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, redirect
 from app.database.mongodb import get_database as get_db
 from bson import ObjectId
 from datetime import datetime, timezone
@@ -22,6 +22,11 @@ class JSONEncoder(json.JSONEncoder):
 app.json_encoder = JSONEncoder
 
 @app.route('/')
+def root():
+    """Redirect root to broker dashboard"""
+    return redirect('/broker/dashboard')
+
+@app.route('/signals')
 def index():
     """Home page with table, pagination and search"""
     return render_template('index.html')
@@ -34,6 +39,7 @@ def get_data():
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 20))
         search = request.args.get('search', '').strip()
+        show_buy_sell_only = request.args.get('show_buy_sell_only') == 'true'
         
         # Calculate skip for pagination
         skip = (page - 1) * per_page
@@ -50,21 +56,28 @@ def get_data():
         # Then unwind strategies array to get each strategy
         pipeline.append({'$unwind': '$results.strategies'})
         
-        # Add search filter if provided (after unwinding for accurate search)
+        # Build match filter
+        match_query = {}
+        
+        # Add search filter if provided
         if search:
             search_regex = {'$regex': search, '$options': 'i'}
-            pipeline.append({
-                '$match': {
-                    '$or': [
-                        {'results.strategies.strategy_name': search_regex},
-                        {'results.symbol': search_regex},
-                        {'results.strategies.signal_type': search_regex}
-                    ]
-                }
-            })
+            match_query['$or'] = [
+                {'results.strategies.strategy_name': search_regex},
+                {'results.symbol': search_regex},
+                {'results.strategies.signal_type': search_regex}
+            ]
+            
+        # Add Buy/Sell filter if enabled
+        if show_buy_sell_only:
+            match_query['results.strategies.signal_type'] = {'$in': ['BUY', 'SELL', 'buy', 'sell']}
+            
+        # Apply match if any filters exist
+        if match_query:
+            pipeline.append({'$match': match_query})
         
-        # Sort by created_at descending (newest first)
-        pipeline.append({'$sort': {'created_at': -1}})
+        # Sort by stored_at descending (newest first)
+        pipeline.append({'$sort': {'stored_at': -1}})
         
         # Use $facet to get both data and total count in one query
         facet_stage = {
@@ -254,6 +267,172 @@ def download_log(filename):
 def view_log(filename):
     """Page to view log file content"""
     return render_template('log_viewer.html', filename=filename)
+
+@app.route('/broker/orders')
+def orders_page():
+    """Orders page"""
+    return render_template('orders.html')
+
+@app.route('/broker/positions')
+def positions_page():
+    """Positions page"""
+    return render_template('positions.html')
+
+@app.route('/api/orders')
+def get_orders():
+    """API endpoint to fetch orders from trade_buddy db"""
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 20))
+        show_buy_sell_only = request.args.get('show_buy_sell_only') == 'true'
+        
+        skip = (page - 1) * per_page
+        
+        # Access trade_buddy database
+        # We use the client from the existing connection to access a different DB
+        db = get_db().client['trade_buddy']
+        collection = db['orders']
+        
+        query = {}
+        if show_buy_sell_only:
+            query['side'] = {'$in': ['buy', 'sell', 'BUY', 'SELL']}
+            
+        total_count = collection.count_documents(query)
+        
+        orders = list(collection.find(query)
+                     .sort('created_at', -1)
+                     .skip(skip)
+                     .limit(per_page))
+        
+        # Process for JSON
+        for item in orders:
+            if '_id' in item:
+                item['_id'] = str(item['_id'])
+            # Ensure dates are strings ? In the sample they are strings "2025..."
+            # If they are datetime objects, encoder handles it.
+            
+        total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 1
+        
+        return jsonify({
+            'data': orders,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': total_count,
+                'total_pages': total_pages
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/positions')
+def get_positions():
+    """API endpoint to fetch positions from trade_buddy db"""
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 20))
+        
+        skip = (page - 1) * per_page
+        
+        db = get_db().client['trade_buddy']
+        collection = db['positions']
+        
+        query = {}
+        
+        total_count = collection.count_documents(query)
+        
+        positions = list(collection.find(query)
+                        .sort('created_at', -1)
+                        .skip(skip)
+                        .limit(per_page))
+                        
+        for item in positions:
+            if '_id' in item:
+                item['_id'] = str(item['_id'])
+                
+        total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 1
+        
+        return jsonify({
+            'data': positions,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': total_count,
+                'total_pages': total_pages
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/broker/dashboard')
+def broker_dashboard():
+    """Broker Dashboard page"""
+    return render_template('broker_dashboard.html')
+
+@app.route('/api/broker/stats')
+def get_broker_stats():
+    """API to fetch aggregated stats for the dashboard"""
+    try:
+        db = get_db().client['trade_buddy']
+        collection = db['positions']
+        
+        # Pipeline for global stats and daily graph
+        pipeline = [
+            # 1. Match only closed positions for realized PnL analysis
+            {'$match': {'status': 'closed'}},
+            
+            # 2. Convert 'realized_pnl' string to double
+            {'$addFields': {
+                'pnl_value': {'$toDouble': '$realized_pnl'},
+                # Extract date string YYYY-MM-DD from created_at
+                'date': {'$substr': ['$created_at', 0, 10]} 
+            }},
+            
+            # 3. Facet for two different aggregations
+            {'$facet': {
+                # A: Global Summary
+                'summary': [
+                    {'$group': {
+                        '_id': None,
+                        'total_pnl': {'$sum': '$pnl_value'},
+                        'total_trades': {'$sum': 1},
+                        'winning_trades': {
+                            '$sum': {'$cond': [{'$gt': ['$pnl_value', 0]}, 1, 0]}
+                        },
+                        'losing_trades': {
+                            '$sum': {'$cond': [{'$lt': ['$pnl_value', 0]}, 1, 0]}
+                        }
+                    }}
+                ],
+                # B: Daily PnL for Graph
+                'daily': [
+                    {'$group': {
+                        '_id': '$date',
+                        'daily_pnl': {'$sum': '$pnl_value'},
+                        'daily_trades': {'$sum': 1}
+                    }},
+                    {'$sort': {'_id': 1}}  # Sort by date ascending
+                ]
+            }}
+        ]
+        
+        result = list(collection.aggregate(pipeline))
+        
+        # Process results
+        data = result[0]
+        summary = data['summary'][0] if data['summary'] else {
+            'total_pnl': 0, 'total_trades': 0, 'winning_trades': 0, 'losing_trades': 0
+        }
+        
+        daily_data = data['daily']
+        
+        return jsonify({
+            'summary': summary,
+            'daily': daily_data
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

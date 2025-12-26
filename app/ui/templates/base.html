@@ -1,386 +1,179 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Stock Analysis Dashboard{% endblock %}</title>
-    
+
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        dark: {
+                            bg: '#0f1115',
+                            card: '#181b21',
+                            sidebar: '#131519',
+                            border: '#2a2e35'
+                        },
+                        primary: {
+                            DEFAULT: '#3b82f6',
+                            glow: 'rgba(59, 130, 246, 0.5)'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
     <style>
-        :root {
-            /* Premium Dark Palette */
-            --bg-body: #0f1115;
-            --bg-card: #181b21;
-            --bg-sidebar: #131519;
-            --border-color: #2a2e35;
-            
-            --text-primary: #ffffff;
-            --text-secondary: #9ca3af;
-            --text-muted: #6b7280;
-            
-            --primary: #3b82f6;
-            --primary-glow: rgba(59, 130, 246, 0.5);
-            --success: #10b981;
-            --success-glow: rgba(16, 185, 129, 0.3);
-            --danger: #ef4444;
-            --danger-glow: rgba(239, 68, 68, 0.3);
-            --warning: #f59e0b;
-            
-            --glass-bg: rgba(24, 27, 33, 0.7);
-            --glass-border: rgba(255, 255, 255, 0.05);
-            
-            --transition-speed: 0.3s;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            outline: none;
-        }
-
-        body {
-            font-family: 'Outfit', sans-serif;
-            background-color: var(--bg-body);
-            color: var(--text-primary);
-            line-height: 1.6;
-            min-height: 100vh;
-        }
-        
-        /* Scrollbar styling */
+        /* CustomScrollbar */
         ::-webkit-scrollbar {
             width: 8px;
             height: 8px;
         }
-        
+
         ::-webkit-scrollbar-track {
-            background: var(--bg-body);
+            background: #0f1115;
         }
-        
+
         ::-webkit-scrollbar-thumb {
-            background: var(--border-color);
+            background: #2a2e35;
             border-radius: 4px;
         }
-        
+
         ::-webkit-scrollbar-thumb:hover {
-            background: var(--text-muted);
+            background: #6b7280;
         }
 
-        /* Layout */
-        .app-container {
-            display: flex;
-            min-height: 100vh;
-        }
-
-        /* Sidebar - Desktop */
-        .sidebar {
-            width: 250px;
-            background: var(--bg-sidebar);
-            border-right: 1px solid var(--border-color);
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            position: fixed;
-            height: 100vh;
-            left: 0;
-            top: 0;
-            z-index: 100;
-            transition: transform var(--transition-speed) ease;
-        }
-
-        .brand {
-            font-size: 20px;
-            font-weight: 700;
-            color: var(--text-primary);
-            margin-bottom: 40px;
-            padding: 0 10px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .brand i {
-            color: var(--primary);
-            filter: drop-shadow(0 0 8px var(--primary-glow));
-        }
-
-        .nav-link {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 15px;
-            color: var(--text-secondary);
-            text-decoration: none;
-            border-radius: 10px;
-            transition: all 0.2s;
-            margin-bottom: 5px;
-            font-weight: 500;
-        }
-
-        .nav-link:hover, .nav-link.active {
-            background: rgba(59, 130, 246, 0.1);
-            color: var(--primary);
-        }
-        
-        .nav-link.active {
-            border-left: 3px solid var(--primary);
-        }
-
-        .mobile-nav-toggle {
-            display: none;
-            position: fixed;
-            top: 15px;
-            right: 15px;
-            z-index: 200;
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            padding: 8px 12px;
-            border-radius: 8px;
-            cursor: pointer;
-        }
-
-        /* Main Content */
-        .main-content {
-            flex: 1;
-            margin-left: 250px;
-            padding: 30px;
-            width: calc(100% - 250px);
-        }
-
-        .page-header {
-            margin-bottom: 30px;
-        }
-        
-        .page-header h1 {
-            font-size: 28px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            background: linear-gradient(90deg, #fff, #9ca3af);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        
-        .page-header p {
-            color: var(--text-muted);
-            font-size: 14px;
-        }
-
-        /* Card System */
-        .card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 24px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        }
-        
         .glass-card {
-            background: var(--glass-bg);
+            background: rgba(24, 27, 33, 0.7);
             backdrop-filter: blur(12px);
-            border: 1px solid var(--glass-border);
+            border: 1px solid rgba(255, 255, 255, 0.05);
         }
-
-        /* Buttons */
-        .btn {
-            padding: 10px 20px;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-            font-weight: 500;
-            font-family: inherit;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            text-decoration: none;
-            font-size: 14px;
-        }
-
-        .btn-primary {
-            background: var(--primary);
-            color: white;
-            box-shadow: 0 0 15px var(--primary-glow);
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 0 20px var(--primary-glow);
-        }
-        
-        .btn-outline {
-            background: transparent;
-            border: 1px solid var(--border-color);
-            color: var(--text-secondary);
-        }
-        
-        .btn-outline:hover {
-            border-color: var(--text-primary);
-            color: var(--text-primary);
-            background: rgba(255,255,255,0.05);
-        }
-        
-        .btn-success {
-            background: rgba(16, 185, 129, 0.1);
-            color: var(--success);
-            border: 1px solid rgba(16, 185, 129, 0.2);
-        }
-        
-        .btn-success:hover {
-            background: rgba(16, 185, 129, 0.2);
-        }
-
-        /* Forms */
-        .form-control {
-            background: rgba(0,0,0,0.2);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            padding: 12px 16px;
-            border-radius: 8px;
-            width: 100%;
-            transition: border-color 0.2s;
-            font-size: 14px;
-        }
-
-        .form-control:focus {
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        }
-
-        /* Loading */
-        .loading-spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top-color: var(--primary);
-            animation: spin 1s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* Responsive Styles */
-        @media (max-width: 768px) {
-            .sidebar {
-                transform: translateX(-100%);
-                width: 260px;
-                box-shadow: 5px 0 15px rgba(0,0,0,0.5);
-            }
-            
-            .sidebar.active {
-                transform: translateX(0);
-            }
-            
-            .main-content {
-                margin-left: 0;
-                width: 100%;
-                padding: 15px;
-                padding-top: 60px; /* Space for mobile toggle */
-            }
-            
-            .mobile-nav-toggle {
-                display: block;
-            }
-            
-            .card {
-                padding: 16px;
-            }
-            
-            /* Responsive Utilities */
-            .hidden-mobile {
-                display: none !important;
-            }
-        }
-        
-        /* Utility Classes */
-        .text-success { color: var(--success); }
-        .text-danger { color: var(--danger); }
-        .text-warning { color: var(--warning); }
-        .text-muted { color: var(--text-muted); }
-        
-        .mb-4 { margin-bottom: 1.5rem; }
-        .flex-between { display: flex; justify-content: space-between; align-items: center; }
-        .flex-center { display: flex; align-items: center; justify-content: center; }
-        .gap-2 { gap: 0.5rem; }
-        
-        {% block extra_css %}{% endblock %}
     </style>
+    {% block extra_css %}{% endblock %}
 </head>
-<body>
-    <button class="mobile-nav-toggle" onclick="toggleSidebar()">
+
+<body class="bg-dark-bg text-white font-sans min-h-screen">
+
+    <!-- Mobile Toggle -->
+    <button class="fixed top-4 right-4 z-50 md:hidden bg-dark-card border border-dark-border text-white p-2 rounded-lg"
+        onclick="toggleSidebar()">
         <i class="fas fa-bars"></i>
     </button>
 
-    <div class="app-container">
+    <div class="flex min-h-screen">
         <!-- Sidebar -->
-        <aside class="sidebar" id="sidebar">
-            <div class="brand">
-                <i class="fas fa-chart-line"></i>
-                StockAI
+        <aside id="sidebar"
+            class="w-64 bg-dark-sidebar border-r border-dark-border fixed h-full left-0 top-0 z-40 transform -translate-x-full md:translate-x-0 transition-transform duration-300 flex flex-col p-5">
+            <div class="flex items-center gap-2 text-xl font-bold text-white mb-10 px-2">
+                <i class="fas fa-chart-line text-blue-500 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]"></i>
+                TradeBuddy
             </div>
-            
-            <nav class="nav-menu">
-                <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">
-                    <i class="fas fa-home"></i>
+
+            <nav class="flex-1 overflow-y-auto">
+                <!-- Section Manager -->
+                <div class="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-2 pl-4">ALGO MANAGER
+                </div>
+                <a href="/signals"
+                    class="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-blue-500 hover:bg-blue-500/10 rounded-xl transition-all mb-1 {% if 'signals' in request.path %}bg-blue-500/10 text-blue-500 border-l-4 border-blue-500{% endif %}">
+                    <i class="fas fa-signal w-5"></i>
+                    Algo Signals
+                </a>
+                <a href="/logs"
+                    class="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-blue-500 hover:bg-blue-500/10 rounded-xl transition-all mb-1 {% if 'logs' in request.path %}bg-blue-500/10 text-blue-500 border-l-4 border-blue-500{% endif %}">
+                    <i class="fas fa-file-alt w-5"></i>
+                    Algo Signals Logs
+                </a>
+
+                <!-- Broker -->
+                <div class="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-2 mt-6 pl-4">BROKER
+                </div>
+                <a href="/broker/dashboard"
+                    class="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-blue-500 hover:bg-blue-500/10 rounded-xl transition-all mb-1 {% if 'dashboard' in request.path %}bg-blue-500/10 text-blue-500 border-l-4 border-blue-500{% endif %}">
+                    <i class="fas fa-tachometer-alt w-5"></i>
                     Dashboard
                 </a>
-                <a href="/logs" class="nav-link {% if 'logs' in request.path %}active{% endif %}">
-                    <i class="fas fa-file-alt"></i>
-                    System Logs
+                <a href="/broker/orders"
+                    class="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-blue-500 hover:bg-blue-500/10 rounded-xl transition-all mb-1 {% if 'orders' in request.path %}bg-blue-500/10 text-blue-500 border-l-4 border-blue-500{% endif %}">
+                    <i class="fas fa-list w-5"></i>
+                    Orders
                 </a>
-                
-                <!-- Spacer -->
-                <div style="height: 1px; background: var(--border-color); margin: 20px 0;"></div>
-                
-                <a href="#" class="nav-link" onclick="location.reload()">
-                    <i class="fas fa-sync-alt"></i>
+                <a href="/broker/positions"
+                    class="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-blue-500 hover:bg-blue-500/10 rounded-xl transition-all mb-1 {% if 'positions' in request.path %}bg-blue-500/10 text-blue-500 border-l-4 border-blue-500{% endif %}">
+                    <i class="fas fa-layer-group w-5"></i>
+                    Positions
+                </a>
+
+                <div class="h-px bg-dark-border my-5"></div>
+
+                <a href="#" onclick="location.reload()"
+                    class="flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-white hover:bg-white/5 rounded-xl transition-all">
+                    <i class="fas fa-sync-alt w-5"></i>
                     Refresh Data
                 </a>
             </nav>
+
+            <div class="mt-auto pt-4 border-t border-dark-border">
+                <a href="https://njtechstudio.vercel.app/" target="_blank"
+                    class="flex items-center justify-center gap-2 text-[10px] text-gray-600 hover:text-blue-500 transition-colors">
+                    <span>Developer by</span>
+                    <span class="font-bold">NJTechStudio</span>
+                </a>
+            </div>
         </aside>
 
         <!-- Main Content -->
-        <main class="main-content">
+        <main class="flex-1 md:ml-64 p-4 md:p-8 w-full">
             {% block content %}
             {% endblock %}
         </main>
     </div>
 
-    <!-- Common Scripts -->
+    <!-- Scripts -->
     <script>
         function toggleSidebar() {
             const sidebar = document.getElementById('sidebar');
-            sidebar.classList.toggle('active');
-            
+            sidebar.classList.toggle('-translate-x-full');
+
             // Close sidebar when clicking outside on mobile
-            if (sidebar.classList.contains('active')) {
-                document.addEventListener('click', closeSidebarOnClickOutside);
-            }
-        }
-        
-        function closeSidebarOnClickOutside(event) {
-            const sidebar = document.getElementById('sidebar');
-            const toggle = document.querySelector('.mobile-nav-toggle');
-            
-            if (!sidebar.contains(event.target) && !toggle.contains(event.target)) {
-                sidebar.classList.remove('active');
-                document.removeEventListener('click', closeSidebarOnClickOutside);
+            if (!sidebar.classList.contains('-translate-x-full')) {
+                const overlay = document.createElement('div');
+                overlay.id = 'sidebar-overlay';
+                overlay.className = 'fixed inset-0 bg-black/50 z-30 md:hidden';
+                overlay.onclick = () => {
+                    sidebar.classList.add('-translate-x-full');
+                    overlay.remove();
+                };
+                document.body.appendChild(overlay);
+            } else {
+                const overlay = document.getElementById('sidebar-overlay');
+                if (overlay) overlay.remove();
             }
         }
     </script>
-    
+
     {% block scripts %}
     {% endblock %}
 </body>
+
 </html>

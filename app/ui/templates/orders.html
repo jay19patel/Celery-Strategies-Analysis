@@ -1,0 +1,384 @@
+{% extends "base.html" %}
+
+{% block title %}Broker Orders | StockAI{% endblock %}
+
+{% block content %}
+<div class="mb-8 pl-1">
+    <h1 class="text-2xl font-semibold mb-2 bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">Broker
+        Orders</h1>
+    <p class="text-gray-500 text-sm">Manage and track your trading orders</p>
+</div>
+
+<!-- Controls -->
+<div
+    class="bg-dark-card border border-dark-border rounded-xl p-5 mb-6 shadow-sm backdrop-blur-md bg-opacity-70 flex justify-end items-center">
+    <!-- Refresh Button -->
+    <button
+        class="flex items-center gap-2 px-4 py-2 rounded-lg border border-dark-border text-gray-400 hover:text-white hover:bg-white/5 transition-all text-sm font-medium"
+        onclick="loadData(currentPage)">
+        <i class="fas fa-sync-alt"></i> Refresh
+    </button>
+</div>
+
+<!-- Table View -->
+<div class="bg-dark-card border border-dark-border rounded-xl overflow-x-auto">
+    <table class="w-full border-collapse white-space-nowrap">
+        <thead>
+            <tr>
+                <th
+                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
+                    Time</th>
+                <th
+                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
+                    Symbol</th>
+                <th
+                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
+                    Side</th>
+                <th
+                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
+                    Type</th>
+                <th
+                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
+                    Price</th>
+                <th
+                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
+                    Method</th>
+                <th
+                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
+                    Status</th>
+                <th
+                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
+                    Details</th>
+            </tr>
+        </thead>
+        <tbody id="table-body">
+            <tr>
+                <td colspan="8" class="p-10 text-center text-gray-500">
+                    <div
+                        class="inline-block w-5 h-5 border-2 border-white/30 border-t-blue-500 rounded-full animate-spin">
+                    </div>
+                    <div class="mt-2.5">Loading orders...</div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+<div class="flex justify-center items-center gap-2.5 mt-8" id="pagination"></div>
+
+<!-- Order Details Modal -->
+<div id="orderModal" class="fixed inset-0 z-50 hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+    <!-- Backdrop -->
+    <div class="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity opacity-0" id="modalBackdrop"></div>
+
+    <!-- Modal Panel -->
+    <div class="fixed inset-0 z-10 overflow-y-auto">
+        <div class="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+            <div class="relative transform overflow-hidden rounded-2xl bg-[#1e293b] border border-white/10 text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-2xl opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+                id="modalPanel">
+                <!-- Header -->
+                <div class="bg-white/5 px-4 py-3 sm:px-6 border-b border-white/10 flex justify-between items-center">
+                    <h3 class="text-base font-semibold leading-6 text-white" id="modal-title">Order Details</h3>
+                    <button type="button" onclick="closeModal()"
+                        class="text-gray-400 hover:text-white transition-colors focus:outline-none">
+                        <i class="fas fa-times text-lg"></i>
+                    </button>
+                </div>
+
+                <!-- Content -->
+                <div class="px-4 py-5 sm:p-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                    <div id="modalContent" class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                        <!-- Content will be injected here -->
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <div class="bg-white/5 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse border-t border-white/10">
+                    <button type="button"
+                        class="mt-3 inline-flex w-full justify-center rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold text-white shadow-sm ring-1 ring-inset ring-white/10 hover:bg-white/20 sm:mt-0 sm:w-auto transition-all"
+                        onclick="closeModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* Custom Scrollbar for Modal */
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.3);
+    }
+</style>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentPage = 1;
+    const perPage = 20; // Requested batch size
+    let currentData = []; // Store current page data
+
+    async function loadData(page = 1) {
+        const tbody = document.getElementById('table-body');
+
+        // Show loading
+        if (page !== currentPage) tbody.innerHTML = `<tr><td colspan="8" class="p-10 text-center text-gray-500"><div class="inline-block w-5 h-5 border-2 border-white/30 border-t-blue-500 rounded-full animate-spin"></div></td></tr>`;
+
+        try {
+            const response = await fetch(`/api/orders?page=${page}&per_page=${perPage}`);
+            const result = await response.json();
+
+            if (result.error) throw new Error(result.error);
+
+            currentData = result.data; // Store for modal usage
+            renderData(result.data);
+            renderPagination(result.pagination);
+            currentPage = page;
+        } catch (error) {
+            tbody.innerHTML = `<tr><td colspan="8" class="p-10 text-center text-red-500">Error: ${error.message}</td></tr>`;
+        }
+    }
+
+    function renderData(data) {
+        const tbody = document.getElementById('table-body');
+
+        if (data.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="p-16 text-center text-gray-500">
+                        <i class="fas fa-inbox fa-2x mb-3"></i><br>
+                        No orders found
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = data.map((row, index) => {
+            const date = formatDateTime(row.created_at);
+            const sideClass = (row.side || '').toLowerCase() === 'buy' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
+                (row.side || '').toLowerCase() === 'sell' ? 'bg-red-500/10 text-red-500 border-red-500/20' : 'bg-white/5 text-gray-400 border-dark-border';
+
+            return `
+                <tr class="hover:bg-white/[0.02] transition-colors">
+                    <td class="p-4 border-b border-dark-border text-sm text-gray-500">${date}</td>
+                    <td class="p-4 border-b border-dark-border text-sm text-white font-bold">${row.product_symbol || row.symbol || 'N/A'}</td>
+                    <td class="p-4 border-b border-dark-border text-sm">
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold uppercase border ${sideClass}">
+                            ${row.side ? row.side.toUpperCase() : 'N/A'}
+                        </span>
+                    </td>
+                    <td class="p-4 border-b border-dark-border text-sm text-white">${row.stop_order_type || row.type || 'N/A'}</td>
+                    <td class="p-4 border-b border-dark-border text-sm text-white">${row.stop_price || row.limit_price || 'N/A'}</td>
+                    <td class="p-4 border-b border-dark-border text-sm text-white">${row.stop_trigger_method || 'N/A'}</td>
+                    <td class="p-4 border-b border-dark-border text-sm">${row.cancellation_reason ? '<span class="text-red-500">Cancelled</span>' : '<span class="text-green-500">Active</span>'}</td>
+                    <td class="p-4 border-b border-dark-border text-sm">
+                        <button onclick="viewOrder(${index})" class="flex items-center gap-2 px-2 py-1 rounded border border-dark-border text-gray-400 hover:text-white hover:bg-white/5 transition-all text-xs">
+                            <i class="fas fa-eye"></i> View
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function viewOrder(index) {
+        const order = currentData[index];
+        if (!order) return;
+
+        const container = document.getElementById('modalContent');
+
+        // Build Grid Content
+        let htmlSnippet = '';
+        let metaDataHtml = '';
+
+        // Helper to format key names (e.g., 'created_at' -> 'Created At')
+        const formatKey = (key) => key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+
+        // Priority fields first (excluding meta_data which goes top)
+        const priorityFields = ['product_symbol', 'symbol', 'side', 'type', 'limit_price', 'status', 'created_at'];
+
+        const keys = Object.keys(order).sort((a, b) => {
+            const idxA = priorityFields.indexOf(a);
+            const idxB = priorityFields.indexOf(b);
+            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+            if (idxA !== -1) return -1;
+            if (idxB !== -1) return 1;
+            return a.localeCompare(b);
+        });
+
+        keys.forEach(key => {
+            let value = order[key];
+
+            // Special handling for Meta Data: Parse and store separately to prepend later
+            if (key === 'meta_data') {
+                try {
+                    let meta = typeof value === 'string' ? JSON.parse(value) : value;
+                    if (typeof meta === 'object' && meta !== null) {
+                        metaDataHtml += `<div class="col-span-1 sm:col-span-2 bg-white/5 rounded-xl p-4 mb-2 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]">`;
+                        metaDataHtml += `<div class="flex items-center gap-2 mb-3 pb-2 border-b border-white/10">
+                                    <i class="fas fa-chart-line text-blue-400"></i>
+                                    <span class="text-sm font-bold text-white uppercase tracking-wider">Meta Data Analysis</span>
+                                 </div>`;
+                        metaDataHtml += `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">`;
+
+                        for (const [mKey, mVal] of Object.entries(meta)) {
+                            let displayVal = mVal;
+
+                            // Color code PnL, ROE, Cashflow
+                            if (['pnl', 'roe', 'cashflow', 'realized_pnl', 'profit'].includes(mKey.toLowerCase())) {
+                                const num = parseFloat(mVal);
+                                if (!isNaN(num)) {
+                                    const color = num >= 0 ? 'text-green-400' : 'text-red-400';
+                                    const sign = num > 0 ? '+' : '';
+                                    displayVal = `<span class="${color} font-mono font-bold text-base">${sign}${num.toFixed(4)}</span>`;
+                                    if (mKey.toLowerCase() === 'roe') displayVal += '<span class="text-gray-500 text-xs ml-0.5">%</span>';
+                                }
+                            }
+                            // Handle Arrays
+                            else if (Array.isArray(mVal)) {
+                                if (mVal.length === 0) displayVal = '<span class="text-gray-600">None</span>';
+                                else {
+                                    displayVal = `<div class="flex flex-col gap-1 mt-1">
+                                        ${mVal.map(item => {
+                                        if (typeof item === 'object') {
+                                            return `<div class="text-xs bg-black/20 rounded px-2 py-1 border border-white/5">
+                                                    ${Object.entries(item).map(([k, v]) =>
+                                                `<span class="text-gray-400">${k}:</span> <span class="text-gray-200">${v}</span>`
+                                            ).join('<span class="mx-1 text-gray-600">|</span>')}
+                                                </div>`;
+                                        }
+                                        return `<span class="text-xs">${item}</span>`;
+                                    }).join('')}
+                                    </div>`;
+                                }
+                            }
+                            else {
+                                const num = parseFloat(mVal);
+                                if (!isNaN(num) && typeof mVal === 'string' && mVal.match(/^-?\d*\.?\d+$/)) {
+                                    displayVal = `<span class="font-mono text-gray-200">${mVal}</span>`;
+                                }
+                            }
+
+                            metaDataHtml += `
+                                <div class="flex flex-col">
+                                    <span class="text-[10px] uppercase tracking-wider text-gray-500 mb-1">${mKey.replace(/_/g, ' ')}</span>
+                                    <span class="text-sm text-gray-200 font-medium break-words">${displayVal}</span>
+                                </div>
+                            `;
+                        }
+                        metaDataHtml += `</div></div>`;
+                    }
+                } catch (e) { console.error(e); }
+                return; // Don't add to standard grid
+            }
+
+            // Standard Rendering for everything else (including _id, nulls)
+            if (value === null || value === '') {
+                value = '<span class="text-gray-600 italic text-xs">null</span>';
+            } else if (typeof value === 'object') {
+                value = JSON.stringify(value);
+            } else {
+                if (key.includes('time') || key.includes('created_at')) value = formatDateTime(value);
+                if (key.toLowerCase() === 'side') value = `<span class="uppercase font-bold ${value.toLowerCase() === 'buy' ? 'text-green-500' : 'text-red-500'}">${value}</span>`;
+            }
+
+            htmlSnippet += `
+                <div class="flex flex-col border-b border-white/5 pb-2">
+                    <span class="text-[10px] uppercase tracking-wider text-gray-500 mb-0.5">${formatKey(key)}</span>
+                    <span class="text-sm text-gray-200 font-medium break-all">${value}</span>
+                </div>
+            `;
+        });
+
+        // Prepend Meta Data to the top
+        container.innerHTML = metaDataHtml + htmlSnippet;
+
+        // Show Modal
+        const modal = document.getElementById('orderModal');
+        const backdrop = document.getElementById('modalBackdrop');
+        const panel = document.getElementById('modalPanel');
+
+        modal.classList.remove('hidden');
+        setTimeout(() => {
+            backdrop.classList.remove('opacity-0');
+            panel.classList.remove('opacity-0', 'translate-y-4', 'sm:translate-y-0', 'sm:scale-95');
+            panel.classList.add('opacity-100', 'translate-y-0', 'sm:scale-100');
+        }, 10);
+    }
+
+    function closeModal() {
+        const modal = document.getElementById('orderModal');
+        const backdrop = document.getElementById('modalBackdrop');
+        const panel = document.getElementById('modalPanel');
+
+        // Animate out
+        backdrop.classList.add('opacity-0');
+        panel.classList.remove('opacity-100', 'translate-y-0', 'sm:scale-100');
+        panel.classList.add('opacity-0', 'translate-y-4', 'sm:translate-y-0', 'sm:scale-95');
+
+        setTimeout(() => {
+            modal.classList.add('hidden');
+        }, 300); // Match transition duration
+    }
+
+    // Close on backdrop click
+    document.getElementById('modalBackdrop').addEventListener('click', closeModal);
+    // Close on escape key
+    document.addEventListener('keydown', function (event) {
+        if (event.key === "Escape") closeModal();
+    });
+
+    function renderPagination(pagination) {
+        const div = document.getElementById('pagination');
+        const { page, total_pages } = pagination;
+
+        if (total_pages <= 1) {
+            div.innerHTML = '';
+            return;
+        }
+
+        let html = `
+            <button class="w-10 h-10 flex items-center justify-center rounded-lg bg-dark-card border border-dark-border text-white transition-all hover:bg-blue-500 hover:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed" onclick="loadData(${page - 1})" ${page === 1 ? 'disabled' : ''}>
+                <i class="fas fa-angle-left"></i>
+            </button>
+            <span class="text-sm mx-2.5 text-gray-400">
+                Page ${page} of ${total_pages}
+            </span>
+            <button class="w-10 h-10 flex items-center justify-center rounded-lg bg-dark-card border border-dark-border text-white transition-all hover:bg-blue-500 hover:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed" onclick="loadData(${page + 1})" ${page >= total_pages ? 'disabled' : ''}>
+                <i class="fas fa-angle-right"></i>
+            </button>
+        `;
+        div.innerHTML = html;
+    }
+
+    function formatDateTime(dateStr) {
+        if (!dateStr) return 'N/A';
+        try {
+            const date = new Date(dateStr);
+            return date.toLocaleString('en-IN', {
+                month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit',
+                hour12: true
+            });
+        } catch (e) { return dateStr; }
+    }
+
+    // Init
+    loadData(1);
+</script>
+{% endblock %}
