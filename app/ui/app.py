@@ -374,27 +374,48 @@ def get_broker_stats():
     """API to fetch aggregated stats for the dashboard"""
     try:
         db = get_db().client['trade_buddy']
-        collection = db['positions']
+        positions_col = db['positions']
+        orders_col = db['orders']
         
-        # Pipeline for global stats and daily graph
+        # 1. Calculate Total Commission from Orders
+        commission_pipeline = [
+            {
+                '$group': {
+                    '_id': None,
+                    'total_commission': {'$sum': {'$toDouble': {'$ifNull': ['$paid_commission', '0']}}}
+                }
+            }
+        ]
+        comm_result = list(orders_col.aggregate(commission_pipeline))
+        total_commission = comm_result[0]['total_commission'] if comm_result else 0
+        
+        # 2. Pipeline for global stats and daily graph from Positions
         pipeline = [
-            # 1. Match only closed positions for realized PnL analysis
+            # Match only closed positions for realized PnL analysis
             {'$match': {'status': 'closed'}},
             
-            # 2. Convert 'realized_pnl' string to double
+            # Convert values and extract date safely
             {'$addFields': {
                 'pnl_value': {'$toDouble': '$realized_pnl'},
-                # Extract date string YYYY-MM-DD from created_at
-                'date': {'$substr': ['$created_at', 0, 10]} 
+                'margin_value': {'$toDouble': {'$ifNull': ['$margin', '0']}},
+                # Use $dateToString for correct daily grouping from Date objects
+                'date': {
+                    '$dateToString': {
+                        'format': '%Y-%m-%d', 
+                        'date': '$created_at',
+                        'timezone': 'Asia/Kolkata' # Use specific timezone to ensure correct daily grouping
+                    }
+                }
             }},
             
-            # 3. Facet for two different aggregations
+            # Facet for two different aggregations
             {'$facet': {
                 # A: Global Summary
                 'summary': [
                     {'$group': {
                         '_id': None,
                         'total_pnl': {'$sum': '$pnl_value'},
+                        'total_margin': {'$sum': '$margin_value'},
                         'total_trades': {'$sum': 1},
                         'winning_trades': {
                             '$sum': {'$cond': [{'$gt': ['$pnl_value', 0]}, 1, 0]}
@@ -412,26 +433,60 @@ def get_broker_stats():
                         'daily_trades': {'$sum': 1}
                     }},
                     {'$sort': {'_id': 1}}  # Sort by date ascending
+                ],
+                # C: Symbol Breakdown
+                'by_symbol': [
+                    {'$group': {
+                        '_id': '$symbol',
+                        'total_profit': {'$sum': {'$cond': [{'$gt': ['$pnl_value', 0]}, '$pnl_value', 0]}},
+                        'total_loss': {'$sum': {'$cond': [{'$lt': ['$pnl_value', 0]}, '$pnl_value', 0]}},
+                        'net_pnl': {'$sum': '$pnl_value'},
+                        'trade_count': {'$sum': 1},
+                        'winning_trades': {'$sum': {'$cond': [{'$gt': ['$pnl_value', 0]}, 1, 0]}},
+                        'losing_trades': {'$sum': {'$cond': [{'$lt': ['$pnl_value', 0]}, 1, 0]}}
+                    }},
+                    {'$sort': {'net_pnl': -1}} # Sort by highest profit
                 ]
             }}
         ]
         
-        result = list(collection.aggregate(pipeline))
+        result = list(positions_col.aggregate(pipeline))
         
         # Process results
         data = result[0]
         summary = data['summary'][0] if data['summary'] else {
-            'total_pnl': 0, 'total_trades': 0, 'winning_trades': 0, 'losing_trades': 0
+            'total_pnl': 0, 'total_margin': 0, 'total_trades': 0, 'winning_trades': 0, 'losing_trades': 0
         }
         
+        # Add commission from orders
+        summary['total_commission'] = total_commission
+        
+        # Calculate Stats
+        total_trades = summary.get('total_trades', 0)
+        winning_trades = summary.get('winning_trades', 0)
+        total_margin = summary.get('total_margin', 0)
+        
+        # Winrate
+        winrate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+        summary['winrate'] = winrate
+        
+        # ROI
+        total_pnl = summary.get('total_pnl', 0)
+        roi = (total_pnl / total_margin * 100) if total_margin > 0 else 0
+        summary['roi'] = roi
+        
         daily_data = data['daily']
+        symbol_data = data['by_symbol']
         
         return jsonify({
             'summary': summary,
-            'daily': daily_data
+            'daily': daily_data,
+            'by_symbol': symbol_data
         })
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

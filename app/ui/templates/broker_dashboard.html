@@ -27,41 +27,73 @@
     </div>
 
     <!-- Stats Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <!-- Total PnL -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <!-- Financial Performance -->
         <div class="glass-card p-6 rounded-2xl relative overflow-hidden group hover:border-blue-500/30 transition-all">
             <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                 <i class="fas fa-wallet fa-3x"></i>
             </div>
-            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-2">Total PnL</h3>
-            <div class="text-2xl font-bold font-mono" id="totalPnl">...</div>
-            <div class="text-xs text-gray-500 mt-1">Realized Profit/Loss</div>
+            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-4">Financial Performance</h3>
+
+            <div class="space-y-4">
+                <div>
+                    <div class="text-xs text-gray-500 mb-1">Total PnL (Realized)</div>
+                    <div class="flex items-baseline gap-3">
+                        <div class="text-3xl font-bold font-mono" id="totalPnl">...</div>
+                        <div class="text-lg font-medium" id="totalRoi"></div>
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t border-white/5">
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-gray-400">Total Commission Paid</span>
+                        <span class="text-base font-mono font-medium text-gray-200" id="totalCommission">...</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <!-- Winning Trades -->
-        <div class="glass-card p-6 rounded-2xl relative overflow-hidden group hover:border-green-500/30 transition-all">
+        <!-- Trade Statistics -->
+        <div
+            class="glass-card p-6 rounded-2xl relative overflow-hidden group hover:border-purple-500/30 transition-all">
             <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                <i class="fas fa-check-circle fa-3x text-green-500"></i>
+                <i class="fas fa-chart-pie fa-3x"></i>
             </div>
-            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-2">Winning Trades</h3>
-            <div class="flex items-baseline gap-2">
-                <div class="text-2xl font-bold font-mono text-green-400" id="winningTrades">...</div>
-                <div class="text-sm text-gray-500" id="winningTradesTotal">/ ...</div>
-            </div>
-            <div class="text-xs text-gray-500 mt-1">Profitable Exits</div>
-        </div>
+            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-4">Trade Statistics</h3>
 
-        <!-- Losing Trades -->
-        <div class="glass-card p-6 rounded-2xl relative overflow-hidden group hover:border-red-500/30 transition-all">
-            <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                <i class="fas fa-times-circle fa-3x text-red-500"></i>
+            <div class="grid grid-cols-2 gap-6">
+                <!-- Winrate -->
+                <div class="col-span-2 sm:col-span-1">
+                    <div class="text-xs text-gray-500 mb-1">Win Rate</div>
+                    <div class="text-3xl font-bold font-mono text-purple-400" id="winRate">...</div>
+                    <div class="text-xs text-gray-500 mt-1">Based on closed trades</div>
+                </div>
+
+                <!-- Counts -->
+                <div class="col-span-2 sm:col-span-1 space-y-3">
+                    <!-- Winning -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-gray-400">Winning Trades</span>
+                            <span class="text-green-400 font-mono" id="winningTradesCount">...</span>
+                        </div>
+                        <div class="w-full bg-dark-bg h-1.5 rounded-full overflow-hidden">
+                            <div class="bg-green-500 h-full rounded-full" id="winBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Losing -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-gray-400">Losing Trades</span>
+                            <span class="text-red-400 font-mono" id="losingTradesCount">...</span>
+                        </div>
+                        <div class="w-full bg-dark-bg h-1.5 rounded-full overflow-hidden">
+                            <div class="bg-red-500 h-full rounded-full" id="lossBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-2">Losing Trades</h3>
-            <div class="flex items-baseline gap-2">
-                <div class="text-2xl font-bold font-mono text-red-400" id="losingTrades">...</div>
-                <div class="text-sm text-gray-500" id="losingTradesTotal">/ ...</div>
-            </div>
-            <div class="text-xs text-gray-500 mt-1">Loss-making Exits</div>
         </div>
     </div>
 
@@ -89,6 +121,29 @@
             <canvas id="pnlChart"></canvas>
         </div>
     </div>
+
+    <!-- Symbol Performance -->
+    <div class="glass-card p-6 rounded-2xl mb-8">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2 mb-6">
+            <i class="fas fa-list-ul text-purple-500"></i>
+            Symbol Performance
+        </h3>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr class="text-xs text-gray-400 border-b border-gray-800">
+                        <th class="py-3 font-medium uppercase tracking-wider">Symbol</th>
+                        <th class="py-3 font-medium uppercase tracking-wider text-right">Total Profit</th>
+                        <th class="py-3 font-medium uppercase tracking-wider text-right">Total Loss</th>
+                        <th class="py-3 font-medium uppercase tracking-wider text-right">Net PnL</th>
+                    </tr>
+                </thead>
+                <tbody id="symbolTableBody" class="text-sm">
+                    <!-- Rows will be injected here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -109,6 +164,7 @@
             if (data.error) throw new Error(data.error);
 
             updateStatsUI(data.summary);
+            renderSymbolTable(data.by_symbol);
 
             fullDailyData = data.daily;
             renderChartWithFilter();
@@ -121,19 +177,45 @@
     }
 
     function updateStatsUI(summary) {
-        // Total PnL
-        const pnlEl = document.getElementById('totalPnl');
+        // Financials
         const pnl = parseFloat(summary.total_pnl || 0);
+        const roi = parseFloat(summary.roi || 0);
+        const commission = parseFloat(summary.total_commission || 0);
+
+        // PnL
+        const pnlEl = document.getElementById('totalPnl');
         pnlEl.textContent = (pnl > 0 ? '+' : '') + pnl.toFixed(2);
-        pnlEl.className = `text-2xl font-bold font-mono ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`;
+        pnlEl.className = `text-3xl font-bold font-mono ${pnl >= 0 ? 'text-green-400' : 'text-red-400'}`;
 
-        // Counts
+        // ROI
+        const roiEl = document.getElementById('totalRoi');
+        roiEl.textContent = `(${(roi > 0 ? '+' : '')}${roi.toFixed(2)}%)`;
+        roiEl.className = `text-lg font-medium ${roi >= 0 ? 'text-green-500' : 'text-red-500'}`;
+
+        // Commission
+        const commStr = Math.abs(commission) < 0.01 && commission !== 0 ? commission.toFixed(6) : commission.toFixed(4);
+        document.getElementById('totalCommission').textContent = '$' + commStr;
+
+        // Trade Stats
         const total = summary.total_trades || 0;
-        document.getElementById('winningTrades').textContent = summary.winning_trades || 0;
-        document.getElementById('winningTradesTotal').textContent = `/ ${total}`;
+        const wins = summary.winning_trades || 0;
+        const losses = summary.losing_trades || 0;
+        const winrate = parseFloat(summary.winrate || 0);
 
-        document.getElementById('losingTrades').textContent = summary.losing_trades || 0;
-        document.getElementById('losingTradesTotal').textContent = `/ ${total}`;
+        // Winrate
+        const winRateEl = document.getElementById('winRate');
+        if (winRateEl) winRateEl.textContent = winrate.toFixed(1) + '%';
+
+        // Counts & Bars
+        if (document.getElementById('winningTradesCount')) {
+            document.getElementById('winningTradesCount').textContent = `${wins} / ${total}`;
+            document.getElementById('losingTradesCount').textContent = `${losses} / ${total}`;
+
+            const winPct = total > 0 ? (wins / total * 100) : 0;
+            const lossPct = total > 0 ? (losses / total * 100) : 0;
+            document.getElementById('winBar').style.width = `${winPct}%`;
+            document.getElementById('lossBar').style.width = `${lossPct}%`;
+        }
     }
 
     function setFilter(filter) {
@@ -164,6 +246,41 @@
         }
 
         updateChart(dataToRender);
+    }
+
+    function renderSymbolTable(symbolData) {
+        const tbody = document.getElementById('symbolTableBody');
+        tbody.innerHTML = '';
+
+        if (!symbolData || symbolData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">No trading data available</td></tr>';
+            return;
+        }
+
+        symbolData.forEach(item => {
+            const row = document.createElement('tr');
+            row.className = 'border-b border-gray-800 hover:bg-white/5 transition-colors';
+
+            const netPnl = parseFloat(item.net_pnl || 0);
+            const totalProfit = parseFloat(item.total_profit || 0);
+            const totalLoss = parseFloat(item.total_loss || 0);
+            const wins = item.winning_trades || 0;
+            const losses = item.losing_trades || 0;
+
+            row.innerHTML = `
+                <td class="py-3 font-medium text-white">${item._id}</td>
+                <td class="py-3 text-right text-green-400 font-mono">
+                    +${totalProfit.toFixed(2)} <span class="text-gray-500 text-xs">(${wins})</span>
+                </td>
+                <td class="py-3 text-right text-red-400 font-mono">
+                    ${totalLoss.toFixed(2)} <span class="text-gray-500 text-xs">(${losses})</span>
+                </td>
+                <td class="py-3 text-right font-mono font-bold ${netPnl >= 0 ? 'text-green-400' : 'text-red-400'}">
+                    ${netPnl > 0 ? '+' : ''}${netPnl.toFixed(2)}
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
     }
 
     function updateChart(dailyData) {
@@ -207,6 +324,7 @@
                 maintainAspectRatio: false,
                 interaction: {
                     mode: 'index',
+                    intersect: false,
                     intersect: false,
                 },
                 plugins: {

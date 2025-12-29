@@ -10,7 +10,7 @@ services:
       MONGODB_URL: mongodb+srv://justj:admin@cluster0.fsgzjrl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
       
       # Application Configuration
-      SYMBOLS: ADAUSD,SHIBUSD
+      SYMBOLS: ADAUSD
       STRATEGIES: "*"
       SCHEDULE_SECONDS: 600
       TZ: Asia/Kolkata
