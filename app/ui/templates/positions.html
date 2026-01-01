@@ -30,7 +30,10 @@
                     Symbol</th>
                 <th
                     class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
-                    Action</th>
+                    PnL</th>
+                <th
+                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
+                    ROI</th>
                 <th
                     class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
                     Size</th>
@@ -39,13 +42,7 @@
                     Entry Price</th>
                 <th
                     class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
-                    Liq. Price</th>
-                <th
-                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
                     Margin</th>
-                <th
-                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
-                    PnL</th>
                 <th
                     class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
                     Status</th>
@@ -181,12 +178,11 @@
                 <tr class="hover:bg-white/[0.02] transition-colors">
                     <td class="p-4 border-b border-dark-border text-sm text-gray-500">${date}</td>
                     <td class="p-4 border-b border-dark-border text-sm text-white font-bold">${row.product_symbol || row.symbol || 'N/A'}</td>
-                    <td class="p-4 border-b border-dark-border text-sm text-white">${row.action || 'N/A'}</td>
+                    <td class="p-4 border-b border-dark-border text-sm ${pnlClass}">${pnlSign}${pnl}</td>
+                    <td class="p-4 border-b border-dark-border text-sm font-mono font-bold ${pnlClass}">${formatRoi(calculateRoi(row))}</td>
                     <td class="p-4 border-b border-dark-border text-sm text-white">${row.size || '0'}</td>
                     <td class="p-4 border-b border-dark-border text-sm text-white">${row.entry_price || 'N/A'}</td>
-                    <td class="p-4 border-b border-dark-border text-sm text-white">${row.liquidation_price || 'N/A'}</td>
                     <td class="p-4 border-b border-dark-border text-sm text-white">${row.margin || '0'}</td>
-                    <td class="p-4 border-b border-dark-border text-sm ${pnlClass}">${pnlSign}${pnl}</td>
                     <td class="p-4 border-b border-dark-border text-sm">
                         <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold uppercase border ${statusClass}">
                             ${row.status || 'N/A'}
@@ -235,7 +231,7 @@
                 value = JSON.stringify(value);
             } else {
                 // Format specific values
-                if (key.includes('time') || key.includes('created_at') || key.includes('close_at')) value = formatDateTime(value);
+                if (key.includes('time') || key.includes('created_at') || key.includes('close_at') || key.includes('updated_at')) value = formatDateTime(value);
 
                 // Format PnL with color
                 if (key === 'realized_pnl' || key === 'unrealized_pnl') {
@@ -322,6 +318,42 @@
                 hour12: true
             });
         } catch (e) { return dateStr; }
+    }
+
+    function calculateRoi(row) {
+        // formula: (PnL / Margin) * 100
+        const pnl = parseFloat(row.realized_pnl || 0);
+        const margin = parseFloat(row.margin || 0);
+
+        if (margin === 0) return 0;
+        return (pnl / margin) * 100;
+    }
+
+    function getMetaValue(metaData, key) {
+        if (!metaData) return null;
+        try {
+            const meta = typeof metaData === 'string' ? JSON.parse(metaData) : metaData;
+            const k = Object.keys(meta).find(k => k.toLowerCase() === key.toLowerCase());
+            return k ? meta[k] : null;
+        } catch (e) { return null; }
+    }
+
+    function formatPnL(val) {
+        if (val === null || val === undefined) return '<span class="text-gray-600">-</span>';
+        const num = parseFloat(val);
+        if (isNaN(num)) return '<span class="text-gray-600">-</span>';
+        const color = num >= 0 ? 'text-green-400' : 'text-red-400';
+        const sign = num > 0 ? '+' : '';
+        return `<span class="${color}">${sign}${num.toFixed(4)}</span>`;
+    }
+
+    function formatRoi(val) {
+        if (val === null || val === undefined) return '<span class="text-gray-600">-</span>';
+        const num = parseFloat(val);
+        if (isNaN(num)) return '<span class="text-gray-600">-</span>';
+        const color = num >= 0 ? 'text-green-400' : 'text-red-400';
+        const sign = num > 0 ? '+' : '';
+        return `<span class="${color}">${sign}${num.toFixed(2)}%</span>`;
     }
 
     // Init

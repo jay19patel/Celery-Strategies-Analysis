@@ -48,6 +48,12 @@
                     Status</th>
                 <th
                     class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
+                    PnL</th>
+                <th
+                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
+                    ROI</th>
+                <th
+                    class="bg-black/20 text-gray-500 font-semibold uppercase text-xs tracking-wide p-4 border-b-2 border-dark-border text-left">
                     Details</th>
             </tr>
         </thead>
@@ -186,6 +192,8 @@
                     <td class="p-4 border-b border-dark-border text-sm text-white">${row.stop_price || row.limit_price || 'N/A'}</td>
                     <td class="p-4 border-b border-dark-border text-sm text-white">${row.stop_trigger_method || 'N/A'}</td>
                     <td class="p-4 border-b border-dark-border text-sm">${row.cancellation_reason ? '<span class="text-red-500">Cancelled</span>' : '<span class="text-green-500">Active</span>'}</td>
+                    <td class="p-4 border-b border-dark-border text-sm font-mono font-bold">${formatPnL(getMetaValue(row.meta_data, 'pnl') || getMetaValue(row.meta_data, 'realized_pnl'))}</td>
+                    <td class="p-4 border-b border-dark-border text-sm font-mono font-bold">${formatRoi(getMetaValue(row.meta_data, 'roe') || getMetaValue(row.meta_data, 'roi'))}</td>
                     <td class="p-4 border-b border-dark-border text-sm">
                         <button onclick="viewOrder(${index})" class="flex items-center gap-2 px-2 py-1 rounded border border-dark-border text-gray-400 hover:text-white hover:bg-white/5 transition-all text-xs">
                             <i class="fas fa-eye"></i> View
@@ -376,6 +384,34 @@
                 hour12: true
             });
         } catch (e) { return dateStr; }
+    }
+
+    function getMetaValue(metaData, key) {
+        if (!metaData) return null;
+        try {
+            const meta = typeof metaData === 'string' ? JSON.parse(metaData) : metaData;
+            // Case insensitive search
+            const k = Object.keys(meta).find(k => k.toLowerCase() === key.toLowerCase());
+            return k ? meta[k] : null;
+        } catch (e) { return null; }
+    }
+
+    function formatPnL(val) {
+        if (val === null || val === undefined) return '<span class="text-gray-600">-</span>';
+        const num = parseFloat(val);
+        if (isNaN(num)) return '<span class="text-gray-600">-</span>';
+        const color = num >= 0 ? 'text-green-400' : 'text-red-400';
+        const sign = num > 0 ? '+' : '';
+        return `<span class="${color}">${sign}${num.toFixed(4)}</span>`;
+    }
+
+    function formatRoi(val) {
+        if (val === null || val === undefined) return '<span class="text-gray-600">-</span>';
+        const num = parseFloat(val);
+        if (isNaN(num)) return '<span class="text-gray-600">-</span>';
+        const color = num >= 0 ? 'text-green-400' : 'text-red-400';
+        const sign = num > 0 ? '+' : '';
+        return `<span class="${color}">${sign}${num.toFixed(2)}%</span>`;
     }
 
     // Init
