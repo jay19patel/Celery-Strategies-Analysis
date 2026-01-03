@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 from app.core.base_strategy import BaseStrategy
 from app.models.strategy_models import StrategyResult, SignalType
 from app.utility.data_provider import fetch_historical_data
@@ -33,6 +34,7 @@ class EMAStrategy(BaseStrategy):
                     signal_type=SignalType.HOLD,
                     confidence=0.0,
                     execution_time=execution_time,
+                    timestamp=datetime.now(timezone.utc),
                     price=0.0
                 )
 
@@ -79,6 +81,7 @@ class EMAStrategy(BaseStrategy):
                 confidence=round(confidence / 100.0, 3),
                 execution_time=execution_time,
                 price=round(current_price, 2),
+                timestamp=datetime.now(timezone.utc),
                 success=True
                 
             )
@@ -92,5 +95,6 @@ class EMAStrategy(BaseStrategy):
                 signal_type=SignalType.HOLD,
                 confidence=0.0,
                 execution_time=execution_time,
+                timestamp=datetime.now(timezone.utc),
                 price=0.0
             )

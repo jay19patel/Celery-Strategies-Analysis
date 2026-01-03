@@ -15,7 +15,7 @@ class StrategyResult(BaseModel):
     signal_type: SignalType
     confidence: float
     execution_time: float
-    timestamp: datetime = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Kolkata"))
+    timestamp: datetime
     price: Optional[float] = None
     success: Optional[bool] = False
 

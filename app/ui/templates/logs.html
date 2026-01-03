@@ -156,7 +156,13 @@
 
         container.innerHTML = files.map(file => {
             const size = formatFileSize(file.size);
-            const modified = new Date(file.modified).toLocaleString();
+            const date = new Date(file.modified);
+            const modified = date.toLocaleString('en-IN', {
+                year: 'numeric', month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                hour12: true,
+                timeZone: 'Asia/Kolkata'
+            });
 
             return `
                 <div class="file-item hover-scale">

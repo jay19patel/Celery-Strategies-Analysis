@@ -2,7 +2,7 @@ from pymongo import MongoClient
 import threading
 from pymongo.errors import ConnectionFailure
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.settings import settings
 from app.core.logger import get_mongodb_logger
 
@@ -79,8 +79,8 @@ class MongoDBConnection:
         try:
             collection = self._db['batch_results']
             
-            # Index on timestamp for time-based queries
-            collection.create_index([('timestamp', -1)], background=True)
+            # Index on created_at for time-based queries
+            collection.create_index([('created_at', -1)], background=True)
             
             # Index on batch execution metadata
             collection.create_index([('summary.total_symbols', 1)], background=True)
@@ -88,7 +88,7 @@ class MongoDBConnection:
             # Compound index for symbol-based queries
             collection.create_index([
                 ('results.symbol', 1),
-                ('timestamp', -1)
+                ('created_at', -1)
             ], background=True)
             
             logger.info("✅ MongoDB indexes created successfully")
@@ -136,8 +136,7 @@ def save_batch_results(batch_data: Dict[str, Any]):
         # Add metadata
         document = {
             **batch_data,
-            "timestamp": datetime.utcnow(),
-            "stored_at": datetime.utcnow().isoformat()
+            "created_at": datetime.now(timezone.utc)
         }
         
         # Insert document
@@ -172,7 +171,7 @@ def get_latest_batch_results(limit: int = 10):
         
         results = list(
             collection.find()
-            .sort('timestamp', -1)
+            .sort('created_at', -1)
             .limit(limit)
         )
         
@@ -201,7 +200,7 @@ def get_symbol_results(symbol: str, limit: int = 10):
         
         results = list(
             collection.find({'results.symbol': symbol})
-            .sort('timestamp', -1)
+            .sort('created_at', -1)
             .limit(limit)
         )
         

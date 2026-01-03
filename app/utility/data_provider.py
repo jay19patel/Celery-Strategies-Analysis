@@ -135,7 +135,7 @@ def fetch_historical_data(symbol: str, period: int = 30, interval: str = "15m"):
                         df = pd.DataFrame(rows)
 
                         # Process datetime
-                        df['DateTime'] = pd.to_datetime(df['time'], unit='s', utc=True).dt.tz_convert('Asia/Kolkata')
+                        df['DateTime'] = pd.to_datetime(df['time'], unit='s', utc=True)
                         df = df.sort_values('DateTime')
                         df.set_index('DateTime', inplace=True)
                         df['DateTime'] = df.index

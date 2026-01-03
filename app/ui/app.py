@@ -76,8 +76,8 @@ def get_data():
         if match_query:
             pipeline.append({'$match': match_query})
         
-        # Sort by stored_at descending (newest first)
-        pipeline.append({'$sort': {'stored_at': -1}})
+        # Sort by created_at descending (newest first)
+        pipeline.append({'$sort': {'created_at': -1}})
         
         # Use $facet to get both data and total count in one query
         facet_stage = {
@@ -89,7 +89,6 @@ def get_data():
                         '$project': {
                             '_id': 1,
                             'batch_id': {'$toString': '$_id'},
-                            'datetime': '$stored_at',
                             'pubsub': '$pubsub',
                             'strategy_name': '$results.strategies.strategy_name',
                             'symbol': '$results.symbol',
@@ -140,26 +139,9 @@ def get_data():
             if 'batch_id' in item and isinstance(item['batch_id'], ObjectId):
                 item['batch_id'] = str(item['batch_id'])
             
-            # Convert datetime objects to ISO strings with IST timezone
-            ist_timezone = ZoneInfo("Asia/Kolkata")
-            if isinstance(item.get('datetime'), datetime):
-                dt = item['datetime']
-                # If datetime has no timezone, assume it's UTC and convert to IST
-                if dt.tzinfo is None:
-                    # Assume UTC and convert to IST
-                    dt = dt.replace(tzinfo=timezone.utc).astimezone(ist_timezone)
-                else:
-                    # Convert to IST from whatever timezone it is
-                    dt = dt.astimezone(ist_timezone)
-                # Convert to ISO format with IST timezone (+05:30)
-                item['datetime'] = dt.isoformat()
+            # Convert datetime objects to ISO strings (UTC)
             if isinstance(item.get('timestamp'), datetime):
-                dt = item['timestamp']
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc).astimezone(ist_timezone)
-                else:
-                    dt = dt.astimezone(ist_timezone)
-                item['timestamp'] = dt.isoformat()
+                item['timestamp'] = item['timestamp'].isoformat()
         
         # Calculate total pages
         total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 1

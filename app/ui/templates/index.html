@@ -198,7 +198,7 @@
 
         // Render Desktop Table
         tbody.innerHTML = data.map(row => {
-            const dateTime = formatDateTime(row.datetime);
+            const dateTime = formatDateTime(row.timestamp);
             const signalClass = getSignalClass(row.signal_type);
             const batchClass = batchColorMap.get(row.batch_id || '');
             const shortBatchId = (row.batch_id || '').substring(0, 8);
@@ -226,7 +226,7 @@
 
         // Render Mobile Cards
         mobileList.innerHTML = data.map(row => {
-            const dateTime = formatDateTime(row.datetime);
+            const dateTime = formatDateTime(row.timestamp);
             const signalClass = getSignalClass(row.signal_type);
 
             return `
@@ -317,9 +317,10 @@
             if (isNaN(date.getTime())) return dateStr;
 
             return date.toLocaleString('en-IN', {
-                month: 'short', day: 'numeric',
-                hour: '2-digit', minute: '2-digit',
-                hour12: true
+                year: 'numeric', month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                hour12: true,
+                timeZone: 'Asia/Kolkata'
             });
         } catch (e) {
             return dateStr;
