@@ -51,8 +51,11 @@ class MongoDBConnection:
                 settings.mongodb_uri,
                 serverSelectionTimeoutMS=5000,
                 connectTimeoutMS=5000,
+                socketTimeoutMS=30000,
                 maxPoolSize=50,
-                minPoolSize=10
+                minPoolSize=10,
+                retryWrites=True,
+                retryReads=True
             )
             
             # Test connection

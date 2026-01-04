@@ -46,19 +46,21 @@ def _get_from_cache(cache_key: str):
     return None
 
 
-def _save_to_cache(cache_key: str, data: pd.DataFrame):
+def _save_to_cache(cache_key: str, data: pd.DataFrame, ttl: int = None):
     """Save data to Redis cache with TTL"""
     if not _redis_client:
         return
         
     try:
         serialized = pickle.dumps(data)
-        _redis_client.setex(cache_key, CACHE_DURATION, serialized)
+        # Use provided TTL or default CACHE_DURATION
+        expiry = ttl if ttl is not None else CACHE_DURATION
+        _redis_client.setex(cache_key, expiry, serialized)
     except Exception as e:
         logger.error(f"⚠️  Redis write error: {str(e)}")
 
 
-def fetch_historical_data(symbol: str, period: int = 30, interval: str = "15m"):
+def fetch_historical_data(symbol: str, period: int = 30, interval: str = "15m", ttl: int = None):
     """
     Fetch historical data for crypto symbols using Delta Exchange API
     and calculate technical indicators.
@@ -87,12 +89,20 @@ def fetch_historical_data(symbol: str, period: int = 30, interval: str = "15m"):
     logger.info(f"🌐 Cache MISS: Fetching fresh data for {symbol} | period={period}, interval={interval}")
 
     try:
+        # Determine actual API resolution to use
+        # Delta Exchange likely doesn't support 1M/1w natively, so we fetch 1d and resample
+        target_interval = interval
+        api_interval = interval
+        
+        if interval in ['1M', '1w', '1W']:
+            api_interval = '1d'
+        
         # Calculate time range
         end_time = int(time.time())
         start_time = end_time - (period * 86400)
 
         params = {
-            'resolution': interval,
+            'resolution': api_interval,
             'symbol': symbol,
             'start': str(start_time),
             'end': str(end_time)
@@ -106,7 +116,7 @@ def fetch_historical_data(symbol: str, period: int = 30, interval: str = "15m"):
         # Retry logic with exponential backoff
         for attempt in range(3):
             try:
-                logger.debug(f"API attempt {attempt + 1}/3 for {symbol}")
+                logger.debug(f"API attempt {attempt + 1}/3 for {symbol} (res={api_interval})")
                 
                 response = requests.get(
                     'https://api.india.delta.exchange/v2/history/candles',
@@ -138,6 +148,24 @@ def fetch_historical_data(symbol: str, period: int = 30, interval: str = "15m"):
                         df['DateTime'] = pd.to_datetime(df['time'], unit='s', utc=True)
                         df = df.sort_values('DateTime')
                         df.set_index('DateTime', inplace=True)
+                        
+                        # --- Resample if needed ---
+                        if target_interval in ['1M', '1w', '1W']:
+                            rule = 'ME' if target_interval == '1M' else 'W'
+                            # Pandas Future Warning: 'M' is deprecated, use 'ME' for Month End.
+                            if target_interval == '1M': rule = 'ME'
+                            
+                            ohlc_dict = {
+                                'Open': 'first',
+                                'High': 'max',
+                                'Low': 'min',
+                                'Close': 'last',
+                                'Volume': 'sum',
+                                'time': 'first' # keep a time reference
+                            }
+                            df = df.resample(rule).agg(ohlc_dict).dropna()
+                            logger.info(f"🔄 Resampled 1d data to {target_interval}: {len(df)} candles")
+
                         df['DateTime'] = df.index
 
                         df['Date'] = df.index.strftime('%d/%m/%Y')
@@ -224,7 +252,8 @@ def fetch_historical_data(symbol: str, period: int = 30, interval: str = "15m"):
         logger.info(f"✅ Processing complete: {symbol} | {len(df)} rows | Indicators calculated")
 
         # Store in cache (thread-safe)
-        _save_to_cache(cache_key, df)
+        # Store in cache (thread-safe)
+        _save_to_cache(cache_key, df, ttl)
 
         return df
 
