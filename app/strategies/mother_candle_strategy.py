@@ -14,10 +14,9 @@ class MotherCandleStrategy(BaseStrategy):
     def execute(self, symbol: str) -> StrategyResult:
         start_time = time.time()
         
-        # 1. Fetch 15m data FIRST to get the authoritative LIVE PRICE
-        # We use default cache (2 mins) for this as it tracks live moves
+        # 1. Fetch 15m data FIRST to get the authoritative LIVE PRICE and Current Candle
         try:
-             df_15m = fetch_historical_data(symbol, period=30, interval="15m")
+             df_15m = fetch_historical_data(symbol, period=5, interval="15m")
         except Exception as e:
              df_15m = None
              print(f"Error fetching 15m data: {e}")
@@ -34,93 +33,125 @@ class MotherCandleStrategy(BaseStrategy):
                 price=0.0
              )
 
+        # Live Price from latest 15m candle
         live_price = df_15m['Close'].iloc[-1]
         
-        # Priority order: 1 Month > 1 Week > 1 Day > 1 Hour > 15 Minute
-        # Define Timeframes with aggressive Caching (TTL) for higher TFs to save API calls
-        timeframes = [
-            {"interval": "1M", "period": 5000, "name": "1 Month", "ttl": 86400}, # Cache for 1 Day
-            {"interval": "1w", "period": 2100, "name": "1 Week", "ttl": 14400},  # Cache for 4 Hours
-            {"interval": "1d", "period": 400, "name": "1 Day", "ttl": 3600},     # Cache for 1 Hour
-            {"interval": "1h", "period": 30, "name": "1 Hour", "ttl": 300},      # Cache for 5 Mins
-            {"interval": "15m", "period": 30, "name": "15 Minute", "ttl": 120}  # Default Cache
-        ]
-
         final_signal = SignalType.HOLD
         confidence = 0.0
-        used_timeframe_name = "None"
         
         try:
+            # Pre-calculate 15m Candle Levels (Signal Candle)
+            # User Request: "running candle nahi chaiye" -> Use Last Closed Candle (iloc[-2])
+            if len(df_15m) < 2:
+                 execution_time = time.time() - start_time
+                 return StrategyResult(
+                    strategy_name=f"{self.name} (Insufficient Data)",
+                    symbol=symbol,
+                    signal_type=SignalType.HOLD,
+                    confidence=0.0,
+                    execution_time=execution_time,
+                    timestamp=datetime.now(timezone.utc),
+                    price=round(live_price, 2)
+                 )
+
+            curr_close = df_15m['Close'].iloc[-2]
+            curr_high = df_15m['High'].iloc[-2]
+            curr_low = df_15m['Low'].iloc[-2]
+            
+            # Additional Volume check for confidence
+            # Original: -6:-2. Now we need to be careful with range if we use it.
+            avg_vol_15m = df_15m['Volume'].iloc[-6:-2].mean() if len(df_15m) > 6 else 0
+            curr_vol_15m = df_15m['Volume'].iloc[-2]
+
+            # --- Multi-Timeframe Patterns ---
+            # User Request: "15m, 1 days, 1 week, 1 month ke hisabse"
+            # Logic: "Mother Candle" = Inside Bar Pattern.
+            # Pattern: Mother Candle (large) -> Child Candle (inside mother) -> Breakout Candle (current signal)
+            
+            timeframes = [
+                {"interval": "15m", "period": 5, "name": "15 Minute"},
+                {"interval": "1d", "period": 400, "name": "1 Day"},
+                {"interval": "1w", "period": 2100, "name": "1 Week"},
+                {"interval": "1M", "period": 5000, "name": "1 Month"},
+            ]
+            
+            used_timeframe_name = "None"
+
             for tf in timeframes:
-                # Use cached data if available (using specific TTL)
-                if tf["interval"] == "15m":
-                     df = df_15m # Reuse already fetched data
+                ttl = 120
+                if tf['interval'] == '1M': ttl = 86400
+                elif tf['interval'] == '1w': ttl = 14400
+                elif tf['interval'] == '1d': ttl = 3600
+                
+                # For 15m, we already have df_15m. For others, fetch.
+                if tf['interval'] == '15m':
+                    df_tf = df_15m
                 else:
-                     df = fetch_historical_data(symbol, period=tf["period"], interval=tf["interval"], ttl=tf["ttl"])
+                    df_tf = fetch_historical_data(symbol, period=tf["period"], interval=tf["interval"], ttl=ttl)
                 
-                if df is None or df.empty or len(df) < 50:
+                # Check Data Length
+                # We need:
+                # Index -4: Mother
+                # Index -3: Child (Inside)
+                # Index -2: Signal (Breakout, Closed)
+                # Index -1: Running (Ignored)
+                # So we need at least 4 candles.
+                if df_tf is None or df_tf.empty or len(df_tf) < 4:
                     continue
+                    
+                # Identify Candles
+                mother_high = df_tf['High'].iloc[-4]
+                mother_low = df_tf['Low'].iloc[-4]
+                mother_close = df_tf['Close'].iloc[-4]
                 
-                # Use LIVE price for current close
-                curr_close = live_price
+                child_high = df_tf['High'].iloc[-3]
+                child_low = df_tf['Low'].iloc[-3]
                 
-                # --- Setup Detection ---
-                # Index -2: Last Closed Candle (Previous)
-                prev_high = df['High'].iloc[-2]
-                prev_low = df['Low'].iloc[-2]
+                # Check 1: Inside Bar Condition (Child inside Mother)
+                is_inside_bar = (child_high <= mother_high) and (child_low >= mother_low)
                 
-                # --- Signal Logic: Previous Candle Breakout ---
+                if not is_inside_bar:
+                    continue
+                    
+                # Check 2: Breakout Condition (Signal Candle breaks Mother)
+                # We apply the specific "Breakout + Dip" logic requested for Mother Candle.
+                
+                # Signal Candle is the Current Closed 15m candle?
+                # WAIT: If checking 1D mother candle, we compare the *Current 15m Candle* against the 1D Mother Levels.
+                # If checking 15m mother candle, we compare *Current 15m* against 15m Mother.
+                # The logic above (curr_close vs mother_high) works if we use 15m current price against Reference Levels.
+                
+                # BUT, if the Reference is 1D, the "Mother" is 2 days ago, "Child" is Yesterday.
+                # Breakout happens TODAY (Intraday).
+                
                 mc_buy = False
                 mc_sell = False
-                triggered_level = 0.0
-
-                # Buy if Live Price breaks Previous High
-                if curr_close > prev_high:
+                
+                # BUY: Intraday Close > Mother High AND Intraday Low < Mother Close (Dip)
+                if (curr_close > mother_high) and (curr_low < mother_close):
                     mc_buy = True
-                    triggered_level = prev_high
                 
-                # Sell if Live Price breaks Previous Low
-                elif curr_close < prev_low:
+                # SELL: Intraday Close < Mother Low AND Intraday High > Mother Close (Dip)
+                elif (curr_close < mother_low) and (curr_high > mother_close):
                     mc_sell = True
-                    triggered_level = prev_low
-
-                # Combine
-                signal = 0
+                    
                 if mc_buy:
-                    signal = 1
-                elif mc_sell:
-                    signal = -1
-                
-                if signal != 0:
-                    final_signal = SignalType.BUY if signal == 1 else SignalType.SELL
+                    final_signal = SignalType.BUY
                     used_timeframe_name = tf["name"]
-                    
-                    # Calculate Confidence
-                    conf = 50 # Base confidence for breakout
-                        
-                    # 1. Candle Color Confirmation
-                    # If we are Buying, Current Candle should optionally be Green (showing strength in current session)
-                    is_green = curr_close >= df['Open'].iloc[-1]
-                    if (signal == 1 and is_green) or (signal == -1 and not is_green):
-                        conf += 20
-                        
-                    # 2. Breakout Strength
-                    # How far above the level are we?
-                    diff = abs(curr_close - triggered_level)
-                    strength = (diff / triggered_level) * 100
-                    conf += min(strength * 5, 20)
-                        
-                    # 3. Volume Confirmation
-                    # Use cached volume for Previous candles to get average
-                    avg_vol = df['Volume'].iloc[-21:-1].mean()
-                    # Use current candle volume from the Timeframe DF (latest partial candle)
-                    curr_vol_tf = df['Volume'].iloc[-1]
-                    
-                    if curr_vol_tf > avg_vol:
-                        conf += 20
-                        
-                    confidence = min(conf, 100)
-                    break
+                    triggered_level = mother_high
+                elif mc_sell:
+                    final_signal = SignalType.SELL
+                    used_timeframe_name = tf["name"]
+                    triggered_level = mother_low
+                
+                if final_signal != SignalType.HOLD:
+                    confidence = 80.0
+                    # Volume Confirmation (using 15m volume info)
+                    if curr_vol_15m > avg_vol_15m:
+                        confidence = min(confidence + 10, 100.0)
+                    break # Prioritize first found? Or specific order? (15m > 1d ...)
+                    # User didn't specify priority, but usually lower TF signals first or higher?
+                    # Let's keep loop order: 15m, 1d, 1w... 
         
         except Exception as e:
             print(f"Error in MotherCandleStrategy processing {symbol}: {str(e)}")

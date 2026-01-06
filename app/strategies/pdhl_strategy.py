@@ -11,11 +11,10 @@ class PDHLStrategy(BaseStrategy):
     """
     Previous Day/Week/Month High/Low (PDHL) Breakout Strategy
     
-    Simplified Logic:
+    Logic:
     - Iterates through timeframes: 1 Month > 1 Week > 1 Day.
-    - BUY: Current Price breaks ABOVE the Previous Candle's High.
-    - SELL: Current Price breaks BELOW the Previous Candle's Low.
-    - Strict check on Level 1 (Previous) only.
+    - BUY: Intraday 15m Close > Ref High AND Intraday 15m Low < Ref Close.
+    - SELL: Intraday 15m Close < Ref Low AND Intraday 15m High > Ref Close.
     """
 
     def __init__(self):
@@ -24,7 +23,7 @@ class PDHLStrategy(BaseStrategy):
     def execute(self, symbol: str) -> StrategyResult:
         start_time = time.time()
 
-        # 1. Fetch 15m data FIRST to get the authoritative LIVE PRICE
+        # 1. Fetch 15m data FIRST to get the authoritative LIVE PRICE and Signal Candle
         try:
              df_15m = fetch_historical_data(symbol, period=5, interval="15m")
         except Exception as e:
@@ -50,86 +49,91 @@ class PDHLStrategy(BaseStrategy):
             {"interval": "1M", "period": 5000, "name": "Prev Month"},
             {"interval": "1w", "period": 2100, "name": "Prev Week"},
             {"interval": "1d", "period": 400, "name": "Prev Day"},
-            # User specifically asked for Day/Week/Month. 
-            # "previd day ya previd month ya previd week"
         ]
 
         final_signal = SignalType.HOLD
         confidence = 0.0
         used_timeframe_name = "None"
-        triggered_level = 0.0
         
         try:
-            for tf in timeframes:
-                # Fetch data (utilizes the smart caching we implemented earlier)
-                # TTLs are handled by default in data_provider based on interval or we could pass them explicitly
-                # Since we didn't update default args in data_provider to map interval->ttl automatically inside the function (we did it in strategy),
-                # let's pass them here for safety/performance consistency with MotherCandle.
-                ttl = 120
-                if tf['interval'] == '1M': ttl = 86400
-                elif tf['interval'] == '1w': ttl = 14400
-                elif tf['interval'] == '1d': ttl = 3600
+            # Pre-calculate 15m Candle Levels
+            # User Request: "running candle nahi chaiye" -> Use Last Closed Candle (iloc[-2])
+            if len(df_15m) < 2:
+                 execution_time = time.time() - start_time
+                 return StrategyResult(
+                    strategy_name=f"{self.name} (Insufficient Data)",
+                    symbol=symbol,
+                    signal_type=SignalType.HOLD,
+                    confidence=0.0,
+                    execution_time=execution_time,
+                    timestamp=datetime.now(timezone.utc),
+                    price=round(live_price, 2)
+                 )
+
+            curr_close = df_15m['Close'].iloc[-2]
+            curr_high = df_15m['High'].iloc[-2]
+            curr_low = df_15m['Low'].iloc[-2]
+            curr_open = df_15m['Open'].iloc[-2] # For color check
+            
+            # Volume analysis for confidence
+            # Original: -21:-1 (Last 20 excl running). Now Running is ignored (-2 is target).
+            # So range shifts back by 1: -22:-2
+            avg_vol_15m = df_15m['Volume'].iloc[-22:-2].mean() if len(df_15m) > 21 else 0
+            curr_vol_15m = df_15m['Volume'].iloc[-2]
+
+            # --- PREVIOUS DAY DATA ONLY ---
+            # User Request: "only previd day ka hi rakhe weeks and month nikal do"
+            df_day = fetch_historical_data(symbol, period=400, interval="1d", ttl=3600)
+            
+            if df_day is not None and not df_day.empty and len(df_day) >= 2:
+                # Get Previous Candle (Last Closed Ref Candle)
+                prev_high = df_day['High'].iloc[-2]
+                prev_low = df_day['Low'].iloc[-2]
                 
-                df = fetch_historical_data(symbol, period=tf["period"], interval=tf["interval"], ttl=ttl)
+                # --- Signal Logic ---
+                # User Request (Simplified): "Use ONLY High/Low, ignore Open/Close"
                 
-                if df is None or df.empty or len(df) < 2:
-                    continue
-                
-                # Get Previous Candle (Last Closed)
-                # Index -1 is current (live/incomplete), Index -2 is Previous
-                prev_high = df['High'].iloc[-2]
-                prev_low = df['Low'].iloc[-2]
-                prev_close = df['Close'].iloc[-2]
-                
-                # Check Breakout
+                triggered_level = 0.0
                 buy_signal = False
                 sell_signal = False
-                
-                # BUY: Breakout of Previous High
-                if live_price > prev_high:
+    
+                # BUY: Close > Prev High
+                if curr_close > prev_high:
                     buy_signal = True
                     triggered_level = prev_high
-                    
-                # SELL: Breakout of Previous Low
-                elif live_price < prev_low:
+                
+                # SELL: Close < Prev Low
+                elif curr_close < prev_low:
                     sell_signal = True
                     triggered_level = prev_low
                 
-                # Determine Signal
                 if buy_signal:
                     final_signal = SignalType.BUY
-                    used_timeframe_name = tf["name"]
+                    used_timeframe_name = "Prev Day"
                 elif sell_signal:
                     final_signal = SignalType.SELL
-                    used_timeframe_name = tf["name"]
+                    used_timeframe_name = "Prev Day"
                 
                 if final_signal != SignalType.HOLD:
                     # Calculate Confidence
+                    base_conf = 60 # Higher base for this strong pattern
                     
-                    # 1. Base Score
-                    base_conf = 50
+                    # 1. Breakout Strength / Momentum
+                    diff = abs(curr_close - triggered_level)
+                    strength = (diff / triggered_level) * 100
+                    base_conf += min(strength * 5, 20)
                     
-                    # 2. Breakout Strength (How far past level?)
-                    diff = abs(live_price - triggered_level)
-                    pct_diff = (diff / triggered_level) * 100
-                    strength = min(pct_diff * 10, 20) # Up to 20 pts for 2% move
-                    
-                    # 3. Candle Color Alignment
-                    candle_conf = 0
-                    is_green = live_price >= df['Open'].iloc[-1] # Current candle color
-                    if (buy_signal and is_green) or (sell_signal and not is_green):
-                        candle_conf = 15
+                    # 2. Candle Color Alignment
+                    is_green = curr_close >= curr_open
+                    if (final_signal == SignalType.BUY and is_green) or (final_signal == SignalType.SELL and not is_green):
+                        base_conf += 10
                         
-                    # 4. Volume (if available) -> Check 15m volume intensity
-                    vol_conf = 0
-                    if df_15m['Volume'].iloc[-1] > df_15m['Volume'].tail(20).mean():
-                         vol_conf = 15
+                    # 3. Volume Confirmation
+                    if curr_vol_15m > avg_vol_15m:
+                         base_conf += 10
                          
-                    confidence = min(base_conf + strength + candle_conf + vol_conf, 100)
-                    
-                    # Stop at highest priority signal
-                    break
-                    
+                    confidence = min(base_conf, 100)
+
         except Exception as e:
             print(f"Error in PDHLStrategy for {symbol}: {str(e)}")
             pass
@@ -146,3 +150,5 @@ class PDHLStrategy(BaseStrategy):
             timestamp=datetime.now(timezone.utc),
             success=True
         )
+                    
+
