@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+{% endblock %}
+
+{% block title %}Signal Analysis | StockAI{% endblock %}
+
+{% block content %}
+<div class="mb-8 pl-1">
+    <h1 class="text-2xl font-semibold mb-2 bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
+        Signal Analysis</h1>
+    <p class="text-gray-500 text-sm">Visualize historic signals on the chart</p>
+</div>
+
+<!-- Controls -->
+<div class="bg-dark-card border border-dark-border rounded-xl p-6 mb-6 shadow-sm backdrop-blur-md bg-opacity-70">
+    <div class="flex flex-wrap gap-6 items-end">
+        <!-- Symbol Selection -->
+        <div class="flex-1 min-w-[200px]">
+            <label class="block text-gray-400 text-sm mb-2">Select Symbol</label>
+            <div class="relative">
+                <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                <select id="symbol-select"
+                    class="w-full h-[50px] pl-11 bg-white/[0.03] border border-dark-border text-white rounded-xl text-base transition-all focus:bg-white/[0.05] focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none appearance-none cursor-pointer">
+                    <option value="" disabled selected>Loading symbols...</option>
+                </select>
+                <i
+                    class="fas fa-chevron-down absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"></i>
+            </div>
+        </div>
+
+        <!-- Strategy Filter -->
+        <div class="min-w-[200px]">
+            <label class="block text-gray-400 text-sm mb-2">Number of Signals</label>
+            <select id="limit-select"
+                class="w-full h-[50px] px-4 bg-white/[0.03] border border-dark-border text-white rounded-xl text-base transition-all focus:bg-white/[0.05] focus:border-blue-500 outline-none">
+                <option value="10" selected>Last 10 Signals</option>
+                <option value="20">Last 20 Signals</option>
+                <option value="50">Last 50 Signals</option>
+            </select>
+        </div>
+
+        <!-- Load Button -->
+        <button onclick="loadAnalysis()"
+            class="h-[50px] px-8 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-all shadow-lg hover:shadow-blue-500/25 flex items-center gap-2">
+            <i class="fas fa-chart-bar"></i>
+            Load Analysis
+        </button>
+    </div>
+</div>
+
+<!-- Main Visualization Area -->
+<div class="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[calc(100vh-320px)] min-h-[500px]">
+
+    <!-- Chart Section (Left/Center) -->
+    <div
+        class="lg:col-span-3 bg-dark-card border border-dark-border rounded-xl flex flex-col overflow-hidden relative shadow-md">
+        <!-- Chart Header -->
+        <div class="p-4 border-b border-dark-border flex justify-between items-center bg-black/20">
+            <div class="flex items-center gap-3">
+                <h3 id="chart-title" class="text-lg font-bold text-white">No Symbol Selected</h3>
+                <span id="chart-subtitle" class="text-xs text-gray-400 bg-white/5 px-2 py-1 rounded">15m
+                    Timeframe</span>
+            </div>
+            <div class="flex gap-2">
+                <div class="flex items-center gap-2 text-xs text-gray-400 mr-4">
+                    <span class="w-2 h-2 rounded-full bg-green-500"></span> Buy
+                    <span class="w-2 h-2 rounded-full bg-red-500"></span> Sell
+                </div>
+            </div>
+        </div>
+
+        <!-- Chart Container -->
+        <div id="tv-chart" class="flex-1 w-full relative bg-[#0f1115]">
+            <div id="chart-loading"
+                class="absolute inset-0 flex flex-col items-center justify-center bg-dark-card z-10 hidden">
+                <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+                <div class="text-gray-400">Loading historical data...</div>
+            </div>
+            <div id="chart-placeholder"
+                class="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
+                <i class="fas fa-chart-area text-6xl mb-4 opacity-20"></i>
+                <p>Select a symbol and click load to view chart</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signal List (Right Sidebar) -->
+    <div class="bg-dark-card border border-dark-border rounded-xl flex flex-col overflow-hidden shadow-md">
+        <div class="p-4 border-b border-dark-border bg-black/20">
+            <h3 class="font-bold text-white">Recent Signals</h3>
+            <p class="text-xs text-gray-500 mt-0.5">Click to jump to candle</p>
+        </div>
+
+        <div id="signals-list" class="flex-1 overflow-y-auto p-2 space-y-2">
+            <!-- Empty State -->
+            <div class="flex flex-col items-center justify-center h-full text-gray-500 text-sm">
+                <span>No signals loaded</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // --- Variables ---
+    let analysisChart = null;
+    let analysisSeries = null;
+    let currentMarkers = [];
+
+    // --- Initialization ---
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadSymbols();
+    });
+
+    async function loadSymbols() {
+        const select = document.getElementById('symbol-select');
+        try {
+            const response = await fetch('/api/symbols');
+            const symbols = await response.json();
+
+            if (symbols.error) throw new Error(symbols.error);
+
+            select.innerHTML = '<option value="" disabled selected>Select Symbol</option>';
+            symbols.forEach(sym => {
+                const opt = document.createElement('option');
+                opt.value = sym;
+                opt.innerText = sym;
+                select.appendChild(opt);
+            });
+        } catch (e) {
+            console.error(e);
+            select.innerHTML = '<option disabled>Error loading symbols</option>';
+        }
+    }
+
+    // --- Core Logic ---
+    async function loadAnalysis() {
+        const symbol = document.getElementById('symbol-select').value;
+        const limit = document.getElementById('limit-select').value;
+        const loading = document.getElementById('chart-loading');
+        const placeholder = document.getElementById('chart-placeholder');
+
+        if (!symbol) {
+            alert('Please select a symbol first');
+            return;
+        }
+
+        // UI Updates
+        loading.classList.remove('hidden');
+        placeholder.classList.add('hidden');
+        document.getElementById('chart-title').innerText = symbol;
+        document.getElementById('signals-list').innerHTML = ''; // Clear list
+
+        try {
+            // 1. Initialize Chart if needed
+            initChart();
+
+            // 2. Fetch Historical Data (30 days default)
+            const historyPromise = fetch(`/api/history?symbol=${symbol}&interval=15m&period=30`).then(r => r.json());
+
+            // 3. Fetch Signals
+            const signalsPromise = fetch(`/api/analysis/signals?symbol=${symbol}&limit=${limit}`).then(r => r.json());
+
+            const [historyData, signalsData] = await Promise.all([historyPromise, signalsPromise]);
+
+            if (historyData.error) throw new Error("History: " + historyData.error);
+            if (signalsData.error) throw new Error("Signals: " + signalsData.error);
+
+            // 4. Render Chart Data
+            if (analysisSeries) {
+                analysisSeries.setData(historyData);
+                analysisChart.timeScale().fitContent();
+            }
+
+            // 5. Process Markers
+            processSignals(signalsData);
+
+        } catch (e) {
+            console.error(e);
+            alert("Error loading data: " + e.message);
+        } finally {
+            loading.classList.add('hidden');
+        }
+    }
+
+    function processSignals(signals) {
+        currentMarkers = [];
+        const listContainer = document.getElementById('signals-list');
+
+        if (!signals || signals.length === 0) {
+            listContainer.innerHTML = '<div class="flex flex-col items-center justify-center h-full text-gray-500 text-sm"><span>No signals found</span></div>';
+            if (analysisSeries) analysisSeries.setMarkers([]);
+            return;
+        }
+
+        signals.forEach(sig => {
+            const date = new Date(sig.timestamp);
+            const unixTime = Math.floor(date.getTime() / 1000);
+            const isBuy = sig.signal_type.toUpperCase() === 'BUY';
+
+            // Create Marker
+            currentMarkers.push({
+                time: unixTime,
+                position: isBuy ? 'belowBar' : 'aboveBar',
+                color: isBuy ? '#10b981' : '#ef4444',
+                shape: isBuy ? 'arrowUp' : 'arrowDown',
+                text: `${sig.signal_type} @ ${sig.price}`,
+                id: sig.timestamp // unique ref
+            });
+
+            // Add to Sidebar List
+            const item = document.createElement('div');
+            item.className = `p-3 rounded-lg border border-dark-border cursor-pointer transition-all hover:translate-x-1 ${isBuy ? 'bg-green-500/5 hover:bg-green-500/10' : 'bg-red-500/5 hover:bg-red-500/10'}`;
+            item.innerHTML = `
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-xs font-mono text-gray-500">${date.toLocaleString()}</span>
+                    <span class="text-xs font-bold ${isBuy ? 'text-green-500' : 'text-red-500'}">${sig.signal_type}</span>
+                </div>
+                <div class="flex justify-between items-center text-sm">
+                    <span class="text-white font-medium">$${sig.price}</span>
+                    <span class="text-xs text-gray-400">${(sig.confidence * 100).toFixed(0)}% Conf</span>
+                </div>
+                <div class="text-[10px] text-gray-600 mt-1 truncate">${sig.strategy_name}</div>
+            `;
+            item.onclick = () => focusOnTime(unixTime);
+            listContainer.appendChild(item);
+        });
+
+        // Sort markers by time (Lightweight charts requirement)
+        currentMarkers.sort((a, b) => a.time - b.time);
+
+        if (analysisSeries) {
+            analysisSeries.setMarkers(currentMarkers);
+        }
+    }
+
+    function focusOnTime(time) {
+        if (analysisChart) {
+            analysisChart.timeScale().setVisibleRange({
+                from: time - (3600 * 24), // 1 day before
+                to: time + (3600 * 4)     // 4 hours after
+            });
+        }
+    }
+
+    // --- Chart Setup ---
+    function initChart() {
+        if (analysisChart) return;
+
+        const chartContainer = document.getElementById('tv-chart');
+        if (!chartContainer) return;
+
+        try {
+            analysisChart = LightweightCharts.createChart(chartContainer, {
+                layout: {
+                    background: { color: '#0f1115' },
+                    textColor: '#9ca3af',
+                },
+                grid: {
+                    vertLines: { color: '#1f2937' },
+                    horzLines: { color: '#1f2937' },
+                },
+                timeScale: {
+                    timeVisible: true,
+                    secondsVisible: false,
+                    borderColor: '#2a2e35',
+                },
+                rightPriceScale: {
+                    borderColor: '#2a2e35',
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                },
+            });
+
+            analysisSeries = analysisChart.addCandlestickSeries({
+                upColor: '#10b981',
+                downColor: '#ef4444',
+                borderUpColor: '#10b981',
+                borderDownColor: '#ef4444',
+                wickUpColor: '#10b981',
+                wickDownColor: '#ef4444',
+            });
+
+            // Resize observer
+            new ResizeObserver(entries => {
+                if (analysisChart) {
+                    const rect = chartContainer.getBoundingClientRect();
+                    analysisChart.resize(rect.width, rect.height);
+                }
+            }).observe(chartContainer);
+
+        } catch (e) {
+            console.error("Chart Error:", e);
+            // If createChart fails, analysisChart might be null/undefined
+            analysisChart = null;
+            throw e;
+        }
+    }
+</script>
+{% endblock %}

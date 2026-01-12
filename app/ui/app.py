@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, jsonify, send_file, redirect
 from app.database.mongodb import get_database as get_db
+from app.utility.data_provider import fetch_historical_data
 from bson import ObjectId
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -30,6 +31,11 @@ def root():
 def index():
     """Home page with table, pagination and search"""
     return render_template('index.html')
+
+@app.route('/analysis')
+def analysis_page():
+    """Signal Analysis Page"""
+    return render_template('historical_data.html')
 
 @app.route('/api/data')
 def get_data():
@@ -158,6 +164,89 @@ def get_data():
     except Exception as e:
         import traceback
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+@app.route('/api/history')
+def get_history():
+    """API endpoint to fetch historical data for chart"""
+    try:
+        symbol = request.args.get('symbol')
+        interval = request.args.get('interval', '15m')
+        period = int(request.args.get('period', 30))
+        
+        if not symbol:
+            return jsonify({'error': 'Symbol is required'}), 400
+            
+        df = fetch_historical_data(symbol, period=period, interval=interval)
+        
+        # Format for lightweight-charts
+        result = []
+        for index, row in df.iterrows():
+            result.append({
+                'time': int(index.timestamp()),
+                'open': row['Open'],
+                'high': row['High'],
+                'low': row['Low'],
+                'close': row['Close']
+            })
+            
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/symbols')
+def get_symbols():
+    """API endpoint to get list of unique symbols"""
+    try:
+        collection = get_db().batch_results
+        symbols = collection.distinct('results.symbol')
+        symbols.sort()
+        return jsonify(symbols)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/analysis/signals')
+def get_analysis_signals():
+    """API endpoint to fetch recent signals for specific symbol"""
+    try:
+        symbol = request.args.get('symbol')
+        limit = int(request.args.get('limit', 10))
+        
+        if not symbol:
+            return jsonify({'error': 'Symbol is required'}), 400
+            
+        collection = get_db().batch_results
+        
+        pipeline = [
+            {'$unwind': '$results'},
+            {'$unwind': '$results.strategies'},
+            {'$match': {
+                'results.symbol': symbol,
+                'results.strategies.signal_type': {'$in': ['BUY', 'SELL', 'buy', 'sell']}
+            }},
+            {'$sort': {'results.strategies.timestamp': -1}},
+            {'$limit': limit},
+            {'$project': {
+                'strategy_name': '$results.strategies.strategy_name',
+                'signal_type': '$results.strategies.signal_type',
+                'price': '$results.strategies.price',
+                'timestamp': '$results.strategies.timestamp',
+                'confidence': '$results.strategies.confidence'
+            }}
+        ]
+        
+        signals = list(collection.aggregate(pipeline))
+        
+        # Process dates
+        for s in signals:
+            if '_id' in s: s.pop('_id')
+            if isinstance(s.get('timestamp'), datetime):
+                s['timestamp'] = s['timestamp'].isoformat()
+                
+        return jsonify(signals)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/logs')
 def logs():
