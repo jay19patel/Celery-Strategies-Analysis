@@ -110,6 +110,7 @@
     let analysisChart = null;
     let analysisSeries = null;
     let currentMarkers = [];
+    let activeSignalId = null;
 
     // --- Initialization ---
     document.addEventListener('DOMContentLoaded', async () => {
@@ -214,6 +215,7 @@
 
             // Add to Sidebar List
             const item = document.createElement('div');
+            item.dataset.id = sig.timestamp;
             item.className = `p-3 rounded-lg border border-dark-border cursor-pointer transition-all hover:translate-x-1 ${isBuy ? 'bg-green-500/5 hover:bg-green-500/10' : 'bg-red-500/5 hover:bg-red-500/10'}`;
             item.innerHTML = `
                 <div class="flex justify-between items-center mb-1">
@@ -226,7 +228,7 @@
                 </div>
                 <div class="text-[10px] text-gray-600 mt-1 truncate">${sig.strategy_name}</div>
             `;
-            item.onclick = () => focusOnTime(unixTime);
+            item.onclick = () => selectSignal(sig.timestamp, unixTime);
             listContainer.appendChild(item);
         });
 
@@ -236,6 +238,46 @@
         if (analysisSeries) {
             analysisSeries.setMarkers(currentMarkers);
         }
+    }
+
+    function selectSignal(id, time) {
+        // Toggle selection
+        if (activeSignalId === id) {
+            activeSignalId = null;
+        } else {
+            activeSignalId = id;
+        }
+
+        // Update Chart Markers
+        if (analysisSeries) {
+            if (activeSignalId) {
+                const marker = currentMarkers.find(m => m.id === activeSignalId);
+                analysisSeries.setMarkers(marker ? [marker] : []);
+                focusOnTime(time);
+            } else {
+                analysisSeries.setMarkers(currentMarkers);
+            }
+        }
+
+        // Update Sidebar Visuals
+        const items = document.querySelectorAll('#signals-list > div');
+        items.forEach(el => {
+            if (el.dataset.id === String(id)) {
+                if (activeSignalId === id) {
+                    el.classList.add('ring-2', 'ring-blue-500', 'bg-white/5');
+                } else {
+                    el.classList.remove('ring-2', 'ring-blue-500', 'bg-white/5');
+                }
+                el.classList.remove('opacity-40');
+            } else {
+                el.classList.remove('ring-2', 'ring-blue-500', 'bg-white/5');
+                if (activeSignalId !== null) {
+                    el.classList.add('opacity-40');
+                } else {
+                    el.classList.remove('opacity-40');
+                }
+            }
+        });
     }
 
     function focusOnTime(time) {
