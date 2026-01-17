@@ -45,16 +45,14 @@ class PDHLStrategy(BaseStrategy):
         live_price = df_15m['Close'].iloc[-1]
         
         # Priority order: 1 Month > 1 Week > 1 Day
-        timeframes = [
-            {"interval": "1M", "period": 5000, "name": "Prev Month"},
-            {"interval": "1w", "period": 2100, "name": "Prev Week"},
-            {"interval": "1d", "period": 400, "name": "Prev Day"},
-        ]
-
+        # We will check all, and if multiple match, we take the highest priority (Month > Week > Day)
+        # However, usually we just want ANY breakout. But let's check in order.
+        
         final_signal = SignalType.HOLD
         confidence = 0.0
         used_timeframe_name = "None"
-        
+        triggered_level = 0.0
+
         try:
             # Pre-calculate 15m Candle Levels
             # User Request: "running candle nahi chaiye" -> Use Last Closed Candle (iloc[-2])
@@ -73,66 +71,76 @@ class PDHLStrategy(BaseStrategy):
             curr_close = df_15m['Close'].iloc[-2]
             curr_high = df_15m['High'].iloc[-2]
             curr_low = df_15m['Low'].iloc[-2]
-            curr_open = df_15m['Open'].iloc[-2] # For color check
+            curr_open = df_15m['Open'].iloc[-2]
             
-            # Volume analysis for confidence
-            # Original: -21:-1 (Last 20 excl running). Now Running is ignored (-2 is target).
-            # So range shifts back by 1: -22:-2
+            # Volume for confidence
             avg_vol_15m = df_15m['Volume'].iloc[-22:-2].mean() if len(df_15m) > 21 else 0
             curr_vol_15m = df_15m['Volume'].iloc[-2]
 
-            # --- PREVIOUS DAY DATA ONLY ---
-            # User Request: "only previd day ka hi rakhe weeks and month nikal do"
-            df_day = fetch_historical_data(symbol, period=400, interval="1d", ttl=3600)
+            # Fetch Higher Timeframe Data
+            # Note: Fetching them sequentially. 
             
-            if df_day is not None and not df_day.empty and len(df_day) >= 2:
-                # Get Previous Candle (Last Closed Ref Candle)
-                prev_high = df_day['High'].iloc[-2]
-                prev_low = df_day['Low'].iloc[-2]
+            # 1. Month
+            df_month = fetch_historical_data(symbol, period=5000, interval="1M")
+            # 2. Week
+            df_week = fetch_historical_data(symbol, period=2100, interval="1w")
+            # 3. Day
+            df_day = fetch_historical_data(symbol, period=400, interval="1d", ttl=3600)
+
+            # Define checks
+            check_list = [
+                {"df": df_month, "name": "Prev Month"},
+                {"df": df_week, "name": "Prev Week"},
+                {"df": df_day, "name": "Prev Day"},
+            ]
+
+            for item in check_list:
+                df = item["df"]
+                name = item["name"]
                 
-                # --- Signal Logic ---
-                # User Request (Simplified): "Use ONLY High/Low, ignore Open/Close"
-                
-                triggered_level = 0.0
-                buy_signal = False
-                sell_signal = False
-    
-                # BUY: Close > Prev High
-                if curr_close > prev_high:
-                    buy_signal = True
-                    triggered_level = prev_high
-                
-                # SELL: Close < Prev Low
-                elif curr_close < prev_low:
-                    sell_signal = True
-                    triggered_level = prev_low
-                
-                if buy_signal:
-                    final_signal = SignalType.BUY
-                    used_timeframe_name = "Prev Day"
-                elif sell_signal:
-                    final_signal = SignalType.SELL
-                    used_timeframe_name = "Prev Day"
-                
-                if final_signal != SignalType.HOLD:
-                    # Calculate Confidence
-                    base_conf = 60 # Higher base for this strong pattern
+                if df is not None and not df.empty and len(df) >= 2:
+                    # Get Ref Candle (Last Closed) -> iloc[-2]
+                    # Note: For 1M, if current month is running, -2 is prev month. correct.
+                    ref_high = df['High'].iloc[-2]
+                    ref_low = df['Low'].iloc[-2]
                     
-                    # 1. Breakout Strength / Momentum
-                    diff = abs(curr_close - triggered_level)
-                    strength = (diff / triggered_level) * 100
-                    base_conf += min(strength * 5, 20)
+                    # BUY Condition:
+                    # Candle Close > Ref High AND Candle Low < Ref High
+                    # (Meaning it started/dipped below the level and closed above it)
+                    if curr_close > ref_high and curr_low < ref_high:
+                        final_signal = SignalType.BUY
+                        used_timeframe_name = name
+                        triggered_level = ref_high
+                        break # Prioritize higher timeframe (Month checked first)
+
+                    # SELL Condition:
+                    # Candle Close < Ref Low AND Candle High > Ref Low
+                    # (Meaning it started/spiked above the level and closed below it)
+                    elif curr_close < ref_low and curr_high > ref_low:
+                        final_signal = SignalType.SELL
+                        used_timeframe_name = name
+                        triggered_level = ref_low
+                        break
+
+            if final_signal != SignalType.HOLD:
+                # Calculate Confidence
+                base_conf = 60 
+                
+                # 1. Breakout Strength (how far it moved)
+                diff = abs(curr_close - triggered_level)
+                strength = (diff / triggered_level) * 100
+                base_conf += min(strength * 5, 20)
+                
+                # 2. Candle Color Alignment
+                is_green = curr_close >= curr_open
+                if (final_signal == SignalType.BUY and is_green) or (final_signal == SignalType.SELL and not is_green):
+                    base_conf += 10
                     
-                    # 2. Candle Color Alignment
-                    is_green = curr_close >= curr_open
-                    if (final_signal == SignalType.BUY and is_green) or (final_signal == SignalType.SELL and not is_green):
+                # 3. Volume Confirmation
+                if avg_vol_15m > 0 and curr_vol_15m > avg_vol_15m:
                         base_conf += 10
                         
-                    # 3. Volume Confirmation
-                    if curr_vol_15m > avg_vol_15m:
-                         base_conf += 10
-                         
-                    confidence = min(base_conf, 100)
+                confidence = min(base_conf, 100)
 
         except Exception as e:
             print(f"Error in PDHLStrategy for {symbol}: {str(e)}")

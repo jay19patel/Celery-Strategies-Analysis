@@ -40,8 +40,6 @@ class MotherCandleStrategy(BaseStrategy):
         confidence = 0.0
         
         try:
-            # Pre-calculate 15m Candle Levels (Signal Candle)
-            # User Request: "running candle nahi chaiye" -> Use Last Closed Candle (iloc[-2])
             if len(df_15m) < 2:
                  execution_time = time.time() - start_time
                  return StrategyResult(
@@ -58,16 +56,9 @@ class MotherCandleStrategy(BaseStrategy):
             curr_high = df_15m['High'].iloc[-2]
             curr_low = df_15m['Low'].iloc[-2]
             
-            # Additional Volume check for confidence
-            # Original: -6:-2. Now we need to be careful with range if we use it.
             avg_vol_15m = df_15m['Volume'].iloc[-6:-2].mean() if len(df_15m) > 6 else 0
             curr_vol_15m = df_15m['Volume'].iloc[-2]
 
-            # --- Multi-Timeframe Patterns ---
-            # User Request: "15m, 1 days, 1 week, 1 month ke hisabse"
-            # Logic: "Mother Candle" = Inside Bar Pattern.
-            # Pattern: Mother Candle (large) -> Child Candle (inside mother) -> Breakout Candle (current signal)
-            
             timeframes = [
                 {"interval": "15m", "period": 5, "name": "15 Minute"},
                 {"interval": "1d", "period": 400, "name": "1 Day"},
@@ -90,49 +81,37 @@ class MotherCandleStrategy(BaseStrategy):
                     df_tf = fetch_historical_data(symbol, period=tf["period"], interval=tf["interval"], ttl=ttl)
                 
                 # Check Data Length
-                # We need:
-                # Index -4: Mother
-                # Index -3: Child (Inside)
-                # Index -2: Signal (Breakout, Closed)
-                # Index -1: Running (Ignored)
-                # So we need at least 4 candles.
+
                 if df_tf is None or df_tf.empty or len(df_tf) < 4:
                     continue
                     
                 # Identify Candles
-                mother_high = df_tf['High'].iloc[-4]
-                mother_low = df_tf['Low'].iloc[-4]
-                mother_close = df_tf['Close'].iloc[-4]
                 
-                child_high = df_tf['High'].iloc[-3]
-                child_low = df_tf['Low'].iloc[-3]
+                mother_high = df_tf['High'].iloc[-3]
+                mother_low = df_tf['Low'].iloc[-3]
+                mother_close = df_tf['Close'].iloc[-3]
+                
+                child_high = df_tf['High'].iloc[-2]
+                child_low = df_tf['Low'].iloc[-2]
                 
                 # Check 1: Inside Bar Condition (Child inside Mother)
                 is_inside_bar = (child_high <= mother_high) and (child_low >= mother_low)
                 
                 if not is_inside_bar:
                     continue
-                    
-                # Check 2: Breakout Condition (Signal Candle breaks Mother)
-                # We apply the specific "Breakout + Dip" logic requested for Mother Candle.
                 
-                # Signal Candle is the Current Closed 15m candle?
-                # WAIT: If checking 1D mother candle, we compare the *Current 15m Candle* against the 1D Mother Levels.
-                # If checking 15m mother candle, we compare *Current 15m* against 15m Mother.
-                # The logic above (curr_close vs mother_high) works if we use 15m current price against Reference Levels.
-                
-                # BUT, if the Reference is 1D, the "Mother" is 2 days ago, "Child" is Yesterday.
-                # Breakout happens TODAY (Intraday).
+                trigger_price = df_15m['Close'].iloc[-1]
+                trigger_low = df_15m['Low'].iloc[-1]
+                trigger_high = df_15m['High'].iloc[-1]
                 
                 mc_buy = False
                 mc_sell = False
                 
-                # BUY: Intraday Close > Mother High AND Intraday Low < Mother Close (Dip)
-                if (curr_close > mother_high) and (curr_low < mother_close):
+                if (trigger_price > mother_high) and (trigger_low < mother_close):
                     mc_buy = True
                 
-                # SELL: Intraday Close < Mother Low AND Intraday High > Mother Close (Dip)
-                elif (curr_close < mother_low) and (curr_high > mother_close):
+                # SELL: Current Close < Mother Low AND Current High > Mother Close (Dip)
+                elif (trigger_price < mother_low) and (trigger_high > mother_close):
                     mc_sell = True
                     
                 if mc_buy:
@@ -149,10 +128,7 @@ class MotherCandleStrategy(BaseStrategy):
                     # Volume Confirmation (using 15m volume info)
                     if curr_vol_15m > avg_vol_15m:
                         confidence = min(confidence + 10, 100.0)
-                    break # Prioritize first found? Or specific order? (15m > 1d ...)
-                    # User didn't specify priority, but usually lower TF signals first or higher?
-                    # Let's keep loop order: 15m, 1d, 1w... 
-        
+                    break
         except Exception as e:
             print(f"Error in MotherCandleStrategy processing {symbol}: {str(e)}")
             pass
