@@ -103,20 +103,30 @@ class PDHLStrategy(BaseStrategy):
                     # Note: For 1M, if current month is running, -2 is prev month. correct.
                     ref_high = df['High'].iloc[-2]
                     ref_low = df['Low'].iloc[-2]
+
+                    curr_body = abs(curr_close - curr_open)
+                    curr_lower_shadow = min(curr_open, curr_close) - curr_low
+                    curr_upper_shadow = curr_high - max(curr_open, curr_close)
                     
                     # BUY Condition:
-                    # Candle Close > Ref High AND Candle Low < Ref High
-                    # (Meaning it started/dipped below the level and closed above it)
-                    if curr_close > ref_high and curr_low < ref_high:
+                    # 1. Breakout: Started below Ref High (Low < Ref High) and Closed above it (Close > Ref High)
+                    # 2. Green Candle: Close > Open
+                    # 3. Long Lower Shadow: Lower Shadow > Body (indicating rejection from lower prices)
+                    if (curr_close > ref_high and curr_low < ref_high and
+                        curr_close > curr_open and curr_lower_shadow > curr_body):
+                        
                         final_signal = SignalType.BUY
                         used_timeframe_name = name
                         triggered_level = ref_high
                         break # Prioritize higher timeframe (Month checked first)
 
                     # SELL Condition:
-                    # Candle Close < Ref Low AND Candle High > Ref Low
-                    # (Meaning it started/spiked above the level and closed below it)
-                    elif curr_close < ref_low and curr_high > ref_low:
+                    # 1. Breakout: Started above Ref Low (High > Ref Low) and Closed below it (Close < Ref Low)
+                    # 2. Red Candle: Close < Open
+                    # 3. Long Upper Shadow: Upper Shadow > Body (indicating rejection from higher prices)
+                    elif (curr_close < ref_low and curr_high > ref_low and
+                          curr_close < curr_open and curr_upper_shadow > curr_body):
+                        
                         final_signal = SignalType.SELL
                         used_timeframe_name = name
                         triggered_level = ref_low
@@ -131,10 +141,9 @@ class PDHLStrategy(BaseStrategy):
                 strength = (diff / triggered_level) * 100
                 base_conf += min(strength * 5, 20)
                 
-                # 2. Candle Color Alignment
-                is_green = curr_close >= curr_open
-                if (final_signal == SignalType.BUY and is_green) or (final_signal == SignalType.SELL and not is_green):
-                    base_conf += 10
+                # 2. Candle Color Alignment (Already part of signal, but keeping bonus for clarity)
+                # Since we strictly check for Green/Red now, this is always true for the respective signal
+                base_conf += 10
                     
                 # 3. Volume Confirmation
                 if avg_vol_15m > 0 and curr_vol_15m > avg_vol_15m:
