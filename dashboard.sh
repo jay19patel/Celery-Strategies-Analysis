@@ -25,5 +25,8 @@ tell application "Terminal"
     -- Window 4: Performance Logs
     do script "cd \"$LOGS_DIR\" && clear && echo '=== FINANCIAL PERFORMANCE & STATISTICS ===' && tail -f performance.log"
     
+    -- Window 5: Strategy Portfolio Monitor (Paper Broker)
+    do script "cd \"$LOGS_DIR/..\" && clear && uv run python app/scripts/monitor_broker.py"
+    
 end tell
 EOF

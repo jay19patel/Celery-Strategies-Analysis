@@ -30,7 +30,6 @@ class MotherCandleStrategy(BaseStrategy):
                 strategy_name=self.name,
                 symbol=symbol,
                 signal_type=SignalType.HOLD,
-                confidence=0.0,
                 execution_time=execution_time,
                 timestamp=datetime.now(timezone.utc),
                 price=0.0
@@ -40,7 +39,6 @@ class MotherCandleStrategy(BaseStrategy):
         live_price = df_15m['Close'].iloc[-1]
         
         final_signal = SignalType.HOLD
-        confidence = 0.0
         
         try:
             if len(df_15m) < 2:
@@ -49,7 +47,6 @@ class MotherCandleStrategy(BaseStrategy):
                     strategy_name=f"{self.name} (Insufficient Data)",
                     symbol=symbol,
                     signal_type=SignalType.HOLD,
-                    confidence=0.0,
                     execution_time=execution_time,
                     timestamp=datetime.now(timezone.utc),
                     price=round(live_price, 2)
@@ -120,17 +117,10 @@ class MotherCandleStrategy(BaseStrategy):
                 if mc_buy:
                     final_signal = SignalType.BUY
                     used_timeframe_name = tf["name"]
-                    triggered_level = mother_high
+                    break
                 elif mc_sell:
                     final_signal = SignalType.SELL
                     used_timeframe_name = tf["name"]
-                    triggered_level = mother_low
-                
-                if final_signal != SignalType.HOLD:
-                    confidence = 80.0
-                    # Volume Confirmation (using 15m volume info)
-                    if curr_vol_15m > avg_vol_15m:
-                        confidence = min(confidence + 10, 100.0)
                     break
         except Exception as e:
             logger.error(f"❌ Error in MotherCandleStrategy processing {symbol}: {str(e)}", exc_info=True)
@@ -141,7 +131,6 @@ class MotherCandleStrategy(BaseStrategy):
             strategy_name=f"{self.name} ({used_timeframe_name})" if used_timeframe_name != "None" else self.name,
             symbol=symbol,
             signal_type=final_signal,
-            confidence=round(confidence / 100.0, 3),
             execution_time=execution_time,
             price=round(live_price, 2),
             timestamp=datetime.now(timezone.utc),

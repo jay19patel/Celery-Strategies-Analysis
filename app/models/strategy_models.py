@@ -13,7 +13,6 @@ class StrategyResult(BaseModel):
     strategy_name: str
     symbol: str
     signal_type: SignalType
-    confidence: float
     execution_time: float
     timestamp: datetime
     price: Optional[float] = None

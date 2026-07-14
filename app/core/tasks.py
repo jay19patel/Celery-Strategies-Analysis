@@ -8,9 +8,19 @@ from app.core.strategy_manager import StrategyManager
 from app.database.mongodb import save_batch_results
 from app.database.redis_publisher import publish_batch_complete
 from app.core.logger import get_celery_logger
+from app.core.paper_broker import PaperBroker
 import time
 
 logger = get_celery_logger()
+
+# Lazily initialized to handle prefork correctly
+_paper_broker = None
+
+def get_paper_broker():
+    global _paper_broker
+    if _paper_broker is None:
+        _paper_broker = PaperBroker()
+    return _paper_broker
 
 
 def _load_strategy_class(dotted_path: str):
@@ -147,6 +157,26 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
 
         pubsub_response = publish_batch_complete(publish_payload)
         logger.info(f"✅ STEP 3.1 COMPLETED: Published to channel '{pubsub_response.get('channel')}'")
+
+        # STEP 3.1.5: Pass Actionable Signals to PaperBroker
+        broker = get_paper_broker()
+        for symbol_res in aggregated_result.get("results", []):
+            symbol = symbol_res.get("symbol")
+            for strat_res in symbol_res.get("strategies", []):
+                signal = strat_res.get("signal_type")
+                # StrategyResult parses string to Enum, but dictionary is string. Let's convert to Enum
+                try:
+                    sig_enum = SignalType(signal)
+                    price = strat_res.get("price", 0.0)
+                    timestamp = strat_res.get("timestamp")
+                    if isinstance(timestamp, str):
+                        timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    elif not timestamp:
+                        timestamp = datetime.utcnow()
+                        
+                    broker.process_signal(strat_res.get("strategy_name"), symbol, sig_enum, price, timestamp)
+                except Exception as e:
+                    logger.error(f"Failed to process signal with broker: {e}", exc_info=True)
         
         # Update result with metadata for storage
         aggregated_result["_id"] = batch_oid  # Use the pre-generated ID

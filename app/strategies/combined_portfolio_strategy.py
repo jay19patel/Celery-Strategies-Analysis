@@ -31,7 +31,6 @@ class CombinedPortfolioStrategy(BaseStrategy):
                     strategy_name=self.name,
                     symbol=symbol,
                     signal_type=SignalType.HOLD,
-                    confidence=0.0,
                     execution_time=time.time() - start_time,
                     timestamp=datetime.now(timezone.utc),
                     price=0.0,
@@ -75,16 +74,13 @@ class CombinedPortfolioStrategy(BaseStrategy):
             # Resolve signal
             if is_buy and not is_sell:
                 signal_type = SignalType.BUY
-                confidence = 1.0
             elif is_sell and not is_buy:
                 signal_type = SignalType.SELL
-                confidence = 1.0
 
             return StrategyResult(
                 strategy_name=triggered_strategy_name,
                 symbol=symbol,
                 signal_type=signal_type,
-                confidence=confidence,
                 execution_time=time.time() - start_time,
                 timestamp=datetime.now(timezone.utc),
                 price=round(price, 2),
@@ -97,7 +93,6 @@ class CombinedPortfolioStrategy(BaseStrategy):
                 strategy_name=self.name,
                 symbol=symbol,
                 signal_type=SignalType.HOLD,
-                confidence=0.0,
                 execution_time=time.time() - start_time,
                 timestamp=datetime.now(timezone.utc),
                 price=0.0,

@@ -39,7 +39,6 @@ class PDHLStrategy(BaseStrategy):
                 strategy_name=self.name,
                 symbol=symbol,
                 signal_type=SignalType.HOLD,
-                confidence=0.0,
                 execution_time=execution_time,
                 timestamp=datetime.now(timezone.utc),
                 price=0.0
@@ -52,7 +51,6 @@ class PDHLStrategy(BaseStrategy):
         # However, usually we just want ANY breakout. But let's check in order.
         
         final_signal = SignalType.HOLD
-        confidence = 0.0
         used_timeframe_name = "None"
         triggered_level = 0.0
 
@@ -65,7 +63,6 @@ class PDHLStrategy(BaseStrategy):
                     strategy_name=f"{self.name} (Insufficient Data)",
                     symbol=symbol,
                     signal_type=SignalType.HOLD,
-                    confidence=0.0,
                     execution_time=execution_time,
                     timestamp=datetime.now(timezone.utc),
                     price=round(live_price, 2)
@@ -76,10 +73,6 @@ class PDHLStrategy(BaseStrategy):
             curr_low = df_15m['Low'].iloc[-2]
             curr_open = df_15m['Open'].iloc[-2]
             
-            # Volume for confidence
-            avg_vol_15m = df_15m['Volume'].iloc[-22:-2].mean() if len(df_15m) > 21 else 0
-            curr_vol_15m = df_15m['Volume'].iloc[-2]
-
             # Fetch Higher Timeframe Data
             # Note: Fetching them sequentially. 
             
@@ -135,25 +128,6 @@ class PDHLStrategy(BaseStrategy):
                         triggered_level = ref_low
                         break
 
-            if final_signal != SignalType.HOLD:
-                # Calculate Confidence
-                base_conf = 60 
-                
-                # 1. Breakout Strength (how far it moved)
-                diff = abs(curr_close - triggered_level)
-                strength = (diff / triggered_level) * 100
-                base_conf += min(strength * 5, 20)
-                
-                # 2. Candle Color Alignment (Already part of signal, but keeping bonus for clarity)
-                # Since we strictly check for Green/Red now, this is always true for the respective signal
-                base_conf += 10
-                    
-                # 3. Volume Confirmation
-                if avg_vol_15m > 0 and curr_vol_15m > avg_vol_15m:
-                        base_conf += 10
-                        
-                confidence = min(base_conf, 100)
-
         except Exception as e:
             logger.error(f"❌ Error in PDHLStrategy for {symbol}: {str(e)}", exc_info=True)
 
@@ -163,11 +137,8 @@ class PDHLStrategy(BaseStrategy):
             strategy_name=f"{self.name} ({used_timeframe_name})" if used_timeframe_name != "None" else self.name,
             symbol=symbol,
             signal_type=final_signal,
-            confidence=round(confidence / 100.0, 3),
             execution_time=execution_time,
             price=round(live_price, 2),
             timestamp=datetime.now(timezone.utc),
             success=True
-        )
-                    
 
