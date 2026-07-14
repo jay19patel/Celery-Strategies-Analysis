@@ -11,7 +11,7 @@ from app.core.logger import get_data_provider_logger
 logger = get_data_provider_logger()
 
 import redis
-import pickle
+import msgpack
 from app.core.settings import settings
 
 # Initialize Redis client for caching (using DB 3 to separate from Celery)
@@ -39,7 +39,15 @@ def _get_from_cache(cache_key: str):
     try:
         cached_data = _redis_client.get(cache_key)
         if cached_data:
-            return pickle.loads(cached_data)
+            data_dict = msgpack.unpackb(cached_data)
+            df = pd.DataFrame(
+                data=data_dict.get('data'),
+                index=pd.to_datetime(data_dict.get('index')),
+                columns=data_dict.get('columns')
+            )
+            # Restore DataFrame's index name if needed (often None)
+            df.index.name = data_dict.get('index_name', 'DateTime')
+            return df
     except Exception as e:
         logger.error(f"⚠️  Redis read error: {str(e)}")
     
@@ -52,7 +60,12 @@ def _save_to_cache(cache_key: str, data: pd.DataFrame, ttl: int = None):
         return
         
     try:
-        serialized = pickle.dumps(data)
+        data_dict = data.to_dict(orient='split')
+        # Convert Timestamp index to ISO strings for msgpack compatibility
+        data_dict['index'] = [x.isoformat() if hasattr(x, 'isoformat') else str(x) for x in data_dict['index']]
+        data_dict['index_name'] = data.index.name
+        
+        serialized = msgpack.packb(data_dict)
         # Use provided TTL or default CACHE_DURATION
         expiry = ttl if ttl is not None else CACHE_DURATION
         _redis_client.setex(cache_key, expiry, serialized)

@@ -5,6 +5,9 @@ from app.core.base_strategy import BaseStrategy
 from app.models.strategy_models import SignalType, StrategyResult
 from app.utility.features import STRATEGIES, build_features, latest_signal
 from app.utility.data_provider import fetch_historical_data
+from app.core.logger import get_strategies_logger
+
+logger = get_strategies_logger()
 
 FETCH_PERIOD_DAYS = 30
 FETCH_INTERVAL = "1h"
@@ -67,7 +70,7 @@ class CombinedPortfolioStrategy(BaseStrategy):
             )
 
         except Exception as e:
-            print(f"Error in CombinedPortfolioStrategy for {symbol}: {str(e)}")
+            logger.error(f"❌ Error in CombinedPortfolioStrategy for {symbol}: {str(e)}", exc_info=True)
             return StrategyResult(
                 strategy_name=self.name,
                 symbol=symbol,

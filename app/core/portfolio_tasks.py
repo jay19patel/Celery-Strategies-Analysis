@@ -28,21 +28,11 @@ from app.utility.data_provider import fetch_historical_data
 
 logger = get_celery_logger()
 
+# Use settings instead of hardcoded params
 SYMBOL = settings.portfolio_symbol
 INTERVAL = settings.portfolio_interval
 
-INITIAL_CAPITAL = 100.0
-RISK_PER_TRADE_PCT = 2.0
-STOP_LOSS_PCT = 1.0
-TAKE_PROFIT_PCT = 3.0
-MAX_HOLD_BARS = 20
-FEE_PCT = 0.05
-MAX_LEVERAGE = 2.0
-MAX_CONCURRENT_TRADES = 5
-PORTFOLIO_RISK_CAP_PCT = 10.0
-DRAWDOWN_THROTTLE_TRIGGER_PCT = 10.0
-DRAWDOWN_RECOVERY_PCT = 5.0
-THROTTLED_RISK_PCT = 1.0
+FETCH_PERIOD_DAYS = 30
 
 # Fetched every cycle - enough for every indicator's own warmup (~100 bars =
 # ~4 days at 1h) plus comfortable margin. Data isn't cached separately here;
@@ -51,9 +41,19 @@ THROTTLED_RISK_PCT = 1.0
 FETCH_PERIOD_DAYS = 30
 
 
-@celery_app.task(name="run_portfolio_task")
-def run_portfolio_task():
+@celery_app.task(bind=True, name="run_portfolio_task", acks_late=True)
+def run_portfolio_task(self):
+    lock = None
     try:
+        # Prevent concurrent runs via Redis lock
+        from app.database.redis_publisher import get_redis_client
+        redis_client = get_redis_client()
+        lock = redis_client.lock("lock:portfolio_task", timeout=300)
+        
+        if not lock.acquire(blocking=False):
+            logger.warning("⚠️ Portfolio task already running. Skipping this cycle.")
+            return {"ok": False, "reason": "locked"}
+
         df = fetch_historical_data(SYMBOL, period=FETCH_PERIOD_DAYS, interval=INTERVAL)
         if df is None or df.empty or len(df) < 150:
             logger.warning(f"⚠️  Portfolio portfolio: not enough data yet for {SYMBOL} ({INTERVAL})")
@@ -69,18 +69,18 @@ def run_portfolio_task():
         pm = PortfolioManager(
             features_df,
             strategy_arrays,
-            initial_capital=INITIAL_CAPITAL,
-            risk_per_trade_pct=RISK_PER_TRADE_PCT,
-            stop_loss_pct=STOP_LOSS_PCT,
-            take_profit_pct=TAKE_PROFIT_PCT,
-            max_hold_bars=MAX_HOLD_BARS,
-            fee_pct=FEE_PCT,
-            max_leverage=MAX_LEVERAGE,
-            max_concurrent_trades=MAX_CONCURRENT_TRADES,
-            portfolio_risk_cap_pct=PORTFOLIO_RISK_CAP_PCT,
-            drawdown_throttle_trigger_pct=DRAWDOWN_THROTTLE_TRIGGER_PCT,
-            drawdown_recovery_pct=DRAWDOWN_RECOVERY_PCT,
-            throttled_risk_pct=THROTTLED_RISK_PCT,
+            initial_capital=settings.portfolio_initial_capital,
+            risk_per_trade_pct=settings.portfolio_risk_per_trade_pct,
+            stop_loss_pct=settings.portfolio_stop_loss_pct,
+            take_profit_pct=settings.portfolio_take_profit_pct,
+            max_hold_bars=settings.portfolio_max_hold_bars,
+            fee_pct=settings.portfolio_fee_pct,
+            max_leverage=settings.portfolio_max_leverage,
+            max_concurrent_trades=settings.portfolio_max_concurrent_trades,
+            portfolio_risk_cap_pct=settings.portfolio_risk_cap_pct,
+            drawdown_throttle_trigger_pct=settings.portfolio_drawdown_trigger_pct,
+            drawdown_recovery_pct=settings.portfolio_drawdown_recovery_pct,
+            throttled_risk_pct=settings.portfolio_throttled_risk_pct,
         )
 
         state = load_state()
@@ -91,8 +91,8 @@ def run_portfolio_task():
             # fetch window. Live tracking starts from the next genuinely new
             # candle onward, same as the reference livetest implementation.
             new_state = {
-                "balance": INITIAL_CAPITAL,
-                "peak_equity": INITIAL_CAPITAL,
+                "balance": settings.portfolio_initial_capital,
+                "peak_equity": settings.portfolio_initial_capital,
                 "throttled": False,
                 "open_positions": [],
                 "pending_entries": [],
@@ -101,8 +101,8 @@ def run_portfolio_task():
                 "interval": INTERVAL,
             }
             save_state(new_state)
-            logger.info(f"🚀 Portfolio portfolio bootstrapped | {SYMBOL} {INTERVAL} | balance=${INITIAL_CAPITAL}")
-            return {"ok": True, "bootstrap": True, "balance": INITIAL_CAPITAL}
+            logger.info(f"🚀 Portfolio portfolio bootstrapped | {SYMBOL} {INTERVAL} | balance=${settings.portfolio_initial_capital}")
+            return {"ok": True, "bootstrap": True, "balance": settings.portfolio_initial_capital}
 
         prior_pending = [tuple(p) for p in state.get("pending_entries", [])]
         prior_state = {
@@ -152,5 +152,11 @@ def run_portfolio_task():
         }
 
     except Exception as e:
-        logger.error(f"❌ Portfolio portfolio task failed: {str(e)}", exc_info=True)
-        return {"ok": False, "error": str(e)}
+        logger.error(f"❌ Portfolio task failed: {str(e)}", exc_info=True)
+        raise e  # Ensure Celery marks the task as failed
+    finally:
+        if lock and lock.locked():
+            try:
+                lock.release()
+            except Exception:
+                pass

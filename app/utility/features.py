@@ -60,7 +60,7 @@ def build_features(df):
     DataFrame with every column STRATEGIES above reference."""
     df = df.copy()
     df = _add_indicators(df)
-    df = df.bfill().ffill()  # matches the original pipeline: only indicators get filled, not price-action
+    df = df.ffill()  # matches the original pipeline: only indicators get filled, not price-action
     df = _add_price_action(df)
     return df
 

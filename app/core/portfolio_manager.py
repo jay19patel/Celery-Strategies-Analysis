@@ -151,7 +151,9 @@ class PortfolioManager:
 
                 hit_stop = low[i] <= pos["stop_price"] if direction == 1 else high[i] >= pos["stop_price"]
                 hit_target = high[i] >= pos["target_price"] if direction == 1 else low[i] <= pos["target_price"]
-                if hit_stop:
+                if hit_stop and hit_target:
+                    exit_price, exit_reason = close[i], "both_hit_use_close"
+                elif hit_stop:
                     exit_price, exit_reason = pos["stop_price"], "stop"
                 elif hit_target:
                     exit_price, exit_reason = pos["target_price"], "target"

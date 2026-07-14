@@ -24,14 +24,6 @@ celery_app.conf.update(
     result_expires=settings.result_expires,
 )
 
-# Ensure tasks are registered when worker starts
-try:
-    from core import tasks  # noqa: F401
-    celery_app.autodiscover_tasks(["core"])  # explicit for clarity
-except Exception:
-    # Import errors should not crash configuration; worker will fail loudly if tasks missing
-    pass
-
 # Periodic schedule: run batch every N seconds
 celery_app.conf.beat_schedule = {
     "run-batch-periodically": {
@@ -43,5 +35,3 @@ celery_app.conf.beat_schedule = {
         "schedule": schedule(settings.portfolio_schedule_seconds),
     },
 }
-
-

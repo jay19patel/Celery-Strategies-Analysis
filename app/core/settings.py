@@ -32,18 +32,31 @@ class Settings(BaseSettings):
     # App defaults
     symbols: str = Field("BTC-USD,ETH-USD,SOL-USD")  # comma-separated
     strategies: str = Field(
-        "app.strategies.ema_strategy.EMAStrategy," \
-        "app.strategies.rsi_strategy.RSIStrategy"
+        "app.strategies.ema_strategy.EMAStrategy,"
+        "app.strategies.pdhl_strategy.PDHLStrategy"
     )  # use "*" to auto-load every strategy module in app/strategies
 
     # Scheduling
     schedule_seconds: int = Field(60)  # in seconds
 
-    # Portfolio paper-trading portfolio (separate cadence - these
-    # strategies were validated on 1h candles, checking every 60s is pointless)
+    # Portfolio paper-trading
     portfolio_symbol: str = Field("ETHUSD")
     portfolio_interval: str = Field("1h")
     portfolio_schedule_seconds: int = Field(1200)  # 20 minutes
+
+    # Portfolio risk parameters (M3: moved from hardcoded constants)
+    portfolio_initial_capital: float = Field(100.0)
+    portfolio_risk_per_trade_pct: float = Field(2.0)
+    portfolio_stop_loss_pct: float = Field(1.0)
+    portfolio_take_profit_pct: float = Field(3.0)
+    portfolio_max_hold_bars: int = Field(20)
+    portfolio_fee_pct: float = Field(0.05)
+    portfolio_max_leverage: float = Field(2.0)
+    portfolio_max_concurrent_trades: int = Field(5)
+    portfolio_risk_cap_pct: float = Field(10.0)
+    portfolio_drawdown_trigger_pct: float = Field(10.0)
+    portfolio_drawdown_recovery_pct: float = Field(5.0)
+    portfolio_throttled_risk_pct: float = Field(1.0)
 
     # Redis pub/sub channels
     pubsub_channel_batch: str = Field("stockanalysis:batch_complete")
@@ -136,5 +149,3 @@ def get_strategies() -> list[str]:
         deduped.append(path)
 
     return deduped
-
-

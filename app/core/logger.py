@@ -158,51 +158,7 @@ class StockAnalysisLogger:
             return self.logger.getChild(name)
         return self.logger
     
-    def log_function_entry(self, func_name: str, **kwargs):
-        """Log function entry with parameters"""
-        params = ', '.join([f"{k}={v}" for k, v in kwargs.items()])
-        self.logger.debug(f"Entering {func_name}({params})")
-    
-    def log_function_exit(self, func_name: str, result=None):
-        """Log function exit with result"""
-        if result is not None:
-            self.logger.debug(f"Exiting {func_name}() -> {result}")
-        else:
-            self.logger.debug(f"Exiting {func_name}()")
-    
-    def log_api_call(self, method: str, endpoint: str, params: dict = None, response: dict = None):
-        """Log API calls with detailed information"""
-        param_str = f" | Params: {params}" if params else ""
-        response_str = f" | Response: {response}" if response else ""
-        self.logger.info(f"API Call: {method} {endpoint}{param_str}{response_str}")
-    
-    def log_database_operation(self, operation: str, collection: str, query: dict = None, result: dict = None):
-        """Log database operations with detailed information"""
-        query_str = f" | Query: {query}" if query else ""
-        result_str = f" | Result: {result}" if result else ""
-        self.logger.info(f"DB {operation}: {collection}{query_str}{result_str}")
-    
-    def log_redis_event(self, event_type: str, data: dict = None):
-        """Log Redis events with data"""
-        data_str = f" | Data: {data}" if data else ""
-        self.logger.info(f"Redis {event_type}{data_str}")
-    
-    def log_strategy_event(self, event_type: str, symbol: str, details: dict = None):
-        """Log strategy execution events with symbol and details to signals log"""
-        details_str = f" | Details: {details}" if details else ""
-        self.signals_logger.info(f"Strategy {event_type}: {symbol}{details_str}")
-    
-    def log_error_with_context(self, error: Exception, context: str = "", **kwargs):
-        """Log errors with additional context information"""
-        context_str = f" | Context: {context}" if context else ""
-        kwargs_str = f" | Additional Info: {kwargs}" if kwargs else ""
-        self.logger.error(f"Error: {str(error)}{context_str}{kwargs_str}", exc_info=True)
-    
-    def log_performance(self, operation: str, duration: float = None, **kwargs):
-        """Log performance metrics to performance log"""
-        duration_str = f" took {duration:.3f}s" if duration is not None else ""
-        kwargs_str = f" | Details: {kwargs}" if kwargs else ""
-        self.performance_logger.info(f"Performance: {operation}{duration_str}{kwargs_str}")
+
 
 
 # Global logger instance

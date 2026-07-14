@@ -3,7 +3,10 @@ from datetime import datetime, timezone
 from app.core.base_strategy import BaseStrategy
 from app.models.strategy_models import StrategyResult, SignalType
 from app.utility.data_provider import fetch_historical_data
+from app.core.logger import get_strategies_logger
 import numpy as np
+
+logger = get_strategies_logger()
 
 class EMAStrategy(BaseStrategy):
     def __init__(self):
@@ -87,7 +90,7 @@ class EMAStrategy(BaseStrategy):
             )
 
         except Exception as e:
-            print(f"Error in EMAStrategy for {symbol}: {str(e)}")
+            logger.error(f"❌ Error in EMAStrategy for {symbol}: {str(e)}", exc_info=True)
             execution_time = time.time() - start_time
             return StrategyResult(
                 strategy_name=self.name,

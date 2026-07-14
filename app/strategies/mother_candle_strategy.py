@@ -5,6 +5,9 @@ from app.models.strategy_models import StrategyResult, SignalType
 from app.utility.data_provider import fetch_historical_data
 import numpy as np
 import pandas_ta as ta
+from app.core.logger import get_strategies_logger
+
+logger = get_strategies_logger()
 
 
 class MotherCandleStrategy(BaseStrategy):
@@ -19,7 +22,7 @@ class MotherCandleStrategy(BaseStrategy):
              df_15m = fetch_historical_data(symbol, period=5, interval="15m")
         except Exception as e:
              df_15m = None
-             print(f"Error fetching 15m data: {e}")
+             logger.error(f"❌ Error fetching 15m data for {symbol}: {e}")
 
         if df_15m is None or df_15m.empty:
              execution_time = time.time() - start_time
@@ -130,8 +133,7 @@ class MotherCandleStrategy(BaseStrategy):
                         confidence = min(confidence + 10, 100.0)
                     break
         except Exception as e:
-            print(f"Error in MotherCandleStrategy processing {symbol}: {str(e)}")
-            pass
+            logger.error(f"❌ Error in MotherCandleStrategy processing {symbol}: {str(e)}", exc_info=True)
 
         execution_time = time.time() - start_time
 
