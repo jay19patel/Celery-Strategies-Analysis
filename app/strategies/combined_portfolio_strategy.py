@@ -40,17 +40,39 @@ class CombinedPortfolioStrategy(BaseStrategy):
 
             features_df = build_features(df)
             
-            # Check LONG signal
-            dir_long, price = latest_signal(features_df, "strategy_01_long")
-            # Check SHORT signal
-            dir_short, _ = latest_signal(features_df, "strategy_02_short")
-
             signal_type = SignalType.HOLD
             confidence = 0.0
+            triggered_strategy_name = self.name
+            price = df['Close'].iloc[-1]
 
-            is_buy = (dir_long == STRATEGIES["strategy_01_long"]["direction"])
-            is_sell = (dir_short == STRATEGIES["strategy_02_short"]["direction"])
+            # Check LONG strategies (OR logic)
+            is_buy = False
+            for i in range(1, 11):
+                strat_key = f"long_{i:02d}"
+                if strat_key in STRATEGIES:
+                    direction, current_price = latest_signal(features_df, strat_key)
+                    price = current_price  # ensure we have the latest price
+                    if direction == STRATEGIES[strat_key]["direction"]:
+                        is_buy = True
+                        triggered_strategy_name = f"{self.name} ({strat_key})"
+                        break
 
+            # Check SHORT strategies (OR logic)
+            is_sell = False
+            for i in range(1, 11):
+                strat_key = f"short_{i:02d}"
+                if strat_key in STRATEGIES:
+                    direction, current_price = latest_signal(features_df, strat_key)
+                    price = current_price
+                    if direction == STRATEGIES[strat_key]["direction"]:
+                        is_sell = True
+                        # If it's both buy and sell, standard practice is to hold (cancel out), 
+                        # but we check if only sell is triggered.
+                        if not is_buy:
+                            triggered_strategy_name = f"{self.name} ({strat_key})"
+                        break
+
+            # Resolve signal
             if is_buy and not is_sell:
                 signal_type = SignalType.BUY
                 confidence = 1.0
@@ -59,7 +81,7 @@ class CombinedPortfolioStrategy(BaseStrategy):
                 confidence = 1.0
 
             return StrategyResult(
-                strategy_name=self.name,
+                strategy_name=triggered_strategy_name,
                 symbol=symbol,
                 signal_type=signal_type,
                 confidence=confidence,

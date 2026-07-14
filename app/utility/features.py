@@ -29,23 +29,31 @@ import pandas_ta as ta
 
 CONDITION_WINDOW = 100  # same causal rolling window used when these strategies were found
 
-# The 2 strategies actually used here (out of 25 originally found - see the
-# module docstring above for why only these 2 were carried over).
+# The Top 10 LONG and Top 10 SHORT strategies verified out-of-sample
 STRATEGIES = {
-    "strategy_01_long": {
-        "name": "strategy_01_long",
-        "combo": "is_bullish>median AND vol_regime>median AND gap_up>median AND path_curvature>median AND wick_imbalance>median AND low_open_return>median AND open_close_return>median AND gap_size>median",
-        "direction": 1,
-        # search-time stats (reference only, in-sample): size=8, fires=134, trades=83, win_rate_pct=51.8, total_pnl=248.57
-        # out-of-sample result: NEGATIVE (-3.2%) - did not hold up, treat with skepticism
-    },
-    "strategy_02_short": {
-        "name": "strategy_02_short",
-        "combo": "RSI_21<median AND price_entropy<median AND lower_wick<median AND wick_to_body<median AND price_to_sma_50<median AND return_10<median",
-        "direction": -1,
-        # search-time stats (reference only, in-sample): size=6, fires=373, trades=184, win_rate_pct=46.2, total_pnl=630.57
-        # out-of-sample result: positive (+74.2%), weaker than in-sample but a real, retained edge
-    },
+    # LONG Strategies
+    "long_01": {"name": "long_01", "combo": "EMA_10>median AND MACD_hist>median AND bars_since_swing_high>median AND aroon_oscillator>median AND shock_elasticity>median", "direction": 1},
+    "long_02": {"name": "long_02", "combo": "WilliamsR_14>median AND vol_regime>median AND gap_up>median AND surprise>median AND ATR_14>median", "direction": 1},
+    "long_03": {"name": "long_03", "combo": "realized_var_20>median AND swing_break(L) AND Stoch_K>median AND trend_score>median AND low_open_return>median", "direction": 1},
+    "long_04": {"name": "long_04", "combo": "ADX_20>median AND trendline_break(L) AND log_volume>median AND zscore_10>median AND return_1>median", "direction": 1},
+    "long_05": {"name": "long_05", "combo": "ADX_14>median AND trend_confluence(L) AND trend_acceleration>median AND RSI_7>median AND return_5>median", "direction": 1},
+    "long_06": {"name": "long_06", "combo": "gap_size>median AND ob_retest(L) AND ATR_pct>median AND KC_upper>median AND open_close_return>median", "direction": 1},
+    "long_07": {"name": "long_07", "combo": "supertrend_direction>median AND bars_since_flip>median AND aroon_up>median AND price_to_ema_20>median AND return_20>median", "direction": 1},
+    "long_08": {"name": "long_08", "combo": "MFI>median AND ema_pullback(L) AND CMF>median AND vol_atr_ratio>median AND EMA_50>median", "direction": 1},
+    "long_09": {"name": "long_09", "combo": "jump_strength>median AND bos(L) AND ATR_21>median AND skew_20>median AND return_10>median", "direction": 1},
+    "long_10": {"name": "long_10", "combo": "engulfing(L) AND donchian(L) AND supertrend>median AND range_velocity>median", "direction": 1},
+
+    # SHORT Strategies
+    "short_01": {"name": "short_01", "combo": "dir_entropy<median AND trend_score<median AND stop_hunt_proxy<median AND bars_since_swing_low<median AND return_10<median", "direction": -1},
+    "short_02": {"name": "short_02", "combo": "price_to_sma_50<median AND Stoch_K<median AND trend_smoothness<median AND skew_20<median AND MFI<median", "direction": -1},
+    "short_03": {"name": "short_03", "combo": "price_entropy<median AND swing_low_label<median AND shock_elasticity<median", "direction": -1},
+    "short_04": {"name": "short_04", "combo": "gap_size<median AND swing_high_label<median AND supertrend<median AND SMA_50<median AND resistance_level<median", "direction": -1},
+    "short_05": {"name": "short_05", "combo": "trend_persistence<median AND squeeze_on<median AND return_5<median AND range_velocity<median AND low_open_return<median", "direction": -1},
+    "short_06": {"name": "short_06", "combo": "ema_10_20_cross<median AND vol_regime<median AND wick_imbalance<median AND aroon_up<median AND BB_upper<median", "direction": -1},
+    "short_07": {"name": "short_07", "combo": "bars_since_flip<median AND nr7_breakout(S) AND BB_lower<median AND return_1<median", "direction": -1},
+    "short_08": {"name": "short_08", "combo": "lower_wick<median AND bos_retest(S) AND last_swing_high<median AND WilliamsR_14<median AND surprise<median", "direction": -1},
+    "short_09": {"name": "short_09", "combo": "donchian(S) AND ob_retest(S) AND KC_upper<median AND return_20<median", "direction": -1},
+    "short_10": {"name": "short_10", "combo": "fractal_proxy<median AND sweep(S) AND trend_acceleration<median AND close_position<median", "direction": -1},
 }
 
 
