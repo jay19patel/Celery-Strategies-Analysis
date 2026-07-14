@@ -81,21 +81,27 @@ class StockAnalysisLogger:
         self.logger.debug("StockAnalysisLogger initialized successfully")
     
     def _setup_file_handlers(self):
-        """Setup file handlers for main and error logs"""
-        # Main log file handler (all levels)
+        """Setup file handlers for multiple specialized logs"""
+        
+        class NonErrorFilter(logging.Filter):
+            def filter(self, record):
+                return record.levelno < logging.ERROR
+                
+        # 1. Success / Main log file handler
         main_file_handler = logging.handlers.RotatingFileHandler(
-            self.log_dir / "stockanalysis_app.log",
+            self.log_dir / "success.log",
             maxBytes=10 * 1024 * 1024,  # 10MB
             backupCount=5,
             encoding='utf-8'
         )
         main_file_handler.setLevel(logging.DEBUG)
+        main_file_handler.addFilter(NonErrorFilter())
         main_file_handler.setFormatter(self.detailed_formatter)
         self.logger.addHandler(main_file_handler)
         
-        # Error log file handler (errors only)
+        # 2. Error log file handler
         error_file_handler = logging.handlers.RotatingFileHandler(
-            self.log_dir / "stockanalysis_app_errors.log",
+            self.log_dir / "errors.log",
             maxBytes=10 * 1024 * 1024,  # 10MB
             backupCount=5,
             encoding='utf-8'
@@ -103,6 +109,31 @@ class StockAnalysisLogger:
         error_file_handler.setLevel(logging.ERROR)
         error_file_handler.setFormatter(self.detailed_formatter)
         self.logger.addHandler(error_file_handler)
+        
+        # 3. Signals logger setup
+        self.signals_logger = logging.getLogger('signals')
+        self.signals_logger.setLevel(logging.INFO)
+        self.signals_logger.propagate = False
+        signals_handler = logging.handlers.RotatingFileHandler(
+            self.log_dir / "signals.log",
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding='utf-8'
+        )
+        signals_handler.setFormatter(self.simple_formatter)
+        self.signals_logger.addHandler(signals_handler)
+        # 4. Performance logger setup
+        self.performance_logger = logging.getLogger('performance')
+        self.performance_logger.setLevel(logging.INFO)
+        self.performance_logger.propagate = False
+        performance_handler = logging.handlers.RotatingFileHandler(
+            self.log_dir / "performance.log",
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding='utf-8'
+        )
+        performance_handler.setFormatter(self.simple_formatter)
+        self.performance_logger.addHandler(performance_handler)
     
     def _setup_console_handler(self):
         """Setup console handler for real-time monitoring"""
@@ -110,6 +141,8 @@ class StockAnalysisLogger:
         console_handler.setLevel(logging.INFO)
         console_handler.setFormatter(self.simple_formatter)
         self.logger.addHandler(console_handler)
+        self.signals_logger.addHandler(console_handler)
+        self.performance_logger.addHandler(console_handler)
     
     def get_logger(self, name: str = None) -> logging.Logger:
         """
@@ -155,9 +188,9 @@ class StockAnalysisLogger:
         self.logger.info(f"Redis {event_type}{data_str}")
     
     def log_strategy_event(self, event_type: str, symbol: str, details: dict = None):
-        """Log strategy execution events with symbol and details"""
+        """Log strategy execution events with symbol and details to signals log"""
         details_str = f" | Details: {details}" if details else ""
-        self.logger.info(f"Strategy {event_type}: {symbol}{details_str}")
+        self.signals_logger.info(f"Strategy {event_type}: {symbol}{details_str}")
     
     def log_error_with_context(self, error: Exception, context: str = "", **kwargs):
         """Log errors with additional context information"""
@@ -165,10 +198,11 @@ class StockAnalysisLogger:
         kwargs_str = f" | Additional Info: {kwargs}" if kwargs else ""
         self.logger.error(f"Error: {str(error)}{context_str}{kwargs_str}", exc_info=True)
     
-    def log_performance(self, operation: str, duration: float, **kwargs):
-        """Log performance metrics"""
+    def log_performance(self, operation: str, duration: float = None, **kwargs):
+        """Log performance metrics to performance log"""
+        duration_str = f" took {duration:.3f}s" if duration is not None else ""
         kwargs_str = f" | Details: {kwargs}" if kwargs else ""
-        self.logger.info(f"Performance: {operation} took {duration:.3f}s{kwargs_str}")
+        self.performance_logger.info(f"Performance: {operation}{duration_str}{kwargs_str}")
 
 
 # Global logger instance

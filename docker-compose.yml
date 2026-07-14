@@ -3,7 +3,7 @@ x-common-env: &common-env
   # Redis URLs
   REDIS_BROKER_URL: redis://redis:6379/0
   REDIS_RESULT_URL: redis://redis:6379/1
-  REDIS_PUBSUB_URL: redis://default:3oG2lFmElfB1xt1fI0LchEWpHXYky9Pj@redis-10597.c85.us-east-1-2.ec2.redns.redis-cloud.com:10597
+  REDIS_PUBSUB_URL: redis://redis:6379/2
   
   # MongoDB Atlas Configuration
   MONGODB_URL: mongodb+srv://justj:admin@cluster0.fsgzjrl.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
@@ -27,12 +27,6 @@ x-common-env: &common-env
   BROKER_CONNECTION_RETRY_ON_STARTUP: true
   
   PYTHONPATH: /app
-
-x-ui-env: &ui-env
-  <<: *common-env
-  # Flask UI Configuration
-  FLASK_APP: app.ui.app
-  FLASK_ENV: production
 
 services:
   # Redis for Celery broker, result backend, and pub/sub
@@ -93,20 +87,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    restart: unless-stopped
-
-  # Flask UI for dashboard
-  ui:
-    build: .
-    container_name: stockanalysis-ui
-    command: uv run python -m app.ui.app
-    environment:
-      <<: *ui-env
-    ports:
-      - "5001:5000"
-    volumes:
-      - .:/app
-      - ./logs:/app/logs
     restart: unless-stopped
 
 volumes:

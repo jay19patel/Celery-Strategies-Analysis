@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # Scheduling
     schedule_seconds: int = Field(60)  # in seconds
 
+    # Portfolio paper-trading portfolio (separate cadence - these
+    # strategies were validated on 1h candles, checking every 60s is pointless)
+    portfolio_symbol: str = Field("ETHUSD")
+    portfolio_interval: str = Field("1h")
+    portfolio_schedule_seconds: int = Field(1200)  # 20 minutes
+
     # Redis pub/sub channels
     pubsub_channel_batch: str = Field("stockanalysis:batch_complete")
 

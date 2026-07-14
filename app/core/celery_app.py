@@ -7,7 +7,7 @@ celery_app = Celery(
     "stockanalysis",
     broker=settings.broker_url,
     backend=settings.result_backend,
-    include=["app.core.tasks"],
+    include=["app.core.tasks", "app.core.portfolio_tasks"],
 )
 
 # Keep tasks discovery explicit to avoid import-time side effects
@@ -37,7 +37,11 @@ celery_app.conf.beat_schedule = {
     "run-batch-periodically": {
         "task": "run_all_batch_task",
         "schedule": schedule(settings.schedule_seconds),
-    }
+    },
+    "run-master-backtester-portfolio-periodically": {
+        "task": "run_portfolio_task",
+        "schedule": schedule(settings.portfolio_schedule_seconds),
+    },
 }
 
 

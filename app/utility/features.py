@@ -1,7 +1,7 @@
-"""Shared feature engineering + condition logic for the two Master Backtester
-strategies (see master_backtester_long_strategy.py / master_backtester_short_strategy.py).
+"""Shared feature engineering + condition logic for the two Portfolio
+strategies (see long_strategy.py / short_strategy.py).
 
-Ported verbatim from the Master Backtester project's livetest/strategies.py -
+Ported verbatim from the Portfolio project's livetest/strategies.py -
 every formula is copied as-is (not re-derived) to avoid subtly-wrong
 reimplementations. That project validated these two specific combos (best
 LONG and best SHORT by raw PnL) via an exhaustive/beam search over historical
@@ -50,7 +50,7 @@ STRATEGIES = {
 
 
 # ----------------------------------------------------------------------
-# Feature engineering (trimmed port of Master Backtester's IndicatorEngine +
+# Feature engineering (trimmed port of Portfolio's IndicatorEngine +
 # PriceActionEngine - only what these 2 strategies' conditions reference)
 # ----------------------------------------------------------------------
 def build_features(df):
