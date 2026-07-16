@@ -60,6 +60,7 @@ class Settings(BaseSettings):
 
     # Redis pub/sub channels
     pubsub_channel_batch: str = Field("stockanalysis:batch_complete")
+    pubsub_channel_strategy: str = Field("stockanalysis:strategy_result")
 
     model_config = {
         "case_sensitive": False,

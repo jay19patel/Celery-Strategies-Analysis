@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading System Dashboard</title>
+    <!-- Premium Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        :root {
+            --bg-color: #0b0b0e;
+            --panel-bg: rgba(22, 22, 29, 0.7);
+            --panel-border: rgba(255, 255, 255, 0.05);
+            --panel-border-hover: rgba(6, 182, 212, 0.3);
+            
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            
+            --cyan: #06b6d4;
+            --cyan-glow: rgba(6, 182, 212, 0.15);
+            --green: #10b981;
+            --green-glow: rgba(16, 185, 129, 0.15);
+            --red: #f43f5e;
+            --red-glow: rgba(244, 63, 94, 0.15);
+            --yellow: #fbbf24;
+            --yellow-glow: rgba(251, 191, 36, 0.15);
+            
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(at 10% 20%, rgba(6, 182, 212, 0.05) 0px, transparent 50%),
+                radial-gradient(at 90% 80%, rgba(16, 185, 129, 0.03) 0px, transparent 50%);
+        }
+
+        /* Layout Structure */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid var(--panel-border);
+            backdrop-filter: blur(20px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background-color: rgba(11, 11, 14, 0.8);
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo-icon {
+            width: 2.25rem;
+            height: 2.25rem;
+            background: linear-gradient(135deg, var(--cyan), var(--green));
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.2rem;
+            color: #000;
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.4);
+        }
+
+        .logo-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            background: linear-gradient(to right, #ffffff, #d1d5db);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        /* Buttons & Badges */
+        .btn {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            color: var(--text-primary);
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            font-family: inherit;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: var(--transition);
+        }
+
+        .btn:hover {
+            border-color: var(--cyan);
+            box-shadow: 0 0 12px var(--cyan-glow);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--cyan), #0891b2);
+            color: #000;
+            font-weight: 600;
+            border: none;
+        }
+
+        .btn-primary:hover {
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.5);
+            transform: translateY(-1px);
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            background-color: var(--green-glow);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--green);
+            padding: 0.35rem 0.75rem;
+            border-radius: 2rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .status-dot {
+            width: 0.5rem;
+            height: 0.5rem;
+            background-color: var(--green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.8; }
+            50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 8px var(--green); }
+            100% { transform: scale(0.9); opacity: 0.8; }
+        }
+
+        /* Navigation Tabs */
+        .tabs-nav {
+            display: flex;
+            gap: 0.5rem;
+            padding: 1rem 2rem 0;
+            border-bottom: 1px solid var(--panel-border);
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            padding: 0.75rem 1.25rem;
+            font-family: inherit;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            position: relative;
+            transition: var(--transition);
+        }
+
+        .tab-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .tab-btn.active {
+            color: var(--cyan);
+        }
+
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background-color: var(--cyan);
+            box-shadow: 0 0 10px var(--cyan);
+        }
+
+        /* Container & Grid */
+        main {
+            padding: 2rem;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* KPIs */
+        .kpis-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .kpi-card {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            backdrop-filter: blur(10px);
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: transparent;
+            transition: var(--transition);
+        }
+
+        .kpi-card:hover::before {
+            background: linear-gradient(90deg, var(--cyan), var(--green));
+        }
+
+        .kpi-card:hover {
+            border-color: var(--panel-border-hover);
+            transform: translateY(-2px);
+        }
+
+        .kpi-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .kpi-value {
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        /* Dual Section Column */
+        .dashboard-split {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        @media (max-width: 1100px) {
+            .dashboard-split {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Panels */
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            backdrop-filter: blur(10px);
+            margin-bottom: 1.5rem;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.25rem;
+        }
+
+        .panel-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Grid Lists */
+        .strategies-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.25rem;
+        }
+
+        .strategy-card {
+            background: rgba(30, 30, 40, 0.4);
+            border: 1px solid var(--panel-border);
+            border-radius: 0.5rem;
+            padding: 1.25rem;
+            transition: var(--transition);
+        }
+
+        .strategy-card:hover {
+            border-color: var(--panel-border-hover);
+            transform: scale(1.01);
+        }
+
+        .strategy-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .strategy-name {
+            font-weight: 600;
+            font-size: 1.05rem;
+        }
+
+        .strategy-pnl {
+            font-weight: 700;
+            font-size: 1.05rem;
+        }
+
+        .strategy-stats-row {
+            display: flex;
+            justify-content: space-between;
+            border-top: 1px solid rgba(255, 255, 255, 0.03);
+            padding-top: 0.75rem;
+            margin-top: 0.75rem;
+            font-size: 0.875rem;
+        }
+
+        .strategy-stat-label {
+            color: var(--text-muted);
+        }
+
+        .strategy-stat-value {
+            font-weight: 500;
+        }
+
+        .strategy-position-block {
+            background: rgba(255,255,255,0.02);
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.25rem;
+            font-size: 0.85rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 0.5rem;
+        }
+
+        /* Tables */
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            padding: 0.75rem 1rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--panel-border);
+        }
+
+        td {
+            padding: 0.875rem 1rem;
+            font-size: 0.925rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+        }
+
+        tr:hover td {
+            background-color: rgba(255, 255, 255, 0.01);
+        }
+
+        /* Logs Console */
+        .console {
+            background: #070709;
+            border: 1px solid var(--panel-border);
+            border-radius: 0.5rem;
+            font-family: 'JetBrains Mono', monospace;
+            padding: 1rem;
+            font-size: 0.825rem;
+            height: 500px;
+            overflow-y: auto;
+            color: #d1d5db;
+            line-height: 1.5;
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
+        }
+
+        .console-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #111115;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem 0.5rem 0 0;
+            border: 1px solid var(--panel-border);
+            border-bottom: none;
+        }
+
+        .console-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .console-line {
+            margin-bottom: 0.35rem;
+            white-space: pre-wrap;
+            border-left: 2px solid transparent;
+            padding-left: 0.5rem;
+        }
+
+        .console-line.INFO { border-color: var(--cyan); }
+        .console-line.WARNING { border-color: var(--yellow); color: var(--yellow); }
+        .console-line.ERROR { border-color: var(--red); color: var(--red); }
+        .console-line.DEBUG { border-color: var(--text-muted); color: var(--text-secondary); }
+
+        /* Helpers & Utility Colors */
+        .color-green { color: var(--green); }
+        .color-red { color: var(--red); }
+        .color-yellow { color: var(--yellow); }
+        .color-cyan { color: var(--cyan); }
+        .color-muted { color: var(--text-muted); }
+
+        .bg-green-glow { background-color: var(--green-glow); color: var(--green); }
+        .bg-red-glow { background-color: var(--red-glow); color: var(--red); }
+
+        .select-input {
+            background-color: #121217;
+            border: 1px solid var(--panel-border);
+            color: var(--text-primary);
+            padding: 0.35rem 0.75rem;
+            border-radius: 0.375rem;
+            font-family: inherit;
+            font-size: 0.875rem;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .select-input:focus {
+            border-color: var(--cyan);
+        }
+
+        /* Pagination & Empty states */
+        .pagination-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 1rem;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 0;
+            color: var(--text-muted);
+        }
+
+        .empty-icon {
+            font-size: 2.5rem;
+            margin-bottom: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header Section -->
+    <header>
+        <div class="logo-section">
+            <div class="logo-icon">▲</div>
+            <div class="logo-title">Celery Trading System WebUI</div>
+        </div>
+        <div class="header-controls">
+            <div class="status-badge" id="system-status-badge">
+                <span class="status-dot" id="system-status-dot"></span>
+                <span id="system-status-text">Worker System Online</span>
+            </div>
+            <button class="btn" id="refresh-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                Refresh Data
+            </button>
+            <label class="btn" style="cursor: pointer; font-size: 0.875rem; display: flex; align-items: center; gap: 0.5rem;">
+                <input type="checkbox" id="auto-refresh-check" checked style="accent-color: var(--cyan);">
+                Auto Refresh (5s)
+            </label>
+        </div>
+    </header>
+
+    <!-- Nav Tabs Section -->
+    <nav class="tabs-nav">
+        <button class="tab-btn active" data-tab="overview">Strategy Overview</button>
+        <button class="tab-btn" data-tab="trades">Closed Trades Log</button>
+        <button class="tab-btn" data-tab="logs">System File Logs</button>
+    </nav>
+
+    <!-- Main Container -->
+    <main>
+        
+        <!-- KPI Dashboard Panel -->
+        <section class="kpis-grid">
+            <div class="kpi-card">
+                <div class="kpi-label">Total Portfolio Capital</div>
+                <div class="kpi-value" id="kpi-capital">$0.00</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Return Since Inception</div>
+                <div class="kpi-value" id="kpi-return">+0.00%</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Global Win Rate</div>
+                <div class="kpi-value" id="kpi-winrate">0.0%</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Total Executed Trades</div>
+                <div class="kpi-value" id="kpi-trades">0</div>
+            </div>
+        </section>
+
+        <!-- TAB 1: OVERVIEW -->
+        <section id="tab-overview" class="tab-content active">
+            <div class="dashboard-split">
+                <!-- Left Block: Strategies Cards -->
+                <div>
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h2 class="panel-title">Active Strategy Portfolios</h2>
+                            <span class="color-muted" id="active-strategies-count">0 Loaded</span>
+                        </div>
+                        <div class="strategies-grid" id="strategies-container">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Block: Chart & Open Positions -->
+                <div>
+                    <div class="panel">
+                        <h2 class="panel-title" style="margin-bottom: 1rem;">Capital Comparison</h2>
+                        <div style="position: relative; height:200px; width:100%;">
+                            <canvas id="capital-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="panel">
+                        <h2 class="panel-title" style="margin-bottom: 1rem;">Active Positions</h2>
+                        <div id="positions-container">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: TRADES LOG -->
+        <section id="tab-trades" class="tab-content">
+            <div class="panel">
+                <div class="panel-header">
+                    <h2 class="panel-title">Historical Closed Trades</h2>
+                    <span class="color-muted" id="trades-count">0 Total Trades</span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Strategy Name</th>
+                                <th>Symbol</th>
+                                <th>Type</th>
+                                <th>Size</th>
+                                <th>Entry Price</th>
+                                <th>Exit Price</th>
+                                <th>Net PnL</th>
+                                <th>Return %</th>
+                                <th>Exit Time</th>
+                                <th>Exit Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trades-table-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination-row">
+                    <span id="pagination-info">Showing page 1</span>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn" id="prev-page-btn" disabled>Prev</button>
+                        <button class="btn" id="next-page-btn" disabled>Next</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 3: SYSTEM LOGS -->
+        <section id="tab-logs" class="tab-content">
+            <div class="console-header">
+                <div class="panel-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    Live Logs Terminal
+                </div>
+                <div class="console-controls">
+                    <select class="select-input" id="log-type-select">
+                        <option value="success">Success / Main Logs</option>
+                        <option value="signals">Trading Signals</option>
+                        <option value="errors">Error Logs</option>
+                        <option value="performance">Simulation stats</option>
+                    </select>
+                    <button class="btn" id="clear-console-btn">Clear View</button>
+                </div>
+            </div>
+            <div class="console" id="console-output">
+                <!-- Log content here -->
+            </div>
+        </section>
+
+    </main>
+
+    <!-- UI Interaction Script -->
+    <script>
+        // State
+        let currentTab = 'overview';
+        let autoRefreshInterval = null;
+        let capitalChart = null;
+        let allTrades = [];
+        let tradesPage = 1;
+        const tradesPerPage = 12;
+
+        // Elements
+        const refreshBtn = document.getElementById('refresh-btn');
+        const autoRefreshCheck = document.getElementById('auto-refresh-check');
+        const tabButtons = document.querySelectorAll('.tab-btn');
+        const tabContents = document.querySelectorAll('.tab-content');
+        const strategiesContainer = document.getElementById('strategies-container');
+        const positionsContainer = document.getElementById('positions-container');
+        const tradesTableBody = document.getElementById('trades-table-body');
+        const logTypeSelect = document.getElementById('log-type-select');
+        const consoleOutput = document.getElementById('console-output');
+        const clearConsoleBtn = document.getElementById('clear-console-btn');
+        
+        // Pagination Elements
+        const prevPageBtn = document.getElementById('prev-page-btn');
+        const nextPageBtn = document.getElementById('next-page-btn');
+        const paginationInfo = document.getElementById('pagination-info');
+
+        // Tab Switching
+        tabButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetTab = btn.getAttribute('data-tab');
+                
+                // Toggle active state in buttons
+                tabButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                // Toggle active state in content sections
+                tabContents.forEach(c => c.classList.remove('active'));
+                document.getElementById(`tab-${targetTab}`).classList.add('active');
+                
+                currentTab = targetTab;
+                fetchData();
+            });
+        });
+
+        // Initialize Auto Refresh
+        function setupAutoRefresh() {
+            if (autoRefreshCheck.checked) {
+                if (!autoRefreshInterval) {
+                    autoRefreshInterval = setInterval(fetchData, 5000);
+                }
+            } else {
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            }
+        }
+        autoRefreshCheck.addEventListener('change', setupAutoRefresh);
+        refreshBtn.addEventListener('click', fetchData);
+
+        // Fetch Global Data
+        async function fetchData() {
+            const statusDot = document.getElementById('system-status-dot');
+            const statusText = document.getElementById('system-status-text');
+            const statusBadge = document.getElementById('system-status-badge');
+
+            try {
+                // Fetch Global Stats
+                const statsRes = await fetch('/api/stats');
+                if (!statsRes.ok) {
+                    throw new Error(`Stats API failed: status ${statsRes.status}`);
+                }
+                const stats = await statsRes.json();
+                
+                const totalCapital = stats.total_capital ?? 0.0;
+                const totalProfitPct = stats.total_profit_pct ?? 0.0;
+                const globalWinRate = stats.global_win_rate ?? 0.0;
+                const totalTrades = stats.total_trades ?? 0;
+
+                document.getElementById('kpi-capital').innerText = `$${Number(totalCapital).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                const returnEl = document.getElementById('kpi-return');
+                returnEl.innerText = `${totalProfitPct > 0 ? '+' : ''}${Number(totalProfitPct).toFixed(2)}%`;
+                returnEl.className = `kpi-value ${totalProfitPct >= 0 ? 'color-green' : 'color-red'}`;
+                
+                document.getElementById('kpi-winrate').innerText = `${Number(globalWinRate).toFixed(1)}%`;
+                document.getElementById('kpi-trades').innerText = totalTrades;
+
+                // Fetch Strategies Stats
+                const stratRes = await fetch('/api/strategies');
+                if (!stratRes.ok) {
+                    throw new Error(`Strategies API failed: status ${stratRes.status}`);
+                }
+                const strategies = await stratRes.json();
+                
+                document.getElementById('active-strategies-count').innerText = `${strategies.length} Active`;
+                renderStrategies(strategies);
+                updateChart(strategies);
+                renderPositions(strategies);
+
+                // Tab-specific fetching
+                if (currentTab === 'trades') {
+                    const tradesRes = await fetch('/api/trades');
+                    if (!tradesRes.ok) {
+                        throw new Error(`Trades API failed: status ${tradesRes.status}`);
+                    }
+                    allTrades = await tradesRes.json();
+                    document.getElementById('trades-count').innerText = `${allTrades.length} Total Trades`;
+                    renderTrades();
+                } else if (currentTab === 'logs') {
+                    fetchLogs();
+                }
+
+                // Restore Online status
+                if (statusDot && statusText && statusBadge) {
+                    statusDot.style.backgroundColor = 'var(--green)';
+                    statusDot.style.animation = 'pulse 2s infinite';
+                    statusText.innerText = 'System Dashboard Online';
+                    statusBadge.style.backgroundColor = 'var(--green-glow)';
+                    statusBadge.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                    statusBadge.style.color = 'var(--green)';
+                }
+            } catch (err) {
+                console.error("Error loading dashboard data: ", err);
+                
+                // Show offline status
+                if (statusDot && statusText && statusBadge) {
+                    statusDot.style.backgroundColor = 'var(--red)';
+                    statusDot.style.animation = 'none';
+                    statusText.innerText = 'Database / Server Offline';
+                    statusBadge.style.backgroundColor = 'var(--red-glow)';
+                    statusBadge.style.borderColor = 'rgba(244, 63, 94, 0.2)';
+                    statusBadge.style.color = 'var(--red)';
+                }
+            }
+        }
+
+        // Render Strategy Grid
+        function renderStrategies(strategies) {
+            strategiesContainer.innerHTML = '';
+            if (strategies.length === 0) {
+                strategiesContainer.innerHTML = `<div class="empty-state"><div class="empty-icon">📂</div>No active strategy records found.</div>`;
+                return;
+            }
+
+            strategies.forEach(s => {
+                const pnlClass = s.return_pct >= 0 ? 'color-green' : 'color-red';
+                const pos = s.open_position;
+                let posMarkup = `<div class="strategy-position-block"><span class="strategy-stat-label">Position</span><span class="color-muted">FLAT</span></div>`;
+                
+                if (pos) {
+                    const typeClass = pos.type === 'LONG' ? 'color-green' : 'color-red';
+                    posMarkup = `
+                        <div class="strategy-position-block" style="border-left: 2px solid ${pos.type === 'LONG' ? 'var(--green)' : 'var(--red)'}">
+                            <span class="strategy-stat-label">${pos.symbol}</span>
+                            <span class="${typeClass}" style="font-weight:700;">${pos.type}</span>
+                            <span class="color-muted">$${pos.entry_price.toLocaleString()}</span>
+                        </div>
+                    `;
+                }
+
+                strategiesContainer.innerHTML += `
+                    <div class="strategy-card">
+                        <div class="strategy-title-row">
+                            <span class="strategy-name">${s.strategy_name}</span>
+                            <span class="strategy-pnl ${pnlClass}">${s.return_pct > 0 ? '+' : ''}${s.return_pct.toFixed(2)}%</span>
+                        </div>
+                        <div style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.5rem;">$${s.capital.toFixed(2)}</div>
+                        ${posMarkup}
+                        <div class="strategy-stats-row">
+                            <div>
+                                <span class="strategy-stat-label">Win Rate:</span>
+                                <span class="strategy-stat-value">${s.win_rate.toFixed(1)}%</span>
+                            </div>
+                            <div>
+                                <span class="strategy-stat-label">Trades:</span>
+                                <span class="strategy-stat-value">${s.total_trades}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        // Render Open Positions Sidebar
+        function renderPositions(strategies) {
+            positionsContainer.innerHTML = '';
+            const activePositions = strategies.filter(s => s.open_position !== null);
+
+            if (activePositions.length === 0) {
+                positionsContainer.innerHTML = `<div class="empty-state"><div class="empty-icon">📉</div>No open positions.</div>`;
+                return;
+            }
+
+            activePositions.forEach(s => {
+                const pos = s.open_position;
+                const typeColor = pos.type === 'LONG' ? 'var(--green)' : 'var(--red)';
+                const date = new Date(pos.entry_time).toLocaleTimeString(undefined, {hour: '2-digit', minute:'2-digit'});
+
+                positionsContainer.innerHTML += `
+                    <div class="strategy-card" style="margin-bottom: 0.75rem; border-left: 3px solid ${typeColor}">
+                        <div class="strategy-title-row">
+                            <span style="font-weight: 600;">${pos.symbol}</span>
+                            <span class="status-badge" style="background-color: ${pos.type === 'LONG' ? 'var(--green-glow)' : 'var(--red-glow)'}; color: ${typeColor}; border-color: transparent;">
+                                ${pos.type}
+                            </span>
+                        </div>
+                        <div class="strategy-stats-row" style="margin-top: 0.5rem; padding-top: 0.5rem;">
+                            <span class="strategy-stat-label">Strategy:</span>
+                            <span class="strategy-stat-value">${s.strategy_name}</span>
+                        </div>
+                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
+                            <span class="strategy-stat-label">Entry Price:</span>
+                            <span class="strategy-stat-value">$${pos.entry_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                        </div>
+                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
+                            <span class="strategy-stat-label">Size:</span>
+                            <span class="strategy-stat-value">${pos.size.toFixed(5)}</span>
+                        </div>
+                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
+                            <span class="strategy-stat-label">Opened:</span>
+                            <span class="strategy-stat-value">${date}</span>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        // Render Closed Trades Table
+        function renderTrades() {
+            tradesTableBody.innerHTML = '';
+            
+            if (allTrades.length === 0) {
+                tradesTableBody.innerHTML = `<tr><td colspan="10" class="empty-state"><div class="empty-icon">📑</div>No trades logged yet.</td></tr>`;
+                return;
+            }
+
+            const startIndex = (tradesPage - 1) * tradesPerPage;
+            const endIndex = Math.min(startIndex + tradesPerPage, allTrades.length);
+            const paginatedTrades = allTrades.slice(startIndex, endIndex);
+
+            paginatedTrades.forEach(t => {
+                const typeClass = t.type === 'LONG' ? 'color-green' : 'color-red';
+                const pnlClass = t.pnl >= 0 ? 'color-green' : 'color-red';
+                const date = new Date(t.exit_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
+
+                tradesTableBody.innerHTML += `
+                    <tr>
+                        <td style="font-weight: 500;">${t.strategy_name}</td>
+                        <td>${t.symbol}</td>
+                        <td class="${typeClass}" style="font-weight: 600;">${t.type}</td>
+                        <td class="color-muted">${t.size}</td>
+                        <td>$${t.entry_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td>$${t.exit_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td class="${pnlClass}" style="font-weight: 700;">${t.pnl > 0 ? '+' : ''}$${t.pnl.toFixed(2)}</td>
+                        <td class="${pnlClass}" style="font-weight: 700;">${t.return_pct > 0 ? '+' : ''}${t.return_pct.toFixed(2)}%</td>
+                        <td class="color-muted">${date}</td>
+                        <td><span style="font-size: 0.8rem; background: rgba(255,255,255,0.03); padding: 0.25rem 0.5rem; border-radius: 0.25rem;">${t.reason}</span></td>
+                    </tr>
+                `;
+            });
+
+            // Update Pagination
+            const totalPages = Math.ceil(allTrades.length / tradesPerPage);
+            paginationInfo.innerText = `Showing page ${tradesPage} of ${totalPages || 1}`;
+            
+            prevPageBtn.disabled = tradesPage === 1;
+            nextPageBtn.disabled = tradesPage >= totalPages;
+        }
+
+        prevPageBtn.addEventListener('click', () => {
+            if (tradesPage > 1) {
+                tradesPage--;
+                renderTrades();
+            }
+        });
+
+        nextPageBtn.addEventListener('click', () => {
+            const totalPages = Math.ceil(allTrades.length / tradesPerPage);
+            if (tradesPage < totalPages) {
+                tradesPage++;
+                renderTrades();
+            }
+        });
+
+        // Fetch & Display File Logs
+        async function fetchLogs() {
+            try {
+                const logType = logTypeSelect.value;
+                const res = await fetch(`/api/logs/${logType}`);
+                if (!res.ok) {
+                    throw new Error(`Failed to fetch logs: status ${res.status}`);
+                }
+                const logs = await res.json();
+                
+                consoleOutput.innerHTML = '';
+                
+                if (Array.isArray(logs)) {
+                    logs.forEach(line => {
+                        let level = 'INFO';
+                        if (line.includes('| ERROR |') || line.includes('❌')) level = 'ERROR';
+                        else if (line.includes('| WARNING |') || line.includes('⚠️')) level = 'WARNING';
+                        else if (line.includes('| DEBUG |')) level = 'DEBUG';
+                        
+                        consoleOutput.innerHTML += `<div class="console-line ${level}">${line}</div>`;
+                    });
+                } else {
+                    consoleOutput.innerHTML = `<div class="color-muted">No logs available for ${logType}.</div>`;
+                }
+                
+                // Auto scroll to bottom
+                consoleOutput.scrollTop = consoleOutput.scrollHeight;
+            } catch (err) {
+                consoleOutput.innerHTML = `<div class="color-red">Error loading logs: ${err.message}</div>`;
+            }
+        }
+
+        logTypeSelect.addEventListener('change', fetchLogs);
+        clearConsoleBtn.addEventListener('click', () => consoleOutput.innerHTML = '');
+
+        // Render Capital Comparison Chart
+        function updateChart(strategies) {
+            const labels = strategies.map(s => s.strategy_name.split('Strategy')[0]);
+            const capitals = strategies.map(s => s.capital);
+            const backgroundColors = strategies.map((_, i) => `hsla(${180 + (i * 30)}, 70%, 50%, 0.6)`);
+            const borderColors = strategies.map((_, i) => `hsla(${180 + (i * 30)}, 70%, 50%, 1)`);
+
+            if (capitalChart) {
+                capitalChart.data.labels = labels;
+                capitalChart.data.datasets[0].data = capitals;
+                capitalChart.data.datasets[0].backgroundColor = backgroundColors;
+                capitalChart.data.datasets[0].borderColor = borderColors;
+                capitalChart.update();
+            } else {
+                const ctx = document.getElementById('capital-chart').getContext('2d');
+                capitalChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Capital ($)',
+                            data: capitals,
+                            backgroundColor: backgroundColors,
+                            borderColor: borderColors,
+                            borderWidth: 1,
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            y: {
+                                grid: { color: 'rgba(255,255,255,0.05)' },
+                                ticks: { color: '#9ca3af' }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: { color: '#9ca3af' }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Boot
+        fetchData();
+        setupAutoRefresh();
+
+    </script>
+</body>
+</html>

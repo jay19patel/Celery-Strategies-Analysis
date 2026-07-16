@@ -1,12 +1,13 @@
 import importlib
 from typing import Any, Dict
+from datetime import datetime, timezone
 from bson import ObjectId
 from app.models.strategy_models import SignalType, StrategyResult
 from app.core.celery_app import celery_app
-from app.core.settings import get_symbols, get_strategies
+from app.core.settings import get_symbols, get_strategies, settings
 from app.core.strategy_manager import StrategyManager
-from app.database.mongodb import save_batch_results
-from app.database.redis_publisher import publish_batch_complete
+from app.database.mongodb import save_batch_results, get_collection
+from app.database.redis_publisher import publish_batch_complete, publish_message
 from app.core.logger import get_celery_logger
 from app.core.paper_broker import PaperBroker
 import time
@@ -167,14 +168,46 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
                 # StrategyResult parses string to Enum, but dictionary is string. Let's convert to Enum
                 try:
                     sig_enum = SignalType(signal)
-                    price = strat_res.get("price", 0.0)
-                    timestamp = strat_res.get("timestamp")
-                    if isinstance(timestamp, str):
-                        timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                    elif not timestamp:
-                        timestamp = datetime.utcnow()
-                        
-                    broker.process_signal(strat_res.get("strategy_name"), symbol, sig_enum, price, timestamp)
+                    if sig_enum != SignalType.HOLD:
+                        price = strat_res.get("price", 0.0)
+                        timestamp = strat_res.get("timestamp")
+                        if isinstance(timestamp, str):
+                            timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                        elif not timestamp:
+                            timestamp = datetime.now(timezone.utc)
+                            
+                        # 1. Log signal to MongoDB signals_log collection
+                        try:
+                            get_collection("signals_log").insert_one({
+                                "strategy_name": strat_res.get("strategy_name"),
+                                "symbol": symbol,
+                                "signal_type": signal,
+                                "price": price,
+                                "timestamp": timestamp,
+                                "execution_time": strat_res.get("execution_time", 0.0)
+                            })
+                        except Exception as mongo_err:
+                            logger.error(f"Failed to log signal to MongoDB: {mongo_err}", exc_info=True)
+
+                        # 2. Publish signal to Redis Pub/Sub strategy channel
+                        try:
+                            signal_payload = {
+                                "type": "SignalGenerated",
+                                "data": {
+                                    "strategy_name": strat_res.get("strategy_name"),
+                                    "symbol": symbol,
+                                    "signal_type": signal,
+                                    "price": price,
+                                    "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp),
+                                    "execution_time": strat_res.get("execution_time", 0.0)
+                                }
+                            }
+                            publish_message(settings.pubsub_channel_strategy, signal_payload)
+                        except Exception as redis_err:
+                            logger.error(f"Failed to publish signal to Redis: {redis_err}", exc_info=True)
+                            
+                        # 3. Process the signal via PaperBroker
+                        broker.process_signal(strat_res.get("strategy_name"), symbol, sig_enum, price, timestamp)
                 except Exception as e:
                     logger.error(f"Failed to process signal with broker: {e}", exc_info=True)
         
