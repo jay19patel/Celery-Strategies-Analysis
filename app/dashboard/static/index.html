@@ -455,6 +455,33 @@
         .console-line.ERROR { border-color: var(--red); color: var(--red); }
         .console-line.DEBUG { border-color: var(--text-muted); color: var(--text-secondary); }
 
+        /* Multi-Log Grid (all logs visible at once, no separate terminals) */
+        .logs-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 1100px) {
+            .logs-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .log-panel {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .console-small {
+            height: 340px;
+        }
+
+        .btn-small {
+            padding: 0.3rem 0.7rem;
+            font-size: 0.8rem;
+        }
+
         /* Helpers & Utility Colors */
         .color-green { color: var(--green); }
         .color-red { color: var(--red); }
@@ -630,25 +657,37 @@
             </div>
         </section>
 
-        <!-- TAB 3: SYSTEM LOGS -->
+        <!-- TAB 3: SYSTEM LOGS (all 4 logs live, side by side — no separate terminals) -->
         <section id="tab-logs" class="tab-content">
-            <div class="console-header">
-                <div class="panel-title">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                    Live Logs Terminal
+            <div class="logs-grid">
+                <div class="log-panel">
+                    <div class="console-header">
+                        <div class="panel-title">📡 Algo Signals</div>
+                        <button class="btn btn-small" data-log="signals">Clear</button>
+                    </div>
+                    <div class="console console-small" id="console-signals"></div>
                 </div>
-                <div class="console-controls">
-                    <select class="select-input" id="log-type-select">
-                        <option value="success">Success / Main Logs</option>
-                        <option value="signals">Trading Signals</option>
-                        <option value="errors">Error Logs</option>
-                        <option value="performance">Simulation stats</option>
-                    </select>
-                    <button class="btn" id="clear-console-btn">Clear View</button>
+                <div class="log-panel">
+                    <div class="console-header">
+                        <div class="panel-title">✅ Success Logs</div>
+                        <button class="btn btn-small" data-log="success">Clear</button>
+                    </div>
+                    <div class="console console-small" id="console-success"></div>
                 </div>
-            </div>
-            <div class="console" id="console-output">
-                <!-- Log content here -->
+                <div class="log-panel">
+                    <div class="console-header">
+                        <div class="panel-title">❌ Error Logs</div>
+                        <button class="btn btn-small" data-log="errors">Clear</button>
+                    </div>
+                    <div class="console console-small" id="console-errors"></div>
+                </div>
+                <div class="log-panel">
+                    <div class="console-header">
+                        <div class="panel-title">📊 Performance & Statistics</div>
+                        <button class="btn btn-small" data-log="performance">Clear</button>
+                    </div>
+                    <div class="console console-small" id="console-performance"></div>
+                </div>
             </div>
         </section>
 
@@ -672,10 +711,8 @@
         const strategiesContainer = document.getElementById('strategies-container');
         const positionsContainer = document.getElementById('positions-container');
         const tradesTableBody = document.getElementById('trades-table-body');
-        const logTypeSelect = document.getElementById('log-type-select');
-        const consoleOutput = document.getElementById('console-output');
-        const clearConsoleBtn = document.getElementById('clear-console-btn');
-        
+        const LOG_TYPES = ['signals', 'success', 'errors', 'performance'];
+
         // Pagination Elements
         const prevPageBtn = document.getElementById('prev-page-btn');
         const nextPageBtn = document.getElementById('next-page-btn');
@@ -939,40 +976,55 @@
             }
         });
 
-        // Fetch & Display File Logs
-        async function fetchLogs() {
-            try {
-                const logType = logTypeSelect.value;
-                const res = await fetch(`/api/logs/${logType}`);
-                if (!res.ok) {
-                    throw new Error(`Failed to fetch logs: status ${res.status}`);
-                }
-                const logs = await res.json();
-                
-                consoleOutput.innerHTML = '';
-                
-                if (Array.isArray(logs)) {
-                    logs.forEach(line => {
-                        let level = 'INFO';
-                        if (line.includes('| ERROR |') || line.includes('❌')) level = 'ERROR';
-                        else if (line.includes('| WARNING |') || line.includes('⚠️')) level = 'WARNING';
-                        else if (line.includes('| DEBUG |')) level = 'DEBUG';
-                        
-                        consoleOutput.innerHTML += `<div class="console-line ${level}">${line}</div>`;
-                    });
-                } else {
-                    consoleOutput.innerHTML = `<div class="color-muted">No logs available for ${logType}.</div>`;
-                }
-                
-                // Auto scroll to bottom
-                consoleOutput.scrollTop = consoleOutput.scrollHeight;
-            } catch (err) {
-                consoleOutput.innerHTML = `<div class="color-red">Error loading logs: ${err.message}</div>`;
-            }
+        // Escape untrusted log text before injecting as HTML
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
         }
 
-        logTypeSelect.addEventListener('change', fetchLogs);
-        clearConsoleBtn.addEventListener('click', () => consoleOutput.innerHTML = '');
+        // Fetch & Display All File Logs Simultaneously (signals, success, errors, performance)
+        async function fetchLogs() {
+            await Promise.all(LOG_TYPES.map(async (logType) => {
+                const consoleEl = document.getElementById(`console-${logType}`);
+                if (!consoleEl) return;
+                try {
+                    const res = await fetch(`/api/logs/${logType}`);
+                    if (!res.ok) {
+                        throw new Error(`status ${res.status}`);
+                    }
+                    const logs = await res.json();
+
+                    consoleEl.innerHTML = '';
+
+                    if (Array.isArray(logs) && logs.length > 0) {
+                        logs.forEach(line => {
+                            let level = 'INFO';
+                            if (line.includes('| ERROR |') || line.includes('❌')) level = 'ERROR';
+                            else if (line.includes('| WARNING |') || line.includes('⚠️')) level = 'WARNING';
+                            else if (line.includes('| DEBUG |')) level = 'DEBUG';
+
+                            consoleEl.innerHTML += `<div class="console-line ${level}">${escapeHtml(line)}</div>`;
+                        });
+                    } else {
+                        consoleEl.innerHTML = `<div class="color-muted">No ${logType} logs yet.</div>`;
+                    }
+
+                    // Auto scroll to bottom
+                    consoleEl.scrollTop = consoleEl.scrollHeight;
+                } catch (err) {
+                    consoleEl.innerHTML = `<div class="color-red">Error loading logs: ${err.message}</div>`;
+                }
+            }));
+        }
+
+        document.querySelectorAll('.log-panel .btn-small').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const logType = btn.getAttribute('data-log');
+                const consoleEl = document.getElementById(`console-${logType}`);
+                if (consoleEl) consoleEl.innerHTML = '';
+            });
+        });
 
         // Render Capital Comparison Chart
         function updateChart(strategies) {
