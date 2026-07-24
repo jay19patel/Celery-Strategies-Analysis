@@ -251,7 +251,19 @@ def trigger_batch_execution(self) -> Dict[str, Any]:
         logger.info("=" * 80)
         logger.info("🚀 STEP 1: INITIATING BATCH EXECUTION")
         logger.info("=" * 80)
-        
+
+        try:
+            get_collection("system_status").update_one(
+                {"_id": "batch_schedule"},
+                {"$set": {
+                    "last_triggered_at": datetime.now(timezone.utc),
+                    "interval_seconds": settings.schedule_seconds,
+                }},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.error(f"⚠️  Failed to record batch schedule status: {e}")
+
         symbols = get_symbols()
         strategies = get_strategies()
         

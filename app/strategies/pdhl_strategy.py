@@ -141,4 +141,5 @@ class PDHLStrategy(BaseStrategy):
             price=round(live_price, 2),
             timestamp=datetime.now(timezone.utc),
             success=True
+        )
 

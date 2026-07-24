@@ -1,4 +1,5 @@
 import logging
+from datetime import timezone
 from pathlib import Path
 from typing import Any, Dict, List
 from fastapi import FastAPI, HTTPException
@@ -6,6 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.database.mongodb import MongoDBConnection
+from app.core.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,33 @@ def get_global_stats() -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Error compiling global stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/schedule")
+def get_batch_schedule() -> Dict[str, Any]:
+    """Returns when the strategy batch last ran and its configured interval, so the UI can show a next-run countdown."""
+    try:
+        db = MongoDBConnection.get_database()
+        doc = db.system_status.find_one({"_id": "batch_schedule"})
+
+        last_triggered_at = doc.get("last_triggered_at") if doc else None
+        interval_seconds = (doc.get("interval_seconds") if doc else None) or settings.schedule_seconds
+
+        last_triggered_iso = None
+        if hasattr(last_triggered_at, "isoformat"):
+            # MongoDB returns naive datetimes; they were written as UTC, so mark them
+            # explicitly or JS's `new Date()` will misinterpret them as local time.
+            if last_triggered_at.tzinfo is None:
+                last_triggered_at = last_triggered_at.replace(tzinfo=timezone.utc)
+            last_triggered_iso = last_triggered_at.isoformat()
+
+        return {
+            "interval_seconds": interval_seconds,
+            "last_triggered_at": last_triggered_iso,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching batch schedule status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
