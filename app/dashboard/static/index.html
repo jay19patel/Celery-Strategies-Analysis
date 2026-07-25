@@ -482,6 +482,175 @@
             font-size: 0.8rem;
         }
 
+        /* Strategy Analytics tab */
+        .analytics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            gap: 1.25rem;
+        }
+
+        .analytics-stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.6rem 1rem;
+            margin: 0.85rem 0;
+        }
+
+        .analytics-stat-label {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .analytics-stat-value {
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .split-bar {
+            display: flex;
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+            background: rgba(255,255,255,0.05);
+            margin-top: 0.35rem;
+        }
+
+        .split-bar-long { background: var(--green); }
+        .split-bar-short { background: var(--red); }
+
+        .badge-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-top: 0.5rem;
+        }
+
+        .mini-badge {
+            font-size: 0.75rem;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--panel-border);
+            color: var(--text-secondary);
+            padding: 0.2rem 0.55rem;
+            border-radius: 1rem;
+        }
+
+        /* How It Works - flow diagram */
+        .flow-diagram {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        .flow-step {
+            width: 100%;
+            background: rgba(30, 30, 40, 0.4);
+            border: 1px solid var(--panel-border);
+            border-radius: 0.75rem;
+            padding: 1.1rem 1.4rem;
+            transition: var(--transition);
+        }
+
+        .flow-step:hover {
+            border-color: var(--panel-border-hover);
+        }
+
+        .flow-step-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.6rem;
+            height: 1.6rem;
+            border-radius: 50%;
+            background: var(--cyan-glow);
+            color: var(--cyan);
+            font-size: 0.8rem;
+            font-weight: 700;
+            margin-right: 0.6rem;
+            flex-shrink: 0;
+        }
+
+        .flow-step-title {
+            display: flex;
+            align-items: center;
+            font-weight: 600;
+            font-size: 1.02rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .flow-step-desc {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.55;
+            margin-left: 2.2rem;
+        }
+
+        .flow-arrow {
+            color: var(--text-muted);
+            font-size: 1.3rem;
+            line-height: 1;
+            margin: 0.35rem 0;
+        }
+
+        .flow-branch-row {
+            display: flex;
+            gap: 1.25rem;
+            width: 100%;
+        }
+
+        .flow-branch-row .flow-step {
+            flex: 1;
+        }
+
+        .flow-branch-row .flow-step.branch-no {
+            border-color: rgba(244, 63, 94, 0.25);
+        }
+
+        .flow-branch-row .flow-step.branch-yes {
+            border-color: rgba(16, 185, 129, 0.25);
+        }
+
+        /* Per-strategy account illustration */
+        .accounts-illustration {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 1rem;
+        }
+
+        .account-box {
+            text-align: center;
+            background: rgba(30, 30, 40, 0.4);
+            border: 1px solid var(--panel-border);
+            border-radius: 0.6rem;
+            padding: 1rem 0.5rem;
+        }
+
+        .account-box .amount {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--cyan);
+        }
+
+        .account-box .name {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.3rem;
+        }
+
+        .info-key-value {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+            font-size: 0.9rem;
+        }
+
+        .info-key-value:last-child { border-bottom: none; }
+
         /* Helpers & Utility Colors */
         .color-green { color: var(--green); }
         .color-red { color: var(--red); }
@@ -557,8 +726,11 @@
     <!-- Nav Tabs Section -->
     <nav class="tabs-nav">
         <button class="tab-btn active" data-tab="overview">Strategy Overview</button>
+        <button class="tab-btn" data-tab="analytics">Strategy Analytics</button>
         <button class="tab-btn" data-tab="trades">Closed Trades Log</button>
         <button class="tab-btn" data-tab="logs">System File Logs</button>
+        <button class="tab-btn" data-tab="config">System Config</button>
+        <button class="tab-btn" data-tab="howitworks">How It Works</button>
     </nav>
 
     <!-- Main Container -->
@@ -625,6 +797,33 @@
             </div>
         </section>
 
+        <!-- TAB: STRATEGY ANALYTICS -->
+        <section id="tab-analytics" class="tab-content">
+            <div class="panel">
+                <h2 class="panel-title" style="margin-bottom: 1rem;">Cumulative PnL Over Time</h2>
+                <div style="position: relative; height:260px; width:100%;">
+                    <canvas id="pnl-trend-chart"></canvas>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2 class="panel-title" style="margin-bottom: 1rem;">Total PnL by Strategy</h2>
+                <div style="position: relative; height:220px; width:100%;">
+                    <canvas id="analytics-chart"></canvas>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <h2 class="panel-title">Strategy-wise Performance Breakdown</h2>
+                    <span class="color-muted" id="analytics-count">0 Strategies</span>
+                </div>
+                <div class="analytics-grid" id="analytics-container">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </section>
+
         <!-- TAB 2: TRADES LOG -->
         <section id="tab-trades" class="tab-content">
             <div class="panel">
@@ -642,8 +841,11 @@
                                 <th>Size</th>
                                 <th>Entry Price</th>
                                 <th>Exit Price</th>
+                                <th>Stop Loss</th>
+                                <th>Target</th>
                                 <th>Net PnL</th>
                                 <th>Return %</th>
+                                <th>Hold Time</th>
                                 <th>Exit Time</th>
                                 <th>Exit Reason</th>
                             </tr>
@@ -697,6 +899,141 @@
             </div>
         </section>
 
+        <!-- TAB: SYSTEM CONFIG -->
+        <section id="tab-config" class="tab-content">
+            <div class="dashboard-split">
+                <div>
+                    <div class="panel">
+                        <h2 class="panel-title" style="margin-bottom: 1rem;">Active Strategies</h2>
+                        <div class="badge-row" id="config-strategies"></div>
+                    </div>
+                    <div class="panel">
+                        <h2 class="panel-title" style="margin-bottom: 1rem;">Symbols Being Tracked</h2>
+                        <div class="badge-row" id="config-symbols"></div>
+                    </div>
+                    <div class="panel">
+                        <h2 class="panel-title" style="margin-bottom: 1rem;">Schedules</h2>
+                        <div class="analytics-stats-grid" id="config-schedules"></div>
+                    </div>
+                </div>
+                <div>
+                    <div class="panel">
+                        <h2 class="panel-title" style="margin-bottom: 1rem;">Per-Strategy Paper Broker Risk</h2>
+                        <div class="analytics-stats-grid" id="config-broker-risk"></div>
+                    </div>
+                    <div class="panel">
+                        <h2 class="panel-title" style="margin-bottom: 1rem;">Portfolio Ensemble Engine</h2>
+                        <div class="analytics-stats-grid" id="config-portfolio"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB: HOW IT WORKS -->
+        <section id="tab-howitworks" class="tab-content">
+            <div class="panel">
+                <h2 class="panel-title" style="margin-bottom: 0.75rem;">What This System Does</h2>
+                <p style="color: var(--text-secondary); line-height: 1.7; font-size: 0.95rem;">
+                    This system runs <span id="hiw-strategies-count">several</span> independent trading strategies
+                    (<span id="hiw-strategies-list">…</span>) on <span id="hiw-symbols-list">…</span>, fully automatically,
+                    on a fixed schedule. Each strategy trades with its own simulated <strong>$100 paper account</strong> —
+                    they never share money or affect each other. No real money is ever used; every trade here is a
+                    simulation used to compare how each strategy actually performs.
+                </p>
+            </div>
+
+            <div class="panel">
+                <h2 class="panel-title" style="margin-bottom: 1.25rem;">The Full Cycle — Step by Step</h2>
+                <div class="flow-diagram">
+
+                    <div class="flow-step">
+                        <div class="flow-step-title"><span class="flow-step-num">1</span>⏰ Celery Beat Scheduler Fires</div>
+                        <div class="flow-step-desc">Every <strong id="hiw-schedule-interval">10 minutes</strong>, the scheduler automatically kicks off a fresh batch run — no manual trigger needed.</div>
+                    </div>
+                    <div class="flow-arrow">↓</div>
+
+                    <div class="flow-step">
+                        <div class="flow-step-title"><span class="flow-step-num">2</span>🧮 Every Strategy Runs in Parallel</div>
+                        <div class="flow-step-desc">For each symbol, every strategy independently fetches the latest price data and decides: <strong class="color-green">BUY</strong>, <strong class="color-red">SELL</strong>, or <strong class="color-muted">HOLD</strong>.</div>
+                    </div>
+                    <div class="flow-arrow">↓</div>
+
+                    <div class="flow-step">
+                        <div class="flow-step-title"><span class="flow-step-num">3</span>🛡️ Protective Exit Check (Stop Loss / Target)</div>
+                        <div class="flow-step-desc">Before anything else, every currently open position is checked against the latest price. If the price has crossed its stop-loss or take-profit level, that position is closed immediately — this happens <strong>every cycle</strong>, even if the strategy itself says HOLD.</div>
+                    </div>
+                    <div class="flow-arrow">↓</div>
+
+                    <div class="flow-step">
+                        <div class="flow-step-title"><span class="flow-step-num">4</span>🚦 Did Any Strategy Signal BUY or SELL?</div>
+                        <div class="flow-step-desc">The system checks whether anything actionable happened this cycle.</div>
+                    </div>
+                    <div class="flow-arrow">↓</div>
+
+                    <div class="flow-branch-row">
+                        <div class="flow-step branch-no">
+                            <div class="flow-step-title">❌ No — All HOLD</div>
+                            <div class="flow-step-desc" style="margin-left: 0;">Nothing else happens. System waits for the next cycle.</div>
+                        </div>
+                        <div class="flow-step branch-yes">
+                            <div class="flow-step-title">✅ Yes — Actionable Signal</div>
+                            <div class="flow-step-desc" style="margin-left: 0;">Continue to Step 5 below.</div>
+                        </div>
+                    </div>
+                    <div class="flow-arrow">↓</div>
+
+                    <div class="flow-step">
+                        <div class="flow-step-title"><span class="flow-step-num">5</span>💰 Paper Broker Opens / Closes / Reverses the Trade</div>
+                        <div class="flow-step-desc">That strategy's own $100 (or whatever it has grown/shrunk to) account is used to open a new position — or close/reverse the existing one — using 100% of its current balance.</div>
+                    </div>
+                    <div class="flow-arrow">↓</div>
+
+                    <div class="flow-step">
+                        <div class="flow-step-title"><span class="flow-step-num">6</span>🗄️ Saved to the Database</div>
+                        <div class="flow-step-desc">Updated balance, open position, and (if a trade closed) the full trade record — entry, exit, stop, target, PnL, reason — are all saved.</div>
+                    </div>
+                    <div class="flow-arrow">↓</div>
+
+                    <div class="flow-step">
+                        <div class="flow-step-title"><span class="flow-step-num">7</span>📊 Dashboard Updates</div>
+                        <div class="flow-step-desc">The Overview, Analytics, and Trades tabs on this dashboard reflect the change automatically the next time they refresh.</div>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="dashboard-split">
+                <div>
+                    <div class="panel">
+                        <h2 class="panel-title" style="margin-bottom: 1rem;">Every Strategy Has Its Own Separate Money</h2>
+                        <p style="color: var(--text-secondary); font-size: 0.88rem; margin-bottom: 1rem;">
+                            No strategy ever touches another's balance. Wins and losses stay within that strategy's own account and compound over time.
+                        </p>
+                        <div class="accounts-illustration" id="hiw-accounts-illustration"></div>
+                    </div>
+                </div>
+                <div>
+                    <div class="panel">
+                        <h2 class="panel-title" style="margin-bottom: 1rem;">A Position's Lifecycle</h2>
+                        <div class="info-key-value"><span>1. Opened</span><span class="color-muted">100% of current balance is used to enter</span></div>
+                        <div class="info-key-value"><span>2. Monitored</span><span class="color-muted">Checked every cycle against stop &amp; target</span></div>
+                        <div class="info-key-value"><span>3a. Closed — Stop Loss Hit</span><span class="color-red">Price dropped/rose past the stop level</span></div>
+                        <div class="info-key-value"><span>3b. Closed — Take Profit Hit</span><span class="color-green">Price reached the target level</span></div>
+                        <div class="info-key-value"><span>3c. Closed — Signal Reverse</span><span class="color-cyan">Strategy signaled the opposite direction</span></div>
+                    </div>
+                    <div class="panel">
+                        <h2 class="panel-title" style="margin-bottom: 1rem;">Live System Numbers</h2>
+                        <div class="info-key-value"><span>Strategy batch runs every</span><span id="hiw-num-schedule" class="color-cyan">—</span></div>
+                        <div class="info-key-value"><span>Stop loss</span><span id="hiw-num-sl" class="color-red">—</span></div>
+                        <div class="info-key-value"><span>Take profit</span><span id="hiw-num-tp" class="color-green">—</span></div>
+                        <div class="info-key-value"><span>Fee per trade leg</span><span class="color-muted">0.05%</span></div>
+                        <div class="info-key-value"><span>Starting capital / strategy</span><span class="color-muted">$100.00</span></div>
+                        <div class="info-key-value"><span>Bankrupt threshold</span><span class="color-muted">≤ $1.00 (frozen permanently)</span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
     </main>
 
     <!-- UI Interaction Script -->
@@ -705,6 +1042,8 @@
         let currentTab = 'overview';
         let autoRefreshInterval = null;
         let capitalChart = null;
+        let analyticsChart = null;
+        let pnlTrendChart = null;
         let allTrades = [];
         let nextRunAtMs = null;
         let tradesPage = 1;
@@ -812,6 +1151,35 @@
                     renderTrades();
                 } else if (currentTab === 'logs') {
                     fetchLogs();
+                } else if (currentTab === 'analytics') {
+                    const [analyticsRes, analyticsTradesRes] = await Promise.all([
+                        fetch('/api/analytics'),
+                        fetch('/api/trades?limit=1000')
+                    ]);
+                    if (!analyticsRes.ok) {
+                        throw new Error(`Analytics API failed: status ${analyticsRes.status}`);
+                    }
+                    const analytics = await analyticsRes.json();
+                    document.getElementById('analytics-count').innerText = `${analytics.length} Strategies`;
+                    renderAnalytics(analytics);
+                    updateAnalyticsChart(analytics);
+
+                    if (analyticsTradesRes.ok) {
+                        const analyticsTrades = await analyticsTradesRes.json();
+                        updatePnlTrendChart(analyticsTrades);
+                    }
+                } else if (currentTab === 'config') {
+                    const configRes = await fetch('/api/config');
+                    if (!configRes.ok) {
+                        throw new Error(`Config API failed: status ${configRes.status}`);
+                    }
+                    renderConfig(await configRes.json());
+                } else if (currentTab === 'howitworks') {
+                    const hiwRes = await fetch('/api/config');
+                    if (!hiwRes.ok) {
+                        throw new Error(`Config API failed: status ${hiwRes.status}`);
+                    }
+                    renderHowItWorks(await hiwRes.json());
                 }
 
                 // Restore Online status
@@ -880,6 +1248,254 @@
         }
         setInterval(updateNextRunCountdown, 1000);
 
+        // Render Strategy-wise Analytics Cards
+        function renderAnalytics(analytics) {
+            const container = document.getElementById('analytics-container');
+            container.innerHTML = '';
+
+            if (analytics.length === 0) {
+                container.innerHTML = `<div class="empty-state"><div class="empty-icon">📈</div>No strategy data yet.</div>`;
+                return;
+            }
+
+            analytics.forEach(a => {
+                const pnlClass = a.total_pnl >= 0 ? 'color-green' : 'color-red';
+                const totalDirTrades = a.long_trades + a.short_trades;
+                const longPct = totalDirTrades ? (a.long_trades / totalDirTrades * 100) : 0;
+                const shortPct = totalDirTrades ? 100 - longPct : 0;
+
+                let profitFactorText = '—';
+                if (a.profit_factor === null && a.total_trades > 0) profitFactorText = '∞ (no losses)';
+                else if (a.profit_factor !== null) profitFactorText = a.profit_factor.toFixed(2);
+
+                const holdText = a.avg_hold_minutes === null
+                    ? '—'
+                    : a.avg_hold_minutes >= 60
+                        ? `${(a.avg_hold_minutes / 60).toFixed(1)}h`
+                        : `${a.avg_hold_minutes.toFixed(0)}m`;
+
+                const symbolBadges = a.symbols_traded.length
+                    ? a.symbols_traded.map(s => `<span class="mini-badge">${s}</span>`).join('')
+                    : `<span class="mini-badge">No trades yet</span>`;
+
+                const reasonBadges = Object.entries(a.exit_reasons)
+                    .map(([reason, count]) => `<span class="mini-badge">${reason}: ${count}</span>`)
+                    .join('');
+
+                container.innerHTML += `
+                    <div class="strategy-card">
+                        <div class="strategy-title-row">
+                            <span class="strategy-name">${a.strategy_name}</span>
+                            <span class="strategy-pnl ${pnlClass}">${a.total_pnl > 0 ? '+' : ''}$${a.total_pnl.toFixed(2)}</span>
+                        </div>
+
+                        <div class="analytics-stats-grid">
+                            <div><div class="analytics-stat-label">Total Trades</div><div class="analytics-stat-value">${a.total_trades}</div></div>
+                            <div><div class="analytics-stat-label">Win Rate</div><div class="analytics-stat-value">${a.win_rate.toFixed(1)}%</div></div>
+                            <div><div class="analytics-stat-label">Avg PnL / Trade</div><div class="analytics-stat-value ${a.avg_pnl_per_trade >= 0 ? 'color-green' : 'color-red'}">$${a.avg_pnl_per_trade.toFixed(2)}</div></div>
+                            <div><div class="analytics-stat-label">Profit Factor</div><div class="analytics-stat-value">${profitFactorText}</div></div>
+                            <div><div class="analytics-stat-label">Best Trade</div><div class="analytics-stat-value color-green">+$${a.best_trade.toFixed(2)}</div></div>
+                            <div><div class="analytics-stat-label">Worst Trade</div><div class="analytics-stat-value color-red">$${a.worst_trade.toFixed(2)}</div></div>
+                            <div><div class="analytics-stat-label">Avg Hold Time</div><div class="analytics-stat-value">${holdText}</div></div>
+                            <div><div class="analytics-stat-label">Current Capital</div><div class="analytics-stat-value">$${a.current_capital.toFixed(2)}</div></div>
+                        </div>
+
+                        <div class="analytics-stat-label">Long vs Short (${a.long_trades} / ${a.short_trades})</div>
+                        <div class="split-bar">
+                            <div class="split-bar-long" style="width: ${longPct}%"></div>
+                            <div class="split-bar-short" style="width: ${shortPct}%"></div>
+                        </div>
+
+                        <div class="analytics-stat-label" style="margin-top: 0.75rem;">Symbols Traded</div>
+                        <div class="badge-row">${symbolBadges}</div>
+
+                        ${reasonBadges ? `<div class="analytics-stat-label" style="margin-top: 0.75rem;">Exit Reasons</div><div class="badge-row">${reasonBadges}</div>` : ''}
+                    </div>
+                `;
+            });
+        }
+
+        // Render Total PnL Comparison Chart (Analytics tab)
+        function updateAnalyticsChart(analytics) {
+            const labels = analytics.map(a => a.strategy_name.split('Strategy')[0]);
+            const pnls = analytics.map(a => a.total_pnl);
+            const backgroundColors = pnls.map(p => p >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(244, 63, 94, 0.6)');
+            const borderColors = pnls.map(p => p >= 0 ? 'rgba(16, 185, 129, 1)' : 'rgba(244, 63, 94, 1)');
+
+            if (analyticsChart) {
+                analyticsChart.data.labels = labels;
+                analyticsChart.data.datasets[0].data = pnls;
+                analyticsChart.data.datasets[0].backgroundColor = backgroundColors;
+                analyticsChart.data.datasets[0].borderColor = borderColors;
+                analyticsChart.update();
+            } else {
+                const ctx = document.getElementById('analytics-chart').getContext('2d');
+                analyticsChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Total PnL ($)',
+                            data: pnls,
+                            backgroundColor: backgroundColors,
+                            borderColor: borderColors,
+                            borderWidth: 1,
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            y: {
+                                grid: { color: 'rgba(255,255,255,0.05)' },
+                                ticks: { color: '#9ca3af' }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: { color: '#9ca3af' }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Formats "time since" a given ISO timestamp as e.g. "2h 14m"
+        function formatHoldingSince(isoTime) {
+            const ms = Date.now() - new Date(isoTime).getTime();
+            if (!isFinite(ms) || ms < 0) return '0m';
+            const totalMinutes = Math.floor(ms / 60000);
+            if (totalMinutes < 60) return `${totalMinutes}m`;
+            return `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
+        }
+
+        // Render Cumulative PnL-over-trades line chart, one line per strategy (Analytics tab)
+        function updatePnlTrendChart(trades) {
+            const byStrategy = {};
+            trades.forEach(t => {
+                if (!byStrategy[t.strategy_name]) byStrategy[t.strategy_name] = [];
+                byStrategy[t.strategy_name].push(t);
+            });
+
+            const palette = ['#06b6d4', '#10b981', '#fbbf24', '#f43f5e', '#8b5cf6', '#3b82f6', '#ec4899'];
+            const datasets = Object.keys(byStrategy).map((name, i) => {
+                const sorted = byStrategy[name].slice().sort((a, b) => new Date(a.exit_time) - new Date(b.exit_time));
+                let cumulative = 0;
+                const points = sorted.map((t, idx) => {
+                    cumulative += t.pnl;
+                    return { x: idx + 1, y: Math.round(cumulative * 100) / 100 };
+                });
+                const color = palette[i % palette.length];
+                return {
+                    label: name.split('Strategy')[0].trim() || name,
+                    data: points,
+                    borderColor: color,
+                    backgroundColor: color,
+                    fill: false,
+                    tension: 0.25,
+                    pointRadius: 2,
+                };
+            });
+
+            if (pnlTrendChart) {
+                pnlTrendChart.data.datasets = datasets;
+                pnlTrendChart.update();
+            } else {
+                const ctx = document.getElementById('pnl-trend-chart').getContext('2d');
+                pnlTrendChart = new Chart(ctx, {
+                    type: 'line',
+                    data: { datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        parsing: false,
+                        plugins: {
+                            legend: { display: true, labels: { color: '#9ca3af' } }
+                        },
+                        scales: {
+                            x: {
+                                type: 'linear',
+                                title: { display: true, text: 'Trade #', color: '#9ca3af' },
+                                grid: { color: 'rgba(255,255,255,0.05)' },
+                                ticks: { color: '#9ca3af', precision: 0 }
+                            },
+                            y: {
+                                title: { display: true, text: 'Cumulative PnL ($)', color: '#9ca3af' },
+                                grid: { color: 'rgba(255,255,255,0.05)' },
+                                ticks: { color: '#9ca3af' }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Formats a duration in seconds as e.g. "600s (10m)"
+        function formatDuration(seconds) {
+            if (seconds >= 3600) return `${seconds}s (${(seconds / 3600).toFixed(1)}h)`;
+            if (seconds >= 60) return `${seconds}s (${(seconds / 60).toFixed(1)}m)`;
+            return `${seconds}s`;
+        }
+
+        function statRow(label, value) {
+            return `<div><div class="analytics-stat-label">${label}</div><div class="analytics-stat-value">${value}</div></div>`;
+        }
+
+        // Render System Config tab
+        function renderConfig(config) {
+            document.getElementById('config-strategies').innerHTML = config.strategies.length
+                ? config.strategies.map(s => `<span class="mini-badge">${s}</span>`).join('')
+                : `<span class="mini-badge">None configured</span>`;
+
+            document.getElementById('config-symbols').innerHTML = config.symbols.length
+                ? config.symbols.map(s => `<span class="mini-badge">${s}</span>`).join('')
+                : `<span class="mini-badge">None configured</span>`;
+
+            document.getElementById('config-schedules').innerHTML =
+                statRow('Strategy Batch Runs Every', formatDuration(config.batch_schedule_seconds)) +
+                statRow('Portfolio Engine Runs Every', formatDuration(config.portfolio_engine.schedule_seconds)) +
+                statRow('Timezone', config.timezone);
+
+            document.getElementById('config-broker-risk').innerHTML =
+                statRow('Stop Loss', `${config.paper_broker.stop_loss_pct}%`) +
+                statRow('Take Profit', `${config.paper_broker.take_profit_pct}%`);
+
+            const p = config.portfolio_engine;
+            document.getElementById('config-portfolio').innerHTML =
+                statRow('Symbol', p.symbol) +
+                statRow('Candle Interval', p.interval) +
+                statRow('Initial Capital', `$${p.initial_capital}`) +
+                statRow('Risk / Trade', `${p.risk_per_trade_pct}%`) +
+                statRow('Stop Loss', `${p.stop_loss_pct}%`) +
+                statRow('Take Profit', `${p.take_profit_pct}%`) +
+                statRow('Max Hold', `${p.max_hold_bars} bars`) +
+                statRow('Max Leverage', `${p.max_leverage}x`) +
+                statRow('Max Concurrent Trades', p.max_concurrent_trades);
+        }
+
+        // Render How It Works tab (fills in live numbers so the explainer stays accurate)
+        function renderHowItWorks(config) {
+            document.getElementById('hiw-strategies-count').innerText = config.strategies.length;
+            document.getElementById('hiw-strategies-list').innerText = config.strategies.join(', ');
+            document.getElementById('hiw-symbols-list').innerText = config.symbols.join(', ');
+            document.getElementById('hiw-schedule-interval').innerText = formatDuration(config.batch_schedule_seconds);
+
+            document.getElementById('hiw-num-schedule').innerText = formatDuration(config.batch_schedule_seconds);
+            document.getElementById('hiw-num-sl').innerText = `${config.paper_broker.stop_loss_pct}%`;
+            document.getElementById('hiw-num-tp').innerText = `${config.paper_broker.take_profit_pct}%`;
+
+            document.getElementById('hiw-accounts-illustration').innerHTML = config.strategies.map(name => `
+                <div class="account-box">
+                    <div class="amount">$100</div>
+                    <div class="name">${name}</div>
+                </div>
+            `).join('');
+        }
+
         // Render Strategy Grid
         function renderStrategies(strategies) {
             strategiesContainer.innerHTML = '';
@@ -892,14 +1508,21 @@
                 const pnlClass = s.return_pct >= 0 ? 'color-green' : 'color-red';
                 const pos = s.open_position;
                 let posMarkup = `<div class="strategy-position-block"><span class="strategy-stat-label">Position</span><span class="color-muted">FLAT</span></div>`;
-                
+
                 if (pos) {
                     const typeClass = pos.type === 'LONG' ? 'color-green' : 'color-red';
                     posMarkup = `
-                        <div class="strategy-position-block" style="border-left: 2px solid ${pos.type === 'LONG' ? 'var(--green)' : 'var(--red)'}">
-                            <span class="strategy-stat-label">${pos.symbol}</span>
-                            <span class="${typeClass}" style="font-weight:700;">${pos.type}</span>
-                            <span class="color-muted">$${pos.entry_price.toLocaleString()}</span>
+                        <div class="strategy-position-block" style="border-left: 2px solid ${pos.type === 'LONG' ? 'var(--green)' : 'var(--red)'}; flex-direction: column; align-items: flex-start; gap: 0.3rem;">
+                            <div style="display:flex; justify-content:space-between; width:100%;">
+                                <span class="strategy-stat-label">${pos.symbol}</span>
+                                <span class="${typeClass}" style="font-weight:700;">${pos.type}</span>
+                                <span class="color-muted">$${pos.entry_price.toLocaleString()}</span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; width:100%; font-size:0.78rem;">
+                                <span class="color-red">SL: ${pos.stop_price ? '$' + pos.stop_price.toFixed(2) : '—'}</span>
+                                <span class="color-green">TP: ${pos.target_price ? '$' + pos.target_price.toFixed(2) : '—'}</span>
+                                <span class="color-muted">Held: ${formatHoldingSince(pos.entry_time)}</span>
+                            </div>
                         </div>
                     `;
                 }
@@ -963,8 +1586,20 @@
                             <span class="strategy-stat-value">${pos.size.toFixed(5)}</span>
                         </div>
                         <div class="strategy-stats-row" style="margin: 0; padding: 0;">
+                            <span class="strategy-stat-label">Stop Loss:</span>
+                            <span class="strategy-stat-value color-red">${pos.stop_price ? '$' + pos.stop_price.toFixed(2) : '—'}</span>
+                        </div>
+                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
+                            <span class="strategy-stat-label">Target:</span>
+                            <span class="strategy-stat-value color-green">${pos.target_price ? '$' + pos.target_price.toFixed(2) : '—'}</span>
+                        </div>
+                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
                             <span class="strategy-stat-label">Opened:</span>
                             <span class="strategy-stat-value">${date}</span>
+                        </div>
+                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
+                            <span class="strategy-stat-label">Holding:</span>
+                            <span class="strategy-stat-value">${formatHoldingSince(pos.entry_time)}</span>
                         </div>
                     </div>
                 `;
@@ -976,7 +1611,7 @@
             tradesTableBody.innerHTML = '';
             
             if (allTrades.length === 0) {
-                tradesTableBody.innerHTML = `<tr><td colspan="10" class="empty-state"><div class="empty-icon">📑</div>No trades logged yet.</td></tr>`;
+                tradesTableBody.innerHTML = `<tr><td colspan="13" class="empty-state"><div class="empty-icon">📑</div>No trades logged yet.</td></tr>`;
                 return;
             }
 
@@ -989,6 +1624,18 @@
                 const pnlClass = t.pnl >= 0 ? 'color-green' : 'color-red';
                 const date = new Date(t.exit_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
 
+                const stopText = (t.stop_price !== null && t.stop_price !== undefined) ? `$${t.stop_price.toLocaleString(undefined, {minimumFractionDigits: 2})}` : '—';
+                const targetText = (t.target_price !== null && t.target_price !== undefined) ? `$${t.target_price.toLocaleString(undefined, {minimumFractionDigits: 2})}` : '—';
+
+                let holdText = '—';
+                if (t.holding_minutes !== null && t.holding_minutes !== undefined) {
+                    holdText = t.holding_minutes >= 60 ? `${(t.holding_minutes / 60).toFixed(1)}h` : `${t.holding_minutes.toFixed(0)}m`;
+                }
+
+                let reasonClass = '';
+                if (t.reason && t.reason.includes('Stop Loss')) reasonClass = 'color-red';
+                else if (t.reason && t.reason.includes('Take Profit')) reasonClass = 'color-green';
+
                 tradesTableBody.innerHTML += `
                     <tr>
                         <td style="font-weight: 500;">${t.strategy_name}</td>
@@ -997,10 +1644,13 @@
                         <td class="color-muted">${t.size}</td>
                         <td>$${t.entry_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                         <td>$${t.exit_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td class="color-red">${stopText}</td>
+                        <td class="color-green">${targetText}</td>
                         <td class="${pnlClass}" style="font-weight: 700;">${t.pnl > 0 ? '+' : ''}$${t.pnl.toFixed(2)}</td>
                         <td class="${pnlClass}" style="font-weight: 700;">${t.return_pct > 0 ? '+' : ''}${t.return_pct.toFixed(2)}%</td>
+                        <td class="color-muted">${holdText}</td>
                         <td class="color-muted">${date}</td>
-                        <td><span style="font-size: 0.8rem; background: rgba(255,255,255,0.03); padding: 0.25rem 0.5rem; border-radius: 0.25rem;">${t.reason}</span></td>
+                        <td><span class="mini-badge ${reasonClass}">${t.reason}</span></td>
                     </tr>
                 `;
             });

@@ -111,11 +111,24 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
         expected_symbols = batch_metadata.get("expected_symbols_count") if batch_metadata else None
 
         aggregated_result = manager.aggregate_results(
-            valid_results, 
-            expected_symbols_count=expected_symbols, 
+            valid_results,
+            expected_symbols_count=expected_symbols,
             expected_strategies_count=expected_skills
         )
-        
+
+        # STEP 3.0: Check stop-loss / take-profit on every open position, every cycle -
+        # this must run regardless of this cycle's signal, so a protective exit isn't
+        # missed while the strategy is signaling HOLD (see the early-return below).
+        broker = get_paper_broker()
+        for symbol_res in aggregated_result.get("results", []):
+            symbol = symbol_res.get("symbol")
+            for strat_res in symbol_res.get("strategies", []):
+                price = strat_res.get("price", 0.0)
+                if price and price > 0:
+                    broker.check_protective_exit(
+                        strat_res.get("strategy_name"), symbol, price, datetime.now(timezone.utc)
+                    )
+
         # Check for actionable signals
         has_signals = _has_actionable_signal(aggregated_result)
         
@@ -160,7 +173,6 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
         logger.info(f"✅ STEP 3.1 COMPLETED: Published to channel '{pubsub_response.get('channel')}'")
 
         # STEP 3.1.5: Pass Actionable Signals to PaperBroker
-        broker = get_paper_broker()
         for symbol_res in aggregated_result.get("results", []):
             symbol = symbol_res.get("symbol")
             for strat_res in symbol_res.get("strategies", []):

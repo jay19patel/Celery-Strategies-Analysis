@@ -6,6 +6,7 @@ from app.models.strategy_models import SignalType
 from app.database.mongodb import MongoDBConnection
 from app.database.redis_publisher import get_redis_client
 from app.core.logger import get_celery_logger
+from app.core.settings import settings
 
 logger = get_celery_logger()
 
@@ -104,6 +105,8 @@ class PaperBroker:
             "pnl": round(net_pnl, 4),
             "return_pct": round((net_pnl / pos["capital_allocated"]) * 100, 2),
             "reason": reason,
+            "stop_price": pos.get("stop_price"),
+            "target_price": pos.get("target_price"),
         }
         self.trades_coll.insert_one(trade_record)
 
@@ -115,12 +118,26 @@ class PaperBroker:
     def _open_position(
         self, account: Dict[str, Any], pos_type: str, symbol: str, price: float, entry_time: datetime
     ) -> Dict[str, Any]:
-        """Opens a new position, allocating all available capital and deducting the entry fee."""
+        """Opens a new position, allocating all available capital and deducting the entry fee.
+
+        Also sets a stop-loss and take-profit level (from settings.broker_stop_loss_pct /
+        broker_take_profit_pct) so the position has a protective exit even if the strategy
+        itself keeps signaling HOLD - see check_protective_exit().
+        """
         capital = account["capital"]
 
         fee = capital * self.fee_pct
         investable = capital - fee
         size = investable / price
+
+        stop_dist = price * (settings.broker_stop_loss_pct / 100)
+        target_dist = price * (settings.broker_take_profit_pct / 100)
+        if pos_type == "LONG":
+            stop_price = price - stop_dist
+            target_price = price + target_dist
+        else:  # SHORT
+            stop_price = price + stop_dist
+            target_price = price - target_dist
 
         account["open_position"] = {
             "type": pos_type,
@@ -129,10 +146,68 @@ class PaperBroker:
             "size": size,
             "capital_allocated": capital,
             "entry_time": entry_time,
+            "stop_price": stop_price,
+            "target_price": target_price,
         }
 
-        logger.info(f"📊 BROKER | {account['_id']} OPENED {pos_type} | Size: {size:.4f} @ ${price:.2f}")
+        logger.info(
+            f"📊 BROKER | {account['_id']} OPENED {pos_type} | Size: {size:.4f} @ ${price:.2f} | "
+            f"Stop: ${stop_price:.2f} | Target: ${target_price:.2f}"
+        )
         return account
+
+    def check_protective_exit(self, strategy_name: str, symbol: str, current_price: float, current_time: datetime) -> None:
+        """Closes a strategy's open position if the current price has crossed its
+        stop-loss or take-profit level.
+
+        Called every batch cycle for every (strategy, symbol) pair regardless of that
+        cycle's signal, so a protective exit isn't missed while the strategy is signaling
+        HOLD in between actual BUY/SELL signals.
+        """
+        if current_price <= 0:
+            return
+
+        lock_name = f"lock:broker:{strategy_name}"
+        lock = self.redis.lock(lock_name, timeout=10)
+
+        if not lock.acquire(blocking=True, blocking_timeout=5):
+            logger.warning(f"⚠️ BROKER | Could not acquire lock for {strategy_name}, skipping protective-exit check.")
+            return
+
+        try:
+            account = self._get_account(strategy_name)
+            pos = account.get("open_position")
+            if not pos or pos.get("symbol") != symbol:
+                return
+
+            stop_price = pos.get("stop_price")
+            target_price = pos.get("target_price")
+            if stop_price is None or target_price is None:
+                return  # position opened before this protection existed
+
+            if pos["type"] == "LONG":
+                hit_stop = current_price <= stop_price
+                hit_target = current_price >= target_price
+            else:  # SHORT
+                hit_stop = current_price >= stop_price
+                hit_target = current_price <= target_price
+
+            if hit_stop:
+                account = self._close_position(account, stop_price, current_time, "Stop Loss Hit")
+            elif hit_target:
+                account = self._close_position(account, target_price, current_time, "Take Profit Hit")
+            else:
+                return
+
+            self.accounts_coll.update_one({"_id": strategy_name}, {"$set": account})
+
+        except Exception as e:
+            logger.error(f"❌ BROKER | Error checking protective exit for {strategy_name}: {str(e)}", exc_info=True)
+        finally:
+            try:
+                lock.release()
+            except Exception:
+                pass
 
     def process_signal(self, strategy_name: str, symbol: str, signal: SignalType, price: float, timestamp: datetime) -> None:
         """Opens, closes, or reverses a strategy's position in response to a new signal.

@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # Scheduling
     schedule_seconds: int = Field(60)  # in seconds
 
+    # PaperBroker (simple per-strategy account) risk protection
+    broker_stop_loss_pct: float = Field(2.0)
+    broker_take_profit_pct: float = Field(4.0)
+
     # Portfolio paper-trading
     portfolio_symbol: str = Field("ETHUSD")
     portfolio_interval: str = Field("1h")
