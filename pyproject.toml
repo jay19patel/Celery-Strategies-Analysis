@@ -9,6 +9,7 @@ dependencies = [
     "fastapi>=0.139.2",
     "msgpack>=1.1.0",
     "pandas-ta>=0.4.71b0",
+    "python-dotenv>=1.1.1",
     "pydantic>=2.12.0",
     "pydantic-settings>=2.11.0",
     "pymongo>=4.15.3",

@@ -23,13 +23,35 @@ Every condition string is one of:
     "{signal}(L)" / "{signal}(S)" - sig_{signal} column == +1 / == -1
 """
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
 
+logger = logging.getLogger(__name__)
+
 CONDITION_WINDOW = 100  # same causal rolling window used when these strategies were found
 
+# Combos below reference a sig_* column build_features() never computes (this module
+# was trimmed for only 2 strategies, then the ensemble was expanded to top-10/top-10
+# without updating it - see latest_signal()). Warn once per combo instead of raising,
+# so one broken combo doesn't crash the whole ensemble evaluation every cycle.
+_warned_missing_signals = set()
+
 # The Top 10 LONG and Top 10 SHORT strategies verified out-of-sample
+#
+# KNOWN GAP: 5 of these 20 combos reference a sig_* column build_features()
+# never computes (this module was ported/trimmed for only 2 strategies before
+# the ensemble expanded to all 20 - see the module docstring). Each affected
+# combo permanently evaluates to no-signal (0) via the fallback in
+# latest_signal() until the real logic is implemented:
+#   long_04  -> trendline_break(L)
+#   long_08  -> ema_pullback(L)
+#   long_10  -> donchian(L)
+#   short_07 -> nr7_breakout(S)
+#   short_08 -> bos_retest(S)
+#   short_09 -> donchian(S)
 STRATEGIES = {
     # LONG Strategies
     "long_01": {"name": "long_01", "combo": "EMA_10>median AND MACD_hist>median AND bars_since_swing_high>median AND aroon_oscillator>median AND shock_elasticity>median", "direction": 1},
@@ -356,8 +378,10 @@ def _add_candlestick_signals(df):
 
 def _add_breakout_signals(df, state):
     """squeeze_on/resistance_level/support_level are directly referenced by
-    strategies; sig_donchian/sig_sr_breakout/sig_squeeze_breakout are computed
-    as a side effect (unused, harmless)."""
+    strategies. NOTE: sig_donchian is NOT actually computed here despite what
+    an earlier version of this comment claimed - long_10/short_09 reference
+    donchian(L)/(S) and will hit the missing-column fallback in latest_signal()
+    until this is implemented."""
     ch = state["confirmed_high"].copy()
     cl = state["confirmed_low"].copy()
     resistance = ch.dropna().rolling(3).max().reindex(df.index).ffill()
@@ -458,8 +482,10 @@ def _add_fibonacci_signals(df):
 
 
 def _add_range_signals(df):
-    """sig_inside_bar_breakout is directly referenced (sig_nr7_breakout is
-    not needed and is skipped)."""
+    """sig_inside_bar_breakout is directly referenced. NOTE: sig_nr7_breakout is
+    NOT actually computed here despite what an earlier version of this comment
+    claimed - short_07 references nr7_breakout(S) and will hit the
+    missing-column fallback in latest_signal() until this is implemented."""
     inside = (df["High"] < df["High"].shift(1)) & (df["Low"] > df["Low"].shift(1))
     break_up = inside.shift(1, fill_value=False) & (df["Close"] > df["High"].shift(1))
     break_dn = inside.shift(1, fill_value=False) & (df["Close"] < df["Low"].shift(1))
@@ -468,10 +494,11 @@ def _add_range_signals(df):
 
 
 def _add_combination_signals(df):
-    """trend_score + sig_trend_confluence are directly referenced;
-    sig_bos_retest/sig_sweep_reversal/sig_super_confluence are computed as a
-    side effect (this is all one method upstream too - splitting it apart
-    would risk breaking the shared trend_score/bos state)."""
+    """trend_score + sig_trend_confluence are directly referenced. NOTE:
+    sig_bos_retest is NOT actually computed here despite what an earlier
+    version of this comment claimed - short_08 references bos_retest(S) and
+    will hit the missing-column fallback in latest_signal() until this is
+    implemented."""
     votes = (
         np.sign(df["EMA_20"] - df["EMA_50"])
         + df["supertrend_direction"]
@@ -510,10 +537,30 @@ def _condition_mask(df, condition, window):
 
 def build_direction_array(df, strategy, window=CONDITION_WINDOW):
     """strategy: one entry from STRATEGIES. Returns a +1/-1/0 numpy array,
-    one value per candle."""
+    one value per candle.
+
+    If a condition references a sig_* column build_features() doesn't compute
+    (a handful of the top-10 combos do - this module was trimmed for only 2
+    strategies, then the ensemble was expanded to all 20 without updating it -
+    see the KNOWN GAP note above STRATEGIES), this combo's mask is forced to
+    all-False (never fires) rather than raising - one broken combo should
+    never crash evaluation of the ensemble, whether called per-symbol from a
+    live strategy's execute() or in bulk from the portfolio simulation task.
+    """
+    strategy_key = strategy.get("name", "?")
     mask = None
     for condition in strategy["combo"].split(" AND "):
-        cond_mask = _condition_mask(df, condition, window)
+        try:
+            cond_mask = _condition_mask(df, condition, window)
+        except KeyError as e:
+            if strategy_key not in _warned_missing_signals:
+                _warned_missing_signals.add(strategy_key)
+                logger.warning(
+                    f"⚠️  Strategy combo '{strategy_key}' references missing column {e} - "
+                    f"this combo will never fire until the feature is implemented. "
+                    f"(This warning will not repeat for this combo.)"
+                )
+            return np.zeros(len(df))
         mask = cond_mask if mask is None else (mask & cond_mask)
     return np.where(mask, strategy["direction"], 0)
 
@@ -521,9 +568,7 @@ def build_direction_array(df, strategy, window=CONDITION_WINDOW):
 def latest_signal(df, strategy_key, window=CONDITION_WINDOW):
     """Convenience for a live strategy's execute(): build features (if not
     already present) and return the direction (+1/-1/0) for the MOST RECENT
-    candle only, plus that candle's Close price. Raises KeyError with a clear
-    message if `df` is missing a column the strategy's combo needs (e.g. if
-    build_features() wasn't called first)."""
+    candle only, plus that candle's Close price."""
     strategy = STRATEGIES[strategy_key]
     direction_array = build_direction_array(df, strategy, window)
     latest_direction = int(direction_array[-1])

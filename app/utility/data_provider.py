@@ -4,7 +4,6 @@ import numpy as np
 import requests
 import time
 from functools import lru_cache
-from datetime import datetime, timedelta
 from threading import Lock
 from app.core.logger import get_data_provider_logger
 
@@ -47,6 +46,7 @@ def _get_from_cache(cache_key: str):
             )
             # Restore DataFrame's index name if needed (often None)
             df.index.name = data_dict.get('index_name', 'DateTime')
+            df['DateTime'] = df.index  # restore the column dropped before caching
             return df
     except Exception as e:
         logger.error(f"⚠️  Redis read error: {str(e)}")
@@ -60,11 +60,16 @@ def _save_to_cache(cache_key: str, data: pd.DataFrame, ttl: int = None):
         return
         
     try:
+        # Drop the 'DateTime' column - it's a raw Timestamp duplicating the index
+        # (set in fetch_historical_data) and msgpack can't serialize it. The index
+        # itself is saved separately below and 'DateTime' is restored on cache read.
+        data = data.drop(columns=['DateTime'], errors='ignore')
+
         data_dict = data.to_dict(orient='split')
         # Convert Timestamp index to ISO strings for msgpack compatibility
         data_dict['index'] = [x.isoformat() if hasattr(x, 'isoformat') else str(x) for x in data_dict['index']]
         data_dict['index_name'] = data.index.name
-        
+
         serialized = msgpack.packb(data_dict)
         # Use provided TTL or default CACHE_DURATION
         expiry = ttl if ttl is not None else CACHE_DURATION

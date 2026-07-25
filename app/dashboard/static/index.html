@@ -651,6 +651,59 @@
 
         .info-key-value:last-child { border-bottom: none; }
 
+        /* Trade rows are clickable -> open detail modal */
+        .trade-row:hover td {
+            background-color: rgba(6, 182, 212, 0.05) !important;
+        }
+
+        /* Trade Detail Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 3rem 1.5rem;
+            overflow-y: auto;
+        }
+
+        .modal-panel {
+            background: #14141a;
+            border: 1px solid var(--panel-border);
+            border-radius: 0.75rem;
+            width: 100%;
+            max-width: 900px;
+            padding: 1.75rem;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.25rem;
+        }
+
+        .modal-close-btn {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--panel-border);
+            color: var(--text-secondary);
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+        }
+
+        .modal-close-btn:hover {
+            color: var(--text-primary);
+            border-color: var(--cyan);
+        }
+
         /* Helpers & Utility Colors */
         .color-green { color: var(--green); }
         .color-red { color: var(--red); }
@@ -846,6 +899,7 @@
                                 <th>Net PnL</th>
                                 <th>Return %</th>
                                 <th>Hold Time</th>
+                                <th>Entry Time</th>
                                 <th>Exit Time</th>
                                 <th>Exit Reason</th>
                             </tr>
@@ -1036,6 +1090,19 @@
 
     </main>
 
+    <!-- Trade Detail Modal -->
+    <div class="modal-overlay" id="trade-modal">
+        <div class="modal-panel">
+            <div class="modal-header">
+                <h2 class="panel-title">Trade Detail</h2>
+                <button class="modal-close-btn" id="trade-modal-close">✕</button>
+            </div>
+            <div id="trade-modal-body">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+    </div>
+
     <!-- UI Interaction Script -->
     <script>
         // State
@@ -1063,6 +1130,23 @@
         const prevPageBtn = document.getElementById('prev-page-btn');
         const nextPageBtn = document.getElementById('next-page-btn');
         const paginationInfo = document.getElementById('pagination-info');
+
+        // Trade Detail Modal Elements
+        const tradeModal = document.getElementById('trade-modal');
+        const tradeModalClose = document.getElementById('trade-modal-close');
+
+        // Clicking any trade row opens its in-depth detail modal (event delegation - rows are re-rendered often)
+        tradesTableBody.addEventListener('click', (e) => {
+            const row = e.target.closest('.trade-row');
+            if (row) openTradeDetail(row.getAttribute('data-trade-id'));
+        });
+        tradeModalClose.addEventListener('click', closeTradeDetail);
+        tradeModal.addEventListener('click', (e) => {
+            if (e.target === tradeModal) closeTradeDetail();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && tradeModal.style.display !== 'none') closeTradeDetail();
+        });
 
         // Tab Switching
         tabButtons.forEach(btn => {
@@ -1611,7 +1695,7 @@
             tradesTableBody.innerHTML = '';
             
             if (allTrades.length === 0) {
-                tradesTableBody.innerHTML = `<tr><td colspan="13" class="empty-state"><div class="empty-icon">📑</div>No trades logged yet.</td></tr>`;
+                tradesTableBody.innerHTML = `<tr><td colspan="14" class="empty-state"><div class="empty-icon">📑</div>No trades logged yet.</td></tr>`;
                 return;
             }
 
@@ -1622,6 +1706,7 @@
             paginatedTrades.forEach(t => {
                 const typeClass = t.type === 'LONG' ? 'color-green' : 'color-red';
                 const pnlClass = t.pnl >= 0 ? 'color-green' : 'color-red';
+                const entryDate = new Date(t.entry_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
                 const date = new Date(t.exit_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
 
                 const stopText = (t.stop_price !== null && t.stop_price !== undefined) ? `$${t.stop_price.toLocaleString(undefined, {minimumFractionDigits: 2})}` : '—';
@@ -1637,7 +1722,7 @@
                 else if (t.reason && t.reason.includes('Take Profit')) reasonClass = 'color-green';
 
                 tradesTableBody.innerHTML += `
-                    <tr>
+                    <tr class="trade-row" data-trade-id="${t.id}" style="cursor: pointer;" title="Click for in-depth chart">
                         <td style="font-weight: 500;">${t.strategy_name}</td>
                         <td>${t.symbol}</td>
                         <td class="${typeClass}" style="font-weight: 600;">${t.type}</td>
@@ -1649,6 +1734,7 @@
                         <td class="${pnlClass}" style="font-weight: 700;">${t.pnl > 0 ? '+' : ''}$${t.pnl.toFixed(2)}</td>
                         <td class="${pnlClass}" style="font-weight: 700;">${t.return_pct > 0 ? '+' : ''}${t.return_pct.toFixed(2)}%</td>
                         <td class="color-muted">${holdText}</td>
+                        <td class="color-muted">${entryDate}</td>
                         <td class="color-muted">${date}</td>
                         <td><span class="mini-badge ${reasonClass}">${t.reason}</span></td>
                     </tr>
@@ -1661,6 +1747,56 @@
             
             prevPageBtn.disabled = tradesPage === 1;
             nextPageBtn.disabled = tradesPage >= totalPages;
+        }
+
+        // Open the in-depth Trade Detail modal for a given trade id
+        // Opens the trade detail modal, looking the trade up from the already-loaded
+        // allTrades list (no extra network round-trip needed).
+        function openTradeDetail(tradeId) {
+            const trade = allTrades.find(t => t.id === tradeId);
+            tradeModal.style.display = 'flex';
+            const body = document.getElementById('trade-modal-body');
+
+            if (!trade) {
+                body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><span class="color-red">Trade not found.</span></div>`;
+                return;
+            }
+            renderTradeDetail(trade);
+        }
+
+        function closeTradeDetail() {
+            tradeModal.style.display = 'none';
+        }
+
+        // Render the info grid inside the Trade Detail modal
+        function renderTradeDetail(data) {
+            const body = document.getElementById('trade-modal-body');
+            const pnlClass = data.pnl >= 0 ? 'color-green' : 'color-red';
+            const typeClass = data.type === 'LONG' ? 'color-green' : 'color-red';
+            const returnPct = data.return_pct ?? 0;
+
+            let holdText = '—';
+            if (data.holding_minutes !== null && data.holding_minutes !== undefined) {
+                holdText = data.holding_minutes >= 60 ? `${(data.holding_minutes / 60).toFixed(1)}h` : `${data.holding_minutes.toFixed(0)}m`;
+            }
+
+            body.innerHTML = `
+                <div class="analytics-stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                    <div><div class="analytics-stat-label">Strategy</div><div class="analytics-stat-value">${data.strategy_name}</div></div>
+                    <div><div class="analytics-stat-label">Symbol</div><div class="analytics-stat-value">${data.symbol}</div></div>
+                    <div><div class="analytics-stat-label">Direction</div><div class="analytics-stat-value ${typeClass}">${data.type}</div></div>
+                    <div><div class="analytics-stat-label">Net PnL</div><div class="analytics-stat-value ${pnlClass}">${data.pnl > 0 ? '+' : ''}$${data.pnl.toFixed(2)}</div></div>
+                    <div><div class="analytics-stat-label">Entry Price</div><div class="analytics-stat-value">$${data.entry_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</div></div>
+                    <div><div class="analytics-stat-label">Exit Price</div><div class="analytics-stat-value">$${data.exit_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</div></div>
+                    <div><div class="analytics-stat-label">Stop Loss</div><div class="analytics-stat-value color-red">${data.stop_price ? '$' + data.stop_price.toFixed(4) : '—'}</div></div>
+                    <div><div class="analytics-stat-label">Target</div><div class="analytics-stat-value color-green">${data.target_price ? '$' + data.target_price.toFixed(4) : '—'}</div></div>
+                    <div><div class="analytics-stat-label">Entry Time</div><div class="analytics-stat-value">${new Date(data.entry_time).toLocaleString()}</div></div>
+                    <div><div class="analytics-stat-label">Exit Time</div><div class="analytics-stat-value">${new Date(data.exit_time).toLocaleString()}</div></div>
+                    <div><div class="analytics-stat-label">Hold Time</div><div class="analytics-stat-value">${holdText}</div></div>
+                    <div><div class="analytics-stat-label">Return %</div><div class="analytics-stat-value ${pnlClass}">${returnPct > 0 ? '+' : ''}${returnPct}%</div></div>
+                    <div><div class="analytics-stat-label">Exit Reason</div><div class="analytics-stat-value">${data.reason}</div></div>
+                </div>
+            `;
         }
 
         prevPageBtn.addEventListener('click', () => {
