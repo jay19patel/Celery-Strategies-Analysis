@@ -79,7 +79,7 @@ services:
   worker:
     build: .
     container_name: stockanalysis-worker
-    command: uv run celery -A app.core.celery_app.celery_app worker --loglevel=INFO --pool=prefork --concurrency=9
+    command: uv run --frozen celery -A app.core.celery_app.celery_app worker --loglevel=INFO --pool=prefork --concurrency=9
     environment:
       <<: *common-env
     volumes:
@@ -96,7 +96,7 @@ services:
   beat:
     build: .
     container_name: stockanalysis-beat
-    command: uv run celery -A app.core.celery_app.celery_app beat --loglevel=INFO
+    command: uv run --frozen celery -A app.core.celery_app.celery_app beat --loglevel=INFO
     environment:
       <<: *common-env
     volumes:
@@ -113,7 +113,7 @@ services:
   dashboard:
     build: .
     container_name: stockanalysis-dashboard
-    command: uv run uvicorn app.dashboard.main:app --host 0.0.0.0 --port 8080
+    command: uv run --frozen uvicorn app.dashboard.main:app --host 0.0.0.0 --port 8080
     environment:
       <<: *common-env
     ports:
