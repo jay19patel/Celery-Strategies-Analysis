@@ -53,29 +53,29 @@ _warned_missing_signals = set()
 #   short_08 -> bos_retest(S)
 #   short_09 -> donchian(S)
 STRATEGIES = {
-    # LONG Strategies
-    "long_01": {"name": "long_01", "combo": "EMA_10>median AND MACD_hist>median AND bars_since_swing_high>median AND aroon_oscillator>median AND shock_elasticity>median", "direction": 1},
-    "long_02": {"name": "long_02", "combo": "WilliamsR_14>median AND vol_regime>median AND gap_up>median AND surprise>median AND ATR_14>median", "direction": 1},
-    "long_03": {"name": "long_03", "combo": "realized_var_20>median AND swing_break(L) AND Stoch_K>median AND trend_score>median AND low_open_return>median", "direction": 1},
-    "long_04": {"name": "long_04", "combo": "ADX_20>median AND trendline_break(L) AND log_volume>median AND zscore_10>median AND return_1>median", "direction": 1},
-    "long_05": {"name": "long_05", "combo": "ADX_14>median AND trend_confluence(L) AND trend_acceleration>median AND RSI_7>median AND return_5>median", "direction": 1},
-    "long_06": {"name": "long_06", "combo": "gap_size>median AND ob_retest(L) AND ATR_pct>median AND KC_upper>median AND open_close_return>median", "direction": 1},
-    "long_07": {"name": "long_07", "combo": "supertrend_direction>median AND bars_since_flip>median AND aroon_up>median AND price_to_ema_20>median AND return_20>median", "direction": 1},
-    "long_08": {"name": "long_08", "combo": "MFI>median AND ema_pullback(L) AND CMF>median AND vol_atr_ratio>median AND EMA_50>median", "direction": 1},
-    "long_09": {"name": "long_09", "combo": "jump_strength>median AND bos(L) AND ATR_21>median AND skew_20>median AND return_10>median", "direction": 1},
-    "long_10": {"name": "long_10", "combo": "engulfing(L) AND donchian(L) AND supertrend>median AND range_velocity>median", "direction": 1},
+    # LONG Strategies (Top 10 by PnL from report.json)
+    "long_01": {"name": "long_01", "combo": "price_to_sma_50>median AND wick_to_body>median AND slippage_proxy>median AND fvg_fill(L)", "direction": 1},
+    "long_02": {"name": "long_02", "combo": "RSI_21>median AND wick_to_body>median AND slippage_proxy>median AND fvg_fill(L)", "direction": 1},
+    "long_03": {"name": "long_03", "combo": "wick_to_body>median AND zscore_50>median AND slippage_proxy>median AND fvg_fill(L)", "direction": 1},
+    "long_04": {"name": "long_04", "combo": "SMA_50>median AND ATR_pct>median AND aroon_up>median AND trend_smoothness>median", "direction": 1},
+    "long_05": {"name": "long_05", "combo": "MACD_signal>median AND wick_to_body>median AND slippage_proxy>median AND fvg_fill(L)", "direction": 1},
+    "long_06": {"name": "long_06", "combo": "volume_ratio>median AND EMA_50>median AND skew_20>median AND realized_var_20>median", "direction": 1},
+    "long_07": {"name": "long_07", "combo": "ema_10_20_cross>median AND wick_to_body>median AND slippage_proxy>median AND fvg_fill(L)", "direction": 1},
+    "long_08": {"name": "long_08", "combo": "ATR_14>median AND aroon_up>median AND zscore_10>median AND last_swing_high>median", "direction": 1},
+    "long_09": {"name": "long_09", "combo": "log_volume>median AND SMA_50>median AND ATR_21>median AND directional_bias>median", "direction": 1},
+    "long_10": {"name": "long_10", "combo": "SMA_50>median AND ATR_21>median AND MFI>median AND trend_strength>median", "direction": 1},
 
-    # SHORT Strategies
-    "short_01": {"name": "short_01", "combo": "dir_entropy<median AND trend_score<median AND stop_hunt_proxy<median AND bars_since_swing_low<median AND return_10<median", "direction": -1},
-    "short_02": {"name": "short_02", "combo": "price_to_sma_50<median AND Stoch_K<median AND trend_smoothness<median AND skew_20<median AND MFI<median", "direction": -1},
-    "short_03": {"name": "short_03", "combo": "price_entropy<median AND swing_low_label<median AND shock_elasticity<median", "direction": -1},
-    "short_04": {"name": "short_04", "combo": "gap_size<median AND swing_high_label<median AND supertrend<median AND SMA_50<median AND resistance_level<median", "direction": -1},
-    "short_05": {"name": "short_05", "combo": "trend_persistence<median AND squeeze_on<median AND return_5<median AND range_velocity<median AND low_open_return<median", "direction": -1},
-    "short_06": {"name": "short_06", "combo": "ema_10_20_cross<median AND vol_regime<median AND wick_imbalance<median AND aroon_up<median AND BB_upper<median", "direction": -1},
-    "short_07": {"name": "short_07", "combo": "bars_since_flip<median AND nr7_breakout(S) AND BB_lower<median AND return_1<median", "direction": -1},
-    "short_08": {"name": "short_08", "combo": "lower_wick<median AND bos_retest(S) AND last_swing_high<median AND WilliamsR_14<median AND surprise<median", "direction": -1},
-    "short_09": {"name": "short_09", "combo": "donchian(S) AND ob_retest(S) AND KC_upper<median AND return_20<median", "direction": -1},
-    "short_10": {"name": "short_10", "combo": "fractal_proxy<median AND sweep(S) AND trend_acceleration<median AND close_position<median", "direction": -1},
+    # SHORT Strategies (Top 10 by PnL from report.json)
+    "short_01": {"name": "short_01", "combo": "Stoch_K<median AND ATR_pct<median AND price_entropy<median AND trend_volume<median", "direction": -1},
+    "short_02": {"name": "short_02", "combo": "price_to_vwap<median AND lower_wick<median AND candle_strength<median AND price_entropy<median", "direction": -1},
+    "short_03": {"name": "short_03", "combo": "ATR_pct<median AND VPT<median AND bipower_var<median AND bos(S)", "direction": -1},
+    "short_04": {"name": "short_04", "combo": "Stoch_K<median AND ATR_21<median AND price_entropy<median AND trend_volume<median", "direction": -1},
+    "short_05": {"name": "short_05", "combo": "Stoch_K<median AND ATR_14<median AND price_entropy<median AND trend_volume<median", "direction": -1},
+    "short_06": {"name": "short_06", "combo": "ATR_pct<median AND VPT<median AND realized_var_20<median AND bos(S)", "direction": -1},
+    "short_07": {"name": "short_07", "combo": "ATR_14<median AND VPT<median AND bipower_var<median AND bos(S)", "direction": -1},
+    "short_08": {"name": "short_08", "combo": "ATR_21<median AND aroon_up<median AND VPT<median AND bos_retest(S)", "direction": -1},
+    "short_09": {"name": "short_09", "combo": "ema_10_20_cross<median AND VPT<median AND price_entropy<median AND adx_volume<median", "direction": -1},
+    "short_10": {"name": "short_10", "combo": "low_open_return<median AND aroon_oscillator<median AND bars_since_swing_low<median AND fvg_fill(S)", "direction": -1},
 }
 
 
