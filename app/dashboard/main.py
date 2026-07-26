@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from app.database.mongodb import MongoDBConnection
 from app.core.settings import settings, get_symbols, get_strategies
@@ -51,6 +52,65 @@ def get_dashboard() -> FileResponse:
     if not index_file.exists():
         raise HTTPException(status_code=404, detail="Dashboard index.html not found.")
     return FileResponse(str(index_file))
+
+
+RESET_CONFIRMATION_PHRASE = "RESET SYSTEM"
+
+# Every MongoDB collection this app writes trading data to (see app/database/mongodb.py,
+# app/database/portfolio_store.py, app/core/tasks.py, app/dashboard/main.py's own
+# system_status write) - kept as one explicit list so a reset can never silently miss one.
+RESET_COLLECTIONS = [
+    "broker_accounts",
+    "broker_trades",
+    "portfolio_state",
+    "portfolio_trades",
+    "signals_log",
+    "system_status",
+    "batch_results",
+]
+
+
+class ResetRequest(BaseModel):
+    confirmation: str
+
+
+@app.post("/api/system/reset")
+def reset_system(payload: ResetRequest) -> Dict[str, Any]:
+    """Wipes all trading data (every MongoDB collection above) and clears every log
+    file, resetting the system to a fresh state. Destructive and irreversible - guarded
+    by requiring the exact confirmation phrase, checked server-side (not just in the UI)
+    so a stray/scripted request can't trigger it by accident."""
+    if payload.confirmation != RESET_CONFIRMATION_PHRASE:
+        raise HTTPException(
+            status_code=400,
+            detail=f'Confirmation text must exactly match "{RESET_CONFIRMATION_PHRASE}"'
+        )
+
+    try:
+        db = MongoDBConnection.get_database()
+        cleared_collections = {}
+        for name in RESET_COLLECTIONS:
+            result = db[name].delete_many({})
+            cleared_collections[name] = result.deleted_count
+
+        cleared_logs = []
+        for log_file in _get_logs_path().glob("*.log"):
+            log_file.write_text("")
+            cleared_logs.append(log_file.name)
+
+        logger.warning(
+            f"🔴 SYSTEM RESET performed | collections cleared: {cleared_collections} | "
+            f"logs cleared: {cleared_logs}"
+        )
+
+        return {
+            "ok": True,
+            "cleared_collections": cleared_collections,
+            "cleared_logs": cleared_logs,
+        }
+    except Exception as e:
+        logger.error(f"Error performing system reset: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/stats")

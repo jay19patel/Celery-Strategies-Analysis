@@ -134,6 +134,47 @@
             transform: translateY(-1px);
         }
 
+        .btn-danger {
+            background: rgba(244, 63, 94, 0.1);
+            border: 1px solid rgba(244, 63, 94, 0.4);
+            color: var(--red);
+        }
+
+        .btn-danger:hover {
+            background: var(--red);
+            color: #fff;
+            border-color: var(--red);
+            box-shadow: 0 0 15px rgba(244, 63, 94, 0.5);
+            transform: translateY(-1px);
+        }
+
+        .btn-danger:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            background: rgba(244, 63, 94, 0.1);
+            color: var(--red);
+            transform: none;
+            box-shadow: none;
+        }
+
+        .reset-confirm-input {
+            width: 100%;
+            background: #0b0b0e;
+            border: 1px solid var(--panel-border);
+            color: var(--text-primary);
+            padding: 0.65rem 0.85rem;
+            border-radius: 0.4rem;
+            font-family: inherit;
+            font-size: 0.95rem;
+            outline: none;
+            margin-top: 0.75rem;
+            letter-spacing: 0.5px;
+        }
+
+        .reset-confirm-input:focus {
+            border-color: var(--red);
+        }
+
         .status-badge {
             display: inline-flex;
             align-items: center;
@@ -773,6 +814,10 @@
                 <input type="checkbox" id="auto-refresh-check" checked style="accent-color: var(--cyan);">
                 Auto Refresh (30s)
             </label>
+            <button class="btn btn-danger" id="open-reset-modal-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>
+                Reset System
+            </button>
         </div>
     </header>
 
@@ -1103,6 +1148,32 @@
         </div>
     </div>
 
+    <!-- Reset System Confirmation Modal -->
+    <div class="modal-overlay" id="reset-modal">
+        <div class="modal-panel" style="max-width: 480px;">
+            <div class="modal-header">
+                <h2 class="panel-title color-red">⚠️ Reset System</h2>
+                <button class="modal-close-btn" id="reset-modal-close">✕</button>
+            </div>
+            <div id="reset-modal-body">
+                <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6;">
+                    This will <strong class="color-red">permanently delete</strong> all strategy accounts, trade history,
+                    portfolio state, and log files — the entire system will start fresh from $100 per strategy again.
+                    <strong>This cannot be undone.</strong>
+                </p>
+                <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.75rem;">
+                    Type <strong class="color-cyan">RESET SYSTEM</strong> below to confirm.
+                </p>
+                <input type="text" id="reset-confirm-input" class="reset-confirm-input" placeholder="Type RESET SYSTEM" autocomplete="off">
+                <div id="reset-modal-status" style="margin-top: 0.75rem; font-size: 0.85rem;"></div>
+                <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem; justify-content: flex-end;">
+                    <button class="btn" id="reset-cancel-btn">Cancel</button>
+                    <button class="btn btn-danger" id="reset-confirm-btn" disabled>Confirm Reset</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- UI Interaction Script -->
     <script>
         // State
@@ -1146,6 +1217,68 @@
         });
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && tradeModal.style.display !== 'none') closeTradeDetail();
+        });
+
+        // Reset System Modal Elements
+        const RESET_CONFIRMATION_PHRASE = 'RESET SYSTEM';
+        const resetModal = document.getElementById('reset-modal');
+        const resetModalClose = document.getElementById('reset-modal-close');
+        const resetCancelBtn = document.getElementById('reset-cancel-btn');
+        const resetConfirmBtn = document.getElementById('reset-confirm-btn');
+        const resetConfirmInput = document.getElementById('reset-confirm-input');
+        const resetModalStatus = document.getElementById('reset-modal-status');
+        const openResetModalBtn = document.getElementById('open-reset-modal-btn');
+
+        function openResetModal() {
+            resetConfirmInput.value = '';
+            resetConfirmBtn.disabled = true;
+            resetModalStatus.innerHTML = '';
+            resetModal.style.display = 'flex';
+            setTimeout(() => resetConfirmInput.focus(), 50);
+        }
+
+        function closeResetModal() {
+            resetModal.style.display = 'none';
+        }
+
+        openResetModalBtn.addEventListener('click', openResetModal);
+        resetModalClose.addEventListener('click', closeResetModal);
+        resetCancelBtn.addEventListener('click', closeResetModal);
+        resetModal.addEventListener('click', (e) => {
+            if (e.target === resetModal) closeResetModal();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && resetModal.style.display !== 'none') closeResetModal();
+        });
+
+        resetConfirmInput.addEventListener('input', () => {
+            resetConfirmBtn.disabled = resetConfirmInput.value !== RESET_CONFIRMATION_PHRASE;
+        });
+
+        resetConfirmBtn.addEventListener('click', async () => {
+            resetConfirmBtn.disabled = true;
+            resetConfirmBtn.innerText = 'Resetting...';
+            resetModalStatus.innerHTML = '';
+
+            try {
+                const res = await fetch('/api/system/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirmation: resetConfirmInput.value })
+                });
+                const result = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(result.detail || `status ${res.status}`);
+                }
+
+                resetModalStatus.innerHTML = `<span class="color-green">✅ System reset complete. Reloading dashboard...</span>`;
+                setTimeout(() => window.location.reload(), 1200);
+            } catch (err) {
+                resetModalStatus.innerHTML = `<span class="color-red">⚠️ Reset failed: ${err.message}</span>`;
+                resetConfirmBtn.innerText = 'Confirm Reset';
+                resetConfirmBtn.disabled = resetConfirmInput.value !== RESET_CONFIRMATION_PHRASE;
+            }
         });
 
         // Tab Switching
