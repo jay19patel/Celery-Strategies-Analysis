@@ -9,7 +9,7 @@ x-common-env: &common-env
   MONGODB_URL: mongodb://mongo:27017/stockanalysis
   
   # Application Configuration
-  SYMBOLS: ADAUSD
+  SYMBOLS: ETHUSD,BTCUSD
   STRATEGIES: "*"
   SCHEDULE_SECONDS: 600
   TZ: Asia/Kolkata

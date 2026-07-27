@@ -137,6 +137,35 @@ def get_global_stats() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/portfolio/equity-curve")
+def get_portfolio_equity_curve() -> List[Dict[str, Any]]:
+    """Builds the combined portfolio equity curve (every strategy's capital summed
+    together) over real calendar time, by replaying every closed trade in
+    chronological order on top of each strategy's $100 starting capital."""
+    try:
+        db = MongoDBConnection.get_database()
+        accounts = list(db.broker_accounts.find())
+        trades = list(db.broker_trades.find().sort("exit_time", 1))
+
+        base_capital = len(accounts) * 100.0
+        running_capital = base_capital
+        curve = []
+
+        if trades:
+            first_entry_time = trades[0].get("entry_time")
+            curve.append({"time": _iso_utc(first_entry_time) or str(first_entry_time), "capital": round(base_capital, 2)})
+
+        for t in trades:
+            running_capital += t.get("pnl", 0.0)
+            exit_time = t.get("exit_time")
+            curve.append({"time": _iso_utc(exit_time) or str(exit_time), "capital": round(running_capital, 2)})
+
+        return curve
+    except Exception as e:
+        logger.error(f"Error computing portfolio equity curve: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/config")
 def get_system_config() -> Dict[str, Any]:
     """Returns the active runtime configuration (strategies, symbols, schedules, risk
@@ -199,11 +228,15 @@ def get_strategies_stats() -> List[Dict[str, Any]]:
             
             # Format open position for serializability
             open_pos = acc.get("open_position")
-            if open_pos and "entry_time" in open_pos:
-                open_pos["entry_time"] = _iso_utc(open_pos["entry_time"]) or open_pos["entry_time"]
-            
+            if open_pos:
+                if "entry_time" in open_pos:
+                    open_pos["entry_time"] = _iso_utc(open_pos["entry_time"]) or open_pos["entry_time"]
+                if open_pos.get("last_price_time"):
+                    open_pos["last_price_time"] = _iso_utc(open_pos["last_price_time"]) or open_pos["last_price_time"]
+
             results.append({
-                "strategy_name": acc.get("_id"),
+                "strategy_name": acc.get("strategy_name", acc.get("_id")),
+                "symbol": acc.get("symbol"),
                 "capital": round(acc.get("capital", 100.0), 2),
                 "return_pct": round(ret_pct, 2),
                 "total_trades": acc.get("total_trades", 0),
@@ -242,6 +275,10 @@ def get_recent_trades(limit: int = 100) -> List[Dict[str, Any]]:
                 "stop_price": t.get("stop_price"),
                 "target_price": t.get("target_price"),
                 "size": round(t.get("size", 0.0), 6),
+                "gross_pnl": round(t.get("gross_pnl", t.get("pnl", 0.0)), 2),
+                "entry_fee": round(t.get("entry_fee", 0.0), 4),
+                "exit_fee": round(t.get("exit_fee", 0.0), 4),
+                "total_fees": round(t.get("total_fees", 0.0), 4),
                 "pnl": round(t.get("pnl", 0.0), 2),
                 "return_pct": t.get("return_pct"),
                 "entry_time": _iso_utc(entry_time) or str(entry_time),
@@ -257,30 +294,32 @@ def get_recent_trades(limit: int = 100) -> List[Dict[str, Any]]:
 
 @app.get("/api/analytics")
 def get_strategy_analytics() -> List[Dict[str, Any]]:
-    """Groups closed-trade history by strategy and computes performance analytics
-    (win rate, profit factor, avg win/loss, long/short split, etc.) so each
-    strategy's behavior can be compared at a glance."""
+    """Groups closed-trade history by (strategy, symbol) - matching how broker_accounts
+    are keyed, since each strategy runs an independent account per symbol - and computes
+    performance analytics (win rate, profit factor, avg win/loss, long/short split, etc.)
+    so each strategy's behavior on each symbol can be compared at a glance."""
     try:
         db = MongoDBConnection.get_database()
         trades = list(db.broker_trades.find())
-        accounts = {acc["_id"]: acc for acc in db.broker_accounts.find()}
+        accounts = {(acc.get("strategy_name"), acc.get("symbol")): acc for acc in db.broker_accounts.find()}
 
-        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        grouped: Dict[Any, List[Dict[str, Any]]] = {}
         for t in trades:
-            grouped.setdefault(t.get("strategy_name"), []).append(t)
+            grouped.setdefault((t.get("strategy_name"), t.get("symbol")), []).append(t)
 
-        # Include strategies that have an account but no closed trades yet
-        for strategy_name in accounts:
-            grouped.setdefault(strategy_name, [])
+        # Include accounts that have no closed trades yet
+        for account_key in accounts:
+            grouped.setdefault(account_key, [])
 
         results = []
-        for strategy_name, strat_trades in grouped.items():
+        for (strategy_name, symbol), strat_trades in grouped.items():
             pnls = [t.get("pnl", 0.0) for t in strat_trades]
             wins = [p for p in pnls if p > 0]
             losses = [p for p in pnls if p <= 0]
 
             total_trades = len(strat_trades)
             total_pnl = sum(pnls)
+            total_fees = sum(t.get("total_fees", 0.0) for t in strat_trades)
             gross_profit = sum(wins)
             gross_loss = abs(sum(losses))
 
@@ -305,18 +344,18 @@ def get_strategy_analytics() -> List[Dict[str, Any]]:
                 reason = t.get("reason", "Unknown")
                 reason_breakdown[reason] = reason_breakdown.get(reason, 0) + 1
 
-            symbols_traded = sorted({t.get("symbol") for t in strat_trades if t.get("symbol")})
-
-            account = accounts.get(strategy_name, {})
+            account = accounts.get((strategy_name, symbol), {})
             capital = account.get("capital", 100.0)
 
             results.append({
                 "strategy_name": strategy_name,
+                "symbol": symbol,
                 "current_capital": round(capital, 2),
                 "return_pct": round(((capital - 100.0) / 100.0) * 100, 2),
                 "total_trades": total_trades,
                 "win_rate": round((len(wins) / total_trades * 100), 2) if total_trades else 0.0,
                 "total_pnl": round(total_pnl, 2),
+                "total_fees": round(total_fees, 2),
                 "avg_pnl_per_trade": round(total_pnl / total_trades, 2) if total_trades else 0.0,
                 "avg_win": round(sum(wins) / len(wins), 2) if wins else 0.0,
                 "avg_loss": round(sum(losses) / len(losses), 2) if losses else 0.0,
@@ -326,7 +365,6 @@ def get_strategy_analytics() -> List[Dict[str, Any]]:
                 "long_trades": len(long_trades),
                 "short_trades": len(short_trades),
                 "avg_hold_minutes": round((sum(durations) / len(durations)) / 60, 1) if durations else None,
-                "symbols_traded": symbols_traded,
                 "exit_reasons": reason_breakdown,
             })
 

@@ -13,12 +13,14 @@ logger = get_celery_logger()
 
 class PaperBroker:
     """
-    Simulated ("paper") broker: one virtual account per strategy.
-    
+    Simulated ("paper") broker: one virtual account per (strategy, symbol) pair, so a
+    strategy trading multiple symbols (e.g. ETHUSD and BTCUSD) holds an independent
+    position and capital balance in each rather than sharing one slot across symbols.
+
     Tracks capital, an open position (if any), and trade history in MongoDB.
     Reverses a position on an opposite signal, and freezes an account once its
-    capital drops to $1 or below. A Redis lock guards each strategy's account
-    against concurrent updates.
+    capital drops to $1 or below. A Redis lock guards each account against
+    concurrent updates.
     """
 
     def __init__(self) -> None:
@@ -45,12 +47,16 @@ class PaperBroker:
         """Returns the Redis client instance dynamically to ensure fork-safety."""
         return get_redis_client()
 
-    def _get_account(self, strategy_name: str) -> Dict[str, Any]:
-        """Returns a strategy's virtual account, creating a fresh $100 one if it doesn't exist yet."""
-        account = self.accounts_coll.find_one({"_id": strategy_name})
+    def _get_account(self, strategy_name: str, symbol: str) -> Dict[str, Any]:
+        """Returns a strategy's virtual account for one symbol, creating a fresh $100
+        one if it doesn't exist yet."""
+        account_id = f"{strategy_name}::{symbol}"
+        account = self.accounts_coll.find_one({"_id": account_id})
         if not account:
             account = {
-                "_id": strategy_name,
+                "_id": account_id,
+                "strategy_name": strategy_name,
+                "symbol": symbol,
                 "capital": 100.0,
                 "total_trades": 0,
                 "winning_trades": 0,
@@ -60,6 +66,31 @@ class PaperBroker:
             self.accounts_coll.insert_one(account)
         return account
 
+    def _calc_pnl(self, pos: Dict[str, Any], exit_price: float) -> Dict[str, float]:
+        """Computes gross PnL, the exit fee, and the resulting net PnL for a position -
+        shared by an actual close and a live unrealized-PnL preview.
+
+        Net PnL is charged both the entry fee and the exit fee: sizing the position off
+        (capital - entry_fee) only shrinks gross PnL in proportion to price movement, it
+        never actually removes the entry fee's cost from the account - so it must still
+        be subtracted here, or a flat trade at an unchanged price would net $0 fee cost
+        instead of the ~2x fee_pct a real round-trip costs.
+        """
+        entry_price = pos["entry_price"]
+        size = pos["size"]
+        pos_type = pos["type"]
+        entry_fee = pos.get("entry_fee", 0.0)
+
+        if pos_type == "LONG":
+            gross_pnl = (exit_price - entry_price) * size
+        else:  # SHORT
+            gross_pnl = (entry_price - exit_price) * size
+
+        exit_value = (size * exit_price) if pos_type == "LONG" else (size * entry_price)
+        exit_fee = exit_value * self.fee_pct
+
+        return {"gross_pnl": gross_pnl, "exit_fee": exit_fee, "net_pnl": gross_pnl - entry_fee - exit_fee}
+
     def _close_position(
         self, account: Dict[str, Any], current_price: float, exit_time: datetime, reason: str = "Signal Reverse"
     ) -> Dict[str, Any]:
@@ -68,21 +99,11 @@ class PaperBroker:
         if not pos:
             return account
 
-        entry_price = pos["entry_price"]
-        size = pos["size"]
-        pos_type = pos["type"]
-        symbol = pos["symbol"]
-
-        if pos_type == "LONG":
-            gross_pnl = (current_price - entry_price) * size
-        else:  # SHORT
-            gross_pnl = (entry_price - current_price) * size
-
-        # Exit fee only - the entry fee was already deducted when the position was opened.
-        exit_value = (size * current_price) if pos_type == "LONG" else (size * entry_price)
-        exit_fee = exit_value * self.fee_pct
-
-        net_pnl = gross_pnl - exit_fee
+        pnl_components = self._calc_pnl(pos, current_price)
+        gross_pnl = pnl_components["gross_pnl"]
+        exit_fee = pnl_components["exit_fee"]
+        net_pnl = pnl_components["net_pnl"]
+        entry_fee = pos.get("entry_fee", 0.0)
 
         account["capital"] += net_pnl
         account["total_trades"] += 1
@@ -94,14 +115,18 @@ class PaperBroker:
         account["win_rate"] = (account["winning_trades"] / account["total_trades"]) * 100.0
 
         trade_record = {
-            "strategy_name": account["_id"],
-            "symbol": symbol,
-            "type": pos_type,
+            "strategy_name": account["strategy_name"],
+            "symbol": pos["symbol"],
+            "type": pos["type"],
             "entry_time": pos["entry_time"],
             "exit_time": exit_time,
-            "entry_price": entry_price,
+            "entry_price": pos["entry_price"],
             "exit_price": current_price,
-            "size": size,
+            "size": pos["size"],
+            "gross_pnl": round(gross_pnl, 4),
+            "entry_fee": round(entry_fee, 4),
+            "exit_fee": round(exit_fee, 4),
+            "total_fees": round(entry_fee + exit_fee, 4),
             "pnl": round(net_pnl, 4),
             "return_pct": round((net_pnl / pos["capital_allocated"]) * 100, 2),
             "reason": reason,
@@ -112,7 +137,7 @@ class PaperBroker:
 
         account["open_position"] = None
 
-        logger.info(f"📊 BROKER | {account['_id']} CLOSED {pos_type} | PnL: ${net_pnl:.2f} | Balance: ${account['capital']:.2f}")
+        logger.info(f"📊 BROKER | {account['_id']} CLOSED {pos['type']} | PnL: ${net_pnl:.2f} (fees: ${entry_fee + exit_fee:.2f}) | Balance: ${account['capital']:.2f}")
         return account
 
     def _open_position(
@@ -145,20 +170,25 @@ class PaperBroker:
             "entry_price": price,
             "size": size,
             "capital_allocated": capital,
+            "entry_fee": round(fee, 4),
             "entry_time": entry_time,
             "stop_price": stop_price,
             "target_price": target_price,
+            "last_price": None,
+            "last_price_time": None,
+            "unrealized_pnl": None,
         }
 
         logger.info(
             f"📊 BROKER | {account['_id']} OPENED {pos_type} | Size: {size:.4f} @ ${price:.2f} | "
-            f"Stop: ${stop_price:.2f} | Target: ${target_price:.2f}"
+            f"Fee: ${fee:.2f} | Stop: ${stop_price:.2f} | Target: ${target_price:.2f}"
         )
         return account
 
     def check_protective_exit(self, strategy_name: str, symbol: str, current_price: float, current_time: datetime) -> None:
         """Closes a strategy's open position if the current price has crossed its
-        stop-loss or take-profit level.
+        stop-loss or take-profit level; otherwise snapshots the live price and
+        unrealized PnL onto the position so the dashboard can show it.
 
         Called every batch cycle for every (strategy, symbol) pair regardless of that
         cycle's signal, so a protective exit isn't missed while the strategy is signaling
@@ -167,42 +197,44 @@ class PaperBroker:
         if current_price <= 0:
             return
 
-        lock_name = f"lock:broker:{strategy_name}"
+        lock_name = f"lock:broker:{strategy_name}:{symbol}"
         lock = self.redis.lock(lock_name, timeout=10)
 
         if not lock.acquire(blocking=True, blocking_timeout=5):
-            logger.warning(f"⚠️ BROKER | Could not acquire lock for {strategy_name}, skipping protective-exit check.")
+            logger.warning(f"⚠️ BROKER | Could not acquire lock for {strategy_name}:{symbol}, skipping protective-exit check.")
             return
 
         try:
-            account = self._get_account(strategy_name)
+            account = self._get_account(strategy_name, symbol)
             pos = account.get("open_position")
-            if not pos or pos.get("symbol") != symbol:
+            if not pos:
                 return
 
             stop_price = pos.get("stop_price")
             target_price = pos.get("target_price")
-            if stop_price is None or target_price is None:
-                return  # position opened before this protection existed
 
-            if pos["type"] == "LONG":
-                hit_stop = current_price <= stop_price
-                hit_target = current_price >= target_price
-            else:  # SHORT
-                hit_stop = current_price >= stop_price
-                hit_target = current_price <= target_price
+            hit_stop = hit_target = False
+            if stop_price is not None and target_price is not None:
+                if pos["type"] == "LONG":
+                    hit_stop = current_price <= stop_price
+                    hit_target = current_price >= target_price
+                else:  # SHORT
+                    hit_stop = current_price >= stop_price
+                    hit_target = current_price <= target_price
 
             if hit_stop:
                 account = self._close_position(account, stop_price, current_time, "Stop Loss Hit")
             elif hit_target:
                 account = self._close_position(account, target_price, current_time, "Take Profit Hit")
             else:
-                return
+                pos["last_price"] = current_price
+                pos["last_price_time"] = current_time
+                pos["unrealized_pnl"] = round(self._calc_pnl(pos, current_price)["net_pnl"], 4)
 
-            self.accounts_coll.update_one({"_id": strategy_name}, {"$set": account})
+            self.accounts_coll.update_one({"_id": account["_id"]}, {"$set": account})
 
         except Exception as e:
-            logger.error(f"❌ BROKER | Error checking protective exit for {strategy_name}: {str(e)}", exc_info=True)
+            logger.error(f"❌ BROKER | Error checking protective exit for {strategy_name}:{symbol}: {str(e)}", exc_info=True)
         finally:
             try:
                 lock.release()
@@ -212,21 +244,21 @@ class PaperBroker:
     def process_signal(self, strategy_name: str, symbol: str, signal: SignalType, price: float, timestamp: datetime) -> None:
         """Opens, closes, or reverses a strategy's position in response to a new signal.
 
-        Acquires a per-strategy Redis lock first, so concurrent signals for the
-        same strategy can't corrupt its account.
+        Acquires a per-(strategy, symbol) Redis lock first, so concurrent signals for
+        the same account can't corrupt it.
         """
         if signal == SignalType.HOLD or price <= 0:
             return
 
-        lock_name = f"lock:broker:{strategy_name}"
+        lock_name = f"lock:broker:{strategy_name}:{symbol}"
         lock = self.redis.lock(lock_name, timeout=10)
 
         if not lock.acquire(blocking=True, blocking_timeout=5):
-            logger.warning(f"⚠️ BROKER | Could not acquire lock for {strategy_name}, skipping signal.")
+            logger.warning(f"⚠️ BROKER | Could not acquire lock for {strategy_name}:{symbol}, skipping signal.")
             return
 
         try:
-            account = self._get_account(strategy_name)
+            account = self._get_account(strategy_name, symbol)
 
             if account["capital"] <= 1.0:
                 return  # bankrupt - do nothing
@@ -251,10 +283,10 @@ class PaperBroker:
                 else:
                     account = self._open_position(account, "SHORT", symbol, price, timestamp)
 
-            self.accounts_coll.update_one({"_id": strategy_name}, {"$set": account})
+            self.accounts_coll.update_one({"_id": account["_id"]}, {"$set": account})
 
         except Exception as e:
-            logger.error(f"❌ BROKER | Error processing signal for {strategy_name}: {str(e)}", exc_info=True)
+            logger.error(f"❌ BROKER | Error processing signal for {strategy_name}:{symbol}: {str(e)}", exc_info=True)
         finally:
             try:
                 lock.release()

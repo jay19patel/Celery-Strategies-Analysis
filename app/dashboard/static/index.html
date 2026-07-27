@@ -424,6 +424,9 @@
         /* Tables */
         .table-container {
             overflow-x: auto;
+            border-radius: 0.5rem;
+            border: 1px solid var(--panel-border);
+            background: rgba(15, 15, 20, 0.4);
         }
 
         table {
@@ -433,23 +436,110 @@
         }
 
         th {
-            padding: 0.75rem 1rem;
+            padding: 0.85rem 1rem;
+            background: rgba(15, 15, 22, 0.85);
             color: var(--text-secondary);
             font-weight: 600;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.6px;
             border-bottom: 1px solid var(--panel-border);
+            white-space: nowrap;
         }
 
         td {
             padding: 0.875rem 1rem;
-            font-size: 0.925rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+            font-size: 0.9rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            vertical-align: middle;
         }
 
         tr:hover td {
-            background-color: rgba(255, 255, 255, 0.01);
+            background-color: rgba(255, 255, 255, 0.025);
+        }
+
+        /* PnL Pills */
+        .pnl-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.28rem 0.65rem;
+            border-radius: 0.375rem;
+            font-weight: 700;
+            font-size: 0.85rem;
+            letter-spacing: -0.2px;
+            white-space: nowrap;
+        }
+
+        .pnl-pill.badge-green {
+            background: rgba(16, 185, 129, 0.15);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .pnl-pill.badge-red {
+            background: rgba(244, 63, 94, 0.15);
+            color: #f43f5e;
+            border: 1px solid rgba(244, 63, 94, 0.3);
+        }
+
+        .pnl-pill.badge-muted {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            border: 1px solid var(--panel-border);
+            font-weight: 500;
+            font-size: 0.8rem;
+        }
+
+        /* Custom Scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(11, 11, 14, 0.5);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(6, 182, 212, 0.4);
+        }
+
+        .sortable-th {
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+
+        .sortable-th:hover {
+            color: var(--cyan);
+        }
+
+        .sortable-th .sort-arrow {
+            display: inline-block;
+            width: 0.9em;
+            color: var(--cyan);
+        }
+
+        .trades-filter-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .trades-filter-row select {
+            background: var(--panel-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--panel-border);
+            border-radius: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.85rem;
+            cursor: pointer;
         }
 
         /* Logs Console */
@@ -692,12 +782,6 @@
 
         .info-key-value:last-child { border-bottom: none; }
 
-        /* Trade rows are clickable -> open detail modal */
-        .trade-row:hover td {
-            background-color: rgba(6, 182, 212, 0.05) !important;
-        }
-
-        /* Trade Detail Modal */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -854,43 +938,60 @@
             </div>
         </section>
 
+        <!-- Portfolio Equity Curve (all strategies combined, over real time) -->
+        <section class="panel" style="margin-bottom: 2rem;">
+            <h2 class="panel-title" style="margin-bottom: 1rem;">Portfolio Equity Curve</h2>
+            <div style="position: relative; height:200px; width:100%;">
+                <canvas id="equity-curve-chart"></canvas>
+            </div>
+        </section>
+
         <!-- TAB 1: OVERVIEW -->
         <section id="tab-overview" class="tab-content active">
-            <div class="dashboard-split">
-                <!-- Left Block: Strategies Cards -->
-                <div>
-                    <div class="panel">
-                        <div class="panel-header">
-                            <h2 class="panel-title">Active Strategy Portfolios</h2>
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <span class="status-badge" id="next-run-badge" style="background-color: rgba(255,255,255,0.03); border-color: var(--panel-border); color: var(--text-secondary);">
-                                    <span class="status-dot" style="background-color: var(--cyan); animation: none;"></span>
-                                    <span id="next-run-text">Next run: —</span>
-                                </span>
-                                <span class="color-muted" id="active-strategies-count">0 Loaded</span>
-                            </div>
-                        </div>
-                        <div class="strategies-grid" id="strategies-container">
-                            <!-- Populated by JS -->
-                        </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <h2 class="panel-title">Capital Comparison</h2>
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <span class="status-badge" id="next-run-badge" style="background-color: rgba(255,255,255,0.03); border-color: var(--panel-border); color: var(--text-secondary);">
+                            <span class="status-dot" style="background-color: var(--cyan); animation: none;"></span>
+                            <span id="next-run-text">Next run: —</span>
+                        </span>
+                        <span class="color-muted" id="active-strategies-count">0 Loaded</span>
                     </div>
                 </div>
+                <div style="position: relative; height:340px; width:100%;">
+                    <canvas id="capital-chart"></canvas>
+                </div>
+            </div>
 
-                <!-- Right Block: Chart & Open Positions -->
-                <div>
-                    <div class="panel">
-                        <h2 class="panel-title" style="margin-bottom: 1rem;">Capital Comparison</h2>
-                        <div style="position: relative; height:200px; width:100%;">
-                            <canvas id="capital-chart"></canvas>
-                        </div>
-                    </div>
-                    
-                    <div class="panel">
-                        <h2 class="panel-title" style="margin-bottom: 1rem;">Active Positions</h2>
-                        <div id="positions-container">
+            <div class="panel">
+                <div class="panel-header">
+                    <h2 class="panel-title">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="color: var(--cyan);"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        Active Positions
+                    </h2>
+                    <span class="status-badge" id="active-positions-count" style="background-color: var(--cyan-glow); color: var(--cyan); border-color: rgba(6,182,212,0.2);">0 Open</span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Symbol / Side</th>
+                                <th>Strategy</th>
+                                <th>Size & Value</th>
+                                <th>Entry Price</th>
+                                <th>Current Price</th>
+                                <th>Unrealized PnL</th>
+                                <th>Stop Loss</th>
+                                <th>Target</th>
+                                <th>Brokerage</th>
+                                <th>Opened / Holding</th>
+                            </tr>
+                        </thead>
+                        <tbody id="positions-container">
                             <!-- Populated by JS -->
-                        </div>
-                    </div>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </section>
@@ -929,23 +1030,32 @@
                     <h2 class="panel-title">Historical Closed Trades</h2>
                     <span class="color-muted" id="trades-count">0 Total Trades</span>
                 </div>
+
+                <div class="trades-filter-row">
+                    <select id="filter-strategy"><option value="">All Strategies</option></select>
+                    <select id="filter-symbol"><option value="">All Symbols</option></select>
+                    <select id="filter-type">
+                        <option value="">All Types</option>
+                        <option value="LONG">LONG</option>
+                        <option value="SHORT">SHORT</option>
+                    </select>
+                    <select id="filter-reason"><option value="">All Exit Reasons</option></select>
+                    <button class="btn" id="clear-filters-btn">Clear Filters</button>
+                </div>
+
                 <div class="table-container">
                     <table>
                         <thead>
                             <tr>
-                                <th>Strategy Name</th>
-                                <th>Symbol</th>
-                                <th>Type</th>
-                                <th>Size</th>
-                                <th>Entry Price</th>
-                                <th>Exit Price</th>
-                                <th>Stop Loss</th>
-                                <th>Target</th>
-                                <th>Net PnL</th>
-                                <th>Return %</th>
-                                <th>Hold Time</th>
-                                <th>Entry Time</th>
-                                <th>Exit Time</th>
+                                <th class="sortable-th" data-key="symbol">Symbol / Side<span class="sort-arrow"></span></th>
+                                <th class="sortable-th" data-key="strategy_name">Strategy<span class="sort-arrow"></span></th>
+                                <th class="sortable-th" data-key="size">Size & Value<span class="sort-arrow"></span></th>
+                                <th class="sortable-th" data-key="entry_time">Entry<span class="sort-arrow"></span></th>
+                                <th class="sortable-th" data-key="holding_minutes">Hold Time<span class="sort-arrow"></span></th>
+                                <th class="sortable-th" data-key="exit_time">Exit<span class="sort-arrow"></span></th>
+                                <th>Stop / Target</th>
+                                <th class="sortable-th" data-key="pnl">Net PnL & Return %<span class="sort-arrow"></span></th>
+                                <th class="sortable-th" data-key="total_fees">Brokerage<span class="sort-arrow"></span></th>
                                 <th>Exit Reason</th>
                             </tr>
                         </thead>
@@ -1135,19 +1245,6 @@
 
     </main>
 
-    <!-- Trade Detail Modal -->
-    <div class="modal-overlay" id="trade-modal">
-        <div class="modal-panel">
-            <div class="modal-header">
-                <h2 class="panel-title">Trade Detail</h2>
-                <button class="modal-close-btn" id="trade-modal-close">✕</button>
-            </div>
-            <div id="trade-modal-body">
-                <!-- Populated by JS -->
-            </div>
-        </div>
-    </div>
-
     <!-- Reset System Confirmation Modal -->
     <div class="modal-overlay" id="reset-modal">
         <div class="modal-panel" style="max-width: 480px;">
@@ -1182,17 +1279,21 @@
         let capitalChart = null;
         let analyticsChart = null;
         let pnlTrendChart = null;
+        let equityCurveChart = null;
         let allTrades = [];
         let nextRunAtMs = null;
         let tradesPage = 1;
         const tradesPerPage = 12;
+
+        // Trades table filter/sort state
+        let tradesFilter = { strategy: '', symbol: '', type: '', reason: '' };
+        let tradesSort = { key: 'exit_time', dir: 'desc' };
 
         // Elements
         const refreshBtn = document.getElementById('refresh-btn');
         const autoRefreshCheck = document.getElementById('auto-refresh-check');
         const tabButtons = document.querySelectorAll('.tab-btn');
         const tabContents = document.querySelectorAll('.tab-content');
-        const strategiesContainer = document.getElementById('strategies-container');
         const positionsContainer = document.getElementById('positions-container');
         const tradesTableBody = document.getElementById('trades-table-body');
         const LOG_TYPES = ['signals', 'success', 'errors', 'performance'];
@@ -1202,22 +1303,164 @@
         const nextPageBtn = document.getElementById('next-page-btn');
         const paginationInfo = document.getElementById('pagination-info');
 
-        // Trade Detail Modal Elements
-        const tradeModal = document.getElementById('trade-modal');
-        const tradeModalClose = document.getElementById('trade-modal-close');
+        // Trades Filter/Sort Elements
+        const filterStrategySelect = document.getElementById('filter-strategy');
+        const filterSymbolSelect = document.getElementById('filter-symbol');
+        const filterTypeSelect = document.getElementById('filter-type');
+        const filterReasonSelect = document.getElementById('filter-reason');
+        const clearFiltersBtn = document.getElementById('clear-filters-btn');
+        const sortableHeaders = document.querySelectorAll('.sortable-th');
 
-        // Clicking any trade row opens its in-depth detail modal (event delegation - rows are re-rendered often)
-        tradesTableBody.addEventListener('click', (e) => {
-            const row = e.target.closest('.trade-row');
-            if (row) openTradeDetail(row.getAttribute('data-trade-id'));
+        // URL Parameter Sync
+        function updateUrlParams() {
+            const url = new URL(window.location);
+            if (currentTab && currentTab !== 'overview') {
+                url.searchParams.set('tab', currentTab);
+            } else {
+                url.searchParams.delete('tab');
+            }
+
+            if (currentTab === 'trades') {
+                if (tradesFilter.strategy) url.searchParams.set('strategy', tradesFilter.strategy);
+                else url.searchParams.delete('strategy');
+
+                if (tradesFilter.symbol) url.searchParams.set('symbol', tradesFilter.symbol);
+                else url.searchParams.delete('symbol');
+
+                if (tradesFilter.type) url.searchParams.set('type', tradesFilter.type);
+                else url.searchParams.delete('type');
+
+                if (tradesFilter.reason) url.searchParams.set('reason', tradesFilter.reason);
+                else url.searchParams.delete('reason');
+
+                if (tradesPage > 1) url.searchParams.set('page', tradesPage);
+                else url.searchParams.delete('page');
+            } else {
+                url.searchParams.delete('strategy');
+                url.searchParams.delete('symbol');
+                url.searchParams.delete('type');
+                url.searchParams.delete('reason');
+                url.searchParams.delete('page');
+            }
+
+            window.history.replaceState({}, '', url);
+        }
+
+        function restoreParamsFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const tabParam = urlParams.get('tab');
+            if (tabParam) {
+                const matchingBtn = document.querySelector(`.tab-btn[data-tab="${tabParam}"]`);
+                if (matchingBtn) {
+                    tabButtons.forEach(b => b.classList.remove('active'));
+                    matchingBtn.classList.add('active');
+                    tabContents.forEach(c => c.classList.remove('active'));
+                    const targetSection = document.getElementById(`tab-${tabParam}`);
+                    if (targetSection) targetSection.classList.add('active');
+                    currentTab = tabParam;
+                }
+            }
+
+            if (urlParams.get('strategy')) tradesFilter.strategy = urlParams.get('strategy');
+            if (urlParams.get('symbol')) tradesFilter.symbol = urlParams.get('symbol');
+            if (urlParams.get('type')) tradesFilter.type = urlParams.get('type');
+            if (urlParams.get('reason')) tradesFilter.reason = urlParams.get('reason');
+            if (urlParams.get('page')) {
+                const p = parseInt(urlParams.get('page'), 10);
+                if (!isNaN(p) && p > 0) tradesPage = p;
+            }
+        }
+
+        function populateSelect(selectEl, values, placeholder, activeVal) {
+            const valToSelect = activeVal !== undefined ? activeVal : selectEl.value;
+            selectEl.innerHTML = `<option value="">${placeholder}</option>` +
+                values.map(v => `<option value="${v}">${v}</option>`).join('');
+            if (values.includes(valToSelect)) selectEl.value = valToSelect;
+        }
+
+        // Populates the Strategy/Symbol/Exit Reason filter dropdowns from whatever trade
+        // history is currently loaded, so the options always match real data.
+        function populateTradeFilterOptions() {
+            const strategies = [...new Set(allTrades.map(t => t.strategy_name))].sort();
+            const symbols = [...new Set(allTrades.map(t => t.symbol))].sort();
+            const reasons = [...new Set(allTrades.map(t => t.reason))].sort();
+            populateSelect(filterStrategySelect, strategies, 'All Strategies', tradesFilter.strategy);
+            populateSelect(filterSymbolSelect, symbols, 'All Symbols', tradesFilter.symbol);
+            populateSelect(filterTypeSelect, ['LONG', 'SHORT'], 'All Types', tradesFilter.type);
+            populateSelect(filterReasonSelect, reasons, 'All Exit Reasons', tradesFilter.reason);
+        }
+
+        [filterStrategySelect, filterSymbolSelect, filterTypeSelect, filterReasonSelect].forEach(el => {
+            el.addEventListener('change', () => {
+                tradesFilter = {
+                    strategy: filterStrategySelect.value,
+                    symbol: filterSymbolSelect.value,
+                    type: filterTypeSelect.value,
+                    reason: filterReasonSelect.value,
+                };
+                tradesPage = 1;
+                renderTrades();
+            });
         });
-        tradeModalClose.addEventListener('click', closeTradeDetail);
-        tradeModal.addEventListener('click', (e) => {
-            if (e.target === tradeModal) closeTradeDetail();
+
+        clearFiltersBtn.addEventListener('click', () => {
+            filterStrategySelect.value = '';
+            filterSymbolSelect.value = '';
+            filterTypeSelect.value = '';
+            filterReasonSelect.value = '';
+            tradesFilter = { strategy: '', symbol: '', type: '', reason: '' };
+            tradesPage = 1;
+            renderTrades();
         });
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && tradeModal.style.display !== 'none') closeTradeDetail();
+
+        sortableHeaders.forEach(th => {
+            th.addEventListener('click', () => {
+                const key = th.getAttribute('data-key');
+                if (tradesSort.key === key) {
+                    tradesSort.dir = tradesSort.dir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    tradesSort = { key, dir: 'asc' };
+                }
+                tradesPage = 1;
+                renderTrades();
+            });
         });
+
+        function updateSortArrows() {
+            sortableHeaders.forEach(th => {
+                const arrow = th.querySelector('.sort-arrow');
+                arrow.textContent = th.getAttribute('data-key') === tradesSort.key
+                    ? (tradesSort.dir === 'asc' ? '▲' : '▼')
+                    : '';
+            });
+        }
+
+        // Applies the current strategy/symbol/type/reason filters and column sort to allTrades
+        function getFilteredSortedTrades() {
+            let result = allTrades.filter(t =>
+                (!tradesFilter.strategy || t.strategy_name === tradesFilter.strategy) &&
+                (!tradesFilter.symbol || t.symbol === tradesFilter.symbol) &&
+                (!tradesFilter.type || t.type === tradesFilter.type) &&
+                (!tradesFilter.reason || t.reason === tradesFilter.reason)
+            );
+
+            const { key, dir } = tradesSort;
+            const mult = dir === 'asc' ? 1 : -1;
+            result = result.slice().sort((a, b) => {
+                let av = a[key], bv = b[key];
+                if (key === 'entry_time' || key === 'exit_time') {
+                    av = new Date(av).getTime();
+                    bv = new Date(bv).getTime();
+                } else if (typeof av === 'string') {
+                    return av.localeCompare(bv) * mult;
+                }
+                av = av ?? 0;
+                bv = bv ?? 0;
+                return (av - bv) * mult;
+            });
+
+            return result;
+        }
 
         // Reset System Modal Elements
         const RESET_CONFIRMATION_PHRASE = 'RESET SYSTEM';
@@ -1295,6 +1538,7 @@
                 document.getElementById(`tab-${targetTab}`).classList.add('active');
                 
                 currentTab = targetTab;
+                updateUrlParams();
                 fetchData();
             });
         });
@@ -1350,21 +1594,27 @@
                 const strategies = await stratRes.json();
                 
                 document.getElementById('active-strategies-count').innerText = `${strategies.length} Active`;
-                renderStrategies(strategies);
                 updateChart(strategies);
                 renderPositions(strategies);
+
+                // Fetch the combined portfolio equity curve (Overview tab, under the KPIs)
+                const equityRes = await fetch('/api/portfolio/equity-curve');
+                if (equityRes.ok) {
+                    renderEquityCurveChart(await equityRes.json());
+                }
 
                 // Fetch next scheduled strategy run (for the countdown badge)
                 fetchSchedule();
 
                 // Tab-specific fetching
                 if (currentTab === 'trades') {
-                    const tradesRes = await fetch('/api/trades');
+                    const tradesRes = await fetch('/api/trades?limit=1000');
                     if (!tradesRes.ok) {
                         throw new Error(`Trades API failed: status ${tradesRes.status}`);
                     }
                     allTrades = await tradesRes.json();
                     document.getElementById('trades-count').innerText = `${allTrades.length} Total Trades`;
+                    populateTradeFilterOptions();
                     renderTrades();
                 } else if (currentTab === 'logs') {
                     fetchLogs();
@@ -1465,21 +1715,23 @@
         }
         setInterval(updateNextRunCountdown, 1000);
 
-        // Render Strategy-wise Analytics Cards
+        // Render Strategy-wise Analytics Cards - one card per (strategy, symbol) account,
+        // matching how broker_accounts/analytics are keyed in the backend.
         function renderAnalytics(analytics) {
             const container = document.getElementById('analytics-container');
             container.innerHTML = '';
 
             if (analytics.length === 0) {
-                container.innerHTML = `<div class="empty-state"><div class="empty-icon">📈</div>No strategy data yet.</div>`;
+                container.innerHTML = `<div class="empty-state" style="padding: 2.5rem; text-align: center;"><div class="empty-icon" style="font-size: 2rem; margin-bottom: 0.5rem;">📈</div>No strategy performance data yet.</div>`;
                 return;
             }
 
             analytics.forEach(a => {
-                const pnlClass = a.total_pnl >= 0 ? 'color-green' : 'color-red';
+                const pnlBadgeClass = a.total_pnl >= 0 ? 'badge-green' : 'badge-red';
                 const totalDirTrades = a.long_trades + a.short_trades;
                 const longPct = totalDirTrades ? (a.long_trades / totalDirTrades * 100) : 0;
                 const shortPct = totalDirTrades ? 100 - longPct : 0;
+                const winRateVal = Number(a.win_rate || 0);
 
                 let profitFactorText = '—';
                 if (a.profit_factor === null && a.total_trades > 0) profitFactorText = '∞ (no losses)';
@@ -1491,42 +1743,56 @@
                         ? `${(a.avg_hold_minutes / 60).toFixed(1)}h`
                         : `${a.avg_hold_minutes.toFixed(0)}m`;
 
-                const symbolBadges = a.symbols_traded.length
-                    ? a.symbols_traded.map(s => `<span class="mini-badge">${s}</span>`).join('')
-                    : `<span class="mini-badge">No trades yet</span>`;
-
                 const reasonBadges = Object.entries(a.exit_reasons)
-                    .map(([reason, count]) => `<span class="mini-badge">${reason}: ${count}</span>`)
+                    .map(([reason, count]) => `<span class="mini-badge">${reason}: <strong>${count}</strong></span>`)
                     .join('');
 
                 container.innerHTML += `
-                    <div class="strategy-card">
-                        <div class="strategy-title-row">
-                            <span class="strategy-name">${a.strategy_name}</span>
-                            <span class="strategy-pnl ${pnlClass}">${a.total_pnl > 0 ? '+' : ''}$${a.total_pnl.toFixed(2)}</span>
+                    <div class="strategy-card" style="border-top: 3px solid ${a.total_pnl >= 0 ? 'var(--green)' : 'var(--red)'};">
+                        <div class="strategy-title-row" style="margin-bottom: 1rem; align-items: center;">
+                            <div>
+                                <span class="strategy-name" style="font-size: 1.1rem; font-weight: 700;">${a.strategy_name}</span>
+                                <span class="mini-badge" style="margin-left: 0.5rem; border-color: rgba(6,182,212,0.3); color: var(--cyan);">${a.symbol}</span>
+                                <div class="color-muted" style="font-size: 0.8rem; margin-top: 0.1rem;">Capital: $${a.current_capital.toFixed(2)}</div>
+                            </div>
+                            <span class="pnl-pill ${pnlBadgeClass}" style="font-size: 0.95rem; padding: 0.35rem 0.75rem;">
+                                ${a.total_pnl > 0 ? '+' : ''}$${a.total_pnl.toFixed(2)}
+                            </span>
+                        </div>
+
+                        <!-- Win Rate Progress Bar -->
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                            <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 0.35rem;">
+                                <span class="color-muted" style="font-weight: 600;">WIN RATE</span>
+                                <span style="font-weight: 700; color: ${winRateVal >= 50 ? 'var(--green)' : 'var(--yellow)'};">${winRateVal.toFixed(1)}%</span>
+                            </div>
+                            <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
+                                <div style="width: ${winRateVal}%; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--green)); border-radius: 3px;"></div>
+                            </div>
                         </div>
 
                         <div class="analytics-stats-grid">
                             <div><div class="analytics-stat-label">Total Trades</div><div class="analytics-stat-value">${a.total_trades}</div></div>
-                            <div><div class="analytics-stat-label">Win Rate</div><div class="analytics-stat-value">${a.win_rate.toFixed(1)}%</div></div>
-                            <div><div class="analytics-stat-label">Avg PnL / Trade</div><div class="analytics-stat-value ${a.avg_pnl_per_trade >= 0 ? 'color-green' : 'color-red'}">$${a.avg_pnl_per_trade.toFixed(2)}</div></div>
+                            <div><div class="analytics-stat-label">Avg PnL / Trade</div><div class="analytics-stat-value ${a.avg_pnl_per_trade >= 0 ? 'color-green' : 'color-red'}">${a.avg_pnl_per_trade >= 0 ? '+' : ''}$${a.avg_pnl_per_trade.toFixed(2)}</div></div>
                             <div><div class="analytics-stat-label">Profit Factor</div><div class="analytics-stat-value">${profitFactorText}</div></div>
                             <div><div class="analytics-stat-label">Best Trade</div><div class="analytics-stat-value color-green">+$${a.best_trade.toFixed(2)}</div></div>
                             <div><div class="analytics-stat-label">Worst Trade</div><div class="analytics-stat-value color-red">$${a.worst_trade.toFixed(2)}</div></div>
                             <div><div class="analytics-stat-label">Avg Hold Time</div><div class="analytics-stat-value">${holdText}</div></div>
-                            <div><div class="analytics-stat-label">Current Capital</div><div class="analytics-stat-value">$${a.current_capital.toFixed(2)}</div></div>
+                            <div><div class="analytics-stat-label">Brokerage Paid</div><div class="analytics-stat-value color-muted">$${a.total_fees.toFixed(2)}</div></div>
                         </div>
 
-                        <div class="analytics-stat-label">Long vs Short (${a.long_trades} / ${a.short_trades})</div>
+                        <div class="analytics-stat-label" style="margin-top: 0.85rem;">Long vs Short Ratio (${a.long_trades} Long / ${a.short_trades} Short)</div>
                         <div class="split-bar">
-                            <div class="split-bar-long" style="width: ${longPct}%"></div>
-                            <div class="split-bar-short" style="width: ${shortPct}%"></div>
+                            <div class="split-bar-long" style="width: ${longPct}%" title="${a.long_trades} Long"></div>
+                            <div class="split-bar-short" style="width: ${shortPct}%" title="${a.short_trades} Short"></div>
                         </div>
 
-                        <div class="analytics-stat-label" style="margin-top: 0.75rem;">Symbols Traded</div>
-                        <div class="badge-row">${symbolBadges}</div>
+                        ${reasonBadges ? `<div class="analytics-stat-label" style="margin-top: 0.85rem;">Exit Reasons Breakdown</div><div class="badge-row">${reasonBadges}</div>` : ''}
 
-                        ${reasonBadges ? `<div class="analytics-stat-label" style="margin-top: 0.75rem;">Exit Reasons</div><div class="badge-row">${reasonBadges}</div>` : ''}
+                        <a class="btn" style="width: 100%; justify-content: center; margin-top: 1rem; text-decoration: none; box-sizing: border-box;"
+                           href="?tab=trades&strategy=${encodeURIComponent(a.strategy_name)}&symbol=${encodeURIComponent(a.symbol)}">
+                            Open Trades →
+                        </a>
                     </div>
                 `;
             });
@@ -1534,7 +1800,7 @@
 
         // Render Total PnL Comparison Chart (Analytics tab)
         function updateAnalyticsChart(analytics) {
-            const labels = analytics.map(a => a.strategy_name.split('Strategy')[0]);
+            const labels = analytics.map(a => `${a.strategy_name.split('Strategy')[0].trim()} (${a.symbol})`);
             const pnls = analytics.map(a => a.total_pnl);
             const backgroundColors = pnls.map(p => p >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(244, 63, 94, 0.6)');
             const borderColors = pnls.map(p => p >= 0 ? 'rgba(16, 185, 129, 1)' : 'rgba(244, 63, 94, 1)');
@@ -1590,28 +1856,47 @@
             return `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
         }
 
-        // Render Cumulative PnL-over-trades line chart, one line per strategy (Analytics tab)
+        // Render Cumulative PnL-over-time line chart, one line per strategy (Analytics tab).
+        // X-axis is the real exit timestamp (ms) on a linear scale, not a trade index - so
+        // strategies with different trade counts/frequencies still line up on the same clock.
+        // Renders cumulative PnL over real calendar time, one line per (strategy, symbol)
+        // account - matching how broker_accounts are actually kept separate. Same
+        // strategy on different symbols shares a color but gets a distinct dash pattern,
+        // so "same strategy, different market" reads at a glance instead of just as
+        // more same-colored noise.
         function updatePnlTrendChart(trades) {
-            const byStrategy = {};
+            const byAccount = {};
             trades.forEach(t => {
-                if (!byStrategy[t.strategy_name]) byStrategy[t.strategy_name] = [];
-                byStrategy[t.strategy_name].push(t);
+                const key = `${t.strategy_name}::${t.symbol}`;
+                if (!byAccount[key]) byAccount[key] = { strategy_name: t.strategy_name, symbol: t.symbol, trades: [] };
+                byAccount[key].trades.push(t);
             });
 
             const palette = ['#06b6d4', '#10b981', '#fbbf24', '#f43f5e', '#8b5cf6', '#3b82f6', '#ec4899'];
-            const datasets = Object.keys(byStrategy).map((name, i) => {
-                const sorted = byStrategy[name].slice().sort((a, b) => new Date(a.exit_time) - new Date(b.exit_time));
+            const colorByStrategy = {};
+            [...new Set(trades.map(t => t.strategy_name))].forEach((name, i) => {
+                colorByStrategy[name] = palette[i % palette.length];
+            });
+
+            const dashBySymbol = {};
+            [...new Set(trades.map(t => t.symbol))].sort().forEach((symbol, i) => {
+                dashBySymbol[symbol] = i === 0 ? [] : [6, 3];
+            });
+
+            const datasets = Object.values(byAccount).map(({ strategy_name, symbol, trades: accTrades }) => {
+                const sorted = accTrades.slice().sort((a, b) => new Date(a.exit_time) - new Date(b.exit_time));
                 let cumulative = 0;
-                const points = sorted.map((t, idx) => {
+                const points = sorted.map(t => {
                     cumulative += t.pnl;
-                    return { x: idx + 1, y: Math.round(cumulative * 100) / 100 };
+                    return { x: new Date(t.exit_time).getTime(), y: Math.round(cumulative * 100) / 100 };
                 });
-                const color = palette[i % palette.length];
+                const color = colorByStrategy[strategy_name];
                 return {
-                    label: name.split('Strategy')[0].trim() || name,
+                    label: `${strategy_name.split('Strategy')[0].trim() || strategy_name} (${symbol})`,
                     data: points,
                     borderColor: color,
                     backgroundColor: color,
+                    borderDash: dashBySymbol[symbol],
                     fill: false,
                     tension: 0.25,
                     pointRadius: 2,
@@ -1631,14 +1916,22 @@
                         maintainAspectRatio: false,
                         parsing: false,
                         plugins: {
-                            legend: { display: true, labels: { color: '#9ca3af' } }
+                            legend: { display: true, labels: { color: '#9ca3af', boxWidth: 14, font: { size: 11 } } },
+                            tooltip: {
+                                callbacks: {
+                                    title: (items) => items.length
+                                        ? new Date(items[0].parsed.x).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                        : '',
+                                    label: (item) => `${item.dataset.label}: ${item.parsed.y >= 0 ? '+' : ''}$${item.parsed.y.toFixed(2)}`
+                                }
+                            }
                         },
                         scales: {
                             x: {
                                 type: 'linear',
-                                title: { display: true, text: 'Trade #', color: '#9ca3af' },
+                                title: { display: true, text: 'Time', color: '#9ca3af' },
                                 grid: { color: 'rgba(255,255,255,0.05)' },
-                                ticks: { color: '#9ca3af', precision: 0 }
+                                ticks: { color: '#9ca3af', callback: formatAxisDate }
                             },
                             y: {
                                 title: { display: true, text: 'Cumulative PnL ($)', color: '#9ca3af' },
@@ -1713,112 +2006,101 @@
             `).join('');
         }
 
-        // Render Strategy Grid
-        function renderStrategies(strategies) {
-            strategiesContainer.innerHTML = '';
-            if (strategies.length === 0) {
-                strategiesContainer.innerHTML = `<div class="empty-state"><div class="empty-icon">📂</div>No active strategy records found.</div>`;
-                return;
-            }
+        // Computes a consistent current-price/unrealized-PnL view of an open position -
+        // shared by the strategy cards and the Active Positions panel. Falls back gracefully
+        // for positions opened before the live-price snapshot existed, or not yet refreshed
+        // by this batch cycle (last_price/unrealized_pnl are null until the next cycle runs).
+        function positionLiveMetrics(pos) {
+            const hasLivePrice = pos.last_price !== null && pos.last_price !== undefined;
+            const currentPrice = hasLivePrice ? pos.last_price : pos.entry_price;
+            const positionValue = currentPrice * pos.size;
 
-            strategies.forEach(s => {
-                const pnlClass = s.return_pct >= 0 ? 'color-green' : 'color-red';
-                const pos = s.open_position;
-                let posMarkup = `<div class="strategy-position-block"><span class="strategy-stat-label">Position</span><span class="color-muted">FLAT</span></div>`;
+            const hasUnrealized = pos.unrealized_pnl !== null && pos.unrealized_pnl !== undefined;
+            const unrealizedPct = (hasUnrealized && pos.capital_allocated)
+                ? (pos.unrealized_pnl / pos.capital_allocated) * 100
+                : 0;
 
-                if (pos) {
-                    const typeClass = pos.type === 'LONG' ? 'color-green' : 'color-red';
-                    posMarkup = `
-                        <div class="strategy-position-block" style="border-left: 2px solid ${pos.type === 'LONG' ? 'var(--green)' : 'var(--red)'}; flex-direction: column; align-items: flex-start; gap: 0.3rem;">
-                            <div style="display:flex; justify-content:space-between; width:100%;">
-                                <span class="strategy-stat-label">${pos.symbol}</span>
-                                <span class="${typeClass}" style="font-weight:700;">${pos.type}</span>
-                                <span class="color-muted">$${pos.entry_price.toLocaleString()}</span>
-                            </div>
-                            <div style="display:flex; justify-content:space-between; width:100%; font-size:0.78rem;">
-                                <span class="color-red">SL: ${pos.stop_price ? '$' + pos.stop_price.toFixed(2) : '—'}</span>
-                                <span class="color-green">TP: ${pos.target_price ? '$' + pos.target_price.toFixed(2) : '—'}</span>
-                                <span class="color-muted">Held: ${formatHoldingSince(pos.entry_time)}</span>
-                            </div>
-                        </div>
-                    `;
-                }
-
-                strategiesContainer.innerHTML += `
-                    <div class="strategy-card">
-                        <div class="strategy-title-row">
-                            <span class="strategy-name">${s.strategy_name}</span>
-                            <span class="strategy-pnl ${pnlClass}">${s.return_pct > 0 ? '+' : ''}${s.return_pct.toFixed(2)}%</span>
-                        </div>
-                        <div style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.5rem;">$${s.capital.toFixed(2)}</div>
-                        ${posMarkup}
-                        <div class="strategy-stats-row">
-                            <div>
-                                <span class="strategy-stat-label">Win Rate:</span>
-                                <span class="strategy-stat-value">${s.win_rate.toFixed(1)}%</span>
-                            </div>
-                            <div>
-                                <span class="strategy-stat-label">Trades:</span>
-                                <span class="strategy-stat-value">${s.total_trades}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
+            return { hasLivePrice, currentPrice, positionValue, hasUnrealized, unrealizedPnl: pos.unrealized_pnl, unrealizedPct };
         }
 
-        // Render Open Positions Sidebar
+        // Render Open Positions Table
         function renderPositions(strategies) {
             positionsContainer.innerHTML = '';
             const activePositions = strategies.filter(s => s.open_position !== null);
+            document.getElementById('active-positions-count').innerText = `${activePositions.length} Open`;
 
             if (activePositions.length === 0) {
-                positionsContainer.innerHTML = `<div class="empty-state"><div class="empty-icon">📉</div>No open positions.</div>`;
+                positionsContainer.innerHTML = `<tr><td colspan="10" class="empty-state" style="padding: 2.5rem; text-align: center;"><div class="empty-icon" style="font-size: 2rem; margin-bottom: 0.5rem;">📈</div>No open positions active right now.</td></tr>`;
                 return;
             }
 
             activePositions.forEach(s => {
                 const pos = s.open_position;
-                const typeColor = pos.type === 'LONG' ? 'var(--green)' : 'var(--red)';
+                const isLong = pos.type === 'LONG';
+                const typeColor = isLong ? 'var(--green)' : 'var(--red)';
+                const typeBg = isLong ? 'var(--green-glow)' : 'var(--red-glow)';
                 const date = new Date(pos.entry_time).toLocaleTimeString(undefined, {hour: '2-digit', minute:'2-digit'});
+                const live = positionLiveMetrics(pos);
+
+                const pnlBadgeClass = !live.hasUnrealized ? 'badge-muted' : (live.unrealizedPnl >= 0 ? 'badge-green' : 'badge-red');
+                const pnlText = live.hasUnrealized
+                    ? `${live.unrealizedPnl >= 0 ? '+' : ''}$${live.unrealizedPnl.toFixed(2)} (${live.unrealizedPct >= 0 ? '+' : ''}${live.unrealizedPct.toFixed(2)}%)`
+                    : 'Awaiting next cycle…';
+
+                const currentPriceText = live.hasLivePrice
+                    ? `$${live.currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`
+                    : '<span class="color-muted" style="font-style: italic;">Awaiting cycle…</span>';
+
+                const entryFeeText = (pos.entry_fee !== null && pos.entry_fee !== undefined)
+                    ? `$${pos.entry_fee.toFixed(4)}`
+                    : '—';
 
                 positionsContainer.innerHTML += `
-                    <div class="strategy-card" style="margin-bottom: 0.75rem; border-left: 3px solid ${typeColor}">
-                        <div class="strategy-title-row">
-                            <span style="font-weight: 600;">${pos.symbol}</span>
-                            <span class="status-badge" style="background-color: ${pos.type === 'LONG' ? 'var(--green-glow)' : 'var(--red-glow)'}; color: ${typeColor}; border-color: transparent;">
-                                ${pos.type}
+                    <tr style="border-left: 3px solid ${typeColor}">
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                                <span style="font-weight: 700; font-size: 0.95rem; letter-spacing: 0.3px;">${pos.symbol}</span>
+                                <span class="status-badge" style="background-color: ${typeBg}; color: ${typeColor}; border-color: transparent; padding: 0.15rem 0.55rem; font-size: 0.75rem; font-weight: 700;">
+                                    ${pos.type}
+                                </span>
+                            </div>
+                        </td>
+                        <td>
+                            <span style="font-weight: 500; color: var(--text-primary);">${s.strategy_name}</span>
+                        </td>
+                        <td>
+                            <div>
+                                <div style="font-weight: 600;">$${live.positionValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                                <div class="color-muted" style="font-size: 0.78rem;">${pos.size.toFixed(5)} units</div>
+                            </div>
+                        </td>
+                        <td>
+                            <span style="font-weight: 500;">$${pos.entry_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                        </td>
+                        <td>
+                            <span style="font-weight: 500;">${currentPriceText}</span>
+                        </td>
+                        <td>
+                            <span class="pnl-pill ${pnlBadgeClass}">
+                                ${pnlText}
                             </span>
-                        </div>
-                        <div class="strategy-stats-row" style="margin-top: 0.5rem; padding-top: 0.5rem;">
-                            <span class="strategy-stat-label">Strategy:</span>
-                            <span class="strategy-stat-value">${s.strategy_name}</span>
-                        </div>
-                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
-                            <span class="strategy-stat-label">Entry Price:</span>
-                            <span class="strategy-stat-value">$${pos.entry_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                        </div>
-                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
-                            <span class="strategy-stat-label">Size:</span>
-                            <span class="strategy-stat-value">${pos.size.toFixed(5)}</span>
-                        </div>
-                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
-                            <span class="strategy-stat-label">Stop Loss:</span>
-                            <span class="strategy-stat-value color-red">${pos.stop_price ? '$' + pos.stop_price.toFixed(2) : '—'}</span>
-                        </div>
-                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
-                            <span class="strategy-stat-label">Target:</span>
-                            <span class="strategy-stat-value color-green">${pos.target_price ? '$' + pos.target_price.toFixed(2) : '—'}</span>
-                        </div>
-                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
-                            <span class="strategy-stat-label">Opened:</span>
-                            <span class="strategy-stat-value">${date}</span>
-                        </div>
-                        <div class="strategy-stats-row" style="margin: 0; padding: 0;">
-                            <span class="strategy-stat-label">Holding:</span>
-                            <span class="strategy-stat-value">${formatHoldingSince(pos.entry_time)}</span>
-                        </div>
-                    </div>
+                        </td>
+                        <td>
+                            <span class="color-red" style="font-weight: 600;">${pos.stop_price ? '$' + pos.stop_price.toFixed(2) : '—'}</span>
+                        </td>
+                        <td>
+                            <span class="color-green" style="font-weight: 600;">${pos.target_price ? '$' + pos.target_price.toFixed(2) : '—'}</span>
+                        </td>
+                        <td>
+                            <span class="color-muted" style="font-size: 0.85rem;">${entryFeeText}</span>
+                        </td>
+                        <td>
+                            <div>
+                                <div style="font-weight: 500; font-size: 0.85rem;">${formatHoldingSince(pos.entry_time)}</div>
+                                <div class="color-muted" style="font-size: 0.78rem;">${date}</div>
+                            </div>
+                        </td>
+                    </tr>
                 `;
             });
         }
@@ -1826,21 +2108,42 @@
         // Render Closed Trades Table
         function renderTrades() {
             tradesTableBody.innerHTML = '';
-            
+            updateSortArrows();
+
             if (allTrades.length === 0) {
-                tradesTableBody.innerHTML = `<tr><td colspan="14" class="empty-state"><div class="empty-icon">📑</div>No trades logged yet.</td></tr>`;
+                tradesTableBody.innerHTML = `<tr><td colspan="10" class="empty-state" style="padding: 2.5rem; text-align: center;"><div class="empty-icon" style="font-size: 2rem; margin-bottom: 0.5rem;">📑</div>No trades logged yet.</td></tr>`;
+                paginationInfo.innerText = 'Showing page 1 of 1';
+                prevPageBtn.disabled = true;
+                nextPageBtn.disabled = true;
+                updateUrlParams();
                 return;
             }
 
+            const filteredTrades = getFilteredSortedTrades();
+
+            if (filteredTrades.length === 0) {
+                tradesTableBody.innerHTML = `<tr><td colspan="10" class="empty-state" style="padding: 2.5rem; text-align: center;"><div class="empty-icon" style="font-size: 2rem; margin-bottom: 0.5rem;">🔍</div>No trades match the current filters.</td></tr>`;
+                paginationInfo.innerText = 'Showing page 1 of 1';
+                prevPageBtn.disabled = true;
+                nextPageBtn.disabled = true;
+                updateUrlParams();
+                return;
+            }
+
+            const totalPages = Math.ceil(filteredTrades.length / tradesPerPage);
+            tradesPage = Math.min(tradesPage, totalPages);
+
             const startIndex = (tradesPage - 1) * tradesPerPage;
-            const endIndex = Math.min(startIndex + tradesPerPage, allTrades.length);
-            const paginatedTrades = allTrades.slice(startIndex, endIndex);
+            const endIndex = Math.min(startIndex + tradesPerPage, filteredTrades.length);
+            const paginatedTrades = filteredTrades.slice(startIndex, endIndex);
 
             paginatedTrades.forEach(t => {
-                const typeClass = t.type === 'LONG' ? 'color-green' : 'color-red';
-                const pnlClass = t.pnl >= 0 ? 'color-green' : 'color-red';
+                const isLong = t.type === 'LONG';
+                const typeColor = isLong ? 'var(--green)' : 'var(--red)';
+                const typeBg = isLong ? 'var(--green-glow)' : 'var(--red-glow)';
+                const pnlBadgeClass = t.pnl >= 0 ? 'badge-green' : 'badge-red';
                 const entryDate = new Date(t.entry_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
-                const date = new Date(t.exit_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
+                const exitDate = new Date(t.exit_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
 
                 const stopText = (t.stop_price !== null && t.stop_price !== undefined) ? `$${t.stop_price.toLocaleString(undefined, {minimumFractionDigits: 2})}` : '—';
                 const targetText = (t.target_price !== null && t.target_price !== undefined) ? `$${t.target_price.toLocaleString(undefined, {minimumFractionDigits: 2})}` : '—';
@@ -1854,82 +2157,72 @@
                 if (t.reason && t.reason.includes('Stop Loss')) reasonClass = 'color-red';
                 else if (t.reason && t.reason.includes('Take Profit')) reasonClass = 'color-green';
 
+                const entryVal = (t.entry_price * t.size).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                const returnPct = t.return_pct ?? 0;
+
                 tradesTableBody.innerHTML += `
-                    <tr class="trade-row" data-trade-id="${t.id}" style="cursor: pointer;" title="Click for in-depth chart">
-                        <td style="font-weight: 500;">${t.strategy_name}</td>
-                        <td>${t.symbol}</td>
-                        <td class="${typeClass}" style="font-weight: 600;">${t.type}</td>
-                        <td class="color-muted">${t.size}</td>
-                        <td>$${t.entry_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                        <td>$${t.exit_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                        <td class="color-red">${stopText}</td>
-                        <td class="color-green">${targetText}</td>
-                        <td class="${pnlClass}" style="font-weight: 700;">${t.pnl > 0 ? '+' : ''}$${t.pnl.toFixed(2)}</td>
-                        <td class="${pnlClass}" style="font-weight: 700;">${t.return_pct > 0 ? '+' : ''}${t.return_pct.toFixed(2)}%</td>
-                        <td class="color-muted">${holdText}</td>
-                        <td class="color-muted">${entryDate}</td>
-                        <td class="color-muted">${date}</td>
-                        <td><span class="mini-badge ${reasonClass}">${t.reason}</span></td>
+                    <tr style="border-left: 3px solid ${typeColor}">
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                                <span style="font-weight: 700; font-size: 0.95rem; letter-spacing: 0.3px;">${t.symbol}</span>
+                                <span class="status-badge" style="background-color: ${typeBg}; color: ${typeColor}; border-color: transparent; padding: 0.15rem 0.55rem; font-size: 0.75rem; font-weight: 700;">
+                                    ${t.type}
+                                </span>
+                            </div>
+                        </td>
+                        <td>
+                            <span style="font-weight: 500; color: var(--text-primary);">${t.strategy_name}</span>
+                        </td>
+                        <td>
+                            <div>
+                                <div style="font-weight: 600;">$${entryVal}</div>
+                                <div class="color-muted" style="font-size: 0.78rem;">${t.size} units</div>
+                            </div>
+                        </td>
+                        <td style="white-space: nowrap;">
+                            <div>
+                                <div style="font-weight: 600;">$${t.entry_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+                                <div class="color-muted" style="font-size: 0.78rem;">${entryDate}</div>
+                            </div>
+                        </td>
+                        <td>
+                            <span style="font-weight: 500;">${holdText}</span>
+                        </td>
+                        <td style="white-space: nowrap;">
+                            <div>
+                                <div style="font-weight: 600;">$${t.exit_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+                                <div class="color-muted" style="font-size: 0.78rem;">${exitDate}</div>
+                            </div>
+                        </td>
+                        <td>
+                            <div>
+                                <span class="color-red" style="font-weight: 600; font-size: 0.82rem;">SL: ${stopText}</span>
+                                <br>
+                                <span class="color-green" style="font-weight: 600; font-size: 0.82rem;">TP: ${targetText}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="pnl-pill ${pnlBadgeClass}">
+                                ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)} (${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(2)}%)
+                            </span>
+                        </td>
+                        <td>
+                            <span class="color-muted" style="font-size: 0.85rem;">$${(t.total_fees ?? 0).toFixed(4)}</span>
+                        </td>
+                        <td>
+                            <span class="mini-badge ${reasonClass}" style="white-space: nowrap;">${t.reason}</span>
+                        </td>
                     </tr>
                 `;
             });
 
             // Update Pagination
-            const totalPages = Math.ceil(allTrades.length / tradesPerPage);
-            paginationInfo.innerText = `Showing page ${tradesPage} of ${totalPages || 1}`;
-            
+            paginationInfo.innerText = `Showing page ${tradesPage} of ${totalPages || 1} (${filteredTrades.length} filtered of ${allTrades.length} total)`;
+
             prevPageBtn.disabled = tradesPage === 1;
             nextPageBtn.disabled = tradesPage >= totalPages;
-        }
 
-        // Open the in-depth Trade Detail modal for a given trade id
-        // Opens the trade detail modal, looking the trade up from the already-loaded
-        // allTrades list (no extra network round-trip needed).
-        function openTradeDetail(tradeId) {
-            const trade = allTrades.find(t => t.id === tradeId);
-            tradeModal.style.display = 'flex';
-            const body = document.getElementById('trade-modal-body');
-
-            if (!trade) {
-                body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><span class="color-red">Trade not found.</span></div>`;
-                return;
-            }
-            renderTradeDetail(trade);
-        }
-
-        function closeTradeDetail() {
-            tradeModal.style.display = 'none';
-        }
-
-        // Render the info grid inside the Trade Detail modal
-        function renderTradeDetail(data) {
-            const body = document.getElementById('trade-modal-body');
-            const pnlClass = data.pnl >= 0 ? 'color-green' : 'color-red';
-            const typeClass = data.type === 'LONG' ? 'color-green' : 'color-red';
-            const returnPct = data.return_pct ?? 0;
-
-            let holdText = '—';
-            if (data.holding_minutes !== null && data.holding_minutes !== undefined) {
-                holdText = data.holding_minutes >= 60 ? `${(data.holding_minutes / 60).toFixed(1)}h` : `${data.holding_minutes.toFixed(0)}m`;
-            }
-
-            body.innerHTML = `
-                <div class="analytics-stats-grid" style="grid-template-columns: repeat(4, 1fr);">
-                    <div><div class="analytics-stat-label">Strategy</div><div class="analytics-stat-value">${data.strategy_name}</div></div>
-                    <div><div class="analytics-stat-label">Symbol</div><div class="analytics-stat-value">${data.symbol}</div></div>
-                    <div><div class="analytics-stat-label">Direction</div><div class="analytics-stat-value ${typeClass}">${data.type}</div></div>
-                    <div><div class="analytics-stat-label">Net PnL</div><div class="analytics-stat-value ${pnlClass}">${data.pnl > 0 ? '+' : ''}$${data.pnl.toFixed(2)}</div></div>
-                    <div><div class="analytics-stat-label">Entry Price</div><div class="analytics-stat-value">$${data.entry_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</div></div>
-                    <div><div class="analytics-stat-label">Exit Price</div><div class="analytics-stat-value">$${data.exit_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</div></div>
-                    <div><div class="analytics-stat-label">Stop Loss</div><div class="analytics-stat-value color-red">${data.stop_price ? '$' + data.stop_price.toFixed(4) : '—'}</div></div>
-                    <div><div class="analytics-stat-label">Target</div><div class="analytics-stat-value color-green">${data.target_price ? '$' + data.target_price.toFixed(4) : '—'}</div></div>
-                    <div><div class="analytics-stat-label">Entry Time</div><div class="analytics-stat-value">${new Date(data.entry_time).toLocaleString()}</div></div>
-                    <div><div class="analytics-stat-label">Exit Time</div><div class="analytics-stat-value">${new Date(data.exit_time).toLocaleString()}</div></div>
-                    <div><div class="analytics-stat-label">Hold Time</div><div class="analytics-stat-value">${holdText}</div></div>
-                    <div><div class="analytics-stat-label">Return %</div><div class="analytics-stat-value ${pnlClass}">${returnPct > 0 ? '+' : ''}${returnPct}%</div></div>
-                    <div><div class="analytics-stat-label">Exit Reason</div><div class="analytics-stat-value">${data.reason}</div></div>
-                </div>
-            `;
+            updateUrlParams();
         }
 
         prevPageBtn.addEventListener('click', () => {
@@ -1940,7 +2233,7 @@
         });
 
         nextPageBtn.addEventListener('click', () => {
-            const totalPages = Math.ceil(allTrades.length / tradesPerPage);
+            const totalPages = Math.ceil(getFilteredSortedTrades().length / tradesPerPage);
             if (tradesPage < totalPages) {
                 tradesPage++;
                 renderTrades();
@@ -1999,7 +2292,7 @@
 
         // Render Capital Comparison Chart
         function updateChart(strategies) {
-            const labels = strategies.map(s => s.strategy_name.split('Strategy')[0]);
+            const labels = strategies.map(s => `${s.strategy_name.split('Strategy')[0].trim()} (${s.symbol})`);
             const capitals = strategies.map(s => s.capital);
             const backgroundColors = strategies.map((_, i) => `hsla(${180 + (i * 30)}, 70%, 50%, 0.6)`);
             const borderColors = strategies.map((_, i) => `hsla(${180 + (i * 30)}, 70%, 50%, 1)`);
@@ -2046,7 +2339,64 @@
             }
         }
 
+        // Formats a unix-ms timestamp for a chart axis tick (no date-adapter dependency needed
+        // since the x-axis is a plain 'linear' scale of timestamps, not Chart.js's 'time' scale)
+        function formatAxisDate(ms) {
+            return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        }
+
+        // Render Portfolio Equity Curve (all strategies combined, real calendar time)
+        function renderEquityCurveChart(curve) {
+            const points = (curve || [])
+                .map(p => ({ x: new Date(p.time).getTime(), y: p.capital }))
+                .filter(p => !Number.isNaN(p.x));
+
+            const ctx = document.getElementById('equity-curve-chart').getContext('2d');
+
+            if (equityCurveChart) {
+                equityCurveChart.data.datasets[0].data = points;
+                equityCurveChart.update();
+                return;
+            }
+
+            equityCurveChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Total Portfolio Capital ($)',
+                        data: points,
+                        borderColor: '#06b6d4',
+                        backgroundColor: 'rgba(6, 182, 212, 0.12)',
+                        fill: true,
+                        tension: 0.2,
+                        pointRadius: 1.5,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    parsing: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#9ca3af', callback: formatAxisDate }
+                        },
+                        y: {
+                            title: { display: true, text: 'Capital ($)', color: '#9ca3af' },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        }
+                    }
+                }
+            });
+        }
+
         // Boot
+        restoreParamsFromUrl();
         fetchData();
         setupAutoRefresh();
 
