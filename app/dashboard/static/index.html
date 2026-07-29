@@ -875,6 +875,268 @@
             font-size: 2.5rem;
             margin-bottom: 0.75rem;
         }
+
+        /* ==========================================================================
+           Mobile Responsiveness & Adaptive Touch Layouts
+           ========================================================================== */
+
+        /* Horizontal touch-scroll navigation for tabs */
+        .tabs-nav {
+            overflow-x: auto;
+            flex-wrap: nowrap;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        .tabs-nav::-webkit-scrollbar {
+            display: none;
+        }
+        .tab-btn {
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        /* Responsive Table Container touch scroll */
+        .table-container {
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* Chart Wrappers */
+        .chart-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        /* Medium Devices / Tablets (max-width: 992px) */
+        @media (max-width: 992px) {
+            header {
+                padding: 1.25rem 1.5rem;
+            }
+            main {
+                padding: 1.5rem 1.25rem;
+            }
+            .dashboard-split {
+                grid-template-columns: 1fr;
+            }
+            .logs-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Mobile Devices (max-width: 768px) */
+        @media (max-width: 768px) {
+            header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 1rem;
+                padding: 1rem;
+            }
+
+            .logo-section {
+                justify-content: space-between;
+                width: 100%;
+            }
+
+            .header-controls {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0.5rem;
+                width: 100%;
+            }
+
+            .header-controls .status-badge {
+                grid-column: 1 / -1;
+                justify-content: center;
+                width: 100%;
+                padding: 0.45rem 0.75rem;
+            }
+
+            .header-controls .btn,
+            .header-controls label.btn {
+                width: 100%;
+                justify-content: center;
+                text-align: center;
+                font-size: 0.825rem;
+                padding: 0.55rem 0.5rem;
+            }
+
+            .tabs-nav {
+                padding: 0.75rem 1rem 0;
+            }
+
+            .tab-btn {
+                padding: 0.65rem 0.85rem;
+                font-size: 0.85rem;
+            }
+
+            main {
+                padding: 1rem 0.75rem;
+            }
+
+            .kpis-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 0.75rem;
+                margin-bottom: 1.25rem;
+            }
+
+            .kpi-card {
+                padding: 0.9rem 0.75rem;
+                border-radius: 0.5rem;
+            }
+
+            .kpi-label {
+                font-size: 0.725rem;
+                letter-spacing: 0.3px;
+                margin-bottom: 0.35rem;
+            }
+
+            .kpi-value {
+                font-size: 1.35rem;
+            }
+
+            .panel {
+                padding: 1rem 0.75rem;
+                border-radius: 0.5rem;
+                margin-bottom: 1.25rem;
+            }
+
+            .panel-header {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+                align-items: flex-start;
+            }
+
+            .panel-title {
+                font-size: 1rem;
+            }
+
+            .strategies-grid {
+                grid-template-columns: 1fr;
+                gap: 0.85rem;
+            }
+
+            .strategy-card {
+                padding: 0.85rem;
+            }
+
+            .analytics-grid {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+
+            .analytics-stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .accounts-illustration {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 0.5rem;
+            }
+
+            th, td {
+                padding: 0.65rem 0.6rem;
+                font-size: 0.825rem;
+            }
+
+            .pnl-pill {
+                padding: 0.2rem 0.45rem;
+                font-size: 0.78rem;
+            }
+
+            .console-small {
+                height: 280px;
+            }
+
+            .console-header {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+                padding: 0.5rem 0.75rem;
+            }
+
+            .pagination-row {
+                flex-direction: column;
+                gap: 0.75rem;
+                align-items: center;
+                text-align: center;
+            }
+
+            .modal-overlay {
+                padding: 1rem 0.5rem;
+                align-items: center;
+            }
+
+            .modal-panel {
+                padding: 1.25rem 1rem;
+                border-radius: 0.6rem;
+                max-height: 90vh;
+                overflow-y: auto;
+            }
+
+            .chart-wrapper-lg {
+                height: 220px !important;
+            }
+
+            .chart-wrapper-md {
+                height: 180px !important;
+            }
+
+            .chart-wrapper-sm {
+                height: 160px !important;
+            }
+        }
+
+        /* Small Mobile Phones (max-width: 480px) */
+        @media (max-width: 480px) {
+            .logo-title {
+                font-size: 1.05rem;
+            }
+
+            .kpi-value {
+                font-size: 1.15rem;
+            }
+
+            .trades-filter-row {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0.5rem;
+            }
+
+            .trades-filter-row select {
+                width: 100%;
+                font-size: 0.825rem;
+                padding: 0.5rem;
+            }
+
+            .trades-filter-row #clear-filters-btn {
+                grid-column: 1 / -1;
+                width: 100%;
+                justify-content: center;
+            }
+
+            .flow-branch-row {
+                flex-direction: column;
+                gap: 0.65rem;
+            }
+
+            .flow-step-desc {
+                margin-left: 0;
+                margin-top: 0.35rem;
+                font-size: 0.85rem;
+            }
+
+            .flow-step {
+                padding: 0.85rem 0.75rem;
+            }
+
+            .flow-step-title {
+                font-size: 0.95rem;
+            }
+
+            .btn {
+                padding: 0.5rem 0.75rem;
+                font-size: 0.825rem;
+            }
+        }
     </style>
 </head>
 <body>
@@ -941,7 +1203,7 @@
         <!-- Portfolio Equity Curve (all strategies combined, over real time) -->
         <section class="panel" style="margin-bottom: 2rem;">
             <h2 class="panel-title" style="margin-bottom: 1rem;">Portfolio Equity Curve</h2>
-            <div style="position: relative; height:200px; width:100%;">
+            <div class="chart-wrapper chart-wrapper-md" style="height:200px;">
                 <canvas id="equity-curve-chart"></canvas>
             </div>
         </section>
@@ -959,7 +1221,7 @@
                         <span class="color-muted" id="active-strategies-count">0 Loaded</span>
                     </div>
                 </div>
-                <div style="position: relative; height:340px; width:100%;">
+                <div class="chart-wrapper chart-wrapper-lg" style="height:340px;">
                     <canvas id="capital-chart"></canvas>
                 </div>
             </div>
@@ -978,7 +1240,8 @@
                             <tr>
                                 <th>Symbol / Side</th>
                                 <th>Strategy</th>
-                                <th>Size & Value</th>
+                                <th>Margin & Leverage</th>
+                                <th>Notional Value</th>
                                 <th>Entry Price</th>
                                 <th>Current Price</th>
                                 <th>Unrealized PnL</th>
@@ -1000,14 +1263,14 @@
         <section id="tab-analytics" class="tab-content">
             <div class="panel">
                 <h2 class="panel-title" style="margin-bottom: 1rem;">Cumulative PnL Over Time</h2>
-                <div style="position: relative; height:260px; width:100%;">
+                <div class="chart-wrapper chart-wrapper-md" style="height:260px;">
                     <canvas id="pnl-trend-chart"></canvas>
                 </div>
             </div>
 
             <div class="panel">
                 <h2 class="panel-title" style="margin-bottom: 1rem;">Total PnL by Strategy</h2>
-                <div style="position: relative; height:220px; width:100%;">
+                <div class="chart-wrapper chart-wrapper-sm" style="height:220px;">
                     <canvas id="analytics-chart"></canvas>
                 </div>
             </div>
@@ -1049,7 +1312,8 @@
                             <tr>
                                 <th class="sortable-th" data-key="symbol">Symbol / Side<span class="sort-arrow"></span></th>
                                 <th class="sortable-th" data-key="strategy_name">Strategy<span class="sort-arrow"></span></th>
-                                <th class="sortable-th" data-key="size">Size & Value<span class="sort-arrow"></span></th>
+                                <th class="sortable-th" data-key="leverage">Margin & Leverage<span class="sort-arrow"></span></th>
+                                <th class="sortable-th" data-key="size">Notional Value<span class="sort-arrow"></span></th>
                                 <th class="sortable-th" data-key="entry_time">Entry<span class="sort-arrow"></span></th>
                                 <th class="sortable-th" data-key="holding_minutes">Hold Time<span class="sort-arrow"></span></th>
                                 <th class="sortable-th" data-key="exit_time">Exit<span class="sort-arrow"></span></th>
@@ -1080,28 +1344,40 @@
                 <div class="log-panel">
                     <div class="console-header">
                         <div class="panel-title">📡 Algo Signals</div>
-                        <button class="btn btn-small" data-log="signals">Clear</button>
+                        <div style="display: flex; gap: 0.4rem;">
+                            <a class="btn btn-small" href="/api/logs/signals/download" download="signals.log">⬇ Download</a>
+                            <button class="btn btn-small" data-log="signals">Clear</button>
+                        </div>
                     </div>
                     <div class="console console-small" id="console-signals"></div>
                 </div>
                 <div class="log-panel">
                     <div class="console-header">
                         <div class="panel-title">✅ Success Logs</div>
-                        <button class="btn btn-small" data-log="success">Clear</button>
+                        <div style="display: flex; gap: 0.4rem;">
+                            <a class="btn btn-small" href="/api/logs/success/download" download="success.log">⬇ Download</a>
+                            <button class="btn btn-small" data-log="success">Clear</button>
+                        </div>
                     </div>
                     <div class="console console-small" id="console-success"></div>
                 </div>
                 <div class="log-panel">
                     <div class="console-header">
                         <div class="panel-title">❌ Error Logs</div>
-                        <button class="btn btn-small" data-log="errors">Clear</button>
+                        <div style="display: flex; gap: 0.4rem;">
+                            <a class="btn btn-small" href="/api/logs/errors/download" download="errors.log">⬇ Download</a>
+                            <button class="btn btn-small" data-log="errors">Clear</button>
+                        </div>
                     </div>
                     <div class="console console-small" id="console-errors"></div>
                 </div>
                 <div class="log-panel">
                     <div class="console-header">
                         <div class="panel-title">📊 Performance & Statistics</div>
-                        <button class="btn btn-small" data-log="performance">Clear</button>
+                        <div style="display: flex; gap: 0.4rem;">
+                            <a class="btn btn-small" href="/api/logs/performance/download" download="performance.log">⬇ Download</a>
+                            <button class="btn btn-small" data-log="performance">Clear</button>
+                        </div>
                     </div>
                     <div class="console console-small" id="console-performance"></div>
                 </div>
@@ -1232,11 +1508,12 @@
                     </div>
                     <div class="panel">
                         <h2 class="panel-title" style="margin-bottom: 1rem;">Live System Numbers</h2>
+                        <div class="info-key-value"><span>Default Leverage / Margin</span><span id="hiw-num-leverage" class="color-cyan">20x Margin</span></div>
                         <div class="info-key-value"><span>Strategy batch runs every</span><span id="hiw-num-schedule" class="color-cyan">—</span></div>
                         <div class="info-key-value"><span>Stop loss</span><span id="hiw-num-sl" class="color-red">—</span></div>
                         <div class="info-key-value"><span>Take profit</span><span id="hiw-num-tp" class="color-green">—</span></div>
                         <div class="info-key-value"><span>Fee per trade leg</span><span class="color-muted">0.05%</span></div>
-                        <div class="info-key-value"><span>Starting capital / strategy</span><span class="color-muted">$100.00</span></div>
+                        <div class="info-key-value"><span>Starting capital / strategy</span><span class="color-muted">$100.00 Margin</span></div>
                         <div class="info-key-value"><span>Bankrupt threshold</span><span class="color-muted">≤ $1.00 (frozen permanently)</span></div>
                     </div>
                 </div>
@@ -1971,6 +2248,7 @@
                 statRow('Timezone', config.timezone);
 
             document.getElementById('config-broker-risk').innerHTML =
+                statRow('Default Leverage', `${config.paper_broker.default_leverage || 20}x Margin`) +
                 statRow('Stop Loss', `${config.paper_broker.stop_loss_pct}%`) +
                 statRow('Take Profit', `${config.paper_broker.take_profit_pct}%`);
 
@@ -1983,7 +2261,7 @@
                 statRow('Stop Loss', `${p.stop_loss_pct}%`) +
                 statRow('Take Profit', `${p.take_profit_pct}%`) +
                 statRow('Max Hold', `${p.max_hold_bars} bars`) +
-                statRow('Max Leverage', `${p.max_leverage}x`) +
+                statRow('Max Leverage', `${p.max_leverage || 20}x Margin`) +
                 statRow('Max Concurrent Trades', p.max_concurrent_trades);
         }
 
@@ -1997,6 +2275,8 @@
             document.getElementById('hiw-num-schedule').innerText = formatDuration(config.batch_schedule_seconds);
             document.getElementById('hiw-num-sl').innerText = `${config.paper_broker.stop_loss_pct}%`;
             document.getElementById('hiw-num-tp').innerText = `${config.paper_broker.take_profit_pct}%`;
+            const levEl = document.getElementById('hiw-num-leverage');
+            if (levEl) levEl.innerText = `${config.paper_broker.default_leverage || 20}x Margin`;
 
             document.getElementById('hiw-accounts-illustration').innerHTML = config.strategies.map(name => `
                 <div class="account-box">
@@ -2044,7 +2324,7 @@
 
                 const pnlBadgeClass = !live.hasUnrealized ? 'badge-muted' : (live.unrealizedPnl >= 0 ? 'badge-green' : 'badge-red');
                 const pnlText = live.hasUnrealized
-                    ? `${live.unrealizedPnl >= 0 ? '+' : ''}$${live.unrealizedPnl.toFixed(2)} (${live.unrealizedPct >= 0 ? '+' : ''}${live.unrealizedPct.toFixed(2)}%)`
+                    ? `${live.unrealizedPnl >= 0 ? '+' : ''}$${live.unrealizedPnl.toFixed(2)} <span style="font-size: 0.7em; font-weight: 500; opacity: 0.8; margin-left: 0.15rem;">(${live.unrealizedPct >= 0 ? '+' : ''}${live.unrealizedPct.toFixed(2)}%)</span>`
                     : 'Awaiting next cycle…';
 
                 const currentPriceText = live.hasLivePrice
@@ -2054,6 +2334,25 @@
                 const entryFeeText = (pos.entry_fee !== null && pos.entry_fee !== undefined)
                     ? `$${pos.entry_fee.toFixed(4)}`
                     : '—';
+
+                const leverageVal = pos.leverage || 20;
+                const marginAllocated = pos.capital_allocated || s.capital || 100;
+
+                let stopLossText = '—';
+                if (pos.stop_price && pos.entry_price) {
+                    const slPct = isLong
+                        ? ((pos.stop_price - pos.entry_price) / pos.entry_price) * 100
+                        : ((pos.entry_price - pos.stop_price) / pos.entry_price) * 100;
+                    stopLossText = `$${pos.stop_price.toLocaleString(undefined, {minimumFractionDigits: 2})} <span style="font-size: 0.7em; opacity: 0.8; font-weight: 500;">(${slPct >= 0 ? '+' : ''}${slPct.toFixed(1)}%)</span>`;
+                }
+
+                let targetPriceText = '—';
+                if (pos.target_price && pos.entry_price) {
+                    const tpPct = isLong
+                        ? ((pos.target_price - pos.entry_price) / pos.entry_price) * 100
+                        : ((pos.entry_price - pos.target_price) / pos.entry_price) * 100;
+                    targetPriceText = `$${pos.target_price.toLocaleString(undefined, {minimumFractionDigits: 2})} <span style="font-size: 0.7em; opacity: 0.8; font-weight: 500;">(${tpPct >= 0 ? '+' : ''}${tpPct.toFixed(1)}%)</span>`;
+                }
 
                 positionsContainer.innerHTML += `
                     <tr style="border-left: 3px solid ${typeColor}">
@@ -2067,6 +2366,12 @@
                         </td>
                         <td>
                             <span style="font-weight: 500; color: var(--text-primary);">${s.strategy_name}</span>
+                        </td>
+                        <td>
+                            <div>
+                                <span class="pnl-pill badge-muted" style="color: var(--cyan); border-color: rgba(6,182,212,0.3); font-size: 0.78rem;">${leverageVal}x Margin</span>
+                                <div class="color-muted" style="font-size: 0.78rem; margin-top: 0.15rem;">$${marginAllocated.toFixed(2)} Margin</div>
+                            </div>
                         </td>
                         <td>
                             <div>
@@ -2086,10 +2391,10 @@
                             </span>
                         </td>
                         <td>
-                            <span class="color-red" style="font-weight: 600;">${pos.stop_price ? '$' + pos.stop_price.toFixed(2) : '—'}</span>
+                            <span class="color-red" style="font-weight: 600;">${stopLossText}</span>
                         </td>
                         <td>
-                            <span class="color-green" style="font-weight: 600;">${pos.target_price ? '$' + pos.target_price.toFixed(2) : '—'}</span>
+                            <span class="color-green" style="font-weight: 600;">${targetPriceText}</span>
                         </td>
                         <td>
                             <span class="color-muted" style="font-size: 0.85rem;">${entryFeeText}</span>
@@ -2143,10 +2448,21 @@
                 const typeBg = isLong ? 'var(--green-glow)' : 'var(--red-glow)';
                 const pnlBadgeClass = t.pnl >= 0 ? 'badge-green' : 'badge-red';
                 const entryDate = new Date(t.entry_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
-                const exitDate = new Date(t.exit_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
+                let stopText = '—';
+                if (t.stop_price !== null && t.stop_price !== undefined && t.entry_price) {
+                    const slPct = isLong
+                        ? ((t.stop_price - t.entry_price) / t.entry_price) * 100
+                        : ((t.entry_price - t.stop_price) / t.entry_price) * 100;
+                    stopText = `$${t.stop_price.toLocaleString(undefined, {minimumFractionDigits: 2})} <span style="font-size: 0.7em; opacity: 0.8; font-weight: 500;">(${slPct >= 0 ? '+' : ''}${slPct.toFixed(1)}%)</span>`;
+                }
 
-                const stopText = (t.stop_price !== null && t.stop_price !== undefined) ? `$${t.stop_price.toLocaleString(undefined, {minimumFractionDigits: 2})}` : '—';
-                const targetText = (t.target_price !== null && t.target_price !== undefined) ? `$${t.target_price.toLocaleString(undefined, {minimumFractionDigits: 2})}` : '—';
+                let targetText = '—';
+                if (t.target_price !== null && t.target_price !== undefined && t.entry_price) {
+                    const tpPct = isLong
+                        ? ((t.target_price - t.entry_price) / t.entry_price) * 100
+                        : ((t.entry_price - t.target_price) / t.entry_price) * 100;
+                    targetText = `$${t.target_price.toLocaleString(undefined, {minimumFractionDigits: 2})} <span style="font-size: 0.7em; opacity: 0.8; font-weight: 500;">(${tpPct >= 0 ? '+' : ''}${tpPct.toFixed(1)}%)</span>`;
+                }
 
                 let holdText = '—';
                 if (t.holding_minutes !== null && t.holding_minutes !== undefined) {
@@ -2159,6 +2475,8 @@
 
                 const entryVal = (t.entry_price * t.size).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
                 const returnPct = t.return_pct ?? 0;
+                const leverageVal = t.leverage || 20;
+                const marginVal = (t.capital_allocated ?? 100).toFixed(2);
 
                 tradesTableBody.innerHTML += `
                     <tr style="border-left: 3px solid ${typeColor}">
@@ -2175,7 +2493,13 @@
                         </td>
                         <td>
                             <div>
-                                <div style="font-weight: 600;">$${entryVal}</div>
+                                <span class="pnl-pill badge-muted" style="color: var(--cyan); border-color: rgba(6,182,212,0.3); font-size: 0.78rem;">${leverageVal}x Margin</span>
+                                <div class="color-muted" style="font-size: 0.78rem; margin-top: 0.15rem;">$${marginVal} Margin</div>
+                            </div>
+                        </td>
+                        <td>
+                            <div>
+                                <div style="font-weight: 600;">$${entryVal} Notional</div>
                                 <div class="color-muted" style="font-size: 0.78rem;">${t.size} units</div>
                             </div>
                         </td>
@@ -2203,7 +2527,7 @@
                         </td>
                         <td>
                             <span class="pnl-pill ${pnlBadgeClass}">
-                                ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)} (${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(2)}%)
+                                ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)} <span style="font-size: 0.7em; font-weight: 500; opacity: 0.8; margin-left: 0.15rem;">(${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(2)}%)</span>
                             </span>
                         </td>
                         <td>

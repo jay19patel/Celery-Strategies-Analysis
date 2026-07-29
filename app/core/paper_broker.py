@@ -123,12 +123,15 @@ class PaperBroker:
             "entry_price": pos["entry_price"],
             "exit_price": current_price,
             "size": pos["size"],
+            "capital_allocated": pos.get("capital_allocated", account["capital"]),
+            "leverage": pos.get("leverage", getattr(settings, "broker_leverage", 20.0)),
+            "notional_value": round(pos["size"] * pos["entry_price"], 2),
             "gross_pnl": round(gross_pnl, 4),
             "entry_fee": round(entry_fee, 4),
             "exit_fee": round(exit_fee, 4),
             "total_fees": round(entry_fee + exit_fee, 4),
             "pnl": round(net_pnl, 4),
-            "return_pct": round((net_pnl / pos["capital_allocated"]) * 100, 2),
+            "return_pct": round((net_pnl / pos["capital_allocated"]) * 100, 2) if pos.get("capital_allocated") else round((net_pnl / account["capital"]) * 100, 2),
             "reason": reason,
             "stop_price": pos.get("stop_price"),
             "target_price": pos.get("target_price"),
@@ -143,17 +146,19 @@ class PaperBroker:
     def _open_position(
         self, account: Dict[str, Any], pos_type: str, symbol: str, price: float, entry_time: datetime
     ) -> Dict[str, Any]:
-        """Opens a new position, allocating all available capital and deducting the entry fee.
+        """Opens a new position using 20x default leverage, allocating available capital as margin.
 
         Also sets a stop-loss and take-profit level (from settings.broker_stop_loss_pct /
         broker_take_profit_pct) so the position has a protective exit even if the strategy
         itself keeps signaling HOLD - see check_protective_exit().
         """
         capital = account["capital"]
+        leverage = getattr(settings, "broker_leverage", 20.0)
 
-        fee = capital * self.fee_pct
-        investable = capital - fee
-        size = investable / price
+        notional_capital = capital * leverage
+        fee = notional_capital * self.fee_pct
+        investable_notional = notional_capital - fee
+        size = investable_notional / price
 
         stop_dist = price * (settings.broker_stop_loss_pct / 100)
         target_dist = price * (settings.broker_take_profit_pct / 100)
@@ -170,6 +175,8 @@ class PaperBroker:
             "entry_price": price,
             "size": size,
             "capital_allocated": capital,
+            "leverage": leverage,
+            "notional_value": round(size * price, 2),
             "entry_fee": round(fee, 4),
             "entry_time": entry_time,
             "stop_price": stop_price,
@@ -180,7 +187,8 @@ class PaperBroker:
         }
 
         logger.info(
-            f"📊 BROKER | {account['_id']} OPENED {pos_type} | Size: {size:.4f} @ ${price:.2f} | "
+            f"📊 BROKER | {account['_id']} OPENED {pos_type} ({leverage:.0f}x Margin) | "
+            f"Size: {size:.4f} @ ${price:.2f} (Notional: ${size * price:.2f}, Margin: ${capital:.2f}) | "
             f"Fee: ${fee:.2f} | Stop: ${stop_price:.2f} | Target: ${target_price:.2f}"
         )
         return account

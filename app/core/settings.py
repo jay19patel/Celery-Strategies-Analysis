@@ -33,16 +33,16 @@ class Settings(BaseSettings):
     symbols: str = Field("BTC-USD,ETH-USD,SOL-USD")  # comma-separated
     strategies: str = Field(
         "app.strategies.ema_strategy.EMAStrategy,"
-        "app.strategies.pdhl_strategy.PDHLStrategy,"
-        "app.strategies.random_strategy.RandomStrategy"
+        "app.strategies.pdhl_strategy.PDHLStrategy"
     )  # use "*" to auto-load every strategy module in app/strategies
 
     # Scheduling
     schedule_seconds: int = Field(60)  # in seconds
 
     # PaperBroker (simple per-strategy account) risk protection
-    broker_stop_loss_pct: float = Field(2.0)
-    broker_take_profit_pct: float = Field(4.0)
+    broker_stop_loss_pct: float = Field(1.0)
+    broker_take_profit_pct: float = Field(2.0)
+    broker_leverage: float = Field(20.0)
 
     # Portfolio paper-trading
     portfolio_symbol: str = Field("ETHUSD")
@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     portfolio_take_profit_pct: float = Field(3.0)
     portfolio_max_hold_bars: int = Field(20)
     portfolio_fee_pct: float = Field(0.05)
-    portfolio_max_leverage: float = Field(2.0)
+    portfolio_max_leverage: float = Field(20.0)
     portfolio_max_concurrent_trades: int = Field(5)
     portfolio_risk_cap_pct: float = Field(10.0)
     portfolio_drawdown_trigger_pct: float = Field(10.0)

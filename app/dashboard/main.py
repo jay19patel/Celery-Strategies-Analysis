@@ -180,6 +180,7 @@ def get_system_config() -> Dict[str, Any]:
         "paper_broker": {
             "stop_loss_pct": settings.broker_stop_loss_pct,
             "take_profit_pct": settings.broker_take_profit_pct,
+            "default_leverage": getattr(settings, "broker_leverage", 20.0),
         },
         "portfolio_engine": {
             "symbol": settings.portfolio_symbol,
@@ -275,6 +276,8 @@ def get_recent_trades(limit: int = 100) -> List[Dict[str, Any]]:
                 "stop_price": t.get("stop_price"),
                 "target_price": t.get("target_price"),
                 "size": round(t.get("size", 0.0), 6),
+                "leverage": t.get("leverage", getattr(settings, "broker_leverage", 20.0)),
+                "capital_allocated": t.get("capital_allocated"),
                 "gross_pnl": round(t.get("gross_pnl", t.get("pnl", 0.0)), 2),
                 "entry_fee": round(t.get("entry_fee", 0.0), 4),
                 "exit_fee": round(t.get("exit_fee", 0.0), 4),
@@ -380,17 +383,34 @@ def get_file_logs(log_type: str, lines_count: int = 200) -> List[str]:
     """Reads and returns the last N lines of a specific system log file."""
     if log_type not in ["success", "errors", "signals", "performance"]:
         raise HTTPException(status_code=400, detail="Invalid log type requested.")
-        
+
     try:
         log_file = _get_logs_path() / f"{log_type}.log"
         if not log_file.exists():
             return [f"Log file {log_type}.log does not exist yet. It will be generated when tasks run."]
-            
+
         with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
-            
+
         # Return only the last lines_count lines
         return [line.strip() for line in lines[-lines_count:]]
     except Exception as e:
         logger.error(f"Error reading log file {log_type}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/logs/{log_type}/download")
+def download_file_logs(log_type: str) -> FileResponse:
+    """Downloads the full raw log file (success, errors, signals, or performance)."""
+    if log_type not in ["success", "errors", "signals", "performance"]:
+        raise HTTPException(status_code=400, detail="Invalid log type requested.")
+
+    log_file = _get_logs_path() / f"{log_type}.log"
+    if not log_file.exists():
+        raise HTTPException(status_code=404, detail=f"Log file {log_type}.log does not exist yet.")
+
+    return FileResponse(
+        str(log_file),
+        media_type="text/plain",
+        filename=f"{log_type}.log",
+    )

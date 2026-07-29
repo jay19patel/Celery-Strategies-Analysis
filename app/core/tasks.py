@@ -8,11 +8,13 @@ from app.core.settings import get_symbols, get_strategies, settings
 from app.core.strategy_manager import StrategyManager
 from app.database.mongodb import save_batch_results, get_collection
 from app.database.redis_publisher import publish_batch_complete, publish_message
-from app.core.logger import get_celery_logger
+from app.core.logger import get_celery_logger, get_signals_logger, get_performance_logger
 from app.core.paper_broker import PaperBroker
 import time
 
 logger = get_celery_logger()
+signals_logger = get_signals_logger()
+performance_logger = get_performance_logger()
 
 # Lazily initialized to handle prefork correctly
 _paper_broker = None
@@ -171,6 +173,12 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
 
         pubsub_response = publish_batch_complete(publish_payload)
         logger.info(f"✅ STEP 3.1 COMPLETED: Published to channel '{pubsub_response.get('channel')}'")
+        signals_logger.info(
+            f"BATCH_COMPLETE | channel={pubsub_response.get('channel')} | batch_id={batch_id_str} | "
+            f"total_results={len(aggregated_result.get('results', []))} | "
+            f"subscribers_received={pubsub_response.get('subscriber_count', 0)} | "
+            f"status={pubsub_response.get('status')}"
+        )
 
         # STEP 3.1.5: Pass Actionable Signals to PaperBroker
         for symbol_res in aggregated_result.get("results", []):
@@ -188,20 +196,8 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
                         elif not timestamp:
                             timestamp = datetime.now(timezone.utc)
                             
-                        # 1. Log signal to MongoDB signals_log collection
-                        try:
-                            get_collection("signals_log").insert_one({
-                                "strategy_name": strat_res.get("strategy_name"),
-                                "symbol": symbol,
-                                "signal_type": signal,
-                                "price": price,
-                                "timestamp": timestamp,
-                                "execution_time": strat_res.get("execution_time", 0.0)
-                            })
-                        except Exception as mongo_err:
-                            logger.error(f"Failed to log signal to MongoDB: {mongo_err}", exc_info=True)
-
-                        # 2. Publish signal to Redis Pub/Sub strategy channel
+                        # 1. Publish signal to Redis Pub/Sub strategy channel
+                        subscriber_count = 0
                         try:
                             signal_payload = {
                                 "type": "SignalGenerated",
@@ -214,10 +210,34 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
                                     "execution_time": strat_res.get("execution_time", 0.0)
                                 }
                             }
-                            publish_message(settings.pubsub_channel_strategy, signal_payload)
+                            subscriber_count = publish_message(settings.pubsub_channel_strategy, signal_payload)
+                            signals_logger.info(
+                                f"SIGNAL_PUBLISHED | channel={settings.pubsub_channel_strategy} | "
+                                f"strategy={strat_res.get('strategy_name')} | symbol={symbol} | "
+                                f"signal={signal} | price={price} | "
+                                f"subscribers_received={subscriber_count}"
+                            )
                         except Exception as redis_err:
                             logger.error(f"Failed to publish signal to Redis: {redis_err}", exc_info=True)
-                            
+                            signals_logger.error(
+                                f"SIGNAL_PUBLISH_FAILED | channel={settings.pubsub_channel_strategy} | "
+                                f"strategy={strat_res.get('strategy_name')} | symbol={symbol} | error={redis_err}"
+                            )
+
+                        # 2. Log signal to MongoDB signals_log collection
+                        try:
+                            get_collection("signals_log").insert_one({
+                                "strategy_name": strat_res.get("strategy_name"),
+                                "symbol": symbol,
+                                "signal_type": signal,
+                                "price": price,
+                                "timestamp": timestamp,
+                                "execution_time": strat_res.get("execution_time", 0.0),
+                                "subscribers_received": subscriber_count
+                            })
+                        except Exception as mongo_err:
+                            logger.error(f"Failed to log signal to MongoDB: {mongo_err}", exc_info=True)
+
                         # 3. Process the signal via PaperBroker
                         broker.process_signal(strat_res.get("strategy_name"), symbol, sig_enum, price, timestamp)
                 except Exception as e:
@@ -243,7 +263,24 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
         logger.info(f"   Symbols Processed: {aggregated_result.get('summary', {}).get('total_symbols')}")
         logger.info(f"   Strategies Used: {aggregated_result.get('summary', {}).get('total_strategies')}")
         logger.info("=" * 80)
-        
+
+        # Performance & Statistics log: per-strategy execution timings for this batch
+        exec_times = [
+            strat_res.get("execution_time", 0.0)
+            for symbol_res in aggregated_result.get("results", [])
+            for strat_res in symbol_res.get("strategies", [])
+        ]
+        total_exec_time = sum(exec_times)
+        avg_exec_time = (total_exec_time / len(exec_times)) if exec_times else 0.0
+        performance_logger.info(
+            f"BATCH_PERFORMANCE | batch_id={batch_id} | total_tasks={len(results)} | "
+            f"successful={len(valid_results)} | failed={failed_count} | "
+            f"symbols={aggregated_result.get('summary', {}).get('total_symbols')} | "
+            f"strategies={aggregated_result.get('summary', {}).get('total_strategies')} | "
+            f"total_execution_time={total_exec_time:.2f}s | avg_execution_time={avg_exec_time:.2f}s | "
+            f"pubsub_subscribers_received={pubsub_response.get('subscriber_count', 0)}"
+        )
+
         return {"batch_id": str(batch_id), "summary": aggregated_result.get("summary", {})}
         
     except Exception as e:

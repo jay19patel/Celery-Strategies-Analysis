@@ -202,3 +202,11 @@ def get_main_logger():
     """Get main application logger"""
     return get_logger('main')
 
+def get_signals_logger():
+    """Get logger that writes to logs/signals.log (Algo Signals dashboard panel)"""
+    return logger_instance.signals_logger
+
+def get_performance_logger():
+    """Get logger that writes to logs/performance.log (Performance & Statistics dashboard panel)"""
+    return logger_instance.performance_logger
+

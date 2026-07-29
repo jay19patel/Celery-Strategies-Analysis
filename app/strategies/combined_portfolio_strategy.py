@@ -41,7 +41,7 @@ class CombinedPortfolioStrategy(BaseStrategy):
             
             signal_type = SignalType.HOLD
             confidence = 0.0
-            triggered_strategy_name = self.name
+            triggered_strategy_key = None
             price = df['Close'].iloc[-1]
 
             # Check LONG strategies (OR logic)
@@ -53,7 +53,7 @@ class CombinedPortfolioStrategy(BaseStrategy):
                     price = current_price  # ensure we have the latest price
                     if direction == STRATEGIES[strat_key]["direction"]:
                         is_buy = True
-                        triggered_strategy_name = f"{self.name} ({strat_key})"
+                        triggered_strategy_key = strat_key
                         break
 
             # Check SHORT strategies (OR logic)
@@ -65,10 +65,10 @@ class CombinedPortfolioStrategy(BaseStrategy):
                     price = current_price
                     if direction == STRATEGIES[strat_key]["direction"]:
                         is_sell = True
-                        # If it's both buy and sell, standard practice is to hold (cancel out), 
+                        # If it's both buy and sell, standard practice is to hold (cancel out),
                         # but we check if only sell is triggered.
                         if not is_buy:
-                            triggered_strategy_name = f"{self.name} ({strat_key})"
+                            triggered_strategy_key = strat_key
                         break
 
             # Resolve signal
@@ -77,8 +77,11 @@ class CombinedPortfolioStrategy(BaseStrategy):
             elif is_sell and not is_buy:
                 signal_type = SignalType.SELL
 
+            if triggered_strategy_key:
+                logger.info(f"📊 CombinedPortfolioStrategy | {symbol} | triggered by {triggered_strategy_key} | {signal_type}")
+
             return StrategyResult(
-                strategy_name=triggered_strategy_name,
+                strategy_name=self.name,
                 symbol=symbol,
                 signal_type=signal_type,
                 execution_time=time.time() - start_time,
