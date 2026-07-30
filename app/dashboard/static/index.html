@@ -2447,7 +2447,8 @@
                 const typeColor = isLong ? 'var(--green)' : 'var(--red)';
                 const typeBg = isLong ? 'var(--green-glow)' : 'var(--red-glow)';
                 const pnlBadgeClass = t.pnl >= 0 ? 'badge-green' : 'badge-red';
-                const entryDate = new Date(t.entry_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
+                const entryDate = t.entry_time ? new Date(t.entry_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'}) : '—';
+                const exitDate = t.exit_time ? new Date(t.exit_time).toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'}) : '—';
                 let stopText = '—';
                 if (t.stop_price !== null && t.stop_price !== undefined && t.entry_price) {
                     const slPct = isLong
