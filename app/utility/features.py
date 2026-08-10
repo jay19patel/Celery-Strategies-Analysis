@@ -1,15 +1,24 @@
-"""Shared feature engineering + condition logic for the two Portfolio
-strategies (see long_strategy.py / short_strategy.py).
+"""Shared feature engineering + condition logic for CombinedPortfolioStrategy.
 
-Ported verbatim from the Portfolio project's livetest/strategies.py -
-every formula is copied as-is (not re-derived) to avoid subtly-wrong
-reimplementations. That project validated these two specific combos (best
-LONG and best SHORT by raw PnL) via an exhaustive/beam search over historical
-ETHUSD 1h data, then confirmed the search methodology itself was free of
-lookahead bias (see that project's combo_backtester.py for the search, and
-its README/session history for the out-of-sample validation results -
-strategy_01 (LONG) did NOT hold up out-of-sample and should be treated with
-real skepticism; strategy_02 (SHORT) retained a modest, real edge).
+STRATEGIES below comes from ~/Desktop/Development/Jay/Master Backtester
+(a separate project - its combo_backtester.py exhaustively tested ~183M
+3-100-condition combinations of every indicator/price-action signal against
+365 days of ETHUSD 15m candles, min 15 fires, and wrote every profitable one
+to report.json). Every formula here is copied as-is from that project's
+indicator_engine.py/price_action_engine.py (not re-derived), to avoid
+subtly-wrong reimplementations.
+
+Raw top-PnL-by-report.json is not used directly - a single 365-day in-sample
+search over that many candidates will surface pure noise alongside real
+edges. Before picking these 10+10, every top-~60-by-PnL candidate per side
+was re-simulated (backtester.py's simulate_trades) on a 70/30 time split of
+the same year and only combos profitable on BOTH halves (>=5 trades each)
+were kept, ranked by whichever half did worse (not raw full-period PnL) -
+a combo that's merely lucky on one slice of the year ranks low even if its
+full-period number looks great. Still a single asset/year/timeframe though
+(and CombinedPortfolioStrategy applies these to BTCUSD too) - treat as a
+reasonable prior, not a guarantee, and keep an eye on live paper-trading
+results per combo.
 
 Leading underscore in the filename is deliberate: app/core/settings.py's
 strategy auto-discovery (`_discover_strategy_class_paths`) skips any module
@@ -21,9 +30,12 @@ Every condition string is one of:
     "{indicator}>median" / "{indicator}<median" - indicator value vs its own
         trailing rolling median (CONDITION_WINDOW bars, causal - no lookahead)
     "{signal}(L)" / "{signal}(S)" - sig_{signal} column == +1 / == -1
+Any condition above may also carry a "[-k]" suffix (k in 1..3) - the same
+mask, shifted k bars back ("this was true k candles ago").
 """
 
 import logging
+import re
 
 import numpy as np
 import pandas as pd
@@ -33,49 +45,39 @@ logger = logging.getLogger(__name__)
 
 CONDITION_WINDOW = 100  # same causal rolling window used when these strategies were found
 
-# Combos below reference a sig_* column build_features() never computes (this module
-# was trimmed for only 2 strategies, then the ensemble was expanded to top-10/top-10
-# without updating it - see latest_signal()). Warn once per combo instead of raising,
-# so one broken combo doesn't crash the whole ensemble evaluation every cycle.
+# Warn once per combo instead of raising, so one broken combo doesn't crash the
+# whole ensemble evaluation every cycle (kept as a safety net for any future
+# combo added with a typo'd or not-yet-implemented column name).
 _warned_missing_signals = set()
 
-# The Top 10 LONG and Top 10 SHORT strategies verified out-of-sample
-#
-# KNOWN GAP: 5 of these 20 combos reference a sig_* column build_features()
-# never computes (this module was ported/trimmed for only 2 strategies before
-# the ensemble expanded to all 20 - see the module docstring). Each affected
-# combo permanently evaluates to no-signal (0) via the fallback in
-# latest_signal() until the real logic is implemented:
-#   long_04  -> trendline_break(L)
-#   long_08  -> ema_pullback(L)
-#   long_10  -> donchian(L)
-#   short_07 -> nr7_breakout(S)
-#   short_08 -> bos_retest(S)
-#   short_09 -> donchian(S)
+# Top 10 LONG / Top 10 SHORT, ranked by worst-half PnL after the 70/30
+# split-period check described above (generated_at 2026-08-09T14:36:03Z).
 STRATEGIES = {
-    # LONG Strategies (Top 10 by PnL from report.json)
-    "long_01": {"name": "long_01", "combo": "price_to_sma_50>median AND wick_to_body>median AND slippage_proxy>median AND fvg_fill(L)", "direction": 1},
-    "long_02": {"name": "long_02", "combo": "RSI_21>median AND wick_to_body>median AND slippage_proxy>median AND fvg_fill(L)", "direction": 1},
-    "long_03": {"name": "long_03", "combo": "wick_to_body>median AND zscore_50>median AND slippage_proxy>median AND fvg_fill(L)", "direction": 1},
-    "long_04": {"name": "long_04", "combo": "SMA_50>median AND ATR_pct>median AND aroon_up>median AND trend_smoothness>median", "direction": 1},
-    "long_05": {"name": "long_05", "combo": "MACD_signal>median AND wick_to_body>median AND slippage_proxy>median AND fvg_fill(L)", "direction": 1},
-    "long_06": {"name": "long_06", "combo": "volume_ratio>median AND EMA_50>median AND skew_20>median AND realized_var_20>median", "direction": 1},
-    "long_07": {"name": "long_07", "combo": "ema_10_20_cross>median AND wick_to_body>median AND slippage_proxy>median AND fvg_fill(L)", "direction": 1},
-    "long_08": {"name": "long_08", "combo": "ATR_14>median AND aroon_up>median AND zscore_10>median AND last_swing_high>median", "direction": 1},
-    "long_09": {"name": "long_09", "combo": "log_volume>median AND SMA_50>median AND ATR_21>median AND directional_bias>median", "direction": 1},
-    "long_10": {"name": "long_10", "combo": "SMA_50>median AND ATR_21>median AND MFI>median AND trend_strength>median", "direction": 1},
+    # LONG - every one of these leans on rsi_divergence(L); it's the dominant
+    # signal across the entire top-of-search, not a fluke of one combo.
+    "long_01": {"name": "long_01", "combo": "Stoch_K>median AND bipower_var>median[-1] AND rsi_divergence(L)", "direction": 1},
+    "long_02": {"name": "long_02", "combo": "low_open_return>median[-2] AND aroon_down>median AND rsi_divergence(L)", "direction": 1},
+    "long_03": {"name": "long_03", "combo": "low_open_return>median[-2] AND aroon_down>median[-2] AND rsi_divergence(L)", "direction": 1},
+    "long_04": {"name": "long_04", "combo": "low_open_return>median[-2] AND aroon_down>median[-1] AND rsi_divergence(L)", "direction": 1},
+    "long_05": {"name": "long_05", "combo": "log_volume>median[-2] AND Stoch_K>median AND rsi_divergence(L)", "direction": 1},
+    "long_06": {"name": "long_06", "combo": "log_volume>median[-2] AND zscore_10>median[-1] AND rsi_divergence(L)", "direction": 1},
+    "long_07": {"name": "long_07", "combo": "bars_since_flip>median[-2] AND realized_var_20>median AND rsi_divergence(L)", "direction": 1},
+    "long_08": {"name": "long_08", "combo": "bars_since_flip>median[-1] AND bipower_var>median AND rsi_divergence(L)", "direction": 1},
+    "long_09": {"name": "long_09", "combo": "wick_to_body>median[-1] AND vol_regime>median AND rsi_divergence(L)[-3]", "direction": 1},
+    "long_10": {"name": "long_10", "combo": "aroon_down>median[-1] AND vol_atr_ratio>median[-1] AND rsi_divergence(L)", "direction": 1},
 
-    # SHORT Strategies (Top 10 by PnL from report.json)
-    "short_01": {"name": "short_01", "combo": "Stoch_K<median AND ATR_pct<median AND price_entropy<median AND trend_volume<median", "direction": -1},
-    "short_02": {"name": "short_02", "combo": "price_to_vwap<median AND lower_wick<median AND candle_strength<median AND price_entropy<median", "direction": -1},
-    "short_03": {"name": "short_03", "combo": "ATR_pct<median AND VPT<median AND bipower_var<median AND bos(S)", "direction": -1},
-    "short_04": {"name": "short_04", "combo": "Stoch_K<median AND ATR_21<median AND price_entropy<median AND trend_volume<median", "direction": -1},
-    "short_05": {"name": "short_05", "combo": "Stoch_K<median AND ATR_14<median AND price_entropy<median AND trend_volume<median", "direction": -1},
-    "short_06": {"name": "short_06", "combo": "ATR_pct<median AND VPT<median AND realized_var_20<median AND bos(S)", "direction": -1},
-    "short_07": {"name": "short_07", "combo": "ATR_14<median AND VPT<median AND bipower_var<median AND bos(S)", "direction": -1},
-    "short_08": {"name": "short_08", "combo": "ATR_21<median AND aroon_up<median AND VPT<median AND bos_retest(S)", "direction": -1},
-    "short_09": {"name": "short_09", "combo": "ema_10_20_cross<median AND VPT<median AND price_entropy<median AND adx_volume<median", "direction": -1},
-    "short_10": {"name": "short_10", "combo": "low_open_return<median AND aroon_oscillator<median AND bars_since_swing_low<median AND fvg_fill(S)", "direction": -1},
+    # SHORT - every one of these leans on ATR_pct<median + vol_regime<median
+    # (low-volatility regime); likewise the dominant signal, not a fluke.
+    "short_01": {"name": "short_01", "combo": "ATR_pct<median AND close_position<median[-2] AND vol_regime<median", "direction": -1},
+    "short_02": {"name": "short_02", "combo": "ATR_pct<median AND vol_regime<median[-1] AND range_velocity<median[-3]", "direction": -1},
+    "short_03": {"name": "short_03", "combo": "ATR_pct<median AND close_position<median[-2] AND vol_regime<median AND vol_regime<median[-1]", "direction": -1},
+    "short_04": {"name": "short_04", "combo": "ATR_pct<median[-2] AND realized_var_20<median AND vol_regime<median", "direction": -1},
+    "short_05": {"name": "short_05", "combo": "ATR_pct<median[-1] AND vol_regime<median[-1] AND adx_volume<median[-3]", "direction": -1},
+    "short_06": {"name": "short_06", "combo": "ATR_pct<median AND vol_regime<median AND stop_hunt_proxy<median[-3]", "direction": -1},
+    "short_07": {"name": "short_07", "combo": "ATR_pct<median AND total_wick<median[-2] AND vol_regime<median", "direction": -1},
+    "short_08": {"name": "short_08", "combo": "volume_ratio<median AND ATR_pct<median[-2] AND vol_regime<median[-1]", "direction": -1},
+    "short_09": {"name": "short_09", "combo": "ATR_pct<median[-2] AND vol_regime<median[-1] AND vol_atr_ratio<median", "direction": -1},
+    "short_10": {"name": "short_10", "combo": "ATR_pct<median[-1] AND close_position<median[-3] AND vol_regime<median[-1]", "direction": -1},
 }
 
 
@@ -119,7 +121,7 @@ def _add_indicators(df):
     df["price_to_vwap"] = (df["Close"] - df["VWAP"]) / df["VWAP"]
 
     # --- momentum ---
-    for period in [7, 21]:
+    for period in [7, 14, 21]:  # RSI_14 is a dependency of sig_rsi_divergence
         df[f"RSI_{period}"] = ta.rsi(df["Close"], length=period).bfill()
     macd = ta.macd(df["Close"], fast=12, slow=26, signal=9)
     df["MACD"] = macd["MACD_12_26_9"].bfill()
@@ -254,6 +256,7 @@ def _add_price_action(df, swing_left=3, swing_right=3, max_zone_age=50, max_acti
     df = _add_fibonacci_signals(df)
     df = _add_range_signals(df)
     df = _add_combination_signals(df)
+    df = _add_divergence_signals(df, state)
     return df
 
 
@@ -377,11 +380,7 @@ def _add_candlestick_signals(df):
 
 
 def _add_breakout_signals(df, state):
-    """squeeze_on/resistance_level/support_level are directly referenced by
-    strategies. NOTE: sig_donchian is NOT actually computed here despite what
-    an earlier version of this comment claimed - long_10/short_09 reference
-    donchian(L)/(S) and will hit the missing-column fallback in latest_signal()
-    until this is implemented."""
+    """squeeze_on/resistance_level/support_level are directly referenced by strategies."""
     ch = state["confirmed_high"].copy()
     cl = state["confirmed_low"].copy()
     resistance = ch.dropna().rolling(3).max().reindex(df.index).ffill()
@@ -482,10 +481,7 @@ def _add_fibonacci_signals(df):
 
 
 def _add_range_signals(df):
-    """sig_inside_bar_breakout is directly referenced. NOTE: sig_nr7_breakout is
-    NOT actually computed here despite what an earlier version of this comment
-    claimed - short_07 references nr7_breakout(S) and will hit the
-    missing-column fallback in latest_signal() until this is implemented."""
+    """sig_inside_bar_breakout is directly referenced."""
     inside = (df["High"] < df["High"].shift(1)) & (df["Low"] > df["Low"].shift(1))
     break_up = inside.shift(1, fill_value=False) & (df["Close"] > df["High"].shift(1))
     break_dn = inside.shift(1, fill_value=False) & (df["Close"] < df["Low"].shift(1))
@@ -494,11 +490,7 @@ def _add_range_signals(df):
 
 
 def _add_combination_signals(df):
-    """trend_score + sig_trend_confluence are directly referenced. NOTE:
-    sig_bos_retest is NOT actually computed here despite what an earlier
-    version of this comment claimed - short_08 references bos_retest(S) and
-    will hit the missing-column fallback in latest_signal() until this is
-    implemented."""
+    """trend_score + sig_trend_confluence are directly referenced."""
     votes = (
         np.sign(df["EMA_20"] - df["EMA_50"])
         + df["supertrend_direction"]
@@ -516,10 +508,62 @@ def _add_combination_signals(df):
     return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
 
+def _add_divergence_signals(df, state):
+    """sig_rsi_divergence (long uses rsi_divergence(L)): bearish/bullish RSI
+    divergence at confirmed swing pivots - price makes a lower low while RSI
+    at that pivot is higher than at the prior swing low (bullish), or price
+    makes a higher high while RSI is lower than at the prior swing high
+    (bearish). RSI is read `right` bars before the pivot's confirmation bar
+    (the swing_right lag baked into state["confirmed_high"/"confirmed_low"]),
+    matching the actual candle the pivot sits on rather than the bar it's
+    confirmed on."""
+    right = 3  # must match _add_swings' swing_right
+    n = len(df)
+    rsi = df["RSI_14"].to_numpy()
+    ch = state["confirmed_high"].to_numpy()
+    cl = state["confirmed_low"].to_numpy()
+
+    sig = np.zeros(n)
+    prev_low_price, prev_low_rsi = np.nan, np.nan
+    prev_high_price, prev_high_rsi = np.nan, np.nan
+
+    for i in range(n):
+        if not np.isnan(cl[i]):
+            pivot_rsi = rsi[i - right] if i - right >= 0 else np.nan
+            if (
+                not np.isnan(prev_low_price)
+                and cl[i] < prev_low_price
+                and not np.isnan(pivot_rsi)
+                and pivot_rsi > prev_low_rsi
+            ):
+                sig[i] = 1
+            prev_low_price, prev_low_rsi = cl[i], pivot_rsi
+        if not np.isnan(ch[i]):
+            pivot_rsi = rsi[i - right] if i - right >= 0 else np.nan
+            if (
+                not np.isnan(prev_high_price)
+                and ch[i] > prev_high_price
+                and not np.isnan(pivot_rsi)
+                and pivot_rsi < prev_high_rsi
+            ):
+                sig[i] = -1
+            prev_high_price, prev_high_rsi = ch[i], pivot_rsi
+
+    return pd.concat([df, pd.DataFrame({"sig_rsi_divergence": sig}, index=df.index)], axis=1)
+
+
 # ----------------------------------------------------------------------
 # Turning a strategy's combo string into a real +1/-1/0 direction array
 # ----------------------------------------------------------------------
+_LAG_SUFFIX_RE = re.compile(r"\[-(\d+)\]$")
+
+
 def _condition_mask(df, condition, window):
+    lag_match = _LAG_SUFFIX_RE.search(condition)
+    if lag_match:
+        k = int(lag_match.group(1))
+        base_mask = _condition_mask(df, condition[: lag_match.start()], window)
+        return pd.Series(base_mask, index=df.index).shift(k, fill_value=False).to_numpy()
     if condition.endswith("(L)"):
         return df["sig_" + condition[: -len("(L)")]].to_numpy() == 1
     if condition.endswith("(S)"):
@@ -539,13 +583,12 @@ def build_direction_array(df, strategy, window=CONDITION_WINDOW):
     """strategy: one entry from STRATEGIES. Returns a +1/-1/0 numpy array,
     one value per candle.
 
-    If a condition references a sig_* column build_features() doesn't compute
-    (a handful of the top-10 combos do - this module was trimmed for only 2
-    strategies, then the ensemble was expanded to all 20 without updating it -
-    see the KNOWN GAP note above STRATEGIES), this combo's mask is forced to
-    all-False (never fires) rather than raising - one broken combo should
-    never crash evaluation of the ensemble, whether called per-symbol from a
-    live strategy's execute() or in bulk from the portfolio simulation task.
+    If a condition references a sig_*/indicator column build_features()
+    doesn't compute (e.g. a future combo added with a typo'd or not-yet-
+    implemented name), this combo's mask is forced to all-False (never
+    fires) rather than raising - one broken combo should never crash
+    evaluation of the ensemble, whether called per-symbol from a live
+    strategy's execute() or in bulk from the portfolio simulation task.
     """
     strategy_key = strategy.get("name", "?")
     mask = None

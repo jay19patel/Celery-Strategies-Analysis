@@ -32,8 +32,7 @@ class Settings(BaseSettings):
     # App defaults
     symbols: str = Field("BTC-USD,ETH-USD,SOL-USD")  # comma-separated
     strategies: str = Field(
-        "app.strategies.ema_strategy.EMAStrategy,"
-        "app.strategies.pdhl_strategy.PDHLStrategy"
+        "*"
     )  # use "*" to auto-load every strategy module in app/strategies
 
     # Scheduling
