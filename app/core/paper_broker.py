@@ -18,9 +18,9 @@ class PaperBroker:
     position and capital balance in each rather than sharing one slot across symbols.
 
     Tracks capital, an open position (if any), and trade history in MongoDB.
-    Reverses a position on an opposite signal, and freezes an account once its
-    capital drops to $1 or below. A Redis lock guards each account against
-    concurrent updates.
+    On an opposite signal, the existing position is closed and no new position is opened
+    immediately (no signal reversal). Freezes an account once its capital drops to $1 or
+    below. A Redis lock guards each account against concurrent updates.
     """
 
     def __init__(self) -> None:
@@ -250,10 +250,11 @@ class PaperBroker:
                 pass
 
     def process_signal(self, strategy_name: str, symbol: str, signal: SignalType, price: float, timestamp: datetime) -> None:
-        """Opens, closes, or reverses a strategy's position in response to a new signal.
+        """Opens a new position in response to a signal — only when no position is currently open.
 
-        Acquires a per-(strategy, symbol) Redis lock first, so concurrent signals for
-        the same account can't corrupt it.
+        If a position is already open, ALL signals are ignored. The position will only be
+        closed by check_protective_exit() when Stop Loss or Take Profit is hit.
+        Acquires a per-(strategy, symbol) Redis lock to prevent concurrent corruption.
         """
         if signal == SignalType.HOLD or price <= 0:
             return
@@ -273,23 +274,55 @@ class PaperBroker:
 
             pos = account["open_position"]
 
-            if signal == SignalType.BUY:
-                if pos:
-                    if pos["type"] == "SHORT":
-                        account = self._close_position(account, price, timestamp, "Signal Reverse (BUY)")
-                        account = self._open_position(account, "LONG", symbol, price, timestamp)
-                    # Already LONG - keep it simple, don't add to the position.
-                else:
-                    account = self._open_position(account, "LONG", symbol, price, timestamp)
+            # ── ACTIVE LOGIC ─────────────────────────────────────────────────────────
+            # If a position is already open, ignore all signals.
+            # Position closes ONLY when SL or TP is hit (check_protective_exit).
+            if pos:
+                logger.debug(
+                    f"📊 BROKER | {strategy_name}:{symbol} already has an open {pos['type']} position. "
+                    f"Signal {signal.value} ignored — waiting for SL/TP."
+                )
+                return
 
+            # No open position — open a new one based on signal.
+            if signal == SignalType.BUY:
+                account = self._open_position(account, "LONG", symbol, price, timestamp)
             elif signal == SignalType.SELL:
-                if pos:
-                    if pos["type"] == "LONG":
-                        account = self._close_position(account, price, timestamp, "Signal Reverse (SELL)")
-                        account = self._open_position(account, "SHORT", symbol, price, timestamp)
-                    # Already SHORT - no-op.
-                else:
-                    account = self._open_position(account, "SHORT", symbol, price, timestamp)
+                account = self._open_position(account, "SHORT", symbol, price, timestamp)
+
+            # ── COMMENTED: Signal Exit (no reversal, but closes on opposite signal) ──
+            # if signal == SignalType.BUY:
+            #     if pos:
+            #         if pos["type"] == "SHORT":
+            #             account = self._close_position(account, price, timestamp, "Signal Exit (BUY)")
+            #         # Already LONG - no-op.
+            #     else:
+            #         account = self._open_position(account, "LONG", symbol, price, timestamp)
+            # elif signal == SignalType.SELL:
+            #     if pos:
+            #         if pos["type"] == "LONG":
+            #             account = self._close_position(account, price, timestamp, "Signal Exit (SELL)")
+            #         # Already SHORT - no-op.
+            #     else:
+            #         account = self._open_position(account, "SHORT", symbol, price, timestamp)
+
+            # ── COMMENTED: Signal Reverse (closes + immediately opens opposite) ──────
+            # if signal == SignalType.BUY:
+            #     if pos:
+            #         if pos["type"] == "SHORT":
+            #             account = self._close_position(account, price, timestamp, "Signal Reverse (BUY)")
+            #             account = self._open_position(account, "LONG", symbol, price, timestamp)
+            #         # Already LONG - no-op.
+            #     else:
+            #         account = self._open_position(account, "LONG", symbol, price, timestamp)
+            # elif signal == SignalType.SELL:
+            #     if pos:
+            #         if pos["type"] == "LONG":
+            #             account = self._close_position(account, price, timestamp, "Signal Reverse (SELL)")
+            #             account = self._open_position(account, "SHORT", symbol, price, timestamp)
+            #         # Already SHORT - no-op.
+            #     else:
+            #         account = self._open_position(account, "SHORT", symbol, price, timestamp)
 
             self.accounts_coll.update_one({"_id": account["_id"]}, {"$set": account})
 
