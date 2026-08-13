@@ -230,10 +230,37 @@ class PaperBroker:
                     hit_stop = current_price >= stop_price
                     hit_target = current_price <= target_price
 
+            # ── 24-Hour Time Limit Check ─────────────────────────────────────
+            entry_time = pos.get("entry_time")
+            hit_time_limit = False
+            if entry_time:
+                if isinstance(entry_time, str):
+                    try:
+                        entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+                    except Exception:
+                        entry_dt = None
+                else:
+                    entry_dt = entry_time
+
+                if entry_dt:
+                    if entry_dt.tzinfo is None:
+                        from datetime import timezone
+                        entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                    curr_dt = current_time
+                    if curr_dt.tzinfo is None:
+                        from datetime import timezone
+                        curr_dt = curr_dt.replace(tzinfo=timezone.utc)
+
+                    holding_hours = (curr_dt - entry_dt).total_seconds() / 3600.0
+                    if holding_hours >= 24.0:
+                        hit_time_limit = True
+
             if hit_stop:
                 account = self._close_position(account, stop_price, current_time, "Stop Loss Hit")
             elif hit_target:
                 account = self._close_position(account, target_price, current_time, "Take Profit Hit")
+            elif hit_time_limit:
+                account = self._close_position(account, current_price, current_time, "Time Exceeded (24h Limit)")
             else:
                 pos["last_price"] = current_price
                 pos["last_price_time"] = current_time

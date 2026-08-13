@@ -2662,13 +2662,24 @@
             }
         }
 
-        // Formats "time since" a given ISO timestamp as e.g. "2h 14m"
+        // Formats "time since" a given ISO timestamp as e.g. "2h 14m" with 24h limit countdown
         function formatHoldingSince(isoTime) {
             const ms = Date.now() - new Date(isoTime).getTime();
-            if (!isFinite(ms) || ms < 0) return '0m';
+            if (!isFinite(ms) || ms < 0) return '0m <span style="font-size:0.72rem; color:#fbbf24;">(24h limit)</span>';
             const totalMinutes = Math.floor(ms / 60000);
-            if (totalMinutes < 60) return `${totalMinutes}m`;
-            return `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
+            const hours = Math.floor(totalMinutes / 60);
+            const mins = totalMinutes % 60;
+            const remainingMins = Math.max(0, 1440 - totalMinutes);
+            const remHours = Math.floor(remainingMins / 60);
+            const remMins = remainingMins % 60;
+            
+            const elapsedText = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+            const remText = remainingMins > 0 ? `${remHours}h ${remMins}m left` : '⏱️ 24h limit reached';
+            
+            return `<div style="display: flex; flex-direction: column; gap: 0.1rem;">
+                <span style="font-weight: 600;">${elapsedText}</span>
+                <span style="font-size: 0.72rem; color: #fbbf24; font-weight: 500;">(${remText})</span>
+            </div>`;
         }
 
         // Render Cumulative PnL-over-time line chart, one line per strategy (Analytics tab).
@@ -3303,8 +3314,17 @@
                 }
 
                 let reasonClass = '';
-                if (t.reason && t.reason.includes('Stop Loss')) reasonClass = 'color-red';
-                else if (t.reason && t.reason.includes('Take Profit')) reasonClass = 'color-green';
+                let reasonBadgeStyle = 'background: rgba(255, 255, 255, 0.05); color: var(--text-secondary);';
+                if (t.reason && t.reason.includes('Stop Loss')) {
+                    reasonClass = 'color-red';
+                    reasonBadgeStyle = 'background: rgba(244, 63, 94, 0.15); color: #f43f5e; border: 1px solid rgba(244, 63, 94, 0.3);';
+                } else if (t.reason && t.reason.includes('Take Profit')) {
+                    reasonClass = 'color-green';
+                    reasonBadgeStyle = 'background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);';
+                } else if (t.reason && t.reason.includes('Time Exceeded')) {
+                    reasonClass = 'color-yellow';
+                    reasonBadgeStyle = 'background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3);';
+                }
 
                 const entryVal = (t.entry_price * t.size).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
                 const returnPct = t.return_pct ?? 0;
@@ -3367,7 +3387,7 @@
                             <span class="color-muted" style="font-size: 0.85rem;">$${(t.total_fees ?? 0).toFixed(4)}</span>
                         </td>
                         <td>
-                            <span class="mini-badge ${reasonClass}" style="white-space: nowrap;">${t.reason}</span>
+                            <span class="status-badge" style="${reasonBadgeStyle} white-space: nowrap; font-weight: 600; font-size: 0.78rem;">${t.reason}</span>
                         </td>
                     </tr>
                 `;
