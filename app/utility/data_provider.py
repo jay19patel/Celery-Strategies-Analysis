@@ -71,9 +71,14 @@ def _save_to_cache(cache_key: str, data: pd.DataFrame, ttl: int = None):
         data_dict['index_name'] = data.index.name
 
         serialized = msgpack.packb(data_dict)
-        # Use provided TTL or default CACHE_DURATION
+        # Use provided TTL or default CACHE_DURATION - guard against a non-positive
+        # value reaching Redis, which rejects SETEX outright ("invalid expire time")
+        # instead of just skipping the cache write.
         expiry = ttl if ttl is not None else CACHE_DURATION
-        _redis_client.setex(cache_key, expiry, serialized)
+        if expiry <= 0:
+            logger.warning(f"⚠️  Skipping cache write for {cache_key}: invalid ttl={expiry}")
+            return
+        _redis_client.setex(cache_key, int(expiry), serialized)
     except Exception as e:
         logger.error(f"⚠️  Redis write error: {str(e)}")
 
