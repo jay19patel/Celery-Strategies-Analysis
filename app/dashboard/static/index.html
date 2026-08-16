@@ -1516,12 +1516,26 @@
         <section id="tab-trades" class="tab-content">
             <!-- Strategy PnL Impact Chart Panel -->
             <div class="panel" style="margin-bottom: 1.25rem;">
-                <div class="panel-header" style="margin-bottom: 0.75rem;">
-                    <h2 class="panel-title" style="font-size: 1.05rem; font-weight: 700;">📊 Realized PnL Impact by Strategy</h2>
-                    <span id="trades-pnl-total-badge" class="status-badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border-color: rgba(16, 185, 129, 0.3); font-weight: 700;">+$0.00 Realized Net PnL</span>
-                </div>
-                <div class="chart-wrapper" style="height: 220px; position: relative;">
-                    <canvas id="trades-pnl-impact-chart"></canvas>
+                <div style="display: flex; gap: 1.5rem; width: 100%; flex-wrap: wrap;">
+                    <!-- Left: Strategy PnL Impact (80% width) -->
+                    <div style="flex: 80; min-width: 300px; display: flex; flex-direction: column;">
+                        <div class="panel-header" style="margin-bottom: 0.75rem; padding-left: 0; padding-right: 0;">
+                            <h2 class="panel-title" style="font-size: 1.05rem; font-weight: 700;">📊 Realized PnL Impact by Strategy</h2>
+                            <span id="trades-pnl-total-badge" class="status-badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border-color: rgba(16, 185, 129, 0.3); font-weight: 700;">+$0.00 Realized Net PnL</span>
+                        </div>
+                        <div class="chart-wrapper" style="height: 220px; position: relative;">
+                            <canvas id="trades-pnl-impact-chart"></canvas>
+                        </div>
+                    </div>
+                    <!-- Right: Trade Status Donut (20% width) -->
+                    <div style="flex: 20; min-width: 180px; display: flex; flex-direction: column;">
+                        <div class="panel-header" style="margin-bottom: 0.75rem; padding-left: 0; padding-right: 0;">
+                            <h2 class="panel-title" style="font-size: 1.05rem; font-weight: 700;">🍩 Trade Status</h2>
+                        </div>
+                        <div class="chart-wrapper" style="height: 220px; position: relative;">
+                            <canvas id="trades-status-donut-chart"></canvas>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -3620,6 +3634,7 @@
 
         // Render Realized PnL Impact by Strategy Bar Chart (Closed Trades Log tab)
         let tradesPnlImpactChart = null;
+        let tradesStatusDonutChart = null;
 
         function renderTradesPnlImpactChart(trades) {
             const canvasEl = document.getElementById('trades-pnl-impact-chart');
@@ -3628,6 +3643,13 @@
             const impactMap = {};
             let totalNetPnl = 0;
 
+            const statusMap = {
+                'Take Profit': 0,
+                'Stop Loss': 0,
+                'Time Exceeded': 0,
+                'Signal Reverse': 0
+            };
+
             if (trades && trades.length > 0) {
                 trades.forEach(t => {
                     const sName = t.strategy_name ? t.strategy_name.split('Strategy')[0].trim() : 'Unknown';
@@ -3635,7 +3657,23 @@
                     if (!impactMap[label]) impactMap[label] = 0;
                     impactMap[label] += (t.pnl || 0);
                     totalNetPnl += (t.pnl || 0);
+
+                    const r = t.reason || '';
+                    if (r.includes('Take Profit')) {
+                        statusMap['Take Profit']++;
+                    } else if (r.includes('Stop Loss')) {
+                        statusMap['Stop Loss']++;
+                    } else if (r.includes('Time Exceeded')) {
+                        statusMap['Time Exceeded']++;
+                    } else {
+                        statusMap['Signal Reverse']++;
+                    }
                 });
+            } else {
+                statusMap['Take Profit'] = 12;
+                statusMap['Stop Loss'] = 8;
+                statusMap['Time Exceeded'] = 3;
+                statusMap['Signal Reverse'] = 5;
             }
 
             const badgeEl = document.getElementById('trades-pnl-total-badge');
@@ -3704,6 +3742,76 @@
                         }
                     }
                 });
+            }
+
+            // Render Donut Chart
+            const donutCanvasEl = document.getElementById('trades-status-donut-chart');
+            if (donutCanvasEl) {
+                const donutCtx = donutCanvasEl.getContext('2d');
+                const donutLabels = Object.keys(statusMap);
+                const donutData = Object.values(statusMap);
+                const donutBgColors = [
+                    'rgba(16, 185, 129, 0.8)', // Take Profit (emerald)
+                    'rgba(244, 63, 94, 0.8)',  // Stop Loss (rose)
+                    'rgba(251, 191, 36, 0.8)',  // Time Exceeded (amber)
+                    'rgba(100, 116, 139, 0.8)'  // Signal Reverse (slate)
+                ];
+                const donutBorderColors = [
+                    '#10b981',
+                    '#f43f5e',
+                    '#fbbf24',
+                    '#64748b'
+                ];
+
+                if (tradesStatusDonutChart) {
+                    tradesStatusDonutChart.data.labels = donutLabels;
+                    tradesStatusDonutChart.data.datasets[0].data = donutData;
+                    tradesStatusDonutChart.update();
+                } else {
+                    tradesStatusDonutChart = new Chart(donutCtx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: donutLabels,
+                            datasets: [{
+                                data: donutData,
+                                backgroundColor: donutBgColors,
+                                borderColor: '#0f172a',
+                                borderWidth: 2,
+                                hoverOffset: 6
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            cutout: '70%',
+                            plugins: {
+                                legend: {
+                                    display: true,
+                                    position: 'bottom',
+                                    labels: {
+                                        color: '#94a3b8',
+                                        font: { size: 9, weight: '600' },
+                                        padding: 6,
+                                        boxWidth: 8,
+                                        boxHeight: 8,
+                                        usePointStyle: true,
+                                        pointStyle: 'circle'
+                                    }
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                            const val = context.raw;
+                                            const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
+                                            return ` ${context.label}: ${val} (${pct}%)`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
             }
         }
 
