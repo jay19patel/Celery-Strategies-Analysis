@@ -42,9 +42,9 @@ def test_paper_broker_get_account_new(mock_db_and_redis: dict) -> None:
     mock_accounts.find_one.return_value = None  # Account does not exist
     
     broker = PaperBroker()
-    account = broker._get_account("TestStrategy")
+    account = broker._get_account("TestStrategy", "BTC-USD")
     
-    assert account["_id"] == "TestStrategy"
+    assert account["_id"] == "TestStrategy::BTC-USD"
     assert account["capital"] == 100.0
     assert account["total_trades"] == 0
     mock_accounts.insert_one.assert_called_once_with(account)
@@ -54,7 +54,9 @@ def test_paper_broker_get_account_existing(mock_db_and_redis: dict) -> None:
     """Test retrieving an account when it already exists in MongoDB."""
     mock_accounts = mock_db_and_redis["accounts_coll"]
     existing_account = {
-        "_id": "TestStrategy",
+        "_id": "TestStrategy::BTC-USD",
+        "strategy_name": "TestStrategy",
+        "symbol": "BTC-USD",
         "capital": 150.0,
         "total_trades": 2,
         "winning_trades": 1,
@@ -64,17 +66,19 @@ def test_paper_broker_get_account_existing(mock_db_and_redis: dict) -> None:
     mock_accounts.find_one.return_value = existing_account
     
     broker = PaperBroker()
-    account = broker._get_account("TestStrategy")
+    account = broker._get_account("TestStrategy", "BTC-USD")
     
     assert account["capital"] == 150.0
     mock_accounts.insert_one.assert_not_called()
 
 
 def test_paper_broker_open_position(mock_db_and_redis: dict) -> None:
-    """Test opening a new LONG position and verify correct capital/fee/size calculation."""
+    """Test opening a new LONG position and verify correct capital/fee/size calculation with 20x leverage and 50% capital allocation."""
     broker = PaperBroker()
     account = {
-        "_id": "TestStrategy",
+        "_id": "TestStrategy::BTC-USD",
+        "strategy_name": "TestStrategy",
+        "symbol": "BTC-USD",
         "capital": 100.0,
         "total_trades": 0,
         "winning_trades": 0,
@@ -90,8 +94,10 @@ def test_paper_broker_open_position(mock_db_and_redis: dict) -> None:
     assert pos["type"] == "LONG"
     assert pos["symbol"] == "BTC-USD"
     assert pos["entry_price"] == 50000.0
-    # Fee is 0.05%, so investable is 99.95, size should be 99.95 / 50000 = 0.001999
-    assert pos["size"] == pytest.approx(99.95 / 50000.0)
+    # $100 capital * 50% = $50 Margin. $50 * 20x = $1000 Notional. Fee (0.05%) = $0.50. Investable = $999.50. Size = 999.50 / 50000 = 0.01999
+    assert pos["margin_used"] == 50.0
+    assert pos["size"] == pytest.approx(999.50 / 50000.0)
+    assert pos["liquidation_price"] == 47500.0
 
 
 def test_paper_broker_close_position_win(mock_db_and_redis: dict) -> None:
@@ -101,7 +107,9 @@ def test_paper_broker_close_position_win(mock_db_and_redis: dict) -> None:
     
     entry_time = datetime.now(timezone.utc)
     account = {
-        "_id": "TestStrategy",
+        "_id": "TestStrategy::BTC-USD",
+        "strategy_name": "TestStrategy",
+        "symbol": "BTC-USD",
         "capital": 100.0,
         "total_trades": 0,
         "winning_trades": 0,
@@ -125,10 +133,6 @@ def test_paper_broker_close_position_win(mock_db_and_redis: dict) -> None:
     assert updated_account["winning_trades"] == 1
     assert updated_account["win_rate"] == 100.0
     
-    # Gross Return = (60000 - 50000) * 0.002 = 20.0
-    # Exit Value = 0.002 * 60000 = 120.0
-    # Exit Fee = 120 * 0.0005 = 0.06
-    # Net PnL = 20.0 - 0.06 = 19.94
     assert updated_account["capital"] == pytest.approx(119.94)
     mock_trades.insert_one.assert_called_once()
 
@@ -138,7 +142,9 @@ def test_paper_broker_process_signal_buy(mock_db_and_redis: dict) -> None:
     mock_accounts = mock_db_and_redis["accounts_coll"]
     
     account = {
-        "_id": "TestStrategy",
+        "_id": "TestStrategy::BTC-USD",
+        "strategy_name": "TestStrategy",
+        "symbol": "BTC-USD",
         "capital": 100.0,
         "total_trades": 0,
         "winning_trades": 0,
@@ -156,3 +162,4 @@ def test_paper_broker_process_signal_buy(mock_db_and_redis: dict) -> None:
     saved_account = mock_accounts.update_one.call_args[0][1]["$set"]
     assert saved_account["open_position"]["type"] == "LONG"
     assert saved_account["open_position"]["entry_price"] == 50000.0
+

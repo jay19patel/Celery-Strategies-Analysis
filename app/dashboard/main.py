@@ -181,6 +181,8 @@ def get_system_config() -> Dict[str, Any]:
             "stop_loss_pct": settings.broker_stop_loss_pct,
             "take_profit_pct": settings.broker_take_profit_pct,
             "default_leverage": getattr(settings, "broker_leverage", 20.0),
+            "capital_allocation_pct": getattr(settings, "broker_capital_allocation_pct", 20.0),
+            "max_hold_hours": getattr(settings, "broker_max_hold_hours", 72.0),
         },
         "portfolio_engine": {
             "symbol": settings.portfolio_symbol,
@@ -278,6 +280,8 @@ def get_recent_trades(limit: int = 100) -> List[Dict[str, Any]]:
                 "size": round(t.get("size", 0.0), 6),
                 "leverage": t.get("leverage", getattr(settings, "broker_leverage", 20.0)),
                 "capital_allocated": t.get("capital_allocated"),
+                "margin_used": t.get("margin_used", round(((t.get("size", 0.0) * t.get("entry_price", 0.0)) / t.get("leverage", 20.0)), 2) if t.get("leverage") else 100.0),
+                "notional_value": t.get("notional_value", round(t.get("size", 0.0) * t.get("entry_price", 0.0), 2)),
                 "gross_pnl": round(t.get("gross_pnl", t.get("pnl", 0.0)), 2),
                 "entry_fee": round(t.get("entry_fee", 0.0), 4),
                 "exit_fee": round(t.get("exit_fee", 0.0), 4),

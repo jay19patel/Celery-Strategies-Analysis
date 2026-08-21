@@ -2676,19 +2676,24 @@
             }
         }
 
-        // Formats "time since" a given ISO timestamp as e.g. "2h 14m" with 24h limit countdown
+        // Formats "time since" a given ISO timestamp as e.g. "2h 14m" with max hold limit countdown (default 72h / 3 days)
         function formatHoldingSince(isoTime) {
+            const maxHoldHours = (window.systemConfig && window.systemConfig.paper_broker && window.systemConfig.paper_broker.max_hold_hours)
+                ? window.systemConfig.paper_broker.max_hold_hours
+                : 72;
+            const maxHoldMins = maxHoldHours * 60; // 72 * 60 = 4320 mins (3 days)
+
             const ms = Date.now() - new Date(isoTime).getTime();
-            if (!isFinite(ms) || ms < 0) return '0m <span style="font-size:0.72rem; color:#fbbf24;">(24h limit)</span>';
+            if (!isFinite(ms) || ms < 0) return `0m <span style="font-size:0.72rem; color:#fbbf24;">(${maxHoldHours}h limit)</span>`;
             const totalMinutes = Math.floor(ms / 60000);
             const hours = Math.floor(totalMinutes / 60);
             const mins = totalMinutes % 60;
-            const remainingMins = Math.max(0, 1440 - totalMinutes);
+            const remainingMins = Math.max(0, maxHoldMins - totalMinutes);
             const remHours = Math.floor(remainingMins / 60);
             const remMins = remainingMins % 60;
             
             const elapsedText = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-            const remText = remainingMins > 0 ? `${remHours}h ${remMins}m left` : '⏱️ 24h limit reached';
+            const remText = remainingMins > 0 ? `${remHours}h ${remMins}m left` : `⏱️ ${maxHoldHours}h limit reached`;
             
             return `<div style="display: flex; flex-direction: column; gap: 0.1rem;">
                 <span style="font-weight: 600;">${elapsedText}</span>
@@ -2889,8 +2894,10 @@
 
             document.getElementById('config-broker-risk').innerHTML =
                 statRow('Default Leverage', `${config.paper_broker.default_leverage || 20}x Margin`) +
+                statRow('Capital / Trade', `${config.paper_broker.capital_allocation_pct || 20}% Allocation`) +
                 statRow('Stop Loss', `${config.paper_broker.stop_loss_pct}%`) +
-                statRow('Take Profit', `${config.paper_broker.take_profit_pct}%`);
+                statRow('Take Profit', `${config.paper_broker.take_profit_pct}%`) +
+                statRow('Max Hold Time', `${config.paper_broker.max_hold_hours || 72}h (3 Days)`);
 
             const p = config.portfolio_engine;
             document.getElementById('config-portfolio').innerHTML =
@@ -2934,7 +2941,11 @@
             const hasLivePrice = pos.last_price !== null && pos.last_price !== undefined;
             const currentPrice = hasLivePrice ? pos.last_price : pos.entry_price;
             const positionValue = currentPrice * pos.size;
-            const margin = pos.capital_allocated || 100;
+            const leverage = pos.leverage || 20;
+            const notionalVal = pos.notional_value || (pos.size * pos.entry_price);
+            const actualMarginUsed = pos.margin_used || (notionalVal ? (notionalVal / leverage) : (pos.capital_allocated || 100));
+            const accountCapital = pos.capital_allocated || 100;
+            const margin = actualMarginUsed;
 
             const hasUnrealized = pos.unrealized_pnl !== null && pos.unrealized_pnl !== undefined;
             const unrealizedPnl = hasUnrealized ? pos.unrealized_pnl : 0;
@@ -3039,7 +3050,8 @@
                 hasFullRange,
                 rangeEntryPct,
                 rangeCurrentPct,
-                margin
+                margin,
+                accountCapital
             };
         }
 
@@ -3144,10 +3156,15 @@
                         ? `<div style="font-size: 0.72rem; color: #f87171; font-weight: 600; margin-top: 0.15rem;">Wipeout: -$${Math.abs(live.stopPnl).toFixed(2)} (${live.stopPnlPct.toFixed(1)}%)</div>`
                         : '';
 
+                    const liqInfo = pos.liquidation_price
+                        ? `<div style="font-size: 0.70rem; color: #ef4444; font-weight: 500; margin-top: 0.1rem;">Liq: $${pos.liquidation_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>`
+                        : '';
+
                     stopLossCellHtml = `
                         <div>
                             <div class="color-red" style="font-weight: 600;">$${pos.stop_price.toLocaleString(undefined, {minimumFractionDigits: 2})} <span style="font-size: 0.7em; opacity: 0.8; font-weight: 500;">(${slPct >= 0 ? '+' : ''}${slPct.toFixed(1)}%)</span></div>
                             ${wipeoutInfo}
+                            ${liqInfo}
                         </div>
                     `;
                 }
@@ -3223,8 +3240,8 @@
                         </td>
                         <td>
                             <div>
-                                <span class="pnl-pill badge-muted" style="color: var(--cyan); border-color: rgba(6,182,212,0.3); font-size: 0.78rem;">${leverageVal}x Margin</span>
-                                <div class="color-muted" style="font-size: 0.78rem; margin-top: 0.15rem;">$${marginAllocated.toFixed(2)} Margin</div>
+                                <span class="pnl-pill badge-muted" style="color: var(--cyan); border-color: rgba(6,182,212,0.3); font-size: 0.78rem;">${leverageVal}x Leverage</span>
+                                <div class="color-muted" style="font-size: 0.78rem; margin-top: 0.15rem;">$${marginAllocated.toFixed(2)} Margin <span style="font-size: 0.72rem; opacity: 0.75;">($${(live.accountCapital || 100).toFixed(0)} Account)</span></div>
                             </div>
                         </td>
                         <td>
@@ -3343,7 +3360,10 @@
                 const entryVal = (t.entry_price * t.size).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
                 const returnPct = t.return_pct ?? 0;
                 const leverageVal = t.leverage || 20;
-                const marginVal = (t.capital_allocated ?? 100).toFixed(2);
+                const notionalVal = t.notional_value || (t.entry_price * t.size);
+                const marginUsedNum = t.margin_used || (notionalVal ? (notionalVal / leverageVal) : (t.capital_allocated || 100));
+                const marginVal = marginUsedNum.toFixed(2);
+                const capitalVal = (t.capital_allocated || 100).toFixed(0);
 
                 tradesTableBody.innerHTML += `
                     <tr style="border-left: 3px solid ${typeColor}">
@@ -3360,8 +3380,8 @@
                         </td>
                         <td>
                             <div>
-                                <span class="pnl-pill badge-muted" style="color: var(--cyan); border-color: rgba(6,182,212,0.3); font-size: 0.78rem;">${leverageVal}x Margin</span>
-                                <div class="color-muted" style="font-size: 0.78rem; margin-top: 0.15rem;">$${marginVal} Margin</div>
+                                <span class="pnl-pill badge-muted" style="color: var(--cyan); border-color: rgba(6,182,212,0.3); font-size: 0.78rem;">${leverageVal}x Leverage</span>
+                                <div class="color-muted" style="font-size: 0.78rem; margin-top: 0.15rem;">$${marginVal} Margin <span style="font-size: 0.72rem; opacity: 0.75;">($${capitalVal} Account)</span></div>
                             </div>
                         </td>
                         <td>

@@ -114,6 +114,7 @@ class PaperBroker:
 
         account["win_rate"] = (account["winning_trades"] / account["total_trades"]) * 100.0
 
+        margin_used = pos.get("margin_used") or round((pos["size"] * pos["entry_price"]) / pos.get("leverage", 20.0), 2)
         trade_record = {
             "strategy_name": account["strategy_name"],
             "symbol": pos["symbol"],
@@ -124,14 +125,16 @@ class PaperBroker:
             "exit_price": current_price,
             "size": pos["size"],
             "capital_allocated": pos.get("capital_allocated", account["capital"]),
+            "margin_used": margin_used,
             "leverage": pos.get("leverage", getattr(settings, "broker_leverage", 20.0)),
             "notional_value": round(pos["size"] * pos["entry_price"], 2),
+            "liquidation_price": pos.get("liquidation_price"),
             "gross_pnl": round(gross_pnl, 4),
             "entry_fee": round(entry_fee, 4),
             "exit_fee": round(exit_fee, 4),
             "total_fees": round(entry_fee + exit_fee, 4),
             "pnl": round(net_pnl, 4),
-            "return_pct": round((net_pnl / pos["capital_allocated"]) * 100, 2) if pos.get("capital_allocated") else round((net_pnl / account["capital"]) * 100, 2),
+            "return_pct": round((net_pnl / margin_used) * 100, 2) if margin_used > 0 else 0.0,
             "reason": reason,
             "stop_price": pos.get("stop_price"),
             "target_price": pos.get("target_price"),
@@ -154,8 +157,10 @@ class PaperBroker:
         """
         capital = account["capital"]
         leverage = getattr(settings, "broker_leverage", 20.0)
+        alloc_pct = getattr(settings, "broker_capital_allocation_pct", 20.0)
 
-        notional_capital = capital * leverage
+        margin_used = capital * (alloc_pct / 100.0)
+        notional_capital = margin_used * leverage
         fee = notional_capital * self.fee_pct
         investable_notional = notional_capital - fee
         size = investable_notional / price
@@ -165,9 +170,11 @@ class PaperBroker:
         if pos_type == "LONG":
             stop_price = price - stop_dist
             target_price = price + target_dist
+            liquidation_price = price * (1.0 - (1.0 / leverage))
         else:  # SHORT
             stop_price = price + stop_dist
             target_price = price - target_dist
+            liquidation_price = price * (1.0 + (1.0 / leverage))
 
         account["open_position"] = {
             "type": pos_type,
@@ -175,8 +182,10 @@ class PaperBroker:
             "entry_price": price,
             "size": size,
             "capital_allocated": capital,
+            "margin_used": round(margin_used, 2),
             "leverage": leverage,
             "notional_value": round(size * price, 2),
+            "liquidation_price": round(liquidation_price, 2),
             "entry_fee": round(fee, 4),
             "entry_time": entry_time,
             "stop_price": stop_price,
@@ -188,14 +197,14 @@ class PaperBroker:
 
         logger.info(
             f"📊 BROKER | {account['_id']} OPENED {pos_type} ({leverage:.0f}x Margin) | "
-            f"Size: {size:.4f} @ ${price:.2f} (Notional: ${size * price:.2f}, Margin: ${capital:.2f}) | "
-            f"Fee: ${fee:.2f} | Stop: ${stop_price:.2f} | Target: ${target_price:.2f}"
+            f"Size: {size:.4f} @ ${price:.2f} (Notional: ${size * price:.2f}, Margin Used: ${margin_used:.2f} of ${capital:.2f} Capital) | "
+            f"Fee: ${fee:.2f} | Stop: ${stop_price:.2f} | Target: ${target_price:.2f} | Liq: ${liquidation_price:.2f}"
         )
         return account
 
     def check_protective_exit(self, strategy_name: str, symbol: str, current_price: float, current_time: datetime) -> None:
         """Closes a strategy's open position if the current price has crossed its
-        stop-loss or take-profit level; otherwise snapshots the live price and
+        stop-loss, take-profit, or liquidation level; otherwise snapshots the live price and
         unrealized PnL onto the position so the dashboard can show it.
 
         Called every batch cycle for every (strategy, symbol) pair regardless of that
@@ -220,8 +229,17 @@ class PaperBroker:
 
             stop_price = pos.get("stop_price")
             target_price = pos.get("target_price")
+            liquidation_price = pos.get("liquidation_price")
 
+            hit_liquidation = False
             hit_stop = hit_target = False
+
+            if liquidation_price is not None:
+                if pos["type"] == "LONG":
+                    hit_liquidation = current_price <= liquidation_price
+                else:  # SHORT
+                    hit_liquidation = current_price >= liquidation_price
+
             if stop_price is not None and target_price is not None:
                 if pos["type"] == "LONG":
                     hit_stop = current_price <= stop_price
@@ -230,9 +248,10 @@ class PaperBroker:
                     hit_stop = current_price >= stop_price
                     hit_target = current_price <= target_price
 
-            # ── 24-Hour Time Limit Check ─────────────────────────────────────
+            # ── 3-Day (72-Hour) Time Limit Check ─────────────────────────────
             entry_time = pos.get("entry_time")
             hit_time_limit = False
+            max_hold_hours = float(getattr(settings, "broker_max_hold_hours", 72.0))
             if entry_time:
                 if isinstance(entry_time, str):
                     try:
@@ -252,15 +271,17 @@ class PaperBroker:
                         curr_dt = curr_dt.replace(tzinfo=timezone.utc)
 
                     holding_hours = (curr_dt - entry_dt).total_seconds() / 3600.0
-                    if holding_hours >= 24.0:
+                    if holding_hours >= max_hold_hours:
                         hit_time_limit = True
 
-            if hit_stop:
+            if hit_liquidation:
+                account = self._close_position(account, liquidation_price, current_time, "Liquidation Hit")
+            elif hit_stop:
                 account = self._close_position(account, stop_price, current_time, "Stop Loss Hit")
             elif hit_target:
                 account = self._close_position(account, target_price, current_time, "Take Profit Hit")
             elif hit_time_limit:
-                account = self._close_position(account, current_price, current_time, "Time Exceeded (24h Limit)")
+                account = self._close_position(account, current_price, current_time, f"Time Exceeded ({max_hold_hours:.0f}h Limit)")
             else:
                 pos["last_price"] = current_price
                 pos["last_price_time"] = current_time

@@ -38,29 +38,62 @@ class Settings(BaseSettings):
     # Scheduling
     schedule_seconds: int = Field(60)  # in seconds
 
-    # PaperBroker (simple per-strategy account) risk protection
-    broker_stop_loss_pct: float = Field(1.0)
-    broker_take_profit_pct: float = Field(2.0)
-    broker_leverage: float = Field(20.0)
+    # ── Global Unified Risk & Trading Settings ────────────────────────────────
+    leverage: float = Field(20.0)                 # Default 20x Leverage
+    stop_loss_pct: float = Field(1.0)            # Default 1.0% Stop Loss
+    take_profit_pct: float = Field(3.0)          # Default 3.0% Take Profit
+    capital_allocation_pct: float = Field(50.0)  # Default 50% Capital Margin per trade
+    max_hold_hours: float = Field(72.0)          # Default 72 hours (3 Days) hold limit
 
-    # Portfolio paper-trading
+    # Portfolio paper-trading specific
     portfolio_symbol: str = Field("ETHUSD")
     portfolio_interval: str = Field("1h")
     portfolio_schedule_seconds: int = Field(1200)  # 20 minutes
-
-    # Portfolio risk parameters (M3: moved from hardcoded constants)
     portfolio_initial_capital: float = Field(100.0)
     portfolio_risk_per_trade_pct: float = Field(2.0)
-    portfolio_stop_loss_pct: float = Field(1.0)
-    portfolio_take_profit_pct: float = Field(3.0)
-    portfolio_max_hold_bars: int = Field(20)
     portfolio_fee_pct: float = Field(0.05)
-    portfolio_max_leverage: float = Field(20.0)
     portfolio_max_concurrent_trades: int = Field(5)
     portfolio_risk_cap_pct: float = Field(10.0)
     portfolio_drawdown_trigger_pct: float = Field(10.0)
     portfolio_drawdown_recovery_pct: float = Field(5.0)
     portfolio_throttled_risk_pct: float = Field(1.0)
+
+    # ── Backward Compatibility Properties ─────────────────────────────────────
+    @property
+    def broker_leverage(self) -> float:
+        return self.leverage
+
+    @property
+    def portfolio_max_leverage(self) -> float:
+        return self.leverage
+
+    @property
+    def broker_stop_loss_pct(self) -> float:
+        return self.stop_loss_pct
+
+    @property
+    def portfolio_stop_loss_pct(self) -> float:
+        return self.stop_loss_pct
+
+    @property
+    def broker_take_profit_pct(self) -> float:
+        return self.take_profit_pct
+
+    @property
+    def portfolio_take_profit_pct(self) -> float:
+        return self.take_profit_pct
+
+    @property
+    def broker_capital_allocation_pct(self) -> float:
+        return self.capital_allocation_pct
+
+    @property
+    def broker_max_hold_hours(self) -> float:
+        return self.max_hold_hours
+
+    @property
+    def portfolio_max_hold_bars(self) -> int:
+        return int(self.max_hold_hours)
 
     # Redis pub/sub channels
     pubsub_channel_batch: str = Field("stockanalysis:batch_complete")
