@@ -40,14 +40,14 @@ class Settings(BaseSettings):
 
     # ── Global Unified Risk & Trading Settings ────────────────────────────────
     leverage: float = Field(20.0)                 # Default 20x Leverage
-    stop_loss_pct: float = Field(1.0)            # Default 1.0% Stop Loss
-    take_profit_pct: float = Field(3.0)          # Default 3.0% Take Profit
+    stop_loss_pct: float = Field(0.5)            # Default 0.5% Stop Loss
+    take_profit_pct: float = Field(1.0)          # Default 1.0% Take Profit
     capital_allocation_pct: float = Field(50.0)  # Default 50% Capital Margin per trade
     max_hold_hours: float = Field(72.0)          # Default 72 hours (3 Days) hold limit
 
     # Portfolio paper-trading specific
     portfolio_symbol: str = Field("ETHUSD")
-    portfolio_interval: str = Field("1h")
+    portfolio_interval: str = Field("15m")
     portfolio_schedule_seconds: int = Field(1200)  # 20 minutes
     portfolio_initial_capital: float = Field(100.0)
     portfolio_risk_per_trade_pct: float = Field(2.0)
