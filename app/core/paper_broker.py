@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any, Dict
 
 from app.models.strategy_models import SignalType
-from app.database.mongodb import MongoDBConnection
+from app.database.sqlite_adapter import DatabaseConnection, MongoDBConnection
 from app.database.redis_publisher import get_redis_client
 from app.core.logger import get_celery_logger
 from app.core.settings import settings

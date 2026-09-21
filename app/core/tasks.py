@@ -1,16 +1,17 @@
-import importlib
-from typing import Any, Dict
 from datetime import datetime, timezone
-from bson import ObjectId
+import importlib
+import time
+from typing import Any, Dict
+import uuid
+
 from app.models.strategy_models import SignalType, StrategyResult
 from app.core.celery_app import celery_app
-from app.core.settings import get_symbols, get_strategies, settings
+from app.core.settings import get_schedule_seconds, get_strategies, get_symbols, settings
 from app.core.strategy_manager import StrategyManager
-from app.database.mongodb import save_batch_results, get_collection
+from app.database.sqlite_adapter import get_collection, save_batch_results
 from app.database.redis_publisher import publish_batch_complete, publish_message
 from app.core.logger import get_celery_logger, get_signals_logger, get_performance_logger
 from app.core.paper_broker import PaperBroker
-import time
 
 logger = get_celery_logger()
 signals_logger = get_signals_logger()
@@ -151,14 +152,13 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
         logger.info("📡 STEP 3.1: Publishing to Redis Pub/Sub")
         
         # Generate Batch ID upfront
-        batch_oid = ObjectId()
-        batch_id_str = str(batch_oid)
+        batch_id_str = uuid.uuid4().hex[:24]
         
         # Add IDs to results if needed (matching user request structure)
         for symbol_res in aggregated_result.get("results", []):
             for strategy_res in symbol_res.get("strategies", []):
                 if "_id" not in strategy_res:
-                    strategy_res["_id"] = str(ObjectId())
+                    strategy_res["_id"] = uuid.uuid4().hex[:24]
 
         # Construct the requested payload structure
         publish_payload = {
@@ -224,7 +224,12 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
                                 f"strategy={strat_res.get('strategy_name')} | symbol={symbol} | error={redis_err}"
                             )
 
-                        # 2. Log signal to MongoDB signals_log collection
+                        # 2. Process the signal via ExecutionManager (routes to PaperBroker or Live Delta Broker based on mode)
+                        from app.broker.execution_manager import get_execution_manager
+                        exec_mgr = get_execution_manager()
+                        exec_res = exec_mgr.process_signal(strat_res.get("strategy_name"), symbol, sig_enum, price, timestamp)
+
+                        # 3. Log signal with execution routing info
                         try:
                             get_collection("signals_log").insert_one({
                                 "strategy_name": strat_res.get("strategy_name"),
@@ -233,23 +238,22 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
                                 "price": price,
                                 "timestamp": timestamp,
                                 "execution_time": strat_res.get("execution_time", 0.0),
-                                "subscribers_received": subscriber_count
+                                "subscribers_received": subscriber_count,
+                                "mode": exec_res.get("mode", exec_mgr.get_mode()),
+                                "action": exec_res.get("action", "recorded")
                             })
-                        except Exception as mongo_err:
-                            logger.error(f"Failed to log signal to MongoDB: {mongo_err}", exc_info=True)
-
-                        # 3. Process the signal via PaperBroker
-                        broker.process_signal(strat_res.get("strategy_name"), symbol, sig_enum, price, timestamp)
+                        except Exception as db_err:
+                            logger.error(f"Failed to log signal to signals_log: {db_err}", exc_info=True)
                 except Exception as e:
-                    logger.error(f"Failed to process signal with broker: {e}", exc_info=True)
+                    logger.error(f"Failed to process signal with execution manager: {e}", exc_info=True)
         
         # Update result with metadata for storage
         aggregated_result["_id"] = batch_oid  # Use the pre-generated ID
         aggregated_result["pubsub"] = pubsub_response.get("subscriber_count", 0)
 
-        # STEP 3.2: Save to MongoDB
+        # STEP 3.2: Save to SQLite Database
         logger.info("-" * 80)
-        logger.info("📡 STEP 3.2: Saving to MongoDB")
+        logger.info("📡 STEP 3.2: Saving to SQLite Database")
         
         # Save (this will use the _id we added to aggregated_result)
         batch_id = save_batch_results(aggregated_result)
@@ -292,10 +296,39 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
 
 
 @celery_app.task(bind=True, name="run_all_batch_task")
-def trigger_batch_execution(self) -> Dict[str, Any]:
+def trigger_batch_execution(self, force: bool = False) -> Dict[str, Any]:
     """
-    STEP 1: Trigger batch execution using Celery Chord
+    STEP 1: Trigger batch execution using Celery Chord.
+    When force=False, checks if dynamic get_schedule_seconds() interval has elapsed.
     """
+    now_utc = datetime.now(timezone.utc)
+    interval = get_schedule_seconds()
+
+    if not force:
+        try:
+            status_doc = get_collection("system_status").find_one({"_id": "batch_schedule"})
+            if status_doc and status_doc.get("last_triggered_at"):
+                raw_last = status_doc["last_triggered_at"]
+                if isinstance(raw_last, str):
+                    last_dt = datetime.fromisoformat(raw_last.replace("Z", "+00:00"))
+                else:
+                    last_dt = raw_last
+                elapsed = (now_utc - last_dt).total_seconds()
+                if elapsed < interval:
+                    logger.debug(
+                        "Batch schedule interval not reached: %.1fs elapsed < %ds interval",
+                        elapsed,
+                        interval,
+                    )
+                    return {
+                        "status": "skipped",
+                        "reason": f"Interval not reached ({elapsed:.1f}s / {interval}s)",
+                        "elapsed_seconds": elapsed,
+                        "interval_seconds": interval,
+                    }
+        except Exception as check_err:
+            logger.debug("Error checking batch schedule elapsed time: %s", check_err)
+
     try:
         logger.info("=" * 80)
         logger.info("🚀 STEP 1: INITIATING BATCH EXECUTION")
@@ -305,8 +338,8 @@ def trigger_batch_execution(self) -> Dict[str, Any]:
             get_collection("system_status").update_one(
                 {"_id": "batch_schedule"},
                 {"$set": {
-                    "last_triggered_at": datetime.now(timezone.utc),
-                    "interval_seconds": settings.schedule_seconds,
+                    "last_triggered_at": now_utc.isoformat(),
+                    "interval_seconds": interval,
                 }},
                 upsert=True,
             )

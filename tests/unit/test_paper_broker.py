@@ -1,5 +1,6 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from app.core.paper_broker import PaperBroker
@@ -86,7 +87,7 @@ def test_paper_broker_open_position(mock_db_and_redis: dict) -> None:
         "open_position": None
     }
     
-    entry_time = datetime.now(timezone.utc)
+    entry_time = datetime.now(UTC)
     updated_account = broker._open_position(account, "LONG", "BTC-USD", 50000.0, entry_time)
     
     pos = updated_account["open_position"]
@@ -105,7 +106,7 @@ def test_paper_broker_close_position_win(mock_db_and_redis: dict) -> None:
     mock_trades = mock_db_and_redis["trades_coll"]
     broker = PaperBroker()
     
-    entry_time = datetime.now(timezone.utc)
+    entry_time = datetime.now(UTC)
     account = {
         "_id": "TestStrategy::BTC-USD",
         "strategy_name": "TestStrategy",
@@ -124,7 +125,7 @@ def test_paper_broker_close_position_win(mock_db_and_redis: dict) -> None:
         }
     }
     
-    exit_time = datetime.now(timezone.utc)
+    exit_time = datetime.now(UTC)
     # Price went up to 60000 (Win!)
     updated_account = broker._close_position(account, 60000.0, exit_time)
     
@@ -154,7 +155,7 @@ def test_paper_broker_process_signal_buy(mock_db_and_redis: dict) -> None:
     mock_accounts.find_one.return_value = account
     
     broker = PaperBroker()
-    timestamp = datetime.now(timezone.utc)
+    timestamp = datetime.now(UTC)
     broker.process_signal("TestStrategy", "BTC-USD", SignalType.BUY, 50000.0, timestamp)
     
     # Check that update_one was called to save the new position

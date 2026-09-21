@@ -1,0 +1,3617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeBuddy Engine &bull; System Monitor & Algorithmic Trading</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #09090b;
+            --bg-sidebar: #0d0e12;
+            --bg-card: rgba(18, 18, 24, 0.75);
+            --bg-card-hover: rgba(24, 24, 32, 0.9);
+            --border: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(6, 182, 212, 0.4);
+
+            --text-primary: #f4f4f6;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+
+            --cyan: #06b6d4;
+            --cyan-glow: rgba(6, 182, 212, 0.2);
+            --green: #10b981;
+            --green-glow: rgba(16, 185, 129, 0.2);
+            --red: #f43f5e;
+            --red-glow: rgba(244, 63, 94, 0.25);
+            --amber: #f59e0b;
+            --amber-glow: rgba(245, 158, 11, 0.2);
+            --purple: #8b5cf6;
+
+            --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* App Shell Layout */
+        .app-shell {
+            display: flex;
+            min-height: 100vh;
+            width: 100%;
+        }
+
+        /* Collapsible Sidebar */
+        .app-sidebar {
+            width: 270px;
+            background-color: var(--bg-sidebar);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+            overflow-x: hidden;
+            z-index: 100;
+            transition: width var(--transition);
+        }
+
+        .app-sidebar.collapsed {
+            width: 72px;
+        }
+
+        .sidebar-brand {
+            padding: 1.1rem 1.15rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            height: 68px;
+        }
+
+        .brand-left {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            overflow: hidden;
+        }
+
+        .brand-icon {
+            width: 2.3rem;
+            height: 2.3rem;
+            background: linear-gradient(135deg, var(--cyan), var(--green));
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            color: #000;
+            font-size: 1.25rem;
+            box-shadow: 0 0 15px var(--cyan-glow);
+            flex-shrink: 0;
+        }
+
+        .brand-title {
+            white-space: nowrap;
+            overflow: hidden;
+            transition: opacity var(--transition);
+        }
+
+        .brand-title h1 {
+            font-size: 1.05rem;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+        }
+
+        .brand-title p {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            letter-spacing: 0.2px;
+        }
+
+        .app-sidebar.collapsed .brand-title {
+            display: none;
+        }
+
+        .btn-collapse {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            width: 1.9rem;
+            height: 1.9rem;
+            border-radius: 0.4rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: var(--transition);
+            flex-shrink: 0;
+        }
+
+        .btn-collapse:hover {
+            color: #fff;
+            border-color: var(--cyan);
+            background: rgba(6, 182, 212, 0.1);
+        }
+
+        /* Navigation Links & Categories */
+        .sidebar-nav {
+            padding: 0.85rem 0.65rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            flex-grow: 1;
+        }
+
+        .nav-category {
+            font-size: 0.68rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            padding: 0.75rem 0.75rem 0.35rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .app-sidebar.collapsed .nav-category {
+            display: none;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.65rem 0.8rem;
+            border-radius: 0.5rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.86rem;
+            font-weight: 500;
+            transition: var(--transition);
+            cursor: pointer;
+            border: 1px solid transparent;
+            white-space: nowrap;
+            position: relative;
+        }
+
+        .nav-link:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .nav-link.active {
+            color: var(--cyan);
+            background: rgba(6, 182, 212, 0.08);
+            border-color: rgba(6, 182, 212, 0.25);
+            font-weight: 600;
+        }
+
+        .nav-icon {
+            font-size: 1.1rem;
+            width: 1.6rem;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .nav-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            transition: opacity var(--transition);
+        }
+
+        .app-sidebar.collapsed .nav-label {
+            display: none;
+        }
+
+        .app-sidebar.collapsed .nav-link {
+            justify-content: center;
+            padding: 0.65rem 0;
+        }
+
+        /* Sidebar Telemetry Drawer */
+        .sidebar-telemetry {
+            margin: 0 0.65rem 0.85rem;
+            padding: 0.85rem;
+            background: rgba(18, 18, 24, 0.85);
+            border: 1px solid var(--border);
+            border-radius: 0.65rem;
+            font-size: 0.75rem;
+            transition: var(--transition);
+        }
+
+        .app-sidebar.collapsed .sidebar-telemetry {
+            padding: 0.5rem;
+            margin: 0 0.35rem 0.5rem;
+        }
+
+        .telemetry-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.65rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            font-size: 0.68rem;
+        }
+
+        .app-sidebar.collapsed .telemetry-header span:first-child {
+            display: none;
+        }
+
+        .telemetry-dot {
+            width: 0.5rem;
+            height: 0.5rem;
+            border-radius: 50%;
+            background-color: var(--green);
+            box-shadow: 0 0 8px var(--green);
+            display: inline-block;
+        }
+
+        .metric-mini-row {
+            margin-bottom: 0.55rem;
+        }
+
+        .app-sidebar.collapsed .metric-mini-row {
+            display: none;
+        }
+
+        .metric-mini-title {
+            display: flex;
+            justify-content: space-between;
+            color: var(--text-muted);
+            margin-bottom: 0.2rem;
+            font-size: 0.72rem;
+        }
+
+        .progress-bar-mini {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-fill-mini {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.4s ease;
+        }
+
+        .sidebar-ip-box {
+            margin-top: 0.65rem;
+            padding-top: 0.65rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.4rem;
+        }
+
+        .app-sidebar.collapsed .sidebar-ip-box {
+            display: none;
+        }
+
+        .ip-text {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--cyan);
+            font-size: 0.74rem;
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .btn-copy-mini {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 0.2rem 0.45rem;
+            border-radius: 0.3rem;
+            cursor: pointer;
+            font-size: 0.7rem;
+            transition: var(--transition);
+        }
+
+        .btn-copy-mini:hover {
+            color: #fff;
+            border-color: var(--cyan);
+            background: rgba(6, 182, 212, 0.15);
+        }
+
+        /* Main Content Wrapper */
+        .app-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            background-color: var(--bg-color);
+            background-image:
+                radial-gradient(at 0% 0%, rgba(6, 182, 212, 0.05) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.04) 0px, transparent 50%);
+        }
+
+        /* Top Bar */
+        .main-topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.85rem 2rem;
+            background: rgba(9, 9, 11, 0.85);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            height: 68px;
+            z-index: 90;
+        }
+
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .topbar-breadcrumb {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .topbar-breadcrumb span {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .topbar-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+        }
+
+        /* WebSocket Live Status Pill */
+        .ws-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.3rem 0.65rem;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 9999px;
+            color: var(--green);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+        }
+
+        .ws-dot {
+            width: 0.45rem;
+            height: 0.45rem;
+            border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 6px var(--green);
+            animation: pulse-live 1.5s infinite;
+        }
+
+        /* Account Switcher */
+        .account-switcher {
+            display: inline-flex;
+            background: rgba(0, 0, 0, 0.45);
+            border: 1px solid var(--border);
+            border-radius: 9999px;
+            padding: 0.2rem;
+            gap: 0.25rem;
+        }
+
+        .switcher-opt {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            padding: 0.35rem 0.85rem;
+            border-radius: 9999px;
+            font-family: inherit;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            transition: var(--transition);
+        }
+
+        .switcher-opt:hover { color: var(--text-primary); }
+
+        .switcher-opt.active.paper {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--green);
+            border-color: rgba(16, 185, 129, 0.35);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+        }
+
+        .switcher-opt.active.real {
+            background: rgba(244, 63, 94, 0.2);
+            color: var(--red);
+            border-color: rgba(244, 63, 94, 0.45);
+            box-shadow: 0 0 14px rgba(244, 63, 94, 0.3);
+            animation: pulse-live 2s infinite;
+        }
+
+        .opt-indicator {
+            width: 0.5rem;
+            height: 0.5rem;
+            border-radius: 50%;
+        }
+
+        .opt-indicator.green { background: var(--green); }
+        .opt-indicator.red { background: var(--red); }
+
+        @keyframes pulse-live {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(244, 63, 94, 0); }
+        }
+
+        /* Buttons */
+        .btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 0.45rem 0.9rem;
+            border-radius: 0.4rem;
+            font-family: inherit;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            transition: var(--transition);
+        }
+
+        .btn:hover {
+            border-color: var(--cyan);
+            background: var(--bg-card-hover);
+        }
+
+        .btn-kill {
+            background: rgba(244, 63, 94, 0.15);
+            color: var(--red);
+            border-color: rgba(244, 63, 94, 0.4);
+            font-weight: 600;
+        }
+
+        .btn-kill:hover {
+            background: var(--red);
+            color: #fff;
+            border-color: var(--red);
+            box-shadow: 0 0 16px var(--red-glow);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--cyan), #0891b2);
+            color: #000;
+            font-weight: 600;
+            border: none;
+        }
+
+        .btn-primary:hover { box-shadow: 0 0 15px var(--cyan-glow); }
+
+        .btn-success {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--green);
+            border-color: rgba(16, 185, 129, 0.35);
+            font-weight: 600;
+        }
+
+        .btn-success:hover {
+            background: var(--green);
+            color: #000;
+            box-shadow: 0 0 15px var(--green-glow);
+        }
+
+        /* Main Container */
+        main {
+            padding: 1.75rem 2rem;
+            max-width: 1680px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* Sub-tab pills inside Paper Trading */
+        .sub-nav-pills {
+            display: flex;
+            gap: 0.4rem;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 0.3rem;
+            border-radius: 0.6rem;
+            border: 1px solid var(--border);
+            margin-bottom: 1.25rem;
+            flex-wrap: wrap;
+        }
+
+        .sub-pill-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            padding: 0.45rem 1rem;
+            border-radius: 0.4rem;
+            font-family: inherit;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .sub-pill-btn:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .sub-pill-btn.active {
+            background: rgba(6, 182, 212, 0.12);
+            border-color: rgba(6, 182, 212, 0.35);
+            color: var(--cyan);
+            font-weight: 600;
+        }
+
+        .sub-tab-panel { display: none; }
+        .sub-tab-panel.active { display: block; }
+
+        /* Grid & Cards */
+        .grid-4 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            backdrop-filter: blur(16px);
+            transition: var(--transition);
+        }
+
+        .card:hover {
+            border-color: var(--border-hover);
+            background: var(--bg-card-hover);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.85rem;
+        }
+
+        .card-title {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .metric-value {
+            font-size: 1.85rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            margin-bottom: 0.4rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .metric-sub {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.4s ease;
+        }
+
+        .progress-cyan { background: var(--cyan); box-shadow: 0 0 8px var(--cyan-glow); }
+        .progress-green { background: var(--green); box-shadow: 0 0 8px var(--green-glow); }
+        .progress-red { background: var(--red); box-shadow: 0 0 8px var(--red-glow); }
+        .progress-amber { background: var(--amber); box-shadow: 0 0 8px var(--amber-glow); }
+
+        /* Tables */
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+            border-radius: 0.65rem;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            margin-bottom: 1.5rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.85rem;
+        }
+
+        th {
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-secondary);
+            font-weight: 600;
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid var(--border);
+            text-transform: uppercase;
+            font-size: 0.72rem;
+            letter-spacing: 0.6px;
+        }
+
+        td {
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.83rem;
+        }
+
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: rgba(255, 255, 255, 0.02); }
+
+        /* Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.25rem 0.65rem;
+            border-radius: 0.35rem;
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-long {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--green);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-short {
+            background: rgba(244, 63, 94, 0.15);
+            color: var(--red);
+            border: 1px solid rgba(244, 63, 94, 0.3);
+        }
+
+        .badge-neutral {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        .badge-bracket {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--amber);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        /* Banner Box */
+        .info-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1.25rem 1.5rem;
+            border-radius: 0.65rem;
+            background: rgba(18, 18, 24, 0.95);
+            border: 1px solid var(--border);
+            margin-bottom: 1.25rem;
+            gap: 1.25rem;
+        }
+
+        .info-banner.paper-banner {
+            border-color: rgba(16, 185, 129, 0.3);
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(18, 18, 24, 0.95));
+        }
+
+        /* Forms */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+            margin-bottom: 1.1rem;
+        }
+
+        .form-label {
+            font-size: 0.76rem;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .form-control {
+            background: #09090b;
+            border: 1px solid var(--border);
+            color: #fff;
+            padding: 0.65rem 0.85rem;
+            border-radius: 0.4rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.88rem;
+            outline: none;
+            transition: var(--transition);
+            width: 100%;
+        }
+
+        .form-control:focus {
+            border-color: var(--cyan);
+            box-shadow: 0 0 10px var(--cyan-glow);
+        }
+
+        .input-with-action {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn-reveal {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 0 0.85rem;
+            border-radius: 0.4rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+        }
+
+        .btn-reveal:hover {
+            color: #fff;
+            border-color: var(--cyan);
+        }
+
+        /* Server IP Callout Box */
+        .ip-whitelist-card {
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(18, 18, 24, 0.95));
+            border: 1px solid rgba(6, 182, 212, 0.35);
+            border-radius: 0.65rem;
+            padding: 1.25rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .ip-whitelist-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        .ip-badge-box {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: #09090b;
+            border: 1px solid rgba(6, 182, 212, 0.4);
+            padding: 0.5rem 1rem;
+            border-radius: 0.4rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.05rem;
+            color: var(--cyan);
+            font-weight: 700;
+        }
+
+        /* Strategy Cards & Execution Toggles */
+        .strategy-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+            gap: 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .strategy-card {
+            background: rgba(18, 18, 24, 0.95);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.9rem;
+            transition: border-color var(--transition), box-shadow var(--transition);
+        }
+
+        .strategy-card:hover {
+            border-color: rgba(6, 182, 212, 0.4);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .strategy-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+        .strategy-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #fff;
+            margin: 0 0 0.25rem 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .strategy-desc {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin: 0;
+            line-height: 1.35;
+        }
+
+        .strategy-symbols-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+            margin-top: 0.4rem;
+        }
+
+        .strategy-metrics-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.5rem;
+            background: rgba(0, 0, 0, 0.35);
+            padding: 0.65rem 0.85rem;
+            border-radius: 0.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .stat-box {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+
+        .stat-box-label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+        }
+
+        .stat-box-value {
+            font-size: 1rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: #fff;
+        }
+
+        .strategy-footer-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .toggle-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.38rem 0.75rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            border-radius: 20px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-muted);
+            transition: all 0.2s ease;
+        }
+
+        .toggle-btn:hover {
+            background: rgba(255, 255, 255, 0.09);
+            color: #fff;
+        }
+
+        .toggle-btn.active-paper {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--green);
+            border-color: rgba(16, 185, 129, 0.45);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+        }
+
+        .toggle-btn.active-real {
+            background: rgba(244, 63, 94, 0.15);
+            color: var(--red);
+            border-color: rgba(244, 63, 94, 0.45);
+            box-shadow: 0 0 10px rgba(244, 63, 94, 0.25);
+        }
+
+        .error-log-pre {
+            margin: 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.76rem;
+            line-height: 1.45;
+            color: #fca5a5;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* Modals */
+        .modal-backdrop {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-backdrop.open { display: flex; }
+
+        .modal {
+            background: #121217;
+            border: 1px solid var(--red);
+            border-radius: 0.75rem;
+            padding: 1.75rem;
+            width: 90%;
+            max-width: 480px;
+            box-shadow: 0 0 30px rgba(244, 63, 94, 0.25);
+        }
+
+        .modal h3 { color: var(--red); font-size: 1.25rem; margin-bottom: 0.6rem; }
+        .modal p { color: var(--text-secondary); font-size: 0.88rem; margin-bottom: 1.2rem; line-height: 1.5; }
+        .modal input {
+            width: 100%;
+            background: #09090b;
+            border: 1px solid var(--border);
+            color: #fff;
+            padding: 0.65rem 0.85rem;
+            border-radius: 0.4rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.95rem;
+            margin-bottom: 1.2rem;
+            outline: none;
+        }
+        .modal input:focus { border-color: var(--red); }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 0.75rem; }
+
+        /* Toast notification */
+        #toastNotice {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: #121217;
+            border: 1px solid var(--cyan);
+            color: #fff;
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
+            font-size: 0.85rem;
+            display: none;
+            z-index: 2000;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (max-width: 900px) {
+            .app-shell { flex-direction: column; }
+            .app-sidebar { width: 100%; height: auto; position: static; }
+            .app-sidebar.collapsed { width: 100%; }
+            .sidebar-telemetry { display: none; }
+            .main-topbar { padding: 0.85rem 1rem; flex-direction: column; height: auto; gap: 0.75rem; align-items: flex-start; }
+            main { padding: 1rem; }
+            .grid-4, .grid-2 { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-shell">
+        <!-- 1. COLLAPSIBLE LEFT SIDEBAR -->
+        <aside class="app-sidebar" id="appSidebar">
+            <div class="sidebar-brand">
+                <div class="brand-left">
+                    <div class="brand-icon">&Delta;</div>
+                    <div class="brand-title">
+                        <h1>TradeBuddy</h1>
+                        <p>OpenAlgo &bull; ZeroMQ Engine</p>
+                    </div>
+                </div>
+                <button class="btn-collapse" onclick="toggleSidebarCollapse()" title="Toggle Sidebar (Expand/Collapse)">
+                    <span>&equiv;</span>
+                </button>
+            </div>
+
+            <!-- Navigation Links Organized by Broker / Purpose -->
+            <nav class="sidebar-nav">
+                <!-- Section 1: Dashboard -->
+                <div class="nav-category">Main Dashboard</div>
+                <a href="#monitoring" class="nav-link active" data-tab="monitoring" onclick="switchTab('monitoring')" title="System Monitor & Host Telemetry">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-label">System Monitor</span>
+                </a>
+
+                <!-- Section 2: Strategy Suite & Signals -->
+                <div class="nav-category">Strategy Suite</div>
+                <a href="#signals" class="nav-link" data-tab="signals" onclick="switchTab('signals')" title="Algorithmic Strategies, Execution Controls & Live Signals">
+                    <span class="nav-icon">🎯</span>
+                    <span class="nav-label">Strategies & Signals</span>
+                </a>
+
+                <!-- Section 3: Real Broker (Delta Exchange) -->
+                <div class="nav-category">Real Broker (Delta Exchange)</div>
+                <a href="#livebroker" class="nav-link" data-tab="livebroker" onclick="switchTab('livebroker')" title="Real Live Positions & Orders on Delta Exchange">
+                    <span class="nav-icon">⚡</span>
+                    <span class="nav-label">Real Broker Execution</span>
+                </a>
+
+                <!-- Section 3: Paper Simulation (All Strategy Sandbox Data) -->
+                <div class="nav-category">Paper Simulation (Sandbox)</div>
+                <a href="#papertrading" class="nav-link" data-tab="papertrading" onclick="switchTab('papertrading')" title="Simulated Paper Strategy Sandbox (Positions, Overview, Analytics, Trades)">
+                    <span class="nav-icon">📝</span>
+                    <span class="nav-label">Paper Trading Sandbox</span>
+                </a>
+
+                <!-- Section 4: Administration & Logs -->
+                <div class="nav-category">Administration</div>
+                <a href="#admin" class="nav-link" data-tab="admin" onclick="switchTab('admin')" title="Admin Control Panel, Delta Credentials & Risk Rules">
+                    <span class="nav-icon">👑</span>
+                    <span class="nav-label">Admin Control Panel</span>
+                </a>
+                <a href="#logs" class="nav-link" data-tab="logs" onclick="switchTab('logs')" title="System Execution Logs & Audit Trail">
+                    <span class="nav-icon">📋</span>
+                    <span class="nav-label">System Logs</span>
+                </a>
+            </nav>
+
+            <!-- 2. SEGREGATED SYSTEM TELEMETRY (ZEROMQ) -->
+            <div class="sidebar-telemetry">
+                <div class="telemetry-header">
+                    <span>⚡ Live Telemetry</span>
+                    <span class="telemetry-dot" title="ZeroMQ event stream active"></span>
+                </div>
+
+                <div class="metric-mini-row">
+                    <div class="metric-mini-title">
+                        <span>CPU Load</span>
+                        <span id="sbCpuText" style="color:var(--cyan); font-weight:600;">0%</span>
+                    </div>
+                    <div class="progress-bar-mini">
+                        <div id="sbCpuBar" class="progress-fill-mini progress-cyan" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="metric-mini-row">
+                    <div class="metric-mini-title">
+                        <span>RAM (Memory)</span>
+                        <span id="sbRamText" style="color:var(--green); font-weight:600;">0%</span>
+                    </div>
+                    <div class="progress-bar-mini">
+                        <div id="sbRamBar" class="progress-fill-mini progress-green" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="metric-mini-row">
+                    <div class="metric-mini-title">
+                        <span>SQLite DB</span>
+                        <span id="sbSqliteText" style="color:var(--purple); font-weight:600;">0 MB</span>
+                    </div>
+                    <div class="progress-bar-mini">
+                        <div class="progress-fill-mini" style="width: 100%; background: var(--purple);"></div>
+                    </div>
+                </div>
+
+                <!-- Server Public IP Whitelist Quick View -->
+                <div class="sidebar-ip-box">
+                    <div>
+                        <div style="font-size:0.62rem; color:var(--text-muted); text-transform:uppercase;">Outgoing Public IP</div>
+                        <div class="ip-text" id="sbPublicIp">Detecting...</div>
+                    </div>
+                    <button class="btn-copy-mini" onclick="copyServerIp()" title="Copy Server IP for Delta Whitelist">📋</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 3. MAIN APP WRAPPER -->
+        <div class="app-main" id="appMain">
+            <!-- Top Bar -->
+            <header class="main-topbar">
+                <div class="topbar-left">
+                    <button class="btn-collapse" onclick="toggleSidebarCollapse()" title="Toggle Sidebar">
+                        <span>&equiv;</span>
+                    </button>
+                    <div class="topbar-breadcrumb">
+                        <span>TradeBuddy</span> / <span id="pageBreadcrumb">System Monitor</span>
+                    </div>
+                </div>
+
+                <div class="topbar-actions">
+                    <!-- Live WebSocket Status Indicator -->
+                    <div class="ws-badge" id="wsStatusBadge" title="Real-time WebSocket connection to /ws/live">
+                        <span class="ws-dot" id="wsStatusDot"></span>
+                        <span id="wsStatusText">WEBSOCKET LIVE</span>
+                    </div>
+
+                    <!-- Segmented Paper vs Real Switcher -->
+                    <div class="account-switcher" id="headerAccountSwitcher" title="Switch between Paper Trading and Real Broker mode">
+                        <button id="btnSwitchPaper" class="switcher-opt active paper" onclick="handleSwitchToPaper()">
+                            <span class="opt-indicator green"></span>
+                            <span>Paper Trading</span>
+                        </button>
+                        <button id="btnSwitchReal" class="switcher-opt" onclick="handleSwitchToReal()">
+                            <span class="opt-indicator red"></span>
+                            <span>Real Broker</span>
+                        </button>
+                    </div>
+
+                    <button class="btn btn-kill" onclick="triggerEmergencyExit()" title="Cancel all open orders and market-close positions">
+                        <span>&times; KILL SWITCH</span>
+                    </button>
+                    <button class="btn" onclick="refreshCurrentTab()" title="Fetch latest data instantly">
+                        <span>&#x21bb; Refresh</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Main Page Content Tabs -->
+            <main>
+
+                <!-- TAB 1: SYSTEM MONITOR -->
+                <section id="tab-monitoring" class="tab-content active">
+                    <div class="grid-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">CPU Utilization</span>
+                                <span id="cpuCoresBadge" class="badge" style="background: rgba(6,182,212,0.1); color: var(--cyan);">0 Cores</span>
+                            </div>
+                            <div id="cpuValue" class="metric-value">0%</div>
+                            <div class="progress-bar">
+                                <div id="cpuProgress" class="progress-fill progress-cyan" style="width: 0%;"></div>
+                            </div>
+                            <div id="cpuPerCoreText" class="metric-sub">Host CPU load</div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">System Memory (RAM)</span>
+                                <span id="ramTotalBadge" class="badge" style="background: rgba(16,185,129,0.1); color: var(--green);">0 GB</span>
+                            </div>
+                            <div id="ramValue" class="metric-value">0%</div>
+                            <div class="progress-bar">
+                                <div id="ramProgress" class="progress-fill progress-green" style="width: 0%;"></div>
+                            </div>
+                            <div id="ramDetailsText" class="metric-sub">0 GB used / 0 GB free</div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Storage / Disk</span>
+                                <span id="diskTotalBadge" class="badge" style="background: rgba(245,158,11,0.1); color: var(--amber);">0 GB</span>
+                            </div>
+                            <div id="diskValue" class="metric-value">0%</div>
+                            <div class="progress-bar">
+                                <div id="diskProgress" class="progress-fill progress-amber" style="width: 0%;"></div>
+                            </div>
+                            <div id="diskDetailsText" class="metric-sub">0 GB used of root drive</div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">SQLite Database (WAL)</span>
+                                <span id="sqliteLatencyBadge" class="badge" style="background: rgba(139,92,246,0.15); color: var(--purple);">0 ms</span>
+                            </div>
+                            <div id="sqliteSizeValue" class="metric-value">0 MB</div>
+                            <div class="progress-bar">
+                                <div id="sqliteProgress" class="progress-fill progress-cyan" style="width: 25%;"></div>
+                            </div>
+                            <div id="sqliteWALText" class="metric-sub">WAL: 0 MB &bull; Embedded fast storage</div>
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Background Services Health</span>
+                                <span id="healthOverallBadge" class="badge badge-long">HEALTHY</span>
+                            </div>
+                            <div class="table-container" style="border: none; margin-bottom: 0;">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Subsystem</th>
+                                            <th>Status</th>
+                                            <th>Details / Latency</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="servicesStatusTable">
+                                        <tr><td colspan="3" style="text-align:center;">Checking services...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">SQLite Storage Tables</span>
+                                <span class="badge badge-neutral">WAL ACTIVE</span>
+                            </div>
+                            <div class="table-container" style="border: none; margin-bottom: 0;">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Table Name</th>
+                                            <th>Rows Count</th>
+                                            <th>Storage Role</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="sqliteTablesList">
+                                        <tr><td colspan="3" style="text-align:center;">Scanning tables...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- System Error Logs & Operational Health Audit -->
+                    <div class="card" style="margin-top: 1.5rem;">
+                        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <span style="font-size: 1.25rem;">🚨</span>
+                                <div>
+                                    <h3 style="font-size: 1rem; font-weight: 600; color: #fff; margin: 0;">System Error Logs & Operational Health Audit</h3>
+                                    <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0;">Real-time exception logs, Celery worker errors, and pipeline fault monitoring.</p>
+                                </div>
+                                <span id="errorLogsBadge" class="badge badge-long" style="font-weight: 700; margin-left: 0.5rem;">0 ERRORS</span>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <span id="errorLastCheckedText" style="font-size: 0.75rem; color: var(--text-muted);">Auto-checking</span>
+                                <button class="btn" onclick="fetchErrorLogs()" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
+                                    ↻ Refresh Error Logs
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Toolbar: Search filter, Page size, Pagination controls -->
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem 0;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 220px;">
+                                <span style="color: var(--text-muted); font-size: 0.85rem;">🔍</span>
+                                <input type="text" id="errorLogSearchInput" class="form-control" placeholder="Search error logs (e.g. delta, sqlite, symbol, traceback)..." style="font-size: 0.8rem; padding: 0.35rem 0.65rem;" onkeyup="onErrorSearchChanged(this.value)">
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <div style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; color: var(--text-muted);">
+                                    <span>Rows:</span>
+                                    <select id="errorPageSizeSelect" class="form-control" style="width: auto; padding: 0.2rem 0.5rem; font-size: 0.75rem;" onchange="onErrorPageSizeChanged(this.value)">
+                                        <option value="5">5</option>
+                                        <option value="10" selected>10</option>
+                                        <option value="25">25</option>
+                                        <option value="50">50</option>
+                                    </select>
+                                </div>
+                                <span id="errorPaginationInfo" style="font-size: 0.75rem; color: var(--text-muted);">Page 1 of 1</span>
+                                <div style="display: flex; gap: 0.25rem;">
+                                    <button id="errorPrevBtn" class="btn" onclick="prevErrorPage()" style="font-size: 0.75rem; padding: 0.25rem 0.55rem;" disabled>&laquo; Prev</button>
+                                    <button id="errorNextBtn" class="btn" onclick="nextErrorPage()" style="font-size: 0.75rem; padding: 0.25rem 0.55rem;" disabled>Next &raquo;</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="table-container" style="margin-bottom: 0; max-height: 480px; overflow-y: auto;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th style="width: 50px;">#</th>
+                                        <th style="width: 170px;">TIMESTAMP / SOURCE</th>
+                                        <th style="width: 90px;">LEVEL</th>
+                                        <th>ERROR DETAIL &amp; TRACEBACK</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="systemErrorLogsBody">
+                                    <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">Scanning system error logs...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- TAB: STRATEGY SIGNALS & MULTI-STRATEGY PERFORMANCE -->
+                <section id="tab-signals" class="tab-content">
+                    <!-- 1. Pipeline Routing & Safety Status Banner -->
+                    <div id="signalsRoutingBanner" class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(18, 18, 24, 0.95)); border: 1px solid rgba(6, 182, 212, 0.35);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                            <div>
+                                <div style="display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.35rem;">
+                                    <span style="font-size: 1.25rem;">🎯</span>
+                                    <h3 style="font-size: 1.05rem; font-weight: 700; color: #fff; margin: 0;">Algorithmic Strategy Execution Pipeline</h3>
+                                    <span id="signalsModeBadge" class="badge badge-paper">ROUTING: PER-STRATEGY CONTROLS</span>
+                                    <span id="signalsArmedBadge" class="badge" style="background: rgba(100, 116, 139, 0.2); color: var(--text-muted);">DISARMED (SAFE)</span>
+                                </div>
+                                <p id="signalsModeDesc" style="color: var(--text-secondary); font-size: 0.85rem; margin: 0; line-height: 1.4;">
+                                    Each algorithmic strategy can be independently configured for <strong>Paper Simulation</strong> and <strong>Real Broker</strong> execution.
+                                    When both accounts are switched OFF, the strategy operates in <strong>Log-Only Audit Mode</strong>: signals are safely recorded in SQLite without triggering orders or positions.
+                                </p>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <button class="btn btn-primary" onclick="switchTab('admin')" style="font-size: 0.8rem; padding: 0.45rem 0.85rem;">
+                                    Configure & Arm in Admin ⚙️
+                                </button>
+                                <button class="btn" onclick="fetchSignalsPage()" style="font-size: 0.8rem; padding: 0.45rem 0.85rem;">
+                                    ↻ Refresh Strategies
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. Multi-Strategy Performance Metric Cards -->
+                    <div class="grid-4" style="margin-bottom: 1.5rem;">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Configured Strategies</span>
+                                <span class="badge badge-live">ALGO</span>
+                            </div>
+                            <div id="sigStatCount" class="metric-value">2</div>
+                            <div class="metric-sub">Multi-symbol automated algorithms</div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Total Signals Logged</span>
+                                <span class="badge badge-long">FEED</span>
+                            </div>
+                            <div id="sigStatTotal" class="metric-value">0</div>
+                            <div class="metric-sub">Processed by engine</div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Paper Orders Placed</span>
+                                <span class="badge badge-paper">SIMULATION</span>
+                            </div>
+                            <div id="sigStatPaperOrders" class="metric-value">0</div>
+                            <div class="metric-sub">Simulated orders executed</div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Real Broker Orders</span>
+                                <span class="badge badge-short">LIVE</span>
+                            </div>
+                            <div id="sigStatRealOrders" class="metric-value">0</div>
+                            <div class="metric-sub">Routed to Delta Exchange</div>
+                        </div>
+                    </div>
+
+                    <!-- 3. OpenAlgo-Style Strategy Configuration & Execution Control Cards -->
+                    <div style="margin-bottom: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; flex-wrap: wrap; gap: 0.5rem;">
+                            <div>
+                                <h3 style="font-size: 1.05rem; font-weight: 700; color: #fff; margin: 0 0 0.2rem 0;">
+                                    ⚡ Algorithmic Strategies & Granular Execution Controls
+                                </h3>
+                                <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0;">
+                                    Enable or disable Paper Sandbox and Real Live Broker individually. If both are disabled, signals are recorded as <strong>Log-Only</strong> audit entries.
+                                </p>
+                            </div>
+                            <div id="strategyToggleToast" style="display: none; font-size: 0.8rem; font-weight: 600; padding: 0.35rem 0.75rem; border-radius: 0.4rem; background: rgba(16, 185, 129, 0.15); color: var(--green); border: 1px solid rgba(16, 185, 129, 0.3);">
+                                ✅ Strategy execution updated
+                            </div>
+                        </div>
+
+                        <!-- Dynamic Strategy Cards Container -->
+                        <div id="strategyCardsContainer" class="strategy-grid">
+                            <div class="card" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">
+                                Loading strategy profiles & execution states...
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. Multi-Strategy Performance & Accounts Table Matrix -->
+                    <div class="card" style="margin-bottom: 1.5rem;">
+                        <div class="card-header">
+                            <div>
+                                <h3 style="font-size: 1rem; font-weight: 600; color: #fff; margin-bottom: 0.2rem;">Multi-Strategy Performance & Accounts Matrix</h3>
+                                <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0;">Comprehensive breakdown of each active strategy: timeframes, processed symbols, trade count, accuracy, and position state.</p>
+                            </div>
+                            <span class="badge badge-paper">STRATEGY SUITE</span>
+                        </div>
+                        <div class="table-container" style="margin-bottom: 0;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>STRATEGY</th>
+                                        <th>TIMEFRAME</th>
+                                        <th>PROCESSED SYMBOLS</th>
+                                        <th>TOTAL SIGNALS</th>
+                                        <th>PAPER ORDERS</th>
+                                        <th>REAL ORDERS</th>
+                                        <th>WIN RATE / RETURN</th>
+                                        <th>ACTIVE POSITION</th>
+                                        <th>EXECUTION CONTROLS</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="signalsStrategyMatrixBody">
+                                    <tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">Loading strategy performance matrix...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- 4. Real-Time Signals Stream Ledger -->
+                    <div class="card" style="margin-bottom: 1.5rem;">
+                        <div class="card-header">
+                            <div>
+                                <h3 style="font-size: 1rem; font-weight: 600; color: #fff; margin-bottom: 0.2rem;">Live Algorithmic Signals Stream</h3>
+                                <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0;">Audit feed of signals generated by strategies, target execution engine, and execution status.</p>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <span class="ws-badge" style="font-size: 0.68rem; padding: 0.25rem 0.5rem;">
+                                    <span class="ws-dot"></span> LIVE WEBSOCKET STREAM
+                                </span>
+                            </div>
+                        </div>
+                        <div class="table-container" style="margin-bottom: 0;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>TIMESTAMP (UTC)</th>
+                                        <th>STRATEGY</th>
+                                        <th>SYMBOL</th>
+                                        <th>SIGNAL</th>
+                                        <th>TRIGGER PRICE</th>
+                                        <th>ROUTING MODE</th>
+                                        <th>EXECUTION ACTION</th>
+                                        <th>LATENCY</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="signalsStreamTableBody">
+                                    <tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">Awaiting algorithmic signals...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- 5. Manual Signal Dispatcher (Test execution pipeline) -->
+                    <div class="card" style="background: rgba(18, 18, 24, 0.75); border: 1px dashed var(--border);">
+                        <div class="card-header">
+                            <div>
+                                <h3 style="font-size: 0.95rem; font-weight: 600; color: #fff; margin-bottom: 0.2rem;">🧪 Manual Signal Dispatcher (Test Pipeline)</h3>
+                                <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0;">Simulate or trigger an algorithmic signal to verify execution behavior in Paper Sandbox or Live Delta Broker.</p>
+                            </div>
+                            <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.3);">TEST UTILITY</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) 160px; gap: 1rem; align-items: end; margin-top: 0.75rem;">
+                            <div>
+                                <label style="display:block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.35rem; font-weight:600;">STRATEGY</label>
+                                <select id="manualSigStrategy" style="width:100%; background:#09090b; border:1px solid var(--border); color:#fff; padding:0.5rem; border-radius:0.4rem; font-size:0.85rem;">
+                                    <option value="CombinedPortfolioStrategy">CombinedPortfolioStrategy</option>
+                                    <option value="MotherCandleStrategy">MotherCandleStrategy</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.35rem; font-weight:600;">SYMBOL</label>
+                                <select id="manualSigSymbol" style="width:100%; background:#09090b; border:1px solid var(--border); color:#fff; padding:0.5rem; border-radius:0.4rem; font-size:0.85rem;">
+                                    <option value="BTC-USD">BTC-USD</option>
+                                    <option value="ETH-USD">ETH-USD</option>
+                                    <option value="SOL-USD">SOL-USD</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.35rem; font-weight:600;">DIRECTION</label>
+                                <select id="manualSigDirection" style="width:100%; background:#09090b; border:1px solid var(--border); color:#fff; padding:0.5rem; border-radius:0.4rem; font-size:0.85rem;">
+                                    <option value="BUY">BUY / LONG</option>
+                                    <option value="SELL">SELL / SHORT</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.35rem; font-weight:600;">EXECUTION PRICE ($)</label>
+                                <input id="manualSigPrice" type="number" step="0.01" value="65000" style="width:100%; background:#09090b; border:1px solid var(--border); color:#fff; padding:0.5rem; border-radius:0.4rem; font-size:0.85rem; font-family:'JetBrains Mono',monospace;" />
+                            </div>
+                            <div>
+                                <button id="btnDispatchManualSig" class="btn btn-primary" onclick="triggerManualSignal()" style="width:100%; padding:0.55rem; font-size:0.85rem;">
+                                    🚀 Dispatch Signal
+                                </button>
+                            </div>
+                        </div>
+                        <div id="manualSigFeedback" style="margin-top: 0.75rem; font-size: 0.8rem; display: none;"></div>
+                    </div>
+                </section>
+
+                <!-- TAB 2: REAL BROKER (DELTA EXCHANGE INDIA) -->
+                <section id="tab-livebroker" class="tab-content">
+                    <div class="grid-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Delta USD Balance</span>
+                                <span class="badge badge-long">WALLET</span>
+                            </div>
+                            <div id="deltaUsdValue" class="metric-value">$0.00</div>
+                            <div id="deltaInrValue" class="metric-sub">&approx; &#8377;0.00 INR</div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Execution Mode</span>
+                                <span id="brokerModeTag" class="badge badge-long">PAPER</span>
+                            </div>
+                            <div id="brokerArmedState" class="metric-value" style="font-size:1.3rem; color:var(--green);">DISARMED (SAFE)</div>
+                            <div class="metric-sub">Safe sandbox mode active</div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Active Live Positions</span>
+                            </div>
+                            <div id="livePositionsCount" class="metric-value">0</div>
+                            <div class="metric-sub">Contracts in Delta Exchange</div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Live Open Orders</span>
+                            </div>
+                            <div id="liveOrdersCount" class="metric-value">0</div>
+                            <div class="metric-sub">Pending entry/bracket orders</div>
+                        </div>
+                    </div>
+
+                    <!-- Open Positions Table -->
+                    <div class="card" style="margin-bottom: 1.5rem;">
+                        <div class="card-header">
+                            <div>
+                                <span class="card-title">Open Delta Exchange Positions</span>
+                                <span class="badge badge-long" style="margin-left: 0.5rem;">REAL MARGIN</span>
+                            </div>
+                            <button class="btn btn-kill" onclick="triggerEmergencyExit()">Close All &bull; Emergency Exit</button>
+                        </div>
+                        <div class="table-container" style="border: none; margin-bottom: 0;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Side / Direction</th>
+                                        <th>Contracts</th>
+                                        <th>Entry Price</th>
+                                        <th>Mark Price</th>
+                                        <th>Liquidation</th>
+                                        <th>Leverage</th>
+                                        <th>Margin (USD)</th>
+                                        <th>Unrealized PnL</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="livePositionsTable">
+                                    <tr><td colspan="9" style="text-align:center; color: var(--text-muted);">Loading positions...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Live Orders Table -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">Delta Exchange Live Orders</span>
+                            <span class="badge badge-neutral" id="liveOrdersBadge">STREAMED LIVE</span>
+                        </div>
+                        <div class="table-container" style="border: none; margin-bottom: 0;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Order ID</th>
+                                        <th>Symbol</th>
+                                        <th>Side</th>
+                                        <th>Order Role</th>
+                                        <th>Size</th>
+                                        <th>Price / Stop Price</th>
+                                        <th>State</th>
+                                        <th>Created (UTC)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="liveOrdersTable">
+                                    <tr><td colspan="8" style="text-align:center; color: var(--text-muted);">Loading orders...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- TAB 3: CONSOLIDATED SIMULATED PAPER TRADING SANDBOX -->
+                <section id="tab-papertrading" class="tab-content">
+                    <div class="info-banner paper-banner">
+                        <div>
+                            <h3 style="color:var(--green); font-size:1.05rem; margin-bottom:0.25rem;">🛡️ Simulated Paper Trading Sandbox (100% Safe)</h3>
+                            <p style="color:var(--text-secondary); font-size:0.83rem;">
+                                All strategies, performance overviews, portfolio equity curves, and trade audit logs below are simulated inside process-safe SQLite WAL storage. Zero real funds at risk.
+                            </p>
+                        </div>
+                        <button class="btn btn-success" onclick="resetPaperBalancesPrompt()">
+                            🔄 Reset Virtual Balances ($100)
+                        </button>
+                    </div>
+
+                    <!-- Unified Sub-Navigation Pills for Paper Trading -->
+                    <div class="sub-nav-pills">
+                        <button class="sub-pill-btn active" data-subtab="paper-positions" onclick="switchPaperSubTab('paper-positions')">
+                            🎯 Active Paper Positions
+                        </button>
+                        <button class="sub-pill-btn" data-subtab="paper-strategies" onclick="switchPaperSubTab('paper-strategies')">
+                            📈 Strategy Performance & Accounts
+                        </button>
+                        <button class="sub-pill-btn" data-subtab="paper-analytics" onclick="switchPaperSubTab('paper-analytics')">
+                            🔬 Equity Curve & Analytics
+                        </button>
+                        <button class="sub-pill-btn" data-subtab="paper-trades" onclick="switchPaperSubTab('paper-trades')">
+                            📜 Closed Paper Trades Log
+                        </button>
+                    </div>
+
+                    <!-- Top Metrics (Shared for Paper Sandbox) -->
+                    <div class="grid-4">
+                        <div class="card">
+                            <div class="card-header"><span class="card-title">Starting Capital</span><span class="badge badge-long">VIRTUAL</span></div>
+                            <div class="metric-value">$100.00</div>
+                            <div class="metric-sub">Per strategy pair sandbox</div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header"><span class="card-title">Total Virtual Equity</span></div>
+                            <div id="paperTotalEquity" class="metric-value">$0.00</div>
+                            <div id="paperProfitPct" class="metric-sub">+0.00% Overall</div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header"><span class="card-title">Active Paper Positions</span></div>
+                            <div id="paperOpenPositionsCount" class="metric-value">0</div>
+                            <div class="metric-sub">Simulated open contracts</div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header"><span class="card-title">Virtual Win Rate</span></div>
+                            <div id="paperWinRate" class="metric-value">0%</div>
+                            <div id="paperTotalTrades" class="metric-sub">0 completed paper trades</div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-PANEL 1: ACTIVE PAPER POSITIONS -->
+                    <div id="subtab-paper-positions" class="sub-tab-panel active">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Active Simulated Paper Positions</span>
+                                <span class="badge badge-long">SANDBOX OPEN</span>
+                            </div>
+                            <div class="table-container" style="border: none; margin-bottom: 0;">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Strategy</th>
+                                            <th>Symbol</th>
+                                            <th>Direction</th>
+                                            <th>Size</th>
+                                            <th>Entry Price</th>
+                                            <th>Stop-Loss</th>
+                                            <th>Take-Profit</th>
+                                            <th>Account Capital</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="paperPositionsTable">
+                                        <tr><td colspan="9" style="text-align:center; color:var(--text-muted);">No open paper positions. Strategy engine running...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-PANEL 2: STRATEGY PERFORMANCE & ACCOUNTS -->
+                    <div id="subtab-paper-strategies" class="sub-tab-panel">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Virtual Strategy Accounts & Stats</span>
+                            </div>
+                            <div class="table-container" style="border: none; margin-bottom: 0;">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Strategy</th>
+                                            <th>Symbol</th>
+                                            <th>Capital</th>
+                                            <th>Return %</th>
+                                            <th>Total Trades</th>
+                                            <th>Win Rate</th>
+                                            <th>Current Position</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="strategiesTable">
+                                        <tr><td colspan="7" style="text-align:center;">Loading strategies...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-PANEL 3: EQUITY CURVE & ANALYTICS -->
+                    <div id="subtab-paper-analytics" class="sub-tab-panel">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Cumulative Paper Portfolio Equity Curve</span>
+                            </div>
+                            <div style="height: 320px; width: 100%;">
+                                <canvas id="equityChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-PANEL 4: CLOSED PAPER TRADES LOG -->
+                    <div id="subtab-paper-trades" class="sub-tab-panel">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Completed Paper Trades Audit Log</span>
+                                <button class="btn" onclick="exportTradesCSV()">Export CSV</button>
+                            </div>
+                            <div class="table-container" style="border: none; margin-bottom: 0;">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Trade ID</th>
+                                            <th>Strategy</th>
+                                            <th>Symbol</th>
+                                            <th>Type</th>
+                                            <th>Entry Price</th>
+                                            <th>Exit Price</th>
+                                            <th>Size</th>
+                                            <th>Fees</th>
+                                            <th>Net PnL</th>
+                                            <th>Return %</th>
+                                            <th>Reason</th>
+                                            <th>Exit Time</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tradesLogTable">
+                                        <tr><td colspan="12" style="text-align:center;">Loading trade history...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- TAB 4: ADMIN CONTROL PANEL -->
+                <section id="tab-admin" class="tab-content">
+                    <!-- Top Status Cards -->
+                    <div class="grid-4">
+                        <div class="card">
+                            <div class="card-header"><span class="card-title">Active Mode</span></div>
+                            <div id="adminActiveModeText" class="metric-value" style="color:var(--green); font-size:1.35rem;">PAPER</div>
+                            <div class="metric-sub" id="adminModeSub">Safe simulation mode</div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header"><span class="card-title">Delta API Authority</span></div>
+                            <div id="adminAuthBadge" class="metric-value" style="color:var(--amber); font-size:1.15rem;">UNVERIFIED</div>
+                            <div class="metric-sub" id="adminAuthSub">Run Test & Verify Connection</div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header"><span class="card-title">Wallet Balance</span></div>
+                            <div id="adminWalletUsd" class="metric-value">$0.00</div>
+                            <div id="adminWalletInr" class="metric-sub">&approx; &#8377;0.00 INR</div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header"><span class="card-title">Ping Latency</span></div>
+                            <div id="adminPingLatency" class="metric-value">-- ms</div>
+                            <div class="metric-sub">To api.india.delta.exchange</div>
+                        </div>
+                    </div>
+
+                    <!-- Server Public IP Whitelist Card (For Delta Exchange Whitelisting) -->
+                    <div class="ip-whitelist-card">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div>
+                                <h3 style="color: var(--cyan); font-size: 1rem; margin-bottom: 0.25rem;">🌐 Server Outgoing Public IP (For Delta Exchange Whitelist)</h3>
+                                <p style="color: var(--text-secondary); font-size: 0.82rem;">
+                                    Delta Exchange requires you to whitelist this server's public IP in your API Key settings before live trading orders can be placed.
+                                </p>
+                            </div>
+                        </div>
+                        <div class="ip-whitelist-row">
+                            <div class="ip-badge-box">
+                                <span id="adminPublicIpDisplay">Detecting IP...</span>
+                            </div>
+                            <button class="btn btn-primary" onclick="copyServerIp()">
+                                <span>📋 Copy IP Address</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Engine Pipeline & Scheduling Settings -->
+                    <div class="card" style="margin-bottom: 1.5rem; border-color: rgba(6, 182, 212, 0.4); background: linear-gradient(135deg, rgba(6, 182, 212, 0.05), rgba(18, 18, 24, 0.95));">
+                        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <span style="font-size: 1.25rem;">⚡</span>
+                                <div>
+                                    <h3 style="font-size: 1rem; font-weight: 600; color: #fff; margin: 0;">Engine Pipeline &amp; Scheduling Configuration</h3>
+                                    <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0;">Configure active cryptocurrency symbols, algorithmic strategies, and execution frequency directly without container restart.</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <span id="pipelineStatusBadge" class="badge badge-paper" style="font-weight: 600;">ACTIVE IN RUNTIME</span>
+                            </div>
+                        </div>
+
+                        <div class="grid-3" style="margin-top: 0.5rem;">
+                            <div class="form-group">
+                                <label class="form-label" style="display: flex; justify-content: space-between;">
+                                    <span>Target Trading Symbols</span>
+                                    <span style="font-size: 0.72rem; color: var(--cyan); font-family: monospace;">SYMBOLS</span>
+                                </label>
+                                <input type="text" id="pipelineSymbols" class="form-control" placeholder="BTC-USD,ETH-USD,SOL-USD">
+                                <span style="font-size:0.75rem; color:var(--text-muted);">Comma-separated symbols to process (e.g. BTC-USD,ETH-USD,SOL-USD).</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label" style="display: flex; justify-content: space-between;">
+                                    <span>Active Strategies</span>
+                                    <span style="font-size: 0.72rem; color: var(--cyan); font-family: monospace;">STRATEGIES</span>
+                                </label>
+                                <input type="text" id="pipelineStrategies" class="form-control" placeholder="*">
+                                <span style="font-size:0.75rem; color:var(--text-muted);">Use '*' for all available strategies, or comma-separated names.</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label" style="display: flex; justify-content: space-between;">
+                                    <span>Schedule Interval (Seconds)</span>
+                                    <span style="font-size: 0.72rem; color: var(--cyan); font-family: monospace;">SCHEDULE_SECONDS</span>
+                                </label>
+                                <input type="number" id="pipelineScheduleSeconds" class="form-control" value="60" min="10" max="86400" step="10">
+                                <span style="font-size:0.75rem; color:var(--text-muted);">Cadence in seconds for automated batch evaluation (min 10s).</span>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+                            <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                                <button class="btn btn-primary" onclick="savePipelineSettings()">
+                                    <span>💾 Save Pipeline Settings</span>
+                                </button>
+                                <button class="btn" onclick="runBatchPipelineNow()">
+                                    <span id="runBatchBtnIcon">⚡</span>
+                                    <span id="runBatchBtnText">Run Batch Pipeline Now</span>
+                                </button>
+                            </div>
+                            <div id="pipelineAlert" style="font-size: 0.82rem; color: var(--green); display: none; font-weight: 500;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Delta Credentials & Risk Parameters Form -->
+                    <div class="grid-2">
+                        <!-- Delta Credentials -->
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Delta Exchange API Credentials</span>
+                                <span class="badge badge-neutral">HMAC-SHA256</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Gateway URL</label>
+                                <input type="text" id="profileBaseUrl" class="form-control" value="https://api.india.delta.exchange">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Client ID / User ID</label>
+                                <input type="number" id="profileClientId" class="form-control" placeholder="e.g. 82942579">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">API Key</label>
+                                <input type="text" id="profileApiKey" class="form-control" placeholder="Enter Delta API Key">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">API Secret</label>
+                                <div class="input-with-action">
+                                    <input type="password" id="profileApiSecret" class="form-control" placeholder="Enter Delta API Secret">
+                                    <button type="button" id="btnToggleSecret" class="btn-reveal" onclick="toggleSecretVisibility()" title="Show/Hide API Secret">👁️</button>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem; flex-wrap: wrap;">
+                                <button class="btn btn-primary" onclick="saveBrokerProfile()">💾 Save Credentials</button>
+                                <button class="btn" onclick="verifyBrokerAuthority()">
+                                    <span id="verifyBtnSpinner">⚡</span>
+                                    <span id="verifyBtnText">Verify Authority & Test Ping</span>
+                                </button>
+                            </div>
+
+                            <div id="profileVerifyAlert" class="alert" style="display: none; margin-top: 1rem;">
+                                <span id="profileVerifyIcon"></span>
+                                <div id="profileVerifyMsg"></div>
+                            </div>
+                        </div>
+
+                        <!-- Risk Parameters -->
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="card-title">Risk & Capital Rules</span>
+                                <span class="badge badge-neutral">AUTOMATED BRACKET</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Capital Allocation Per Trade (%)</label>
+                                <input type="number" id="riskCapitalPct" class="form-control" value="30" min="1" max="100" step="1">
+                                <span style="font-size:0.75rem; color:var(--text-muted);">Allocated portion of available account balance per trade.</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Stop-Loss Risk Ratio (%)</label>
+                                <input type="number" id="riskStopLossRatio" class="form-control" value="1.0" min="0.1" max="20" step="0.1">
+                                <span style="font-size:0.75rem; color:var(--text-muted);">Maximum allowed price risk before automated exit trigger.</span>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Take-Profit Reward Ratio (%)</label>
+                                <input type="number" id="riskTakeProfitRatio" class="form-control" value="1.5" min="0.1" max="50" step="0.1">
+                                <span style="font-size:0.75rem; color:var(--text-muted);">Target reward ratio for automated bracket exit orders.</span>
+                            </div>
+
+                            <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem; flex-wrap: wrap;">
+                                <button class="btn btn-primary" onclick="saveRiskParams()">💾 Save Risk Parameters</button>
+                                <button class="btn btn-success" onclick="resetPaperBalancesPrompt()">🔄 Reset Paper Balances ($100)</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Admin Danger Zone -->
+                    <div class="card" style="border-color: rgba(244, 63, 94, 0.4); margin-top: 1.5rem;">
+                        <div class="card-header">
+                            <span class="card-title" style="color: var(--red);">🚨 Admin & Emergency Danger Zone</span>
+                        </div>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.25rem;">
+                            The Emergency Kill Switch will immediately cancel all live and unfilled orders on Delta Exchange and execute market orders to close all positions.
+                        </p>
+                        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                            <button class="btn btn-kill" onclick="triggerEmergencyExit()">
+                                <span>&times; TRIGGER EMERGENCY KILL SWITCH</span>
+                            </button>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <input type="text" id="resetInput" class="form-control" placeholder="Type 'RESET SYSTEM'" style="width: 200px;">
+                                <button class="btn" style="border-color: var(--red); color: var(--red);" onclick="executeSystemReset()">
+                                    Wipe & Reset Database
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- TAB 5: SYSTEM LOGS -->
+                <section id="tab-logs" class="tab-content">
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">System Execution & Audit Logs</span>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button class="btn" onclick="fetchLogs()">&#x21bb; Refresh Logs</button>
+                                <a href="/api/logs/download" class="btn" download>Download Log</a>
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0.75rem;">
+                            <input type="text" id="logFilterInput" class="form-control" placeholder="Search log entries (e.g. ERROR, signal, DeltaClient)..." onkeyup="filterLogs()">
+                        </div>
+                        <pre id="logsContainer" style="background: #09090b; border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #d4d4d8; height: 500px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5;"></pre>
+                    </div>
+                </section>
+
+            </main>
+        </div>
+    </div>
+
+    <!-- Live Arming Modal -->
+    <div id="armModal" class="modal-backdrop">
+        <div class="modal">
+            <h3>⚠️ ARM REAL LIVE TRADING</h3>
+            <p>
+                You are about to route real capital orders to <strong>Delta Exchange India</strong>.
+                This will execute real futures contracts with live margin.
+                <br><br>
+                To confirm, type <strong>ARM LIVE TRADING</strong> below:
+            </p>
+            <input type="text" id="armConfirmationInput" placeholder="ARM LIVE TRADING" autocomplete="off">
+            <div class="modal-actions">
+                <button class="btn" onclick="closeArmModal()">Cancel</button>
+                <button class="btn btn-kill" onclick="confirmArmLiveTrading()">Arm Live Trading</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notice -->
+    <div id="toastNotice"></div>
+
+    <script>
+        // State
+        let currentTab = 'monitoring';
+        let currentPaperSubTab = 'paper-positions';
+        let isLiveEnabled = false;
+        let isAuthorized = false;
+        let currentPublicIp = '';
+        let allLogsText = '';
+        let equityChartInstance = null;
+        let wsConnection = null;
+
+        // Toast Helper
+        function showToast(message) {
+            const t = document.getElementById('toastNotice');
+            t.textContent = message;
+            t.style.display = 'block';
+            setTimeout(() => { t.style.display = 'none'; }, 3000);
+        }
+
+        // Sidebar Collapse Toggle
+        function toggleSidebarCollapse() {
+            const sidebar = document.getElementById('appSidebar');
+            sidebar.classList.toggle('collapsed');
+            const isCollapsed = sidebar.classList.contains('collapsed');
+            localStorage.setItem('sidebar_collapsed', isCollapsed ? 'true' : 'false');
+        }
+
+        function restoreSidebarState() {
+            const saved = localStorage.getItem('sidebar_collapsed');
+            if (saved === 'true') {
+                document.getElementById('appSidebar').classList.add('collapsed');
+            }
+        }
+
+        // Copy Server IP
+        function copyServerIp() {
+            if (!currentPublicIp || currentPublicIp === 'Detecting...') {
+                alert("Server IP is still detecting. Please wait a moment.");
+                return;
+            }
+            navigator.clipboard.writeText(currentPublicIp).then(() => {
+                showToast(`✅ Copied IP: ${currentPublicIp}`);
+            }).catch(() => {
+                prompt("Copy your server IP below:", currentPublicIp);
+            });
+        }
+
+        // Secret visibility toggle
+        function toggleSecretVisibility() {
+            const input = document.getElementById('profileApiSecret');
+            const btn = document.getElementById('btnToggleSecret');
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.textContent = '🔒';
+            } else {
+                input.type = 'password';
+                btn.textContent = '👁️';
+            }
+        }
+
+        // Switch Paper Trading Sub-tab
+        function switchPaperSubTab(subTabId) {
+            currentPaperSubTab = subTabId;
+            document.querySelectorAll('.sub-pill-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.subtab === subTabId);
+            });
+            document.querySelectorAll('.sub-tab-panel').forEach(p => {
+                p.classList.toggle('active', p.id === `subtab-${subTabId}`);
+            });
+
+            if (subTabId === 'paper-strategies') fetchOverview();
+            else if (subTabId === 'paper-analytics') fetchAnalytics();
+            else if (subTabId === 'paper-trades') fetchTrades();
+            else if (subTabId === 'paper-positions') fetchPaperData();
+        }
+
+        // URL Hash-based Navigation
+        function switchTab(tabId) {
+            if (!tabId) tabId = 'monitoring';
+
+            // Route backward-compatibility mapping for old URLs
+            if (tabId === 'overview') {
+                tabId = 'papertrading';
+                switchPaperSubTab('paper-strategies');
+            } else if (tabId === 'analytics') {
+                tabId = 'papertrading';
+                switchPaperSubTab('paper-analytics');
+            } else if (tabId === 'trades') {
+                tabId = 'papertrading';
+                switchPaperSubTab('paper-trades');
+            }
+
+            currentTab = tabId;
+            window.location.hash = tabId;
+
+            // Update sidebar nav links
+            document.querySelectorAll('.sidebar-nav .nav-link').forEach(el => {
+                el.classList.toggle('active', el.dataset.tab === tabId);
+            });
+
+            // Update tab contents
+            document.querySelectorAll('.tab-content').forEach(el => {
+                el.classList.toggle('active', el.id === `tab-${tabId}`);
+            });
+
+            // Update Breadcrumb
+            const titles = {
+                monitoring: 'System Monitor & Host Metrics',
+                signals: 'Algorithmic Strategies, Controls & Signals',
+                livebroker: 'Real Broker (Delta Exchange India)',
+                papertrading: 'Simulated Paper Trading Sandbox',
+                admin: 'Admin Control Panel & Settings',
+                logs: 'System Logs & Audit Trail'
+            };
+            const bc = document.getElementById('pageBreadcrumb');
+            if (bc) bc.textContent = titles[tabId] || 'Dashboard';
+
+            refreshCurrentTab();
+        }
+
+        function refreshCurrentTab() {
+            fetchSystemMetrics();
+            fetchBrokerProfile();
+            if (currentTab === 'monitoring') fetchSystemMetrics();
+            else if (currentTab === 'signals') fetchSignalsPage();
+            else if (currentTab === 'livebroker') fetchBrokerData();
+            else if (currentTab === 'papertrading') {
+                fetchPaperData();
+                if (currentPaperSubTab === 'paper-strategies') fetchOverview();
+                else if (currentPaperSubTab === 'paper-analytics') fetchAnalytics();
+                else if (currentPaperSubTab === 'paper-trades') fetchTrades();
+            }
+            else if (currentTab === 'logs') fetchLogs();
+        }
+
+        // ==========================================
+        // REAL-TIME WEBSOCKET STREAM (/ws/live)
+        // ==========================================
+        function initWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/live`;
+
+            try {
+                wsConnection = new WebSocket(wsUrl);
+
+                wsConnection.onopen = () => {
+                    console.log("⚡ Live WebSocket connected to /ws/live");
+                    setWsStatus(true);
+                };
+
+                wsConnection.onmessage = (event) => {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        handleWebSocketLiveStream(msg);
+                    } catch (err) {
+                        console.error("Error parsing WebSocket packet:", err);
+                    }
+                };
+
+                wsConnection.onclose = () => {
+                    console.warn("WebSocket closed. Auto-reconnecting in 2s...");
+                    setWsStatus(false);
+                    setTimeout(initWebSocket, 2000);
+                };
+
+                wsConnection.onerror = (err) => {
+                    console.error("WebSocket connection error:", err);
+                    setWsStatus(false);
+                };
+            } catch (err) {
+                console.error("Failed to initialize WebSocket:", err);
+                setWsStatus(false);
+                setTimeout(initWebSocket, 3000);
+            }
+        }
+
+        function setWsStatus(connected) {
+            const badge = document.getElementById('wsStatusBadge');
+            const dot = document.getElementById('wsStatusDot');
+            const text = document.getElementById('wsStatusText');
+            if (connected) {
+                badge.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+                badge.style.color = 'var(--green)';
+                dot.style.background = 'var(--green)';
+                dot.style.boxShadow = '0 0 6px var(--green)';
+                text.textContent = 'WEBSOCKET LIVE';
+            } else {
+                badge.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+                badge.style.color = 'var(--amber)';
+                dot.style.background = 'var(--amber)';
+                dot.style.boxShadow = '0 0 6px var(--amber)';
+                text.textContent = 'RECONNECTING...';
+            }
+        }
+
+        function handleWebSocketLiveStream(data) {
+            // Update metrics
+            if (data.metrics) {
+                renderSystemMetrics(data.metrics);
+            }
+
+            // Update balance & status
+            if (data.balance) {
+                renderBalance(data.balance);
+            }
+            if (data.status) {
+                renderStatus(data.status);
+            }
+
+            // Update positions & orders (real-time stream)
+            if (data.positions) {
+                renderLivePositions(data.positions);
+            }
+            if (data.orders) {
+                renderLiveOrders(data.orders);
+            }
+
+            // Update paper positions if present
+            if (data.paper_positions) {
+                renderPaperPositions(data.paper_positions);
+            }
+
+            // Update signals stream & strategy matrix if present
+            if (data.signals) {
+                renderSignalsStream(data.signals);
+            }
+            if (data.detailed_strategies) {
+                renderDetailedStrategyCards(data.detailed_strategies);
+                renderDetailedStrategyTable(data.detailed_strategies);
+            } else if (data.strategies) {
+                renderStrategyMatrix(data.strategies);
+            }
+        }
+
+        function renderBalance(bal) {
+            const balUsd = `$${(bal.available_balance_usd || 0).toFixed(2)}`;
+            const balInr = `&approx; &#8377;${(bal.available_balance_inr || 0).toFixed(2)} INR`;
+            document.getElementById('deltaUsdValue').textContent = balUsd;
+            document.getElementById('deltaInrValue').innerHTML = balInr;
+            document.getElementById('adminWalletUsd').textContent = balUsd;
+            document.getElementById('adminWalletInr').innerHTML = balInr;
+        }
+
+        function renderStatus(status) {
+            isLiveEnabled = status.execution_mode === 'LIVE' && status.is_armed;
+            const btnPaper = document.getElementById('btnSwitchPaper');
+            const btnReal = document.getElementById('btnSwitchReal');
+            const brokerModeTag = document.getElementById('brokerModeTag');
+            const brokerArmedState = document.getElementById('brokerArmedState');
+
+            if (isLiveEnabled) {
+                btnPaper.className = 'switcher-opt';
+                btnReal.className = 'switcher-opt active real';
+                brokerModeTag.className = 'badge badge-short';
+                brokerModeTag.textContent = 'LIVE';
+                brokerArmedState.textContent = 'ARMED & ACTIVE';
+                brokerArmedState.style.color = 'var(--red)';
+            } else {
+                btnPaper.className = 'switcher-opt active paper';
+                btnReal.className = 'switcher-opt';
+                brokerModeTag.className = 'badge badge-long';
+                brokerModeTag.textContent = 'PAPER';
+                brokerArmedState.textContent = 'DISARMED (SAFE)';
+                brokerArmedState.style.color = 'var(--green)';
+            }
+
+            // Update signals routing banner
+            const sigModeBadge = document.getElementById('signalsModeBadge');
+            const sigArmedBadge = document.getElementById('signalsArmedBadge');
+            const sigRoutingBanner = document.getElementById('signalsRoutingBanner');
+            const sigModeDesc = document.getElementById('signalsModeDesc');
+            if (sigModeBadge && sigArmedBadge) {
+                if (status.execution_mode === 'LIVE' && status.is_armed) {
+                    sigModeBadge.className = 'badge badge-short';
+                    sigModeBadge.textContent = 'ROUTING: REAL DELTA BROKER';
+                    sigArmedBadge.className = 'badge';
+                    sigArmedBadge.style.background = 'rgba(244, 63, 94, 0.2)';
+                    sigArmedBadge.style.color = 'var(--red)';
+                    sigArmedBadge.textContent = 'ARMED & LIVE';
+                    if (sigRoutingBanner) sigRoutingBanner.style.borderColor = 'rgba(244, 63, 94, 0.4)';
+                    if (sigModeDesc) sigModeDesc.innerHTML = 'Live trading is <strong>ARMED</strong>. Strategy signals immediately dispatch live orders to Delta Exchange India API with 20x bracket SL/TP protection.';
+                } else if (status.execution_mode === 'LIVE' && !status.is_armed) {
+                    sigModeBadge.className = 'badge';
+                    sigModeBadge.style.background = 'rgba(245, 158, 11, 0.2)';
+                    sigModeBadge.style.color = 'var(--amber)';
+                    sigModeBadge.textContent = 'ROUTING: LIVE SELECTED';
+                    sigArmedBadge.className = 'badge';
+                    sigArmedBadge.style.background = 'rgba(245, 158, 11, 0.2)';
+                    sigArmedBadge.style.color = 'var(--amber)';
+                    sigArmedBadge.textContent = 'DISARMED (LOGGED ONLY)';
+                    if (sigRoutingBanner) sigRoutingBanner.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+                    if (sigModeDesc) sigModeDesc.innerHTML = 'Real Broker mode is selected, but safety switch is <strong>DISARMED</strong>. Signals are recorded in the audit ledger without placing real money orders.';
+                } else {
+                    sigModeBadge.className = 'badge badge-paper';
+                    sigModeBadge.textContent = 'ROUTING: PAPER SANDBOX';
+                    sigArmedBadge.className = 'badge';
+                    sigArmedBadge.style.background = 'rgba(16, 185, 129, 0.15)';
+                    sigArmedBadge.style.color = 'var(--green)';
+                    sigArmedBadge.textContent = 'SIMULATED (100% SAFE)';
+                    if (sigRoutingBanner) sigRoutingBanner.style.borderColor = 'rgba(6, 182, 212, 0.35)';
+                    if (sigModeDesc) sigModeDesc.innerHTML = 'Engine is in <strong>PAPER SIMULATION</strong> mode. All algorithmic strategy signals execute in the virtual SQLite sandbox with zero real money risk.';
+                }
+            }
+        }
+
+        function renderLivePositions(positions) {
+            document.getElementById('livePositionsCount').textContent = positions.length;
+            const posTable = document.getElementById('livePositionsTable');
+            if (positions.length === 0) {
+                posTable.innerHTML = `<tr><td colspan="9" style="text-align:center; color: var(--text-muted);">No open positions on Delta Exchange.</td></tr>`;
+            } else {
+                posTable.innerHTML = positions.map(p => {
+                    const isBuy = (p.side || '').toUpperCase() === 'BUY' || (p.position_type || '').toUpperCase() === 'LONG' || p.is_long;
+                    const sideBadge = `<span class="badge ${isBuy ? 'badge-long' : 'badge-short'}">${isBuy ? '🟢 BUY / LONG' : '🔴 SELL / SHORT'}</span>`;
+                    const pnlColor = p.unrealized_pnl >= 0 ? 'var(--green)' : 'var(--red)';
+                    return `
+                        <tr>
+                            <td><strong>${p.symbol}</strong></td>
+                            <td>${sideBadge}</td>
+                            <td>${p.size}</td>
+                            <td>$${p.entry_price}</td>
+                            <td>$${p.mark_price}</td>
+                            <td style="color: var(--amber);">$${p.liquidation_price || 'N/A'}</td>
+                            <td>${p.leverage}x</td>
+                            <td>$${(p.margin || 0).toFixed(2)}</td>
+                            <td style="color: ${pnlColor}; font-weight: 600;">
+                                ${p.unrealized_pnl >= 0 ? '+' : ''}$${(p.unrealized_pnl || 0).toFixed(2)}
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+        }
+
+        function renderLiveOrders(orders) {
+            document.getElementById('liveOrdersCount').textContent = orders.length;
+            const ordTable = document.getElementById('liveOrdersTable');
+            if (orders.length === 0) {
+                ordTable.innerHTML = `<tr><td colspan="8" style="text-align:center; color: var(--text-muted);">No active live orders on Delta Exchange.</td></tr>`;
+            } else {
+                ordTable.innerHTML = orders.map(o => {
+                    const isBuy = (o.side || '').toUpperCase() === 'BUY';
+                    const sideBadge = `<span class="badge ${isBuy ? 'badge-long' : 'badge-short'}">${isBuy ? '🟢 BUY' : '🔴 SELL'}</span>`;
+
+                    const role = (o.order_role || (o.bracket_order ? 'BRACKET' : 'ENTRY')).toUpperCase();
+                    let roleBadge = '<span class="badge" style="background:rgba(6,182,212,0.15); color:var(--cyan);">⚡ ENTRY</span>';
+                    if (role === 'STOP_LOSS') {
+                        roleBadge = '<span class="badge badge-short">🛑 STOP-LOSS</span>';
+                    } else if (role === 'TAKE_PROFIT') {
+                        roleBadge = '<span class="badge badge-long">🎯 TAKE-PROFIT</span>';
+                    } else if (role === 'BRACKET_EXIT') {
+                        roleBadge = '<span class="badge badge-bracket">🎯 BRACKET</span>';
+                    }
+
+                    return `
+                        <tr>
+                            <td>${o.id}</td>
+                            <td>${o.symbol}</td>
+                            <td>${sideBadge}</td>
+                            <td>${roleBadge}</td>
+                            <td>${o.size}</td>
+                            <td>$${o.stop_price || o.limit_price || 'MKT'}</td>
+                            <td>${o.state || o.status}</td>
+                            <td>${o.created_at || ''}</td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+        }
+
+        function renderPaperPositions(positions) {
+            document.getElementById('paperOpenPositionsCount').textContent = positions.length;
+            const posTable = document.getElementById('paperPositionsTable');
+            if (positions.length === 0) {
+                posTable.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--text-muted);">No open simulated paper positions.</td></tr>`;
+            } else {
+                posTable.innerHTML = positions.map(p => {
+                    const isBuy = p.side === 'BUY';
+                    const dirBadge = `<span class="badge ${isBuy ? 'badge-long' : 'badge-short'}">${isBuy ? '🟢 BUY / LONG' : '🔴 SELL / SHORT'}</span>`;
+                    return `
+                        <tr>
+                            <td><strong>${p.strategy_name}</strong></td>
+                            <td>${p.symbol}</td>
+                            <td>${dirBadge}</td>
+                            <td>${p.size}</td>
+                            <td>$${p.entry_price}</td>
+                            <td style="color:var(--red);">$${p.stop_loss || 'None'}</td>
+                            <td style="color:var(--green);">$${p.take_profit || 'None'}</td>
+                            <td>$${(p.capital || 100).toFixed(2)}</td>
+                            <td><span class="badge badge-long">OPEN</span></td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+        }
+
+        function renderSystemMetrics(data) {
+            if (!data) return;
+            const sys = data.resources || data.system || (data.cpu ? data : {});
+            const sqlite = data.sqlite || {};
+            const redis = data.redis || {};
+            const celery = data.celery || {};
+
+            const cpu = Math.round(sys.cpu ? sys.cpu.percent : 0);
+            const cpuEl = document.getElementById('cpuValue');
+            if (cpuEl) cpuEl.textContent = `${cpu}%`;
+            const cpuProg = document.getElementById('cpuProgress');
+            if (cpuProg) cpuProg.style.width = `${Math.min(100, Math.max(0, cpu))}%`;
+            const cpuBadge = document.getElementById('cpuCoresBadge');
+            if (cpuBadge) cpuBadge.textContent = `${sys.cpu ? sys.cpu.cores : 1} Cores`;
+            const cpuSub = document.getElementById('cpuPerCoreText');
+            if (cpuSub && sys.process) {
+                cpuSub.innerHTML = `Host CPU &bull; Process RSS: <strong>${(sys.process.rss_mb || 0).toFixed(0)} MB</strong> (PID ${sys.process.pid || 1})`;
+            }
+
+            const ram = Math.round(sys.memory ? sys.memory.percent : 0);
+            const ramEl = document.getElementById('ramValue');
+            if (ramEl) ramEl.textContent = `${ram}%`;
+            const ramProg = document.getElementById('ramProgress');
+            if (ramProg) ramProg.style.width = `${Math.min(100, Math.max(0, ram))}%`;
+            const ramBadge = document.getElementById('ramTotalBadge');
+            if (ramBadge) ramBadge.textContent = `${sys.memory ? (sys.memory.total_gb || 0).toFixed(1) : 0} GB`;
+            const ramDetails = document.getElementById('ramDetailsText');
+            if (ramDetails) ramDetails.textContent = `${sys.memory ? (sys.memory.used_gb || 0).toFixed(2) : 0} GB used / ${sys.memory ? (sys.memory.free_gb || 0).toFixed(2) : 0} GB free`;
+
+            const disk = Math.round(sys.disk ? sys.disk.percent : 0);
+            const diskEl = document.getElementById('diskValue');
+            if (diskEl) diskEl.textContent = `${disk}%`;
+            const diskProg = document.getElementById('diskProgress');
+            if (diskProg) diskProg.style.width = `${Math.min(100, Math.max(0, disk))}%`;
+            const diskBadge = document.getElementById('diskTotalBadge');
+            if (diskBadge) diskBadge.textContent = `${sys.disk ? (sys.disk.total_gb || 0).toFixed(0) : 0} GB`;
+            const diskDetails = document.getElementById('diskDetailsText');
+            if (diskDetails) diskDetails.textContent = `${sys.disk ? (sys.disk.used_gb || 0).toFixed(1) : 0} GB used of root drive`;
+
+            const sqliteMb = (sqlite.size_mb || 0).toFixed(2);
+            const sqliteSize = document.getElementById('sqliteSizeValue');
+            if (sqliteSize) sqliteSize.textContent = `${sqliteMb} MB`;
+            const sqliteLat = document.getElementById('sqliteLatencyBadge');
+            if (sqliteLat) sqliteLat.textContent = `${sqlite.latency_ms || 0} ms`;
+            const sqliteWal = document.getElementById('sqliteWALText');
+            if (sqliteWal) sqliteWal.innerHTML = `WAL: ${sqlite.wal_size_mb || 0} MB &bull; Embedded fast storage`;
+
+            // Update Sidebar Mini Telemetry
+            const sbCpu = document.getElementById('sbCpuText');
+            if (sbCpu) sbCpu.textContent = `${cpu}%`;
+            const sbCpuB = document.getElementById('sbCpuBar');
+            if (sbCpuB) sbCpuB.style.width = `${cpu}%`;
+            const sbRam = document.getElementById('sbRamText');
+            if (sbRam) sbRam.textContent = `${ram}%`;
+            const sbRamB = document.getElementById('sbRamBar');
+            if (sbRamB) sbRamB.style.width = `${ram}%`;
+            const sbSql = document.getElementById('sbSqliteText');
+            if (sbSql) sbSql.textContent = `${sqliteMb} MB`;
+
+            const servicesHtml = `
+                <tr><td>Celery Workers</td><td><span class="badge ${celery.status === 'pass' ? 'badge-long' : 'badge-short'}">${celery.status === 'pass' ? 'ONLINE' : (celery.status || 'Checking')}</span></td><td>${celery.active_workers_count || 0} active worker(s)</td></tr>
+                <tr><td>Redis Broker</td><td><span class="badge ${redis.status === 'pass' ? 'badge-long' : 'badge-short'}">${redis.status === 'pass' ? 'CONNECTED' : (redis.status || 'Checking')}</span></td><td>Latency: ${redis.latency_ms || 0} ms</td></tr>
+                <tr><td>SQLite Storage</td><td><span class="badge badge-long">WAL MODE</span></td><td>${sqliteMb} MB &bull; Zero External DB</td></tr>
+                <tr><td>System Uptime</td><td><span class="badge badge-long">RUNNING</span></td><td>${Math.floor((sys.uptime_seconds || 0) / 3600)}h ${Math.floor(((sys.uptime_seconds || 0) % 3600) / 60)}m</td></tr>
+            `;
+            const sTable = document.getElementById('servicesStatusTable');
+            if (sTable) sTable.innerHTML = servicesHtml;
+
+            if (sqlite.table_counts) {
+                let tblHtml = '';
+                for (const [tbl, cnt] of Object.entries(sqlite.table_counts)) {
+                    tblHtml += `<tr><td style="font-weight:600; color:#fff;">${tbl}</td><td><span class="badge badge-neutral">${cnt}</span></td><td style="color:var(--text-muted); font-size:0.8rem;">Active SQLite relation</td></tr>`;
+                }
+                const tList = document.getElementById('sqliteTablesList');
+                if (tList) tList.innerHTML = tblHtml;
+            }
+        }
+
+        // ── Error Logs Pagination & Search State ─────────────────────────────
+        let errorLogsData = [];
+        let errorCurrentPage = 1;
+        let errorPageSize = 10;
+        let errorFilterTerm = "";
+        let errorExpandedSet = new Set();
+
+        function onErrorSearchChanged(val) {
+            errorFilterTerm = (val || "").trim().toLowerCase();
+            errorCurrentPage = 1;
+            renderErrorLogsTable();
+        }
+
+        function onErrorPageSizeChanged(val) {
+            errorPageSize = parseInt(val, 10) || 10;
+            errorCurrentPage = 1;
+            renderErrorLogsTable();
+        }
+
+        function prevErrorPage() {
+            if (errorCurrentPage > 1) {
+                errorCurrentPage--;
+                renderErrorLogsTable();
+            }
+        }
+
+        function nextErrorPage() {
+            const filtered = getFilteredErrorLogs();
+            const totalPages = Math.ceil(filtered.length / errorPageSize) || 1;
+            if (errorCurrentPage < totalPages) {
+                errorCurrentPage++;
+                renderErrorLogsTable();
+            }
+        }
+
+        function toggleErrorTraceback(entryIdx) {
+            if (errorExpandedSet.has(entryIdx)) {
+                errorExpandedSet.delete(entryIdx);
+            } else {
+                errorExpandedSet.add(entryIdx);
+            }
+            renderErrorLogsTable();
+        }
+
+        function getFilteredErrorLogs() {
+            if (!errorFilterTerm) return errorLogsData;
+            return errorLogsData.filter(e => {
+                const combined = `${e.timestamp || ''} ${e.source || ''} ${e.function || ''} ${e.level || ''} ${e.message || ''} ${e.traceback || ''}`.toLowerCase();
+                return combined.includes(errorFilterTerm);
+            });
+        }
+
+        function renderErrorLogsTable() {
+            const body = document.getElementById('systemErrorLogsBody');
+            const badge = document.getElementById('errorLogsBadge');
+            const prevBtn = document.getElementById('errorPrevBtn');
+            const nextBtn = document.getElementById('errorNextBtn');
+            const pageInfo = document.getElementById('errorPaginationInfo');
+
+            const filtered = getFilteredErrorLogs();
+            const total = filtered.length;
+            const totalPages = Math.ceil(total / errorPageSize) || 1;
+
+            if (errorCurrentPage > totalPages) errorCurrentPage = totalPages;
+            if (errorCurrentPage < 1) errorCurrentPage = 1;
+
+            if (prevBtn) prevBtn.disabled = (errorCurrentPage <= 1);
+            if (nextBtn) nextBtn.disabled = (errorCurrentPage >= totalPages || total === 0);
+            if (pageInfo) {
+                const startIdx = total === 0 ? 0 : (errorCurrentPage - 1) * errorPageSize + 1;
+                const endIdx = Math.min(errorCurrentPage * errorPageSize, total);
+                pageInfo.textContent = `Showing ${startIdx}-${endIdx} of ${total} (Page ${errorCurrentPage}/${totalPages})`;
+            }
+
+            if (badge) {
+                if (total === 0 && errorLogsData.length === 0) {
+                    badge.className = 'badge badge-long';
+                    badge.textContent = '0 ERRORS (CLEAN)';
+                } else {
+                    badge.className = 'badge badge-short';
+                    badge.textContent = `${total} ERROR${total === 1 ? '' : 'S'}`;
+                }
+            }
+
+            if (!body) return;
+
+            if (total === 0) {
+                body.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--green); padding: 1.5rem;">
+                    ${errorFilterTerm ? `🔍 No error logs matched "${escapeHtml(errorFilterTerm)}"` : '✅ Clean System: Zero error exceptions logged.'}
+                </td></tr>`;
+                return;
+            }
+
+            const pageItems = filtered.slice((errorCurrentPage - 1) * errorPageSize, errorCurrentPage * errorPageSize);
+
+            body.innerHTML = pageItems.map((item, idx) => {
+                const globalIdx = (errorCurrentPage - 1) * errorPageSize + idx + 1;
+                const isCrit = (item.level || '').toUpperCase().includes('CRITICAL');
+                const isWarn = (item.level || '').toUpperCase().includes('WARN');
+                const sevBadge = isCrit
+                    ? `<span class="badge" style="background:rgba(239,68,68,0.25); color:#f87171; border:1px solid #ef4444;">CRITICAL</span>`
+                    : isWarn
+                    ? `<span class="badge" style="background:rgba(245,158,11,0.25); color:#fbbf24; border:1px solid #f59e0b;">WARNING</span>`
+                    : `<span class="badge badge-short">ERROR</span>`;
+
+                const isExpanded = errorExpandedSet.has(globalIdx);
+                const hasTb = Boolean(item.traceback && item.traceback.trim());
+
+                return `
+                    <tr style="vertical-align: top;">
+                        <td style="font-family:'JetBrains Mono',monospace; color:var(--text-muted); font-size:0.75rem; padding:0.65rem 0.5rem;">#${globalIdx}</td>
+                        <td style="font-size:0.75rem; white-space:nowrap; padding:0.65rem 0.5rem;">
+                            <div style="font-family:'JetBrains Mono',monospace; color:#cbd5e1;">${escapeHtml(item.timestamp || '--')}</div>
+                            <div style="color:var(--text-muted); font-size:0.7rem; margin-top:2px;">${escapeHtml(item.source || item.function || '')}</div>
+                        </td>
+                        <td style="padding:0.65rem 0.5rem;">${sevBadge}</td>
+                        <td style="padding:0.65rem 0.5rem;">
+                            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem;">
+                                <div style="font-size:0.82rem; color:#f1f5f9; word-break:break-word; font-family:'JetBrains Mono',monospace; line-height:1.4;">
+                                    ${escapeHtml(item.message || item.raw_header || '')}
+                                </div>
+                                ${hasTb ? `
+                                    <button class="btn" style="font-size:0.7rem; padding:0.2rem 0.45rem; flex-shrink:0;" onclick="toggleErrorTraceback(${globalIdx})">
+                                        ${isExpanded ? 'Hide Traceback ▲' : 'Show Traceback ▼'}
+                                    </button>
+                                ` : ''}
+                            </div>
+                            ${hasTb && isExpanded ? `
+                                <pre class="error-log-pre" style="margin-top:0.5rem; max-height:260px; overflow-y:auto; background:#050508; border:1px solid rgba(239,68,68,0.3); padding:0.75rem; border-radius:0.375rem; font-size:0.75rem; color:#fca5a5; line-height:1.4;">${escapeHtml(item.traceback)}</pre>
+                            ` : ''}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function fetchErrorLogs() {
+            const timeText = document.getElementById('errorLastCheckedText');
+            if (timeText) timeText.textContent = `Checked: ${new Date().toLocaleTimeString()}`;
+
+            try {
+                // Fetch structured, reverse-chronological parsed errors (newest first)
+                const res = await fetch('/api/logs/errors/parsed?limit=100');
+                if (res.ok) {
+                    const parsed = await res.json();
+                    errorLogsData = Array.isArray(parsed) ? parsed : [];
+                    renderErrorLogsTable();
+                    return;
+                }
+
+                // Fallback to raw lines if needed
+                const fallbackRes = await fetch('/api/logs/errors?lines_count=100');
+                if (!fallbackRes.ok) throw new Error(`HTTP ${fallbackRes.status}`);
+                const lines = await fallbackRes.json();
+
+                const parsed = [];
+                let cur = [];
+                for (const line of lines) {
+                    if (line.includes('ERROR') || line.includes('CRITICAL') || line.includes('Traceback')) {
+                        if (cur.length > 0) {
+                            parsed.push({
+                                timestamp: new Date().toLocaleTimeString(),
+                                level: 'ERROR',
+                                message: cur[0],
+                                traceback: cur.slice(1).join('\n'),
+                            });
+                            cur = [];
+                        }
+                    }
+                    cur.push(line);
+                }
+                if (cur.length > 0) {
+                    parsed.push({
+                        timestamp: new Date().toLocaleTimeString(),
+                        level: 'ERROR',
+                        message: cur[0],
+                        traceback: cur.slice(1).join('\n'),
+                    });
+                }
+                errorLogsData = parsed.reverse();
+                renderErrorLogsTable();
+            } catch (err) {
+                const body = document.getElementById('systemErrorLogsBody');
+                if (body) {
+                    body.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--red); padding: 1rem;">Could not fetch error logs: ${err.message}</td></tr>`;
+                }
+            }
+        }
+
+        function escapeHtml(text) {
+            return String(text)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // HTTP Fallbacks for Initial Boot & Full Refreshes
+        async function fetchSystemMetrics() {
+            try {
+                const res = await fetch('/api/system/metrics');
+                const data = await res.json();
+                renderSystemMetrics(data);
+                fetchErrorLogs();
+            } catch (err) {
+                console.error("Error fetching metrics:", err);
+            }
+        }
+
+        async function fetchBrokerData() {
+            try {
+                const [balRes, statRes, posRes, ordRes] = await Promise.all([
+                    fetch('/api/broker/balance'),
+                    fetch('/api/broker/status'),
+                    fetch('/api/broker/positions?mode=LIVE'),
+                    fetch('/api/broker/orders?mode=LIVE')
+                ]);
+                renderBalance(await balRes.json());
+                renderStatus(await statRes.json());
+                renderLivePositions(await posRes.json());
+                renderLiveOrders(await ordRes.json());
+            } catch (err) {
+                console.error("Error fetching broker data:", err);
+            }
+        }
+
+        async function fetchPaperData() {
+            try {
+                const [posRes, ordRes, statsRes] = await Promise.all([
+                    fetch('/api/broker/paper-positions'),
+                    fetch('/api/broker/paper-orders'),
+                    fetch('/api/stats')
+                ]);
+                const positions = await posRes.json();
+                const orders = await ordRes.json();
+                const stats = await statsRes.json();
+
+                document.getElementById('paperTotalEquity').textContent = `$${stats.total_capital.toFixed(2)}`;
+                document.getElementById('paperProfitPct').textContent = `${stats.total_profit_pct >= 0 ? '+' : ''}${stats.total_profit_pct.toFixed(2)}% Overall`;
+                document.getElementById('paperOpenPositionsCount').textContent = positions.length;
+                document.getElementById('paperWinRate').textContent = `${stats.global_win_rate.toFixed(1)}%`;
+                document.getElementById('paperTotalTrades').textContent = `${stats.total_trades} completed paper trades`;
+
+                renderPaperPositions(positions);
+
+                // Closed Paper Trades
+                const ordTable = document.getElementById('paperOrdersTable');
+                if (ordTable) {
+                    if (orders.length === 0) {
+                        ordTable.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--text-muted);">No closed paper trades yet.</td></tr>`;
+                    } else {
+                        ordTable.innerHTML = orders.map(o => {
+                            const isBuy = o.side === 'BUY';
+                            const dirBadge = `<span class="badge ${isBuy ? 'badge-long' : 'badge-short'}">${isBuy ? 'BUY' : 'SELL'}</span>`;
+                            const pnlColor = o.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+                            return `
+                                <tr>
+                                    <td>${o.id}</td>
+                                    <td>${o.strategy_name}</td>
+                                    <td>${o.symbol}</td>
+                                    <td>${dirBadge}</td>
+                                    <td>$${o.entry_price}</td>
+                                    <td>$${o.exit_price || '-'}</td>
+                                    <td style="color:${pnlColor}; font-weight:600;">${o.pnl >= 0 ? '+' : ''}$${(o.pnl || 0).toFixed(2)}</td>
+                                    <td>${o.exit_reason}</td>
+                                    <td>${o.exit_time || o.entry_time || ''}</td>
+                                </tr>
+                            `;
+                        }).join('');
+                    }
+                }
+            } catch (err) {
+                console.error("Error fetching paper data:", err);
+            }
+        }
+
+        async function fetchOverview() {
+            try {
+                const stratRes = await fetch('/api/strategies');
+                const strategies = await stratRes.json();
+                const table = document.getElementById('strategiesTable');
+                if (strategies.length === 0) {
+                    table.innerHTML = `<tr><td colspan="7" style="text-align:center;">No strategies registered.</td></tr>`;
+                } else {
+                    table.innerHTML = strategies.map(s => {
+                        const pos = s.open_position ? `<span class="badge ${s.open_position.type === 'LONG' ? 'badge-long' : 'badge-short'}">${s.open_position.type} @ $${s.open_position.entry_price}</span>` : '<span class="badge badge-neutral">FLAT</span>';
+                        return `
+                            <tr>
+                                <td><strong>${s.strategy_name}</strong></td>
+                                <td>${s.symbol}</td>
+                                <td>$${s.capital.toFixed(2)}</td>
+                                <td style="color:${s.return_pct >= 0 ? 'var(--green)' : 'var(--red)'}; font-weight:600;">${s.return_pct >= 0 ? '+' : ''}${s.return_pct.toFixed(2)}%</td>
+                                <td>${s.total_trades}</td>
+                                <td>${s.win_rate.toFixed(1)}%</td>
+                                <td>${pos}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            } catch (err) {
+                console.error("Error fetching overview:", err);
+            }
+        }
+
+        async function fetchAnalytics() {
+            try {
+                const res = await fetch('/api/portfolio/equity-curve');
+                const curve = await res.json();
+                const ctx = document.getElementById('equityChart').getContext('2d');
+                if (equityChartInstance) equityChartInstance.destroy();
+
+                const labels = curve.map(c => c.time ? new Date(c.time).toLocaleTimeString() : '');
+                const data = curve.map(c => c.capital);
+
+                equityChartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels.length ? labels : ['Start'],
+                        datasets: [{
+                            label: 'Portfolio Equity ($)',
+                            data: data.length ? data : [100],
+                            borderColor: '#06b6d4',
+                            backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                            fill: true,
+                            tension: 0.3
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { grid: { color: 'rgba(255, 255, 255, 0.04)' } },
+                            y: { grid: { color: 'rgba(255, 255, 255, 0.04)' } }
+                        }
+                    }
+                });
+            } catch (err) {
+                console.error("Error fetching analytics:", err);
+            }
+        }
+
+        async function fetchTrades() {
+            try {
+                const res = await fetch('/api/trades');
+                const trades = await res.json();
+                const table = document.getElementById('tradesLogTable');
+                if (trades.length === 0) {
+                    table.innerHTML = `<tr><td colspan="12" style="text-align:center;">No completed trades found.</td></tr>`;
+                } else {
+                    table.innerHTML = trades.map(t => `
+                        <tr>
+                            <td>#${t.id}</td>
+                            <td>${t.strategy_name}</td>
+                            <td>${t.symbol}</td>
+                            <td><span class="badge ${t.type === 'LONG' ? 'badge-long' : 'badge-short'}">${t.type}</span></td>
+                            <td>$${t.entry_price}</td>
+                            <td>$${t.exit_price}</td>
+                            <td>${t.size}</td>
+                            <td>$${(t.total_fees || 0).toFixed(4)}</td>
+                            <td style="color:${t.pnl >= 0 ? 'var(--green)' : 'var(--red)'}; font-weight:600;">${t.pnl >= 0 ? '+' : ''}$${(t.pnl || 0).toFixed(2)}</td>
+                            <td style="color:${t.return_pct >= 0 ? 'var(--green)' : 'var(--red)'};">${t.return_pct >= 0 ? '+' : ''}${(t.return_pct || 0).toFixed(2)}%</td>
+                            <td>${t.reason || 'Exit'}</td>
+                            <td>${t.exit_time || ''}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error("Error fetching trades:", err);
+            }
+        }
+
+        // ==========================================
+        // STRATEGY SIGNALS & EXECUTION CONTROLS PAGE
+        // ==========================================
+        async function fetchSignalsPage() {
+            try {
+                const [sigRes, stratRes, statsRes] = await Promise.all([
+                    fetch('/api/strategy/signals?limit=50'),
+                    fetch('/api/strategy/list'),
+                    fetch('/api/stats')
+                ]);
+
+                const signals = await sigRes.json();
+                const detailedStrats = await stratRes.json();
+                const stats = await statsRes.json();
+
+                // Compute aggregated counts across all strategies
+                let totalPaperOrders = 0;
+                let totalRealOrders = 0;
+                let totalStrategySignals = 0;
+                if (Array.isArray(detailedStrats)) {
+                    detailedStrats.forEach(s => {
+                        totalPaperOrders += s.paper_orders_count || 0;
+                        totalRealOrders += s.real_orders_count || 0;
+                        totalStrategySignals += s.total_signals || 0;
+                    });
+                }
+
+                // Update summary metric counters on top of tab
+                const sigCountEl = document.getElementById('sigStatCount');
+                const sigTotalEl = document.getElementById('sigStatTotal');
+                const sigPaperOrdEl = document.getElementById('sigStatPaperOrders');
+                const sigRealOrdEl = document.getElementById('sigStatRealOrders');
+
+                if (sigCountEl) sigCountEl.textContent = Array.isArray(detailedStrats) ? detailedStrats.length : 2;
+                if (sigTotalEl) sigTotalEl.textContent = Math.max(signals.length, totalStrategySignals);
+                if (sigPaperOrdEl) sigPaperOrdEl.textContent = totalPaperOrders;
+                if (sigRealOrdEl) sigRealOrdEl.textContent = totalRealOrders;
+
+                renderDetailedStrategyCards(detailedStrats);
+                renderDetailedStrategyTable(detailedStrats);
+                renderSignalsStream(signals);
+            } catch (err) {
+                console.error("Error loading signals page:", err);
+            }
+        }
+
+        function renderDetailedStrategyCards(strategies) {
+            const container = document.getElementById('strategyCardsContainer');
+            if (!container) return;
+
+            if (!strategies || strategies.length === 0) {
+                container.innerHTML = `<div class="card" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No configured strategies found.</div>`;
+                return;
+            }
+
+            container.innerHTML = strategies.map(s => {
+                const isPaper = Boolean(s.is_paper_enabled);
+                const isReal = Boolean(s.is_real_enabled);
+
+                let modeBadge = `<span class="badge" style="background: rgba(100, 116, 139, 0.2); color: var(--text-muted); border: 1px solid rgba(100, 116, 139, 0.4);">🔇 LOG ONLY (AUDIT)</span>`;
+                if (isPaper && isReal) {
+                    modeBadge = `<span class="badge" style="background: rgba(139, 92, 246, 0.2); color: var(--purple); border: 1px solid rgba(139, 92, 246, 0.4);">🔥 DUAL EXECUTION</span>`;
+                } else if (isPaper) {
+                    modeBadge = `<span class="badge badge-paper">📝 PAPER SIMULATION</span>`;
+                } else if (isReal) {
+                    modeBadge = `<span class="badge badge-short">⚡ REAL BROKER ONLY</span>`;
+                }
+
+                const symbolsHtml = (s.symbols || []).map(sym => 
+                    `<span class="badge" style="background:#18181b; border:1px solid var(--border); font-family:'JetBrains Mono'; font-size:0.7rem;">${sym}</span>`
+                ).join(' ');
+
+                let posText = `<span style="color: var(--text-muted); font-size: 0.8rem;">⚪ Flat (No open exposure)</span>`;
+                if (s.open_position) {
+                    const p = s.open_position;
+                    const isLong = (p.type || p.side || '').toUpperCase().includes('LONG') || (p.type || p.side || '').toUpperCase().includes('BUY');
+                    posText = `<span class="badge ${isLong ? 'badge-long' : 'badge-short'}">${isLong ? '🟢 LONG' : '🔴 SHORT'} ${p.size || 1} @ $${p.entry_price || p.price}</span>`;
+                }
+
+                const retColor = (s.return_pct || 0) >= 0 ? 'var(--green)' : 'var(--red)';
+                const retSign = (s.return_pct || 0) >= 0 ? '+' : '';
+
+                return `
+                    <div class="strategy-card">
+                        <div class="strategy-card-header">
+                            <div>
+                                <div class="strategy-title">
+                                    <span>⚙️ ${s.name}</span>
+                                    <span class="badge" style="background: rgba(6,182,212,0.15); color: var(--cyan); border: 1px solid rgba(6,182,212,0.3); font-family: 'JetBrains Mono'; font-size: 0.72rem;">⏱️ ${s.timeframe}</span>
+                                </div>
+                                <div class="strategy-desc">ID: <code>${s.strategy_id}</code></div>
+                                <div class="strategy-symbols-list">
+                                    ${symbolsHtml}
+                                </div>
+                            </div>
+                            <div>
+                                ${modeBadge}
+                            </div>
+                        </div>
+
+                        <div class="strategy-metrics-row">
+                            <div class="stat-box">
+                                <span class="stat-box-label">Signals</span>
+                                <span class="stat-box-value">${s.total_signals || 0}</span>
+                            </div>
+                            <div class="stat-box">
+                                <span class="stat-box-label">Paper Orders</span>
+                                <span class="stat-box-value" style="color: var(--green);">${s.paper_orders_count || 0}</span>
+                            </div>
+                            <div class="stat-box">
+                                <span class="stat-box-label">Real Orders</span>
+                                <span class="stat-box-value" style="color: var(--red);">${s.real_orders_count || 0}</span>
+                            </div>
+                            <div class="stat-box">
+                                <span class="stat-box-label">Win Rate</span>
+                                <span class="stat-box-value" style="color: ${retColor};">${(s.win_rate || 0).toFixed(1)}%</span>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; background: rgba(255,255,255,0.02); padding: 0.5rem 0.75rem; border-radius: 0.4rem; border: 1px solid rgba(255,255,255,0.04);">
+                            <div>
+                                <span style="color: var(--text-muted); font-size: 0.75rem;">Simulated Capital:</span>
+                                <strong style="font-family:'JetBrains Mono'; color:#fff; margin-left: 0.25rem;">$${(s.capital || 100).toFixed(2)}</strong>
+                                <span style="color: ${retColor}; font-size: 0.75rem; margin-left: 0.25rem;">(${retSign}${(s.return_pct || 0).toFixed(1)}%)</span>
+                            </div>
+                            <div>
+                                ${posText}
+                            </div>
+                        </div>
+
+                        <div class="strategy-footer-controls">
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <button class="toggle-btn ${isPaper ? 'active-paper' : ''}" onclick="toggleStrategyExecution('${s.strategy_id}', ${!isPaper}, ${isReal})" title="Toggle Paper Simulation execution for ${s.strategy_id}">
+                                    📝 Paper: ${isPaper ? 'ON' : 'OFF'}
+                                </button>
+                                <button class="toggle-btn ${isReal ? 'active-real' : ''}" onclick="toggleStrategyExecution('${s.strategy_id}', ${isPaper}, ${!isReal})" title="Toggle Real Broker execution for ${s.strategy_id}">
+                                    ⚡ Real: ${isReal ? 'ON' : 'OFF'}
+                                </button>
+                            </div>
+                            <span style="font-size: 0.72rem; color: var(--text-muted);">
+                                ${(!isPaper && !isReal) ? 'Signals are logged only (safe audit)' : (isReal ? 'Routes to Delta when armed' : 'Simulates trades in SQLite')}
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderDetailedStrategyTable(strategies) {
+            const tbody = document.getElementById('signalsStrategyMatrixBody');
+            if (!tbody) return;
+
+            if (!strategies || strategies.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No active strategy configurations found.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = strategies.map(s => {
+                const isPaper = Boolean(s.is_paper_enabled);
+                const isReal = Boolean(s.is_real_enabled);
+
+                const symbolsHtml = (s.symbols || []).map(sym => 
+                    `<span class="badge" style="background:#18181b; border:1px solid var(--border); font-family:'JetBrains Mono'; font-size:0.7rem;">${sym}</span>`
+                ).join(' ');
+
+                let posBadge = `<span class="badge badge-neutral">⚪ FLAT</span>`;
+                if (s.open_position) {
+                    const p = s.open_position;
+                    const isLong = (p.type || p.side || '').toUpperCase().includes('LONG') || (p.type || p.side || '').toUpperCase().includes('BUY');
+                    posBadge = `<span class="badge ${isLong ? 'badge-long' : 'badge-short'}">${isLong ? 'LONG' : 'SHORT'} (${p.size || '1'}) @ $${p.entry_price || p.price}</span>`;
+                }
+
+                const retColor = (s.return_pct || 0) >= 0 ? 'var(--green)' : 'var(--red)';
+                const retSign = (s.return_pct || 0) >= 0 ? '+' : '';
+
+                return `
+                    <tr>
+                        <td>
+                            <strong style="color:#fff;">${s.name}</strong>
+                            <div style="font-size:0.75rem; color:var(--text-muted); font-family:'JetBrains Mono';">${s.strategy_id}</div>
+                        </td>
+                        <td>
+                            <span class="badge" style="background:rgba(6,182,212,0.15); color:var(--cyan); border:1px solid rgba(6,182,212,0.3); font-family:'JetBrains Mono';">⏱️ ${s.timeframe}</span>
+                        </td>
+                        <td>${symbolsHtml}</td>
+                        <td style="font-family:'JetBrains Mono'; font-weight:700; font-size:0.95rem;">${s.total_signals || 0}</td>
+                        <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--green);">${s.paper_orders_count || 0}</td>
+                        <td style="font-family:'JetBrains Mono'; font-weight:700; color:var(--red);">${s.real_orders_count || 0}</td>
+                        <td>
+                            <div style="font-weight:600; color:${retColor};">${(s.win_rate || 0).toFixed(1)}%</div>
+                            <div style="font-size:0.75rem; color:var(--text-muted);">$${(s.capital || 100).toFixed(2)} (${retSign}${(s.return_pct || 0).toFixed(1)}%)</div>
+                        </td>
+                        <td>${posBadge}</td>
+                        <td>
+                            <div style="display:flex; gap:0.35rem; align-items:center;">
+                                <button class="toggle-btn ${isPaper ? 'active-paper' : ''}" style="padding:0.25rem 0.55rem; font-size:0.7rem;" onclick="toggleStrategyExecution('${s.strategy_id}', ${!isPaper}, ${isReal})" title="Toggle Paper for ${s.strategy_id}">
+                                    📝 Paper: ${isPaper ? 'ON' : 'OFF'}
+                                </button>
+                                <button class="toggle-btn ${isReal ? 'active-real' : ''}" style="padding:0.25rem 0.55rem; font-size:0.7rem;" onclick="toggleStrategyExecution('${s.strategy_id}', ${isPaper}, ${!isReal})" title="Toggle Real for ${s.strategy_id}">
+                                    ⚡ Real: ${isReal ? 'ON' : 'OFF'}
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function toggleStrategyExecution(strategyId, isPaper, isReal) {
+            try {
+                const res = await fetch('/api/strategy/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        strategy_id: strategyId,
+                        is_paper_enabled: Boolean(isPaper),
+                        is_real_enabled: Boolean(isReal)
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showStrategyToast(`✅ ${strategyId}: Paper=${isPaper ? 'ON' : 'OFF'}, Real=${isReal ? 'ON' : 'OFF'}`);
+                    fetchSignalsPage();
+                } else {
+                    alert(`Failed to update strategy: ${data.detail || JSON.stringify(data)}`);
+                }
+            } catch (err) {
+                console.error("Error toggling strategy execution:", err);
+                alert(`Network error toggling strategy: ${err.message}`);
+            }
+        }
+
+        function showStrategyToast(msg) {
+            const toast = document.getElementById('strategyToggleToast');
+            if (toast) {
+                toast.textContent = msg;
+                toast.style.display = 'inline-block';
+                setTimeout(() => {
+                    toast.style.display = 'none';
+                }, 4000);
+            }
+        }
+
+        async function triggerManualSignal() {
+            const strat = document.getElementById('manualSigStrategy').value;
+            const sym = document.getElementById('manualSigSymbol').value;
+            const dir = document.getElementById('manualSigDirection').value;
+            const price = parseFloat(document.getElementById('manualSigPrice').value) || 60000;
+            const feedbackEl = document.getElementById('manualSigFeedback');
+            const btn = document.getElementById('btnDispatchManualSig');
+
+            btn.disabled = true;
+            btn.textContent = 'Dispatching...';
+
+            try {
+                const res = await fetch('/api/strategy/trigger', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        strategy_name: strat,
+                        symbol: sym,
+                        signal_type: dir,
+                        price: price,
+                        confidence: 1.0
+                    })
+                });
+
+                const data = await res.json();
+                if (res.ok && data.status === 'success') {
+                    feedbackEl.style.display = 'block';
+                    feedbackEl.style.color = 'var(--green)';
+                    feedbackEl.innerHTML = `✅ <strong>Signal Executed!</strong> Strategy: <code>${data.strategy_name}</code> | Symbol: <code>${data.symbol}</code> | Mode: <strong>${data.mode}</strong> | Action: <code>${data.action}</code>`;
+                    fetchSignalsPage();
+                    fetchPaperData();
+                } else {
+                    feedbackEl.style.display = 'block';
+                    feedbackEl.style.color = 'var(--red)';
+                    feedbackEl.innerHTML = `❌ <strong>Execution Failed:</strong> ${data.detail || JSON.stringify(data)}`;
+                }
+            } catch (err) {
+                feedbackEl.style.display = 'block';
+                feedbackEl.style.color = 'var(--red)';
+                feedbackEl.innerHTML = `❌ <strong>Network Error:</strong> ${err.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🚀 Dispatch Signal';
+            }
+        }
+
+        async function fetchBrokerProfile() {
+            try {
+                const res = await fetch('/api/broker/profile');
+                const p = await res.json();
+                isAuthorized = p.is_authorized;
+                currentPublicIp = p.public_ip || '';
+
+                if (currentPublicIp) {
+                    document.getElementById('sbPublicIp').textContent = currentPublicIp;
+                    document.getElementById('adminPublicIpDisplay').textContent = currentPublicIp;
+                }
+
+                if (p.base_url) document.getElementById('profileBaseUrl').value = p.base_url;
+                if (p.client_id) document.getElementById('profileClientId').value = p.client_id;
+                if (p.api_key) document.getElementById('profileApiKey').value = p.api_key;
+
+                const authEl = document.getElementById('adminAuthBadge');
+                const authSub = document.getElementById('adminAuthSub');
+                if (isAuthorized) {
+                    authEl.textContent = 'VERIFIED & READY';
+                    authEl.style.color = 'var(--green)';
+                    authSub.textContent = 'HMAC authority verified on Delta Exchange';
+                } else {
+                    authEl.textContent = 'UNAUTHORIZED / UNTESTED';
+                    authEl.style.color = 'var(--amber)';
+                    authSub.textContent = 'Click Verify Authority below';
+                }
+
+                const modeText = document.getElementById('adminActiveModeText');
+                const modeSub = document.getElementById('adminModeSub');
+                if (p.execution_mode === 'LIVE') {
+                    modeText.textContent = 'REAL BROKER (LIVE)';
+                    modeText.style.color = 'var(--red)';
+                    modeSub.textContent = 'Live order execution enabled';
+                } else {
+                    modeText.textContent = 'PAPER SIMULATION';
+                    modeText.style.color = 'var(--green)';
+                    modeSub.textContent = 'Safe virtual testing';
+                }
+
+                const cfgRes = await fetch('/api/system/config');
+                const cfg = await cfgRes.json();
+                if (cfg.trade_capital_pct) document.getElementById('riskCapitalPct').value = cfg.trade_capital_pct;
+                if (cfg.risk_ratio) document.getElementById('riskStopLossRatio').value = (cfg.risk_ratio * 100).toFixed(1);
+                if (cfg.reward_ratio) document.getElementById('riskTakeProfitRatio').value = (cfg.reward_ratio * 100).toFixed(1);
+
+                // Populate Engine Pipeline Settings
+                const symInput = document.getElementById('pipelineSymbols');
+                if (symInput) {
+                    if (cfg.symbols_raw) symInput.value = cfg.symbols_raw;
+                    else if (Array.isArray(cfg.symbols)) symInput.value = cfg.symbols.join(',');
+                }
+
+                const stratInput = document.getElementById('pipelineStrategies');
+                if (stratInput) {
+                    if (cfg.strategies_raw) stratInput.value = cfg.strategies_raw;
+                    else if (Array.isArray(cfg.strategies)) stratInput.value = cfg.strategies.join(',');
+                }
+
+                const secInput = document.getElementById('pipelineScheduleSeconds');
+                if (secInput && cfg.batch_schedule_seconds) {
+                    secInput.value = cfg.batch_schedule_seconds;
+                }
+            } catch (err) {
+                console.error("Error fetching broker profile:", err);
+            }
+        }
+
+        async function saveBrokerProfile() {
+            const baseUrl = document.getElementById('profileBaseUrl').value.trim();
+            const clientId = parseInt(document.getElementById('profileClientId').value.trim(), 10) || 0;
+            const apiKey = document.getElementById('profileApiKey').value.trim();
+            const apiSecret = document.getElementById('profileApiSecret').value.trim();
+
+            if (!apiKey) {
+                alert("Please enter a valid API Key.");
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/broker/profile', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ base_url: baseUrl, client_id: clientId, api_key: apiKey, api_secret: apiSecret })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || "Failed to save profile");
+                }
+
+                showToast("💾 Broker credentials saved!");
+                document.getElementById('profileApiSecret').value = '';
+                await fetchBrokerProfile();
+            } catch (err) {
+                alert(`Error saving profile: ${err.message}`);
+            }
+        }
+
+        async function verifyBrokerAuthority() {
+            const btnSpinner = document.getElementById('verifyBtnSpinner');
+            const btnText = document.getElementById('verifyBtnText');
+            const alertBox = document.getElementById('profileVerifyAlert');
+            const icon = document.getElementById('profileVerifyIcon');
+            const msg = document.getElementById('profileVerifyMsg');
+
+            btnSpinner.textContent = '⏳';
+            btnText.textContent = 'Testing Delta API...';
+            alertBox.style.display = 'none';
+
+            const baseUrl = document.getElementById('profileBaseUrl').value.trim();
+            const clientId = parseInt(document.getElementById('profileClientId').value.trim(), 10) || 0;
+            const apiKey = document.getElementById('profileApiKey').value.trim();
+            const apiSecret = document.getElementById('profileApiSecret').value.trim();
+
+            try {
+                const payload = {};
+                if (baseUrl) payload.base_url = baseUrl;
+                if (clientId) payload.client_id = clientId;
+                if (apiKey) payload.api_key = apiKey;
+                if (apiSecret) payload.api_secret = apiSecret;
+
+                const res = await fetch('/api/broker/verify-auth', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+                alertBox.style.display = 'flex';
+
+                if (data.authorized) {
+                    alertBox.className = 'alert alert-success';
+                    icon.textContent = '✅';
+                    msg.innerHTML = `<strong>AUTHORITY VERIFIED!</strong> Latency: ${data.latency_ms} ms.<br>${data.message}`;
+                    document.getElementById('adminPingLatency').textContent = `${data.latency_ms} ms`;
+                    showToast(`✅ Delta API Connected (${data.latency_ms} ms)`);
+                } else {
+                    alertBox.className = 'alert alert-danger';
+                    icon.textContent = '❌';
+                    msg.innerHTML = `<strong>VERIFICATION FAILED:</strong> ${data.message}`;
+                }
+
+                await fetchBrokerProfile();
+            } catch (err) {
+                alertBox.style.display = 'flex';
+                alertBox.className = 'alert alert-danger';
+                icon.textContent = '❌';
+                msg.textContent = `Network error: ${err.message}`;
+            } finally {
+                btnSpinner.textContent = '⚡';
+                btnText.textContent = 'Verify Authority & Test Ping';
+            }
+        }
+
+        async function saveRiskParams() {
+            const cap = parseFloat(document.getElementById('riskCapitalPct').value.trim());
+            const sl = parseFloat(document.getElementById('riskStopLossRatio').value.trim());
+            const tp = parseFloat(document.getElementById('riskTakeProfitRatio').value.trim());
+
+            try {
+                const res = await fetch('/api/system/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ trade_capital_pct: cap, risk_ratio: sl / 100.0, reward_ratio: tp / 100.0 })
+                });
+                showToast("💾 Risk parameters saved!");
+            } catch (err) {
+                alert(`Error saving risk parameters: ${err.message}`);
+            }
+        }
+
+        async function savePipelineSettings() {
+            const sym = document.getElementById('pipelineSymbols').value.trim();
+            const strat = document.getElementById('pipelineStrategies').value.trim();
+            const sec = parseInt(document.getElementById('pipelineScheduleSeconds').value.trim(), 10) || 60;
+            const alertBox = document.getElementById('pipelineAlert');
+
+            if (!sym) {
+                alert("Please specify at least one trading symbol.");
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/system/pipeline-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbols: sym, strategies: strat, schedule_seconds: sec })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Failed to save pipeline settings');
+
+                showToast(`💾 Pipeline settings saved! Active: ${sym} (${sec}s)`);
+
+                if (alertBox) {
+                    alertBox.textContent = `✅ Saved! Active: ${sym} • Interval: ${sec}s`;
+                    alertBox.style.display = 'block';
+                    setTimeout(() => { alertBox.style.display = 'none'; }, 4500);
+                }
+
+                if (typeof fetchScheduleStatus === 'function') fetchScheduleStatus();
+                if (typeof fetchSignalsPage === 'function') fetchSignalsPage();
+            } catch (err) {
+                alert(`Error saving pipeline settings: ${err.message}`);
+            }
+        }
+
+        async function runBatchPipelineNow() {
+            const btnIcon = document.getElementById('runBatchBtnIcon');
+            const btnText = document.getElementById('runBatchBtnText');
+            const alertBox = document.getElementById('pipelineAlert');
+
+            if (btnIcon) btnIcon.textContent = '⏳';
+            if (btnText) btnText.textContent = 'Dispatching Pipeline...';
+
+            try {
+                const res = await fetch('/api/batch/run', { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Failed to run batch');
+
+                showToast("🚀 Pipeline batch task dispatched!");
+
+                if (alertBox) {
+                    alertBox.textContent = `🚀 Pipeline Dispatched! Task ID: ${data.task_id || 'OK'}`;
+                    alertBox.style.display = 'block';
+                    setTimeout(() => { alertBox.style.display = 'none'; }, 5000);
+                }
+            } catch (err) {
+                alert(`Error triggering batch: ${err.message}`);
+            } finally {
+                if (btnIcon) btnIcon.textContent = '⚡';
+                if (btnText) btnText.textContent = 'Run Batch Pipeline Now';
+            }
+        }
+
+        async function resetPaperBalancesPrompt() {
+            const capitalStr = prompt("Enter starting virtual capital per strategy account ($):", "100.0");
+            if (capitalStr === null) return;
+            const cap = parseFloat(capitalStr);
+            if (isNaN(cap) || cap < 10) {
+                alert("Starting capital must be at least $10.00.");
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/system/reset-paper', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ starting_capital: cap })
+                });
+                showToast("🔄 Virtual balances reset to $" + cap.toFixed(2));
+                refreshCurrentTab();
+            } catch (err) {
+                alert(`Error resetting paper balances: ${err.message}`);
+            }
+        }
+
+        async function handleSwitchToPaper() {
+            if (!isLiveEnabled) {
+                showToast("🟢 System is already in Paper Trading mode.");
+                return;
+            }
+
+            try {
+                await fetch('/api/broker/toggle-live', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: false })
+                });
+                showToast("🟢 Successfully reverted to Safe Paper Trading mode.");
+                await fetchBrokerProfile();
+                await fetchBrokerData();
+            } catch (err) {
+                alert(`Error: ${err.message}`);
+            }
+        }
+
+        function handleSwitchToReal() {
+            if (isLiveEnabled) {
+                showToast("🔴 Real Broker Live Trading is already active.");
+                return;
+            }
+
+            if (!isAuthorized) {
+                if (confirm("⚠️ Delta Exchange credentials have not been verified yet! Switch to Admin Control Panel to test authority?")) {
+                    switchTab('admin');
+                }
+                return;
+            }
+
+            openArmModal();
+        }
+
+        function openArmModal() {
+            document.getElementById('armModal').classList.add('open');
+            document.getElementById('armConfirmationInput').value = '';
+            document.getElementById('armConfirmationInput').focus();
+        }
+
+        function closeArmModal() {
+            document.getElementById('armModal').classList.remove('open');
+        }
+
+        async function confirmArmLiveTrading() {
+            const phrase = document.getElementById('armConfirmationInput').value.trim();
+            if (phrase !== "ARM LIVE TRADING") {
+                alert("Please type 'ARM LIVE TRADING' exactly to enable real order execution.");
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/broker/toggle-live', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: true, confirmation: phrase })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || "Failed to arm live trading");
+                }
+
+                closeArmModal();
+                showToast("🔴 LIVE TRADING IS ARMED & ACTIVE!");
+                await fetchBrokerProfile();
+                await fetchBrokerData();
+            } catch (err) {
+                alert(`Arming failed: ${err.message}`);
+            }
+        }
+
+        async function triggerEmergencyExit() {
+            if (!confirm("🚨 TRIGGER EMERGENCY KILL SWITCH?\n\nThis will immediately:\n1. Cancel ALL active orders on Delta Exchange\n2. Send market orders to close ALL open positions.\n\nProceed?")) {
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/broker/emergency-exit', { method: 'POST' });
+                const data = await res.json();
+                alert(`🚨 EMERGENCY EXIT EXECUTED!\nPositions closed: ${data.positions_closed}\nOrders cancelled: ${data.orders_cancelled}`);
+                refreshCurrentTab();
+            } catch (err) {
+                alert(`Emergency Exit failed: ${err.message}`);
+            }
+        }
+
+        async function executeSystemReset() {
+            const val = document.getElementById('resetInput').value.trim();
+            if (val !== 'RESET SYSTEM') {
+                alert("Please type 'RESET SYSTEM' to confirm wiping trading tables.");
+                return;
+            }
+
+            try {
+                await fetch('/api/system/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirmation: val })
+                });
+                alert("System successfully reset to clean state.");
+                document.getElementById('resetInput').value = '';
+                refreshCurrentTab();
+            } catch (err) {
+                alert(`Reset failed: ${err.message}`);
+            }
+        }
+
+        async function fetchLogs() {
+            try {
+                const res = await fetch('/api/logs?lines=300');
+                const data = await res.json();
+                allLogsText = data.logs || 'No log entries available.';
+                document.getElementById('logsContainer').textContent = allLogsText;
+            } catch (err) {
+                console.error("Error fetching logs:", err);
+            }
+        }
+
+        function filterLogs() {
+            const query = document.getElementById('logFilterInput').value.toLowerCase();
+            if (!query) {
+                document.getElementById('logsContainer').textContent = allLogsText;
+                return;
+            }
+            const lines = allLogsText.split('\n');
+            const filtered = lines.filter(l => l.toLowerCase().includes(query)).join('\n');
+            document.getElementById('logsContainer').textContent = filtered || 'No matching log entries.';
+        }
+
+        function exportTradesCSV() {
+            window.location.href = '/api/trades/export';
+        }
+
+        // URL hash listener for back/forward navigation
+        window.addEventListener('hashchange', () => {
+            const hash = window.location.hash.replace('#', '');
+            if (hash && hash !== currentTab) {
+                switchTab(hash);
+            }
+        });
+
+        // Initial Boot
+        window.addEventListener('DOMContentLoaded', () => {
+            restoreSidebarState();
+            initWebSocket();
+            const initialTab = window.location.hash.replace('#', '') || 'monitoring';
+            switchTab(initialTab);
+        });
+    </script>
+</body>
+</html>

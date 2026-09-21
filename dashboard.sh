@@ -21,7 +21,7 @@ fi
 
 echo "Starting Trading Dashboard server at $URL ..."
 
-uv run uvicorn app.dashboard.main:app --host "$HOST" --port "$PORT" &
+uv run uvicorn frontend.main:app --host "$HOST" --port "$PORT" &
 SERVER_PID=$!
 
 # Stop the server when this script exits (Ctrl+C, terminal close, etc.)

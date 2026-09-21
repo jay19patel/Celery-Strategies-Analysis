@@ -24,11 +24,11 @@ celery_app.conf.update(
     result_expires=settings.result_expires,
 )
 
-# Periodic schedule: run batch every N seconds
+# Periodic schedule: run batch heartbeat (interval managed dynamically in task)
 celery_app.conf.beat_schedule = {
     "run-batch-periodically": {
         "task": "run_all_batch_task",
-        "schedule": schedule(settings.schedule_seconds),
+        "schedule": schedule(10.0),
     },
     "run-master-backtester-portfolio-periodically": {
         "task": "run_portfolio_task",

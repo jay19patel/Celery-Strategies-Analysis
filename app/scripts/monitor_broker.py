@@ -1,23 +1,11 @@
 import time
 import os
-from datetime import datetime
-from pymongo import MongoClient
 from rich.console import Console
 from rich.table import Table
-from rich.layout import Layout
-from rich.panel import Panel
-from rich.live import Live
-from rich.align import Align
-from rich.text import Text
-from dotenv import load_dotenv
+from app.database.sqlite_adapter import get_collection
 
-load_dotenv()
-
-MONGO_URL = os.environ.get("MONGODB_URL", "mongodb://localhost:27017/")
-client = MongoClient(MONGO_URL)
-db = client.stockanalysis
-accounts_coll = db.broker_accounts
-trades_coll = db.broker_trades
+accounts_coll = get_collection("broker_accounts")
+trades_coll = get_collection("broker_trades")
 
 console = Console()
 

@@ -1,220 +1,29 @@
-import os
-import threading
+"""Legacy compatibility module.
 
-from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure
-from typing import Dict, Any, Optional
-from datetime import datetime, timezone
-from app.core.settings import settings
-from app.core.logger import get_mongodb_logger
+Re-exports SQLite collection adapters from app.database.sqlite_adapter.
+All new code should import directly from app.database.sqlite_adapter.
+"""
 
-logger = get_mongodb_logger()
+from app.database.sqlite_adapter import (
+    DatabaseConnection,
+    MongoDBConnection,
+    SQLiteCollectionAdapter,
+    SQLiteCursor,
+    get_collection,
+    get_database,
+    get_latest_batch_results,
+    get_symbol_results,
+    save_batch_results,
+)
 
-
-class MongoDBConnection:
-    """
-    Fork-safe MongoDB connection manager.
-    Creates one connection per process (tracked by PID) to avoid
-    shared socket corruption in Celery's prefork worker model.
-    """
-    _lock = threading.Lock()
-    _client: Optional[MongoClient] = None
-    _db = None
-    _pid: Optional[int] = None
-
-    @classmethod
-    def get_database(cls):
-        """Get database instance, reconnecting if we're in a forked process."""
-        current_pid = os.getpid()
-        if cls._db is None or cls._pid != current_pid:
-            with cls._lock:
-                # Double-check after acquiring lock
-                if cls._db is None or cls._pid != current_pid:
-                    cls._connect(current_pid)
-        return cls._db
-
-    @classmethod
-    def get_collection(cls, collection_name: str):
-        """Get collection instance"""
-        return cls.get_database()[collection_name]
-
-    @classmethod
-    def _connect(cls, pid: int):
-        """Establish MongoDB connection and setup indexes"""
-        try:
-            logger.info("🔌 Initializing MongoDB connection...")
-
-            # Close stale connection from parent process if any
-            if cls._client is not None:
-                try:
-                    cls._client.close()
-                except Exception:
-                    pass
-
-            cls._client = MongoClient(
-                settings.mongodb_uri,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=5000,
-                socketTimeoutMS=30000,
-                maxPoolSize=50,
-                minPoolSize=10,
-                retryWrites=True,
-                retryReads=True
-            )
-
-            # Test connection
-            cls._client.admin.command('ping')
-
-            # Get database
-            db_name = settings.mongodb_uri.split('/')[-1].split('?')[0] or 'stockanalysis'
-            cls._db = cls._client[db_name]
-            cls._pid = pid
-
-            # Create indexes only once per connection
-            cls._setup_indexes()
-
-            logger.info(f"✅ MongoDB connected successfully | Database: {db_name} | PID: {pid}")
-
-        except ConnectionFailure as e:
-            logger.error(f"❌ MongoDB connection failed: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"❌ MongoDB initialization error: {str(e)}")
-            raise
-
-    @classmethod
-    def _setup_indexes(cls):
-        """Create necessary indexes for optimal performance"""
-        try:
-            collection = cls._db['batch_results']
-
-            # Index on created_at for time-based queries
-            collection.create_index([('created_at', -1)], background=True)
-
-            # Index on batch execution metadata
-            collection.create_index([('summary.total_symbols', 1)], background=True)
-
-            # Compound index for symbol-based queries
-            collection.create_index([
-                ('results.symbol', 1),
-                ('created_at', -1)
-            ], background=True)
-
-            logger.info("✅ MongoDB indexes created successfully")
-
-        except Exception as e:
-            logger.error(f"⚠️  Error creating indexes: {str(e)}")
-            # Don't fail on index creation errors
-
-    @classmethod
-    def close(cls):
-        """Close MongoDB connection"""
-        if cls._client:
-            cls._client.close()
-            cls._client = None
-            cls._db = None
-            cls._pid = None
-            logger.info("🔌 MongoDB connection closed")
-
-
-def get_database():
-    """Get MongoDB database instance"""
-    return MongoDBConnection.get_database()
-
-
-def get_collection(collection_name: str):
-    """Get MongoDB collection instance"""
-    return MongoDBConnection.get_collection(collection_name)
-
-
-def save_batch_results(batch_data: Dict[str, Any]):
-    """
-    Save batch execution results to MongoDB
-
-    Args:
-        batch_data: Dictionary containing batch results and summary
-
-    Returns:
-        ObjectId of inserted document
-    """
-    try:
-        collection = get_collection('batch_results')
-
-        # Add metadata
-        document = {
-            **batch_data,
-            "created_at": datetime.now(timezone.utc)
-        }
-
-        # Insert document
-        result = collection.insert_one(document)
-
-        logger.info(
-            f"💾 Batch saved to MongoDB | "
-            f"ID: {result.inserted_id} | "
-            f"Symbols: {batch_data.get('summary', {}).get('total_symbols')} | "
-            f"Results: {batch_data.get('summary', {}).get('total_results')}"
-        )
-
-        return result.inserted_id
-
-    except Exception as e:
-        logger.error(f"❌ Error saving batch to MongoDB: {str(e)}", exc_info=True)
-        raise
-
-
-def get_latest_batch_results(limit: int = 10):
-    """
-    Retrieve latest batch results from MongoDB
-
-    Args:
-        limit: Maximum number of results to return
-
-    Returns:
-        List of batch result documents
-    """
-    try:
-        collection = get_collection('batch_results')
-
-        results = list(
-            collection.find()
-            .sort('created_at', -1)
-            .limit(limit)
-        )
-
-        logger.info(f"📥 Retrieved {len(results)} batch results from MongoDB")
-
-        return results
-
-    except Exception as e:
-        logger.error(f"❌ Error retrieving batches from MongoDB: {str(e)}")
-        raise
-
-
-def get_symbol_results(symbol: str, limit: int = 10):
-    """
-    Retrieve results for a specific symbol
-
-    Args:
-        symbol: Stock/crypto symbol to query
-        limit: Maximum number of results to return
-
-    Returns:
-        List of results for the symbol
-    """
-    try:
-        collection = get_collection('batch_results')
-
-        results = list(
-            collection.find({'results.symbol': symbol})
-            .sort('created_at', -1)
-            .limit(limit)
-        )
-
-        logger.info(f"📥 Retrieved {len(results)} results for symbol: {symbol}")
-
-        return results
-
-    except Exception as e:
-        logger.error(f"❌ Error retrieving results for {symbol}: {str(e)}")
-        raise
+__all__ = [
+    "DatabaseConnection",
+    "MongoDBConnection",
+    "SQLiteCollectionAdapter",
+    "SQLiteCursor",
+    "get_collection",
+    "get_database",
+    "get_latest_batch_results",
+    "get_symbol_results",
+    "save_batch_results",
+]

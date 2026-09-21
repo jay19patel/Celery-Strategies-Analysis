@@ -1,21 +1,43 @@
 [project]
 name = "stockanalysis"
 version = "0.1.0"
-description = "Add your description here"
+description = "High-performance crypto strategy analysis, paper trading, and real broker execution system"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "celery>=5.5.3",
+    "delta-rest-client>=1.0.13",
     "fastapi>=0.139.2",
     "msgpack>=1.1.0",
     "pandas-ta>=0.4.71b0",
-    "python-dotenv>=1.1.1",
+    "psutil>=5.9.0",
     "pydantic>=2.12.0",
     "pydantic-settings>=2.11.0",
-    "pymongo>=4.15.3",
+    "python-dotenv>=1.1.1",
+    "pyzmq>=27.2.0",
     "redis>=6.4.0",
     "requests>=2.32.0",
     "rich>=15.0.0",
     "scipy>=1.18.0",
     "uvicorn>=0.51.0",
+    "websocket-client>=1.9.0",
+    "websockets>=17.1",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.28.0",
+    "pytest>=8.0.0",
+    "pytest-mock>=3.0.0",
+    "ruff>=0.5.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+addopts = "-v"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120

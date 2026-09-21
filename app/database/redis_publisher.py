@@ -1,11 +1,13 @@
-import redis
 import json
 import os
 import threading
-from typing import Dict, Any, Optional
-from datetime import datetime, timezone
-from app.core.settings import settings
+from datetime import UTC, datetime
+from typing import Any
+
+import redis
+
 from app.core.logger import get_redis_logger
+from app.core.settings import settings
 
 logger = get_redis_logger()
 
@@ -16,8 +18,8 @@ class RedisPublisher:
     Ensures only one connection per process by tracking PID.
     """
     _lock = threading.Lock()
-    _client: Optional[redis.Redis] = None
-    _pid: Optional[int] = None
+    _client: redis.Redis | None = None
+    _pid: int | None = None
 
     @classmethod
     def get_client(cls) -> redis.Redis:
@@ -57,14 +59,14 @@ class RedisPublisher:
             logger.info(f"✅ Redis Pub/Sub connected successfully | PID: {pid}")
 
         except redis.ConnectionError as e:
-            logger.error(f"❌ Redis connection failed: {str(e)}")
+            logger.error(f"❌ Redis connection failed: {e!s}")
             raise
         except Exception as e:
-            logger.error(f"❌ Redis initialization error: {str(e)}")
+            logger.error(f"❌ Redis initialization error: {e!s}")
             raise
 
     @classmethod
-    def publish(cls, channel: str, message: Dict[str, Any]) -> int:
+    def publish(cls, channel: str, message: dict[str, Any]) -> int:
         """
         Publish message to Redis channel
         """
@@ -72,7 +74,7 @@ class RedisPublisher:
             # Add metadata
             message_with_meta = {
                 **message,
-                "published_at": datetime.now(timezone.utc).isoformat(),
+                "published_at": datetime.now(UTC).isoformat(),
                 "channel": channel
             }
 
@@ -92,7 +94,7 @@ class RedisPublisher:
             return subscriber_count
 
         except Exception as e:
-            logger.error(f"❌ Error publishing to '{channel}': {str(e)}", exc_info=True)
+            logger.error(f"❌ Error publishing to '{channel}': {e!s}", exc_info=True)
             raise
 
     @classmethod
@@ -110,14 +112,14 @@ def get_redis_client() -> redis.Redis:
     return RedisPublisher.get_client()
 
 
-def publish_message(channel: str, message: Dict[str, Any]) -> int:
+def publish_message(channel: str, message: dict[str, Any]) -> int:
     """
     Publish message to Redis channel
     """
     return RedisPublisher.publish(channel, message)
 
 
-def publish_batch_complete(batch_data: Dict[str, Any]) -> Dict[str, Any]:
+def publish_batch_complete(batch_data: dict[str, Any]) -> dict[str, Any]:
     """
     Publish batch completion notification
     """
@@ -129,16 +131,16 @@ def publish_batch_complete(batch_data: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "channel": channel,
             "subscriber_count": subscriber_count,
-            "published_at": datetime.now(timezone.utc).isoformat(),
+            "published_at": datetime.now(UTC).isoformat(),
             "status": "success"
         }
         
     except Exception as e:
-        logger.error(f"❌ Error publishing batch complete: {str(e)}")
+        logger.error(f"❌ Error publishing batch complete: {e!s}")
         return {
             "channel": settings.pubsub_channel_batch,
             "subscriber_count": 0,
-            "published_at": datetime.now(timezone.utc).isoformat(),
+            "published_at": datetime.now(UTC).isoformat(),
             "status": "failed",
             "error": str(e)
         }

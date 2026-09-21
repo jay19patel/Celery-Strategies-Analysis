@@ -12,17 +12,32 @@ x-common-env: &common-env
   REDIS_RESULT_URL: redis://redis:6379/1
   REDIS_PUBSUB_URL: redis://redis:6379/2
   
-  # MongoDB Configuration (local container, no external Atlas/DNS dependency)
-  MONGODB_URL: mongodb://mongo:27017/stockanalysis
+  # SQLite Database (Lightweight, embedded, zero MongoDB container dependency)
+  SQLITE_DB_PATH: /app/data/stockanalysis.db
   
   # Application Configuration
-  SYMBOLS: ETHUSD,BTCUSD
+  SYMBOLS: BTC-USD,ETH-USD,SOL-USD
   STRATEGIES: "*"
   SCHEDULE_SECONDS: 600
   TZ: Asia/Kolkata
   
+  # Execution Mode: "PAPER" or "LIVE"
+  EXECUTION_MODE: PAPER
+  LIVE_TRADING_ARMED: "false"
+  
+  # Delta Exchange Broker Integration (Optional live execution)
+  DELTA_BASE_URL: https://api.india.delta.exchange
+  DELTA_WEBSOCKET_URL: wss://socket.india.delta.exchange
+  DELTA_API_KEY: ""
+  DELTA_API_SECRET: ""
+  DELTA_CLIENT_ID: "0"
+  TRADE_CAPITAL_PCT: "30.0"
+  RISK_RATIO: "0.01"
+  REWARD_RATIO: "0.015"
+  
   # Redis Pub/Sub Channels
   PUBSUB_CHANNEL_BATCH: stockanalysis:batch_complete
+  PUBSUB_CHANNEL_STRATEGY: stockanalysis:strategy_result
   
   # Celery Configuration
   TIMEZONE: Asia/Kolkata
@@ -53,23 +68,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # MongoDB for persisting strategy/batch results
-  mongo:
-    image: mongo:7
-    container_name: stockanalysis-mongo
-    logging: *default-logging
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok' || exit 1"]
-      interval: 15s
-      timeout: 30s
-      retries: 5
-      start_period: 30s
-
   # Flower for Celery monitoring
   flower:
     image: mher/flower:latest
@@ -95,12 +93,10 @@ services:
       <<: *common-env
     volumes:
       - .:/app
-      - /app/.venv
       - ./logs:/app/logs
+      - ./data:/app/data
     depends_on:
       redis:
-        condition: service_healthy
-      mongo:
         condition: service_healthy
     restart: unless-stopped
 
@@ -114,12 +110,10 @@ services:
       <<: *common-env
     volumes:
       - .:/app
-      - /app/.venv
       - ./logs:/app/logs
+      - ./data:/app/data
     depends_on:
       redis:
-        condition: service_healthy
-      mongo:
         condition: service_healthy
     restart: unless-stopped
 
@@ -128,25 +122,20 @@ services:
     build: .
     container_name: stockanalysis-dashboard
     logging: *default-logging
-    command: uvicorn app.dashboard.main:app --host 0.0.0.0 --port 8080
+    command: uvicorn frontend.main:app --host 0.0.0.0 --port 8080
     environment:
       <<: *common-env
     ports:
       - "8080:8080"
     volumes:
       - .:/app
-      - /app/.venv
       - ./logs:/app/logs
+      - ./data:/app/data
     depends_on:
       redis:
-        condition: service_healthy
-      mongo:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
   redis_data:
     driver: local
-  mongo_data:
-    driver: local
-
