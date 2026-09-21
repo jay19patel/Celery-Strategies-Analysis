@@ -152,28 +152,126 @@ def _check_sqlite() -> Dict[str, Any]:
 
 
 def _check_celery_workers() -> Dict[str, Any]:
-    """Check active Celery workers and inspect registered tasks."""
+    """Check active Celery workers, pool concurrency, processes, and queue depth."""
     try:
         from app.core.celery_app import celery_app
 
         inspect = celery_app.control.inspect(timeout=1.0)
         ping_res = inspect.ping() if inspect else None
+        stats_res = inspect.stats() if inspect else None
+        active_res = inspect.active() if inspect else None
+        registered_res = inspect.registered() if inspect else None
+
+        # Check Redis queue depth for Celery
+        queue_depth = 0
+        try:
+            import redis
+            from app.core.settings import settings
+            r = redis.Redis.from_url(settings.redis_broker_url)
+            queue_depth = r.llen("celery")
+        except Exception:
+            queue_depth = 0
+
         if not ping_res:
             return {
                 "status": "warn",
                 "active_workers_count": 0,
                 "workers": [],
+                "worker_nodes": [],
+                "queue_depth": queue_depth,
+                "registered_tasks": [],
+                "active_tasks": [],
+                "total_tasks_completed": 0,
                 "message": "No active Celery workers responded to ping",
             }
 
         worker_names = list(ping_res.keys())
+        worker_nodes = []
+        total_tasks_all = 0
+
+        for w_name in worker_names:
+            stat = (stats_res or {}).get(w_name, {})
+            pool_info = stat.get("pool", {})
+            processes = pool_info.get("processes", [])
+            concurrency = pool_info.get("max-concurrency", len(processes))
+            uptime = stat.get("uptime", 0)
+            total_tasks = stat.get("total", {})
+            rusage = stat.get("rusage", {})
+            maxrss_kb = rusage.get("maxrss", 0)
+            memory_mb = round(maxrss_kb / 1024.0, 1) if maxrss_kb else 0.0
+            node_completed = sum(total_tasks.values()) if isinstance(total_tasks, dict) else 0
+            total_tasks_all += node_completed
+
+            worker_nodes.append({
+                "name": w_name,
+                "status": "ONLINE",
+                "pool": pool_info.get("implementation", "prefork").split(".")[-1],
+                "concurrency": concurrency,
+                "processes": processes,
+                "uptime_seconds": uptime,
+                "memory_rss_mb": memory_mb,
+                "total_tasks_completed": node_completed,
+                "tasks_breakdown": total_tasks if isinstance(total_tasks, dict) else {},
+                "active_tasks_count": len((active_res or {}).get(w_name, [])),
+            })
+
+        all_registered = []
+        if registered_res:
+            for task_list in registered_res.values():
+                for t in task_list:
+                    if t not in all_registered:
+                        all_registered.append(t)
+
+        all_active = []
+        if active_res:
+            for t_list in active_res.values():
+                all_active.extend(t_list)
+
         return {
             "status": "pass",
             "active_workers_count": len(worker_names),
             "workers": worker_names,
+            "worker_nodes": worker_nodes,
+            "total_concurrency": sum(node["concurrency"] for node in worker_nodes),
+            "total_processes_count": sum(len(node["processes"]) for node in worker_nodes),
+            "queue_depth": queue_depth,
+            "registered_tasks": all_registered,
+            "active_tasks": all_active,
+            "total_tasks_completed": total_tasks_all,
         }
     except Exception as exc:
-        return {"status": "unknown", "error": str(exc), "active_workers_count": 0}
+        return {
+            "status": "unknown",
+            "error": str(exc),
+            "active_workers_count": 0,
+            "workers": [],
+            "worker_nodes": [],
+            "queue_depth": 0,
+        }
+
+
+def _check_websocket() -> Dict[str, Any]:
+    """Check Delta WebSocket connection status and telemetry."""
+    try:
+        from app.broker.delta.websocket import get_delta_websocket_client
+
+        ws_client = get_delta_websocket_client()
+        status = ws_client.get_status()
+        status["status"] = "pass" if status.get("is_connected") else ("idle" if not status.get("is_configured") else "warn")
+        return status
+    except Exception as exc:
+        return {"status": "unknown", "error": str(exc), "is_connected": False}
+
+
+def _check_zeromq() -> Dict[str, Any]:
+    """Check ZeroMQ event bus status and telemetry."""
+    try:
+        from app.core.event_bus import get_event_bus
+
+        bus = get_event_bus()
+        return bus.get_status()
+    except Exception as exc:
+        return {"status": "unknown", "error": str(exc), "port": 5557, "packets_published": 0}
 
 
 def _check_batch_staleness() -> Dict[str, Any]:
@@ -260,6 +358,8 @@ def _collect_all_metrics() -> Dict[str, Any]:
     celery_info = _check_celery_workers()
     batch_info = _check_batch_staleness()
     trading_info = _check_trading_status()
+    websocket_info = _check_websocket()
+    zeromq_info = _check_zeromq()
 
     # Determine overall status
     statuses = [
@@ -284,6 +384,8 @@ def _collect_all_metrics() -> Dict[str, Any]:
         "celery": celery_info,
         "batch_staleness": batch_info,
         "trading": trading_info,
+        "websocket": websocket_info,
+        "zeromq": zeromq_info,
     }
 
 

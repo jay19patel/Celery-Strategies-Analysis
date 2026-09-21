@@ -29,6 +29,8 @@ class ZeroMQEventBus:
         self._lock = threading.Lock()
         self._latest_snapshot: dict[str, Any] = {}
         self._is_initialized = False
+        self._published_count: int = 0
+        self._last_published_at: str | None = None
 
     def start_publisher(self) -> None:
         """Bind publisher socket to localhost."""
@@ -51,7 +53,11 @@ class ZeroMQEventBus:
 
     def publish(self, topic: str, data: dict[str, Any]) -> None:
         """Publish an event to all subscribers non-blockingly."""
+        from datetime import UTC, datetime
+
         self._latest_snapshot[topic] = data
+        self._published_count += 1
+        self._last_published_at = datetime.now(UTC).isoformat()
         if not self._pub_socket or zmq is None:
             return
 
@@ -65,6 +71,19 @@ class ZeroMQEventBus:
     def get_latest(self, topic: str) -> dict[str, Any] | None:
         """Get the latest cached snapshot for a topic instantly without querying OS/DB."""
         return self._latest_snapshot.get(topic)
+
+    def get_status(self) -> dict[str, Any]:
+        """Get live health and telemetry status of the ZeroMQ event bus."""
+        return {
+            "status": "pass" if self._is_initialized else ("fallback" if zmq is None else "idle"),
+            "port": self.telemetry_port,
+            "mode": "ZeroMQ PUB/SUB" if self._is_initialized else "In-Memory EventBus",
+            "is_bound": self._is_initialized,
+            "packets_published": self._published_count,
+            "last_published_at": self._last_published_at,
+            "topics": list(self._latest_snapshot.keys()),
+            "cached_topics_count": len(self._latest_snapshot),
+        }
 
 
 _event_bus: ZeroMQEventBus | None = None

@@ -44,6 +44,12 @@ class DeltaWebSocketClient:
         self.ws: websocket.WebSocketApp | None = None
         self._thread: threading.Thread | None = None
         self._running: bool = False
+        self._is_connected: bool = False
+        self._messages_received: int = 0
+        self._last_message_at: str | None = None
+        self._last_error: str | None = None
+        self._reconnect_count: int = 0
+        self._subscribed_channels: list[str] = ["orders", "positions"]
         self.db = get_sqlite_db()
         self.delta_client = DeltaClient()
 
@@ -88,6 +94,7 @@ class DeltaWebSocketClient:
 
     def _on_open(self, ws: websocket.WebSocketApp) -> None:
         """Handle connection open event: subscribe to orders and positions."""
+        self._is_connected = True
         logger.info("✅ Delta WebSocket connected. Sending subscription payload...")
         sub_payload = {
             "type": "subscribe",
@@ -102,6 +109,10 @@ class DeltaWebSocketClient:
 
     def _on_message(self, ws: websocket.WebSocketApp, message: str) -> None:
         """Handle incoming WebSocket messages."""
+        from datetime import UTC, datetime
+
+        self._messages_received += 1
+        self._last_message_at = datetime.now(UTC).isoformat()
         try:
             data = json.loads(message)
             channel = data.get("type", "")
@@ -196,8 +207,36 @@ class DeltaWebSocketClient:
 
     def _on_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
         """Handle WebSocket error."""
+        self._last_error = str(error)
         logger.error(f"Delta WebSocket error: {error}")
 
     def _on_close(self, ws: websocket.WebSocketApp, close_status_code: Any, close_msg: Any) -> None:
         """Handle WebSocket closure."""
+        self._is_connected = False
+        self._reconnect_count += 1
         logger.info(f"Delta WebSocket connection closed: code={close_status_code}, msg={close_msg}")
+
+    def get_status(self) -> dict[str, Any]:
+        """Return real-time connection status and telemetry metrics."""
+        return {
+            "is_configured": bool(self.api_key and self.api_secret),
+            "is_running": self._running,
+            "is_connected": self._is_connected,
+            "ws_url": self.ws_url,
+            "subscribed_channels": self._subscribed_channels,
+            "messages_received": self._messages_received,
+            "last_message_at": self._last_message_at,
+            "reconnect_count": self._reconnect_count,
+            "last_error": self._last_error,
+        }
+
+
+_delta_ws_client: DeltaWebSocketClient | None = None
+
+
+def get_delta_websocket_client() -> DeltaWebSocketClient:
+    """Singleton accessor for DeltaWebSocketClient."""
+    global _delta_ws_client
+    if _delta_ws_client is None:
+        _delta_ws_client = DeltaWebSocketClient()
+    return _delta_ws_client

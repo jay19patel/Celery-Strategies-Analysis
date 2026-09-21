@@ -68,20 +68,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Flower for Celery monitoring
-  flower:
-    image: mher/flower:latest
-    container_name: stockanalysis-flower
-    logging: *default-logging
-    ports:
-      - "5555:5555"
-    environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
 
   # Celery worker for task execution
   worker:

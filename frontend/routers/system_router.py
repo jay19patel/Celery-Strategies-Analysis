@@ -148,3 +148,42 @@ def trigger_batch_now() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.get("/api/system/celery")
+def get_celery_cluster_status() -> dict[str, Any]:
+    """Retrieve detailed Celery worker nodes, concurrency, child processes, queues, and tasks."""
+    try:
+        from app.core.celery_app import celery_app
+        from app.core.health_monitor import _check_celery_workers
+
+        cluster = _check_celery_workers()
+        beat_tasks = []
+        for name, entry in celery_app.conf.beat_schedule.items():
+            beat_tasks.append({
+                "name": name,
+                "task": entry.get("task"),
+                "schedule": str(entry.get("schedule")),
+            })
+        cluster["scheduled_beat_tasks"] = beat_tasks
+        return cluster
+    except Exception as exc:
+        logger.exception("Failed to fetch Celery cluster metrics")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/api/system/telemetry")
+def get_system_telemetry() -> dict[str, Any]:
+    """Retrieve combined real-time telemetry: Celery, WebSocket, and ZeroMQ streams."""
+    try:
+        from app.core.health_monitor import _check_celery_workers, _check_websocket, _check_zeromq
+
+        return {
+            "celery": _check_celery_workers(),
+            "websocket": _check_websocket(),
+            "zeromq": _check_zeromq(),
+        }
+    except Exception as exc:
+        logger.exception("Failed to fetch system telemetry")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+

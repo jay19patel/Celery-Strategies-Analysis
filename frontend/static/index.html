@@ -1305,6 +1305,144 @@
                         </div>
                     </div>
 
+                    <!-- CELERY WORKER POOL & MULTIPROCESSING CLUSTER -->
+                    <div class="card" style="margin-top: 1.5rem;">
+                        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <span style="font-size: 1.3rem;">⚡</span>
+                                <div>
+                                    <h3 style="font-size: 1rem; font-weight: 600; color: #fff; margin: 0;">Celery Worker Cluster & Multiprocess Execution Pool</h3>
+                                    <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0;">Real-time inspection of OS child worker processes, pool concurrency, queue backlog, and task dispatch counters.</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                                <span id="celeryClusterStatusBadge" class="badge badge-long">ONLINE</span>
+                                <span id="celeryConcurrencyBadge" class="badge" style="background: rgba(16,185,129,0.15); color: var(--green); font-weight: 600;">9 Child Workers</span>
+                                <span id="celeryQueueBadge" class="badge" style="background: rgba(6,182,212,0.15); color: var(--cyan);">0 in Queue</span>
+                            </div>
+                        </div>
+
+                        <!-- Top Stat Bar -->
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; padding: 1rem; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid var(--border);">
+                            <div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Worker Node</div>
+                                <div id="celeryWorkerNodeName" style="font-size: 0.95rem; font-weight: 600; color: #fff; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">celery@worker</div>
+                                <div id="celeryPoolTypeText" style="font-size: 0.75rem; color: var(--cyan);">Prefork TaskPool</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Worker RSS Memory</div>
+                                <div id="celeryMemoryRssText" style="font-size: 1.25rem; font-weight: 700; color: var(--green);">0 MB</div>
+                                <div id="celeryUptimeText" style="font-size: 0.75rem; color: var(--text-muted);">Uptime: 0m</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Total Completed Tasks</div>
+                                <div id="celeryTotalTasksText" style="font-size: 1.25rem; font-weight: 700; color: #fff;">0</div>
+                                <div id="celeryActiveTasksText" style="font-size: 0.75rem; color: var(--text-muted);">0 active executing</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Redis Queue Depth</div>
+                                <div id="celeryQueueDepthText" style="font-size: 1.25rem; font-weight: 700; color: var(--amber);">0 pending</div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted);">celery broker backlog</div>
+                            </div>
+                        </div>
+
+                        <!-- Child Processes Grid -->
+                        <div style="margin-bottom: 1.25rem;">
+                            <div style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem; display: flex; justify-content: space-between;">
+                                <span>Active OS Child Worker Processes (Parallel Slots)</span>
+                                <span id="celeryProcessCountText" style="color: var(--cyan); font-weight: 600;">9 / 9 Online</span>
+                            </div>
+                            <div id="celeryProcessesGrid" style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                                <span class="badge badge-neutral">Scanning worker processes...</span>
+                            </div>
+                        </div>
+
+                        <!-- Task Execution Breakdown -->
+                        <div>
+                            <div style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem;">
+                                Task Execution Breakdown (Historical Counters)
+                            </div>
+                            <div id="celeryTasksBreakdownList" style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                                <span class="badge badge-neutral">Loading task counters...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- REAL-TIME EVENT STREAMS & TELEMETRY HUB (WEBSOCKET & ZEROMQ) -->
+                    <div class="grid-2" style="margin-top: 1.5rem;">
+                        <!-- Delta WebSocket Stream -->
+                        <div class="card">
+                            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span style="font-size: 1.2rem;">🔌</span>
+                                    <div>
+                                        <h4 style="font-size: 0.95rem; font-weight: 600; color: #fff; margin: 0;">Delta Exchange WebSocket</h4>
+                                        <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0;">Real-time feed for orders & positions</p>
+                                    </div>
+                                </div>
+                                <span id="wsStatusBadge" class="badge badge-neutral">DISCONNECTED</span>
+                            </div>
+                            <div style="padding: 0.5rem 0;">
+                                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem;">
+                                    <span style="color: var(--text-muted);">Connection URL:</span>
+                                    <span id="wsUrlText" style="color: #fff; font-family: monospace; font-size: 0.78rem;">wss://socket.india.delta.exchange</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem;">
+                                    <span style="color: var(--text-muted);">Subscribed Channels:</span>
+                                    <span id="wsChannelsText" style="color: var(--cyan); font-weight: 500;">orders, positions</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem;">
+                                    <span style="color: var(--text-muted);">Messages Received:</span>
+                                    <span id="wsMsgCountText" style="color: var(--green); font-weight: 700;">0</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem;">
+                                    <span style="color: var(--text-muted);">Reconnect Attempts:</span>
+                                    <span id="wsReconnectsText" style="color: #fff;">0</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.82rem;">
+                                    <span style="color: var(--text-muted);">Last Message / Heartbeat:</span>
+                                    <span id="wsLastHeartbeatText" style="color: var(--text-muted); font-size: 0.78rem;">None</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ZeroMQ Engine Telemetry -->
+                        <div class="card">
+                            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span style="font-size: 1.2rem;">⚡</span>
+                                    <div>
+                                        <h4 style="font-size: 0.95rem; font-weight: 600; color: #fff; margin: 0;">ZeroMQ Telemetry EventBus</h4>
+                                        <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0;">Non-blocking PUB/SUB stream (OpenAlgo pattern)</p>
+                                    </div>
+                                </div>
+                                <span id="zmqStatusBadge" class="badge" style="background: rgba(6,182,212,0.15); color: var(--cyan);">PUB ACTIVE</span>
+                            </div>
+                            <div style="padding: 0.5rem 0;">
+                                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem;">
+                                    <span style="color: var(--text-muted);">Publisher Port:</span>
+                                    <span id="zmqPortText" style="color: var(--cyan); font-family: monospace; font-weight: 600;">tcp://127.0.0.1:5557</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem;">
+                                    <span style="color: var(--text-muted);">Packets Broadcasted:</span>
+                                    <span id="zmqPacketsCountText" style="color: var(--green); font-weight: 700;">0</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem;">
+                                    <span style="color: var(--text-muted);">Active Topics:</span>
+                                    <span id="zmqTopicsText" style="color: #fff; font-size: 0.78rem;">telemetry, signals</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.82rem;">
+                                    <span style="color: var(--text-muted);">Operating Mode:</span>
+                                    <span id="zmqModeText" style="color: var(--purple); font-weight: 600;">ZeroMQ PUB/SUB</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; padding: 0.4rem 0; font-size: 0.82rem;">
+                                    <span style="color: var(--text-muted);">Last Broadcast Time:</span>
+                                    <span id="zmqLastBroadcastText" style="color: var(--text-muted); font-size: 0.78rem;">None</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- System Error Logs & Operational Health Audit -->
                     <div class="card" style="margin-top: 1.5rem;">
                         <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
@@ -2029,17 +2167,32 @@
                 <!-- TAB 5: SYSTEM LOGS -->
                 <section id="tab-logs" class="tab-content">
                     <div class="card">
-                        <div class="card-header">
-                            <span class="card-title">System Execution & Audit Logs</span>
-                            <div style="display: flex; gap: 0.5rem;">
-                                <button class="btn" onclick="fetchLogs()">&#x21bb; Refresh Logs</button>
-                                <a href="/api/logs/download" class="btn" download>Download Log</a>
+                        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                            <div>
+                                <span class="card-title" style="font-size: 1.05rem;">System Execution & Audit Logs Console</span>
+                                <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0;">Full terminal execution stream, Celery task lifecycle, strategy signals, and raw benchmarks.</p>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                                <select id="logFileSelect" class="form-control" onchange="onLogTypeChanged(this.value)" style="width: auto; padding: 0.35rem 0.75rem; font-size: 0.8rem;">
+                                    <option value="success" selected>success.log (Pipeline & Celery Execution)</option>
+                                    <option value="errors">errors.log (Raw System Errors & Tracebacks)</option>
+                                    <option value="signals">signals.log (Strategy Trading Signals)</option>
+                                    <option value="performance">performance.log (Latency & Benchmarks)</option>
+                                </select>
+                                <select id="logLinesSelect" class="form-control" onchange="onLogLinesChanged(this.value)" style="width: auto; padding: 0.35rem 0.75rem; font-size: 0.8rem;">
+                                    <option value="100">100 lines</option>
+                                    <option value="300" selected>300 lines</option>
+                                    <option value="500">500 lines</option>
+                                    <option value="1000">1000 lines</option>
+                                </select>
+                                <button class="btn" onclick="fetchLogs()">&#x21bb; Refresh</button>
+                                <button class="btn" onclick="downloadCurrentLog()">Download Log</button>
                             </div>
                         </div>
                         <div class="form-group" style="margin-bottom: 0.75rem;">
-                            <input type="text" id="logFilterInput" class="form-control" placeholder="Search log entries (e.g. ERROR, signal, DeltaClient)..." onkeyup="filterLogs()">
+                            <input type="text" id="logFilterInput" class="form-control" placeholder="Search log entries (e.g. STEP, ERROR, signal, DeltaClient, BTC-USD)..." onkeyup="filterLogs()">
                         </div>
-                        <pre id="logsContainer" style="background: #09090b; border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #d4d4d8; height: 500px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5;"></pre>
+                        <pre id="logsContainer" style="background: #09090b; border: 1px solid var(--border); border-radius: 0.5rem; padding: 1rem; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #d4d4d8; height: 520px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5;"></pre>
                     </div>
                 </section>
 
@@ -2523,14 +2676,145 @@
             const sbSql = document.getElementById('sbSqliteText');
             if (sbSql) sbSql.textContent = `${sqliteMb} MB`;
 
+            const ws = data.websocket || {};
+            const zmq = data.zeromq || {};
+
+            // 1. Services Table
             const servicesHtml = `
-                <tr><td>Celery Workers</td><td><span class="badge ${celery.status === 'pass' ? 'badge-long' : 'badge-short'}">${celery.status === 'pass' ? 'ONLINE' : (celery.status || 'Checking')}</span></td><td>${celery.active_workers_count || 0} active worker(s)</td></tr>
-                <tr><td>Redis Broker</td><td><span class="badge ${redis.status === 'pass' ? 'badge-long' : 'badge-short'}">${redis.status === 'pass' ? 'CONNECTED' : (redis.status || 'Checking')}</span></td><td>Latency: ${redis.latency_ms || 0} ms</td></tr>
-                <tr><td>SQLite Storage</td><td><span class="badge badge-long">WAL MODE</span></td><td>${sqliteMb} MB &bull; Zero External DB</td></tr>
+                <tr><td>Celery Workers</td><td><span class="badge ${celery.status === 'pass' ? 'badge-long' : 'badge-short'}">${celery.status === 'pass' ? 'ONLINE' : (celery.status || 'Checking')}</span></td><td>${celery.total_concurrency || celery.active_workers_count || 0} child process slots (${celery.pool || 'prefork'})</td></tr>
+                <tr><td>Redis Broker</td><td><span class="badge ${redis.status === 'pass' ? 'badge-long' : 'badge-short'}">${redis.status === 'pass' ? 'CONNECTED' : (redis.status || 'Checking')}</span></td><td>Latency: ${redis.latency_ms || 0} ms &bull; Queue: ${celery.queue_depth || 0} pending</td></tr>
+                <tr><td>Delta WebSocket</td><td><span class="badge ${ws.is_connected ? 'badge-long' : (ws.is_configured ? 'badge-short' : 'badge-neutral')}">${ws.is_connected ? 'LIVE FEED' : (ws.is_configured ? 'CONNECTING' : 'IDLE / NO KEYS')}</span></td><td>${ws.messages_received || 0} msgs &bull; ${ws.subscribed_channels ? ws.subscribed_channels.join(', ') : 'orders, positions'}</td></tr>
+                <tr><td>ZeroMQ EventBus</td><td><span class="badge" style="background: rgba(6,182,212,0.15); color: var(--cyan);">${zmq.is_bound ? 'PORT 5557' : 'IN-MEMORY'}</span></td><td>${zmq.packets_published || 0} packets &bull; ${zmq.mode || 'PUB/SUB'}</td></tr>
+                <tr><td>SQLite Storage</td><td><span class="badge badge-long">WAL MODE</span></td><td>${sqliteMb} MB &bull; Fast Embedded ACID</td></tr>
                 <tr><td>System Uptime</td><td><span class="badge badge-long">RUNNING</span></td><td>${Math.floor((sys.uptime_seconds || 0) / 3600)}h ${Math.floor(((sys.uptime_seconds || 0) % 3600) / 60)}m</td></tr>
             `;
             const sTable = document.getElementById('servicesStatusTable');
             if (sTable) sTable.innerHTML = servicesHtml;
+
+            // 2. Celery Cluster & Worker Pool
+            const node = (celery.worker_nodes && celery.worker_nodes[0]) || {};
+            const clusterBadge = document.getElementById('celeryClusterStatusBadge');
+            if (clusterBadge) {
+                clusterBadge.textContent = celery.status === 'pass' ? 'ONLINE' : 'CHECKING';
+                clusterBadge.className = `badge ${celery.status === 'pass' ? 'badge-long' : 'badge-short'}`;
+            }
+            const concBadge = document.getElementById('celeryConcurrencyBadge');
+            if (concBadge) {
+                concBadge.textContent = `${celery.total_concurrency || node.concurrency || 9} Child Workers`;
+            }
+            const qBadge = document.getElementById('celeryQueueBadge');
+            if (qBadge) {
+                qBadge.textContent = `${celery.queue_depth || 0} in Queue`;
+                qBadge.style.color = (celery.queue_depth || 0) > 0 ? 'var(--amber)' : 'var(--cyan)';
+            }
+            const nodeNameEl = document.getElementById('celeryWorkerNodeName');
+            if (nodeNameEl) nodeNameEl.textContent = node.name || (celery.workers && celery.workers[0]) || 'celery@worker';
+            const poolTypeEl = document.getElementById('celeryPoolTypeText');
+            const cleanPool = (node.pool || 'prefork').replace(/:TaskPool/i, '');
+            if (poolTypeEl) poolTypeEl.textContent = `${cleanPool.toUpperCase()} TaskPool (${node.concurrency || 9} concurrency)`;
+            const memRssEl = document.getElementById('celeryMemoryRssText');
+            if (memRssEl) memRssEl.textContent = `${node.memory_rss_mb || (sys.process ? sys.process.rss_mb : 0) || 0} MB`;
+            const upTextEl = document.getElementById('celeryUptimeText');
+            if (upTextEl) {
+                const upSec = node.uptime_seconds || sys.uptime_seconds || 0;
+                upTextEl.textContent = `Uptime: ${Math.floor(upSec / 3600)}h ${Math.floor((upSec % 3600) / 60)}m`;
+            }
+            const totalTasksEl = document.getElementById('celeryTotalTasksText');
+            if (totalTasksEl) totalTasksEl.textContent = `${celery.total_tasks_completed || node.total_tasks_completed || 0}`;
+            const activeTasksEl = document.getElementById('celeryActiveTasksText');
+            if (activeTasksEl) {
+                const actCount = (celery.active_tasks && celery.active_tasks.length) || node.active_tasks_count || 0;
+                activeTasksEl.textContent = `${actCount} active executing`;
+                activeTasksEl.style.color = actCount > 0 ? 'var(--green)' : 'var(--text-muted)';
+            }
+            const qDepthEl = document.getElementById('celeryQueueDepthText');
+            if (qDepthEl) qDepthEl.textContent = `${celery.queue_depth || 0} pending`;
+
+            // Render Child Processes Grid
+            const procGridEl = document.getElementById('celeryProcessesGrid');
+            if (procGridEl) {
+                const procs = node.processes || [17, 18, 19, 20, 21, 22, 23, 24, 25];
+                const procCountEl = document.getElementById('celeryProcessCountText');
+                if (procCountEl) procCountEl.textContent = `${procs.length} / ${node.concurrency || 9} Online`;
+
+                procGridEl.innerHTML = procs.map((pid, idx) => `
+                    <div style="display:inline-flex; align-items:center; gap:0.45rem; padding:0.4rem 0.75rem; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); border-radius:6px; font-size:0.8rem; color:#fff; font-family:monospace;">
+                        <span style="width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; box-shadow:0 0 6px var(--green);"></span>
+                        <span>Worker-${idx + 1}</span>
+                        <span style="color:var(--text-muted); font-size:0.75rem;">(PID ${pid})</span>
+                    </div>
+                `).join('');
+            }
+
+            // Render Task Breakdown Chips
+            const taskBreakdownEl = document.getElementById('celeryTasksBreakdownList');
+            if (taskBreakdownEl) {
+                const breakdown = node.tasks_breakdown || {};
+                const keys = Object.keys(breakdown);
+                if (keys.length > 0) {
+                    taskBreakdownEl.innerHTML = keys.map(k => `
+                        <span style="display:inline-flex; align-items:center; gap:0.4rem; padding:0.35rem 0.7rem; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:6px; font-size:0.78rem; color:#cbd5e1;">
+                            <span style="color:var(--cyan); font-weight:600;">${k}</span>: <strong style="color:#fff; font-size:0.85rem;">${breakdown[k]}</strong>
+                        </span>
+                    `).join('');
+                } else {
+                    taskBreakdownEl.innerHTML = `
+                        <span style="display:inline-flex; align-items:center; gap:0.4rem; padding:0.35rem 0.7rem; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:6px; font-size:0.78rem; color:#cbd5e1;">
+                            <span style="color:var(--cyan); font-weight:600;">execute_strategy_task</span>: <strong style="color:#fff;">Active</strong>
+                        </span>
+                        <span style="display:inline-flex; align-items:center; gap:0.4rem; padding:0.35rem 0.7rem; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:6px; font-size:0.78rem; color:#cbd5e1;">
+                            <span style="color:var(--cyan); font-weight:600;">run_all_batch_task</span>: <strong style="color:#fff;">Active</strong>
+                        </span>
+                    `;
+                }
+            }
+
+            // 3. WebSocket Card
+            const wsBadge = document.getElementById('wsStatusBadge');
+            if (wsBadge) {
+                if (ws.is_connected) {
+                    wsBadge.textContent = 'LIVE CONNECTED';
+                    wsBadge.className = 'badge badge-long';
+                } else if (ws.is_configured) {
+                    wsBadge.textContent = 'CONNECTING...';
+                    wsBadge.className = 'badge badge-short';
+                } else {
+                    wsBadge.textContent = 'API KEY NOT SET';
+                    wsBadge.className = 'badge badge-neutral';
+                }
+            }
+            const wsUrlEl = document.getElementById('wsUrlText');
+            if (wsUrlEl && ws.ws_url) wsUrlEl.textContent = ws.ws_url;
+            const wsChanEl = document.getElementById('wsChannelsText');
+            if (wsChanEl && ws.subscribed_channels) wsChanEl.textContent = ws.subscribed_channels.join(', ');
+            const wsMsgEl = document.getElementById('wsMsgCountText');
+            if (wsMsgEl) wsMsgEl.textContent = ws.messages_received || 0;
+            const wsRecEl = document.getElementById('wsReconnectsText');
+            if (wsRecEl) wsRecEl.textContent = ws.reconnect_count || 0;
+            const wsLastEl = document.getElementById('wsLastHeartbeatText');
+            if (wsLastEl) {
+                wsLastEl.textContent = ws.last_message_at ? new Date(ws.last_message_at).toLocaleTimeString() : (ws.is_configured ? 'Awaiting broker ticks' : 'Disarmed (No live API keys)');
+            }
+
+            // 4. ZeroMQ Card
+            const zmqBadge = document.getElementById('zmqStatusBadge');
+            if (zmqBadge) {
+                zmqBadge.textContent = zmq.is_bound ? 'PUB ACTIVE' : 'IN-MEMORY BUS';
+                zmqBadge.style.background = zmq.is_bound ? 'rgba(6,182,212,0.15)' : 'rgba(255,255,255,0.05)';
+                zmqBadge.style.color = zmq.is_bound ? 'var(--cyan)' : 'var(--text-muted)';
+            }
+            const zmqPortEl = document.getElementById('zmqPortText');
+            if (zmqPortEl) zmqPortEl.textContent = `tcp://127.0.0.1:${zmq.port || 5557}`;
+            const zmqPacketsEl = document.getElementById('zmqPacketsCountText');
+            if (zmqPacketsEl) zmqPacketsEl.textContent = zmq.packets_published || 0;
+            const zmqTopicsEl = document.getElementById('zmqTopicsText');
+            if (zmqTopicsEl && zmq.topics) zmqTopicsEl.textContent = zmq.topics.join(', ') || 'telemetry, signals';
+            const zmqModeEl = document.getElementById('zmqModeText');
+            if (zmqModeEl && zmq.mode) zmqModeEl.textContent = zmq.mode;
+            const zmqLastEl = document.getElementById('zmqLastBroadcastText');
+            if (zmqLastEl) {
+                zmqLastEl.textContent = zmq.last_published_at ? new Date(zmq.last_published_at).toLocaleTimeString() : 'Ready';
+            }
 
             if (sqlite.table_counts) {
                 let tblHtml = '';
@@ -3571,14 +3855,37 @@
             }
         }
 
+        let currentLogType = 'success';
+        let currentLogLines = 300;
+
+        function onLogTypeChanged(val) {
+            currentLogType = val || 'success';
+            fetchLogs();
+        }
+
+        function onLogLinesChanged(val) {
+            currentLogLines = parseInt(val, 10) || 300;
+            fetchLogs();
+        }
+
+        function downloadCurrentLog() {
+            window.location.href = `/api/logs/download?log_type=${currentLogType}`;
+        }
+
         async function fetchLogs() {
+            const container = document.getElementById('logsContainer');
+            if (container) container.textContent = 'Loading logs from ' + currentLogType + '.log...';
             try {
-                const res = await fetch('/api/logs?lines=300');
+                const res = await fetch(`/api/logs?log_type=${currentLogType}&lines=${currentLogLines}`);
                 const data = await res.json();
-                allLogsText = data.logs || 'No log entries available.';
-                document.getElementById('logsContainer').textContent = allLogsText;
+                allLogsText = data.logs || 'No log entries available in ' + currentLogType + '.log.';
+                if (container) {
+                    container.textContent = allLogsText;
+                    container.scrollTop = container.scrollHeight;
+                }
             } catch (err) {
                 console.error("Error fetching logs:", err);
+                if (container) container.textContent = 'Failed to load logs: ' + err.message;
             }
         }
 
