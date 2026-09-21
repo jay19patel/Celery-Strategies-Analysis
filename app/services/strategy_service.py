@@ -96,13 +96,13 @@ class StrategyService:
 
         return results
 
-    def get_signals_log(self, limit: int = 50) -> list[dict[str, Any]]:
+    def get_signals_log(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         """Retrieve recent algorithmic strategy signals with execution routing status."""
         rows = self.db.execute_query(
             "SELECT id, strategy_name, symbol, signal_type, price, timestamp, execution_time, "
             "COALESCE(mode, 'PAPER') AS mode, COALESCE(action, 'paper_executed') AS action, created_at "
-            "FROM signals_log ORDER BY id DESC LIMIT ?;",
-            (limit,),
+            "FROM signals_log ORDER BY id DESC LIMIT ? OFFSET ?;",
+            (limit, offset),
         )
         return [
             {
@@ -119,6 +119,13 @@ class StrategyService:
             }
             for r in rows
         ]
+
+    def get_signals_count(self) -> int:
+        """Get total count of recorded algorithmic strategy signals."""
+        row = self.db.execute_one("SELECT COUNT(*) AS cnt FROM signals_log;")
+        if row and "cnt" in row:
+            return int(row["cnt"])
+        return 0
 
     def trigger_signal(
         self,

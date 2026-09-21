@@ -45,11 +45,27 @@ class SystemService:
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
     def get_metrics(self) -> dict[str, Any]:
-        """Collect real-time host resource metrics: CPU, RAM, Disk, SQLite, Redis, Celery."""
+        """Collect real-time host resource metrics: CPU, RAM, Disk, SQLite, Redis, Celery, ZeroMQ."""
         resources = _check_system_resources()
         sqlite_stats = _check_sqlite()
         redis_stats = _check_redis()
         celery_stats = _check_celery_workers()
+
+        # ZeroMQ EventBus telemetry
+        zmq_stats: dict[str, Any] = {}
+        try:
+            from app.core.event_bus import get_event_bus
+            zmq_stats = get_event_bus().get_status()
+        except Exception:  # noqa: BLE001
+            zmq_stats = {"status": "unknown", "packets_published": 0, "port": 5557, "is_bound": False}
+
+        # WebSocket status
+        ws_stats: dict[str, Any] = {}
+        try:
+            from app.core.health_monitor import _check_websocket  # type: ignore[attr-defined]
+            ws_stats = _check_websocket()
+        except Exception:  # noqa: BLE001
+            ws_stats = {"status": "unknown", "is_connected": False}
 
         return {
             "status": "success",
@@ -58,6 +74,8 @@ class SystemService:
             "sqlite": sqlite_stats,
             "redis": redis_stats,
             "celery": celery_stats,
+            "zeromq": zmq_stats,
+            "websocket": ws_stats,
         }
 
     def get_health(self) -> dict[str, Any]:

@@ -132,6 +132,7 @@ def update_pipeline_settings(payload: UpdatePipelineSettingsRequest) -> dict[str
 
 
 @router.post("/api/batch/run")
+@router.post("/api/system/trigger-batch")
 def trigger_batch_now() -> dict[str, Any]:
     """Manually dispatch the batch strategy pipeline immediately."""
     try:
@@ -172,7 +173,6 @@ def get_celery_cluster_status() -> dict[str, Any]:
 
 @router.get("/api/system/telemetry")
 def get_system_telemetry() -> dict[str, Any]:
-    """Retrieve combined real-time telemetry: Celery, WebSocket, and ZeroMQ streams."""
     try:
         from app.core.health_monitor import _check_celery_workers, _check_websocket, _check_zeromq
 
@@ -184,6 +184,20 @@ def get_system_telemetry() -> dict[str, Any]:
     except Exception as exc:
         logger.exception("Failed to fetch system telemetry")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/api/system/public-ip")
+def get_system_public_ip() -> dict[str, Any]:
+    """Retrieve outgoing server public IP for Delta Exchange whitelist configuration."""
+    from app.services.broker_service import get_broker_service
+
+    service = get_broker_service()
+    ip_addr = service.get_server_ip()
+    return {
+        "ip": ip_addr,
+        "public_ip": ip_addr,
+        "status": "success",
+    }
 
 
 

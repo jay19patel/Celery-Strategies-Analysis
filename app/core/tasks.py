@@ -248,7 +248,7 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
                     logger.error(f"Failed to process signal with execution manager: {e}", exc_info=True)
         
         # Update result with metadata for storage
-        aggregated_result["_id"] = batch_oid  # Use the pre-generated ID
+        aggregated_result["_id"] = batch_id_str  # Use the pre-generated ID
         aggregated_result["pubsub"] = pubsub_response.get("subscriber_count", 0)
 
         # STEP 3.2: Save to SQLite Database
