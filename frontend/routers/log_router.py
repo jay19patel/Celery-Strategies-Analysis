@@ -1,6 +1,14 @@
-"""System logs viewer and log file downloader router.
+"""System logs viewer, stats, and log file downloader router.
 
 Routes incoming HTTP requests to app.services.LogService.
+
+Endpoints:
+    GET  /api/logs/stats          — level counters + file sizes (Log Intelligence panel)
+    GET  /api/logs                — tail last N lines (default: success)
+    GET  /api/logs/errors/parsed  — structured error records
+    GET  /api/logs/{type}         — tail last N lines of specific log type
+    GET  /api/logs/{type}/download — download raw log file
+    POST /api/logs/counts/reset   — reset in-memory level counters
 """
 
 import logging
@@ -14,6 +22,53 @@ from app.services.log_service import get_log_service
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/logs", tags=["Logs"])
 
+
+# ---------------------------------------------------------------------------
+# Log stats — primary endpoint for the Log Intelligence UI panel
+# ---------------------------------------------------------------------------
+
+@router.get("/stats")
+def get_log_stats() -> dict[str, Any]:
+    """Retrieve live log-level counters and per-file disk statistics.
+
+    Returns a combined payload used by the dashboard Log Intelligence panel:
+    - ``counts``: in-memory level counts since startup or last reset
+      (debug, info, warning, error, critical, total, session_start)
+    - ``files``: list of log file stats (name, size_mb, size_bytes, line_count,
+      last_modified_iso) for all known log types
+    - ``logs_dir``: absolute path to the logs directory
+    """
+    try:
+        service = get_log_service()
+        return service.get_log_stats()
+    except Exception as exc:
+        logger.exception("Failed to fetch log stats")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Counter reset
+# ---------------------------------------------------------------------------
+
+@router.post("/counts/reset")
+def reset_log_counts() -> dict[str, Any]:
+    """Reset in-memory log-level counters and refresh session-start timestamp.
+
+    Call this after a system reset so the UI shows counts since the last
+    manual reset, not since process startup.
+    """
+    try:
+        from app.core.logger import reset_log_counts as _reset
+        _reset()
+        return {"status": "success", "message": "Log counters reset successfully."}
+    except Exception as exc:
+        logger.exception("Failed to reset log counts")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Line-paginated log readers
+# ---------------------------------------------------------------------------
 
 @router.get("")
 @router.get("/")

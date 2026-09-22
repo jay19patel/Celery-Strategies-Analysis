@@ -93,6 +93,7 @@ def save_broker_profile(payload: SaveProfileRequest) -> dict[str, Any]:
 
 
 @router.post("/verify-auth")
+@router.post("/verify-authority")
 def verify_broker_authority(payload: VerifyAuthRequest | None = None) -> dict[str, Any]:
     """Test and verify API authorization against Delta Exchange."""
     try:

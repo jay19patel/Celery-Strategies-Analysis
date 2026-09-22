@@ -212,8 +212,16 @@ class SystemService:
             log_file.write_text("")
             cleared_logs.append(log_file.name)
 
+        # Reset in-memory level counters so the dashboard starts fresh after reset
+        try:
+            from app.core.logger import reset_log_counts
+            reset_log_counts()
+        except Exception:  # noqa: BLE001
+            pass
+
         logger.warning("🔴 SYSTEM RESET performed | tables cleared: %s | logs: %s", cleared_counts, cleared_logs)
         return {"ok": True, "cleared_tables": cleared_counts, "cleared_logs": cleared_logs}
+
 
     def update_trading_config(
         self,

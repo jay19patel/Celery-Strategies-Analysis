@@ -387,6 +387,10 @@ class SQLiteDatabase:
                 INSERT OR IGNORE INTO strategy_configs (strategy_id, name, symbols, timeframe, is_paper_enabled, is_real_enabled, created_at, updated_at)
                 VALUES ('MotherCandleStrategy', 'Mother Candle Multi-Timeframe Strategy', 'BTC-USD,ETH-USD,SOL-USD', '15m', 1, 0, ?, ?);
             """, (now_iso, now_iso))
+            cursor.execute("""
+                INSERT OR IGNORE INTO strategy_configs (strategy_id, name, symbols, timeframe, is_paper_enabled, is_real_enabled, created_at, updated_at)
+                VALUES ('DummyHeavyStrategy', 'Dummy Heavy Strategy', 'BTC-USD', '1m', 1, 0, ?, ?);
+            """, (now_iso, now_iso))
             logger.info("✅ SQLite schema and indexes initialized successfully.")
         except Exception as exc:
             logger.error(f"Failed to initialize SQLite schema: {exc}", exc_info=True)

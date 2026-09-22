@@ -8,12 +8,14 @@ the Emergency Exit kill-switch.
 
 import json
 import logging
+import re
 import time
 import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
 from app.broker.delta import DeltaAPIError, DeltaClient
+from app.broker.delta.price_feed import get_delta_price_feed, get_live_price
 from app.broker.execution_manager import ARM_CONFIRMATION_PHRASE, get_execution_manager
 from app.core.settings import get_symbols, settings
 from app.database.sqlite_db import get_sqlite_db
@@ -41,6 +43,8 @@ class BrokerService:
         self.mgr = get_execution_manager()
         self.delta_client = delta_client or self.mgr.delta_client
         self.db = get_sqlite_db()
+        self.last_ip_whitelisted: bool | None = None
+        self.last_rejected_ip: str | None = None
         self._load_saved_profile_on_startup()
 
     def _load_saved_profile_on_startup(self) -> None:
@@ -68,6 +72,29 @@ class BrokerService:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not restore saved broker profile: %s", exc)
 
+    def _is_authorized_status(self) -> bool:
+        """Check if broker credentials are configured and authorized."""
+        if not self.delta_client.is_configured:
+            return False
+        if self.last_ip_whitelisted is False:
+            return False
+        if self.last_ip_whitelisted is True:
+            return True
+        row = self.db.execute_one("SELECT value FROM system_config WHERE key = 'broker_profile';")
+        if row and row.get("value"):
+            try:
+                prof = json.loads(row["value"])
+                if prof.get("is_authorized", False):
+                    return True
+            except Exception:
+                pass
+        try:
+            self.delta_client.get_balance()
+            self.last_ip_whitelisted = True
+            return True
+        except Exception:
+            return False
+
     def get_status(self) -> dict[str, Any]:
         """Fetch current execution mode, safety arming status, and broker readiness."""
         return {
@@ -75,6 +102,9 @@ class BrokerService:
             "is_armed": self.mgr.is_armed(),
             "is_live_enabled": self.mgr.get_mode() == "LIVE" and self.mgr.is_armed(),
             "delta_configured": self.delta_client.is_configured,
+            "is_authorized": self._is_authorized_status(),
+            "ip_whitelisted": self.last_ip_whitelisted,
+            "server_ip": self.last_rejected_ip or self.get_server_ip(),
             "delta_base_url": self.delta_client.base_url or settings.delta_base_url,
             "symbols": get_symbols(),
             "risk_ratio": settings.risk_ratio,
@@ -264,21 +294,39 @@ class BrokerService:
             self.delta_client.client_id = target_client_id
             self.delta_client._init_client()
 
+            self.last_ip_whitelisted = True
+            self.last_rejected_ip = None
+
             return {
                 "authorized": True,
                 "message": "✅ Delta Exchange API credentials verified and authorized successfully!",
                 "latency_ms": latency_ms,
                 "balances": balances,
                 "verified_at": now_utc,
+                "server_ip": self.get_server_ip(),
             }
         except (DeltaAPIError, Exception) as exc:  # noqa: BLE001
             latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            exc_str = str(exc)
+            server_ip = self.get_server_ip()
+            is_ip_error = "ip_not_whitelisted_for_api_key" in exc_str
+            if is_ip_error:
+                match = re.search(r'"client_ip"\s*:\s*"([^"]+)"', exc_str)
+                if match:
+                    server_ip = match.group(1)
+                self.last_ip_whitelisted = False
+                self.last_rejected_ip = server_ip
+                msg = f"❌ IP Not Whitelisted: Delta Exchange rejected server IP {server_ip}. Please whitelist this IP in Delta API key settings."
+            else:
+                msg = f"❌ Authorization failed: {exc}"
             logger.warning("Authority verification failed: %s", exc)
             return {
                 "authorized": False,
-                "message": f"❌ Authorization failed: {exc}",
-                "error": str(exc),
+                "message": msg,
+                "error": exc_str,
                 "latency_ms": latency_ms,
+                "server_ip": server_ip,
+                "ip_whitelisted": False if is_ip_error else None,
             }
 
     def toggle_live_trading(self, enabled: bool, confirmation: str | None = None) -> dict[str, Any]:
@@ -346,6 +394,7 @@ class BrokerService:
         if not self.delta_client.is_configured:
             return {
                 "configured": False,
+                "ip_whitelisted": None,
                 "available_balance_usd": 0.0,
                 "available_balance_inr": 0.0,
                 "message": "Delta Exchange API credentials not configured in settings.",
@@ -353,18 +402,49 @@ class BrokerService:
 
         try:
             balance = self.delta_client.get_balance()
-            return {"configured": True, **balance}
+            self.last_ip_whitelisted = True
+            self.last_rejected_ip = None
+            return {"configured": True, "ip_whitelisted": True, "server_ip": self.get_server_ip(), **balance}
         except (DeltaAPIError, Exception) as exc:  # noqa: BLE001 - Resilient broker error response
+            exc_str = str(exc)
+            is_ip_blocked = "ip_not_whitelisted_for_api_key" in exc_str
+            if is_ip_blocked:
+                match = re.search(r'"client_ip"\s*:\s*"([^"]+)"', exc_str)
+                server_ip = match.group(1) if match else self.get_server_ip()
+                self.last_ip_whitelisted = False
+                self.last_rejected_ip = server_ip
+                logger.warning(
+                    "Delta API IP not whitelisted (server IP: %s). Add this IP to your Delta API key whitelist.",
+                    server_ip,
+                )
+                return {
+                    "configured": True,
+                    "ip_whitelisted": False,
+                    "server_ip": server_ip,
+                    "available_balance_usd": 0.0,
+                    "available_balance_inr": 0.0,
+                    "message": (
+                        f"IP {server_ip} is not whitelisted for this API key. "
+                        "Go to Delta Exchange → API Keys → Edit → Add IP to whitelist."
+                    ),
+                }
             logger.error("Error fetching Delta balance: %s", exc)
             return {
                 "configured": True,
-                "error": str(exc),
+                "ip_whitelisted": None,
+                "server_ip": self.get_server_ip(),
+                "error": exc_str,
                 "available_balance_usd": 0.0,
                 "available_balance_inr": 0.0,
             }
 
     def get_paper_positions(self) -> list[dict[str, Any]]:
-        """Fetch active simulated paper positions from broker_accounts table."""
+        """Fetch active simulated paper positions from broker_accounts table.
+
+        Each position is enriched with the latest live mark price from
+        DeltaLivePriceFeed, enabling real-time unrealized PnL calculation
+        without requiring authenticated API access.
+        """
         rows = self.db.execute_query("SELECT strategy_name, symbol, capital, open_position FROM broker_accounts;")
         positions: list[dict[str, Any]] = []
         for r in rows:
@@ -385,19 +465,33 @@ class BrokerService:
             sl = float(pos_dict.get("stop_loss", 0.0)) if pos_dict.get("stop_loss") else None
             tp = float(pos_dict.get("take_profit", 0.0)) if pos_dict.get("take_profit") else None
 
+            # Enrich with live mark price from public WebSocket price feed
+            symbol = r.get("symbol") or ""
+            mark_price = get_live_price(symbol) or entry_price
+            is_long = pos_type == "LONG"
+            if mark_price and entry_price:
+                if is_long:
+                    unrealized_pnl = (mark_price - entry_price) * size
+                else:
+                    unrealized_pnl = (entry_price - mark_price) * size
+            else:
+                unrealized_pnl = 0.0
+
             positions.append({
                 "strategy_name": r.get("strategy_name"),
-                "symbol": r.get("symbol"),
-                "side": "BUY" if pos_type == "LONG" else "SELL",
+                "symbol": symbol,
+                "side": "BUY" if is_long else "SELL",
                 "position_type": pos_type,
-                "is_long": pos_type == "LONG",
+                "is_long": is_long,
                 "size": size,
                 "entry_price": entry_price,
+                "mark_price": mark_price,
                 "stop_loss": sl,
                 "take_profit": tp,
                 "entry_time": pos_dict.get("entry_time"),
                 "capital": float(r.get("capital", 100.0)),
-                "unrealized_pnl": 0.0,
+                "unrealized_pnl": round(unrealized_pnl, 4),
+                "has_live_price": mark_price != entry_price,
                 "is_paper": True,
             })
         return positions
@@ -433,9 +527,23 @@ class BrokerService:
         """Fetch real live positions from Delta Exchange API or SQLite cache."""
         if self.delta_client.is_configured:
             try:
-                return self.delta_client.get_all_open_positions()
+                positions = self.delta_client.get_all_open_positions()
+                self.last_ip_whitelisted = True
+                self.last_rejected_ip = None
+                return positions
             except (DeltaAPIError, Exception) as exc:  # noqa: BLE001 - Fallback to SQLite cache on broker network error
-                logger.warning("Could not fetch positions from Delta API, falling back to cache: %s", exc)
+                exc_str = str(exc)
+                if "ip_not_whitelisted_for_api_key" in exc_str:
+                    match = re.search(r'"client_ip"\s*:\s*"([^"]+)"', exc_str)
+                    server_ip = match.group(1) if match else self.get_server_ip()
+                    self.last_ip_whitelisted = False
+                    self.last_rejected_ip = server_ip
+                    logger.warning(
+                        "Delta API IP not whitelisted (server IP: %s) — live positions unavailable.",
+                        server_ip,
+                    )
+                else:
+                    logger.warning("Could not fetch positions from Delta API, falling back to cache: %s", exc)
 
         rows = self.db.execute_query("SELECT * FROM live_positions WHERE size != 0;")
         return [dict(r) for r in rows]

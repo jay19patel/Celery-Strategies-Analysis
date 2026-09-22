@@ -1,212 +1,402 @@
 #!/usr/bin/env python3
 """
-Centralized Professional Logging System for Stock Analysis
-Provides consistent logging across all modules with detailed information
+Production-Grade Centralized Logging System.
+
+Architecture:
+  - Console handler  → human-readable colored format  (for `docker logs`)
+  - success.log      → JSON Lines, DEBUG–WARNING       (10 MB rotating, 5 backups)
+  - errors.log       → JSON Lines, ERROR+CRITICAL      (10 MB rotating, 5 backups)
+  - warnings.log     → JSON Lines, WARNING only        (10 MB rotating, 3 backups)
+  - signals.log      → plain text, signal events       (10 MB rotating, 5 backups)
+  - performance.log  → plain text, timing events       (10 MB rotating, 5 backups)
+  - CountingHandler  → in-memory level counters        (zero I/O overhead)
+
+Usage:
+    from app.core.logger import get_logger, get_log_counts, reset_log_counts
+
+    logger = get_logger("my_module")
+    logger.info("Trade placed", extra={"symbol": "BTCUSD", "qty": 1})
+
+    counts = get_log_counts()
+    # → {"debug": 0, "info": 412, "warning": 23, "error": 7, "critical": 0, "total": 442}
 """
 
+import json
 import logging
 import logging.handlers
 import os
 import sys
 import threading
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, Optional
 
+
+# ---------------------------------------------------------------------------
+# CountingHandler — zero-overhead in-memory level counter
+# ---------------------------------------------------------------------------
+
+class CountingHandler(logging.Handler):
+    """Intercepts every log record and increments a per-level counter.
+
+    Thread-safe via RLock. Zero I/O — never writes anywhere.
+    Reset with :func:`reset_log_counts`.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self._lock = threading.RLock()
+        self._counts: Dict[str, int] = {
+            "debug": 0,
+            "info": 0,
+            "warning": 0,
+            "error": 0,
+            "critical": 0,
+        }
+        self._session_start: str = datetime.now(timezone.utc).isoformat()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        level = record.levelname.lower()
+        with self._lock:
+            if level in self._counts:
+                self._counts[level] += 1
+
+    def get_counts(self) -> Dict[str, Any]:
+        """Return a copy of current level counts plus total and session start."""
+        with self._lock:
+            counts = dict(self._counts)
+        counts["total"] = sum(counts.values())
+        counts["session_start"] = self._session_start
+        return counts
+
+    def reset(self) -> None:
+        """Reset all counters and refresh session start timestamp."""
+        with self._lock:
+            for key in self._counts:
+                self._counts[key] = 0
+            self._session_start = datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# JSON Lines formatter — machine-parseable, grep/jq friendly
+# ---------------------------------------------------------------------------
+
+class JsonLinesFormatter(logging.Formatter):
+    """Format each log record as a single JSON object on one line.
+
+    Fields:
+        ts       — ISO-8601 timestamp with timezone
+        level    — DEBUG / INFO / WARNING / ERROR / CRITICAL
+        logger   — logger hierarchy name  (e.g. stockanalysis.tasks)
+        file     — source filename
+        line     — line number
+        func     — function name
+        msg      — log message string
+        exc      — exception text (only when exc_info is set)
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: Dict[str, Any] = {
+            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "file": record.filename,
+            "line": record.lineno,
+            "func": record.funcName,
+            "msg": record.getMessage(),
+        }
+
+        # Attach any extra fields passed via `extra={...}`
+        _standard_attrs = {
+            "args", "asctime", "created", "exc_info", "exc_text", "filename",
+            "funcName", "id", "levelname", "levelno", "lineno", "message",
+            "module", "msecs", "msg", "name", "pathname", "process",
+            "processName", "relativeCreated", "stack_info", "thread", "threadName",
+        }
+        for key, val in record.__dict__.items():
+            if key not in _standard_attrs and not key.startswith("_"):
+                try:
+                    json.dumps(val)  # check serializability
+                    payload[key] = val
+                except (TypeError, ValueError):
+                    payload[key] = str(val)
+
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+
+        return json.dumps(payload, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Colored console formatter — human-readable, `docker logs` friendly
+# ---------------------------------------------------------------------------
+
+class ColoredConsoleFormatter(logging.Formatter):
+    """ANSI-colored console output for human readability."""
+
+    _COLORS = {
+        "DEBUG":    "\033[36m",   # Cyan
+        "INFO":     "\033[32m",   # Green
+        "WARNING":  "\033[33m",   # Yellow
+        "ERROR":    "\033[31m",   # Red
+        "CRITICAL": "\033[35m",   # Magenta
+    }
+    _RESET = "\033[0m"
+
+    def format(self, record: logging.LogRecord) -> str:
+        color = self._COLORS.get(record.levelname, "")
+        reset = self._RESET
+        ts = datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
+        msg = record.getMessage()
+        base = f"{ts} | {color}{record.levelname:8s}{reset} | {record.name} | {msg}"
+        if record.exc_info:
+            base += "\n" + self.formatException(record.exc_info)
+        return base
+
+
+# ---------------------------------------------------------------------------
+# StockAnalysisLogger — singleton setup
+# ---------------------------------------------------------------------------
 
 class StockAnalysisLogger:
+    """Singleton logging system for the trading engine.
+
+    Initializes all handlers exactly once across the entire process lifetime.
+    Thread-safe via double-checked locking.
     """
-    Professional logging system with detailed information including:
-    - Timestamp
-    - File name
-    - Function name
-    - Line number
-    - Log level
-    - Message
-    - Error details (if applicable)
-    """
-    
-    _instance: Optional['StockAnalysisLogger'] = None
+
+    _instance: Optional["StockAnalysisLogger"] = None
     _lock = threading.Lock()
     _initialized: bool = False
-    
-    def __new__(cls):
+
+    def __new__(cls) -> "StockAnalysisLogger":
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
         return cls._instance
-    
-    def __init__(self):
+
+    def __init__(self) -> None:
         if not self._initialized:
             with self._lock:
                 if not self._initialized:
                     self._setup_logging()
                     self._initialized = True
-    
-    def _setup_logging(self):
-        """Setup centralized logging configuration"""
-        # Create logs directory
+
+    # ------------------------------------------------------------------
+    # Setup helpers
+    # ------------------------------------------------------------------
+
+    def _setup_logging(self) -> None:
+        """Configure all handlers and attach to root stockanalysis logger."""
         self.log_dir = Path(__file__).parent.parent.parent / "logs"
-        self.log_dir.mkdir(exist_ok=True)
-        
-        # Create main logger
-        self.logger = logging.getLogger('stockanalysis')
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        self.logger = logging.getLogger("stockanalysis")
         self.logger.setLevel(logging.DEBUG)
-        
-        # Clear any existing handlers to avoid duplicates
         self.logger.handlers.clear()
-        
-        # Create formatters
-        self.detailed_formatter = logging.Formatter(
-            fmt='%(asctime)s | %(filename)s:%(lineno)d | %(funcName)s() | %(levelname)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        
-        self.simple_formatter = logging.Formatter(
-            fmt='%(asctime)s | %(levelname)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        
-        # Setup file handlers
-        self._setup_file_handlers()
-        
-        # Setup console handler
-        self._setup_console_handler()
-        
-        # Prevent propagation to root logger
         self.logger.propagate = False
-        
-        # Log initialization (Debug only to reduce noise in workers)
-        self.logger.debug("StockAnalysisLogger initialized successfully")
-    
-    def _setup_file_handlers(self):
-        """Setup file handlers for multiple specialized logs"""
-        
-        class NonErrorFilter(logging.Filter):
-            def filter(self, record):
+
+        json_fmt = JsonLinesFormatter()
+        console_fmt = ColoredConsoleFormatter()
+        plain_fmt = logging.Formatter(
+            fmt="%(asctime)s | %(levelname)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
+        # ── CountingHandler (must be first — catches everything) ──────────
+        self.counting_handler = CountingHandler()
+        self.logger.addHandler(self.counting_handler)
+
+        # ── Console (INFO+, human-readable colored) ────────────────────────
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(console_fmt)
+        self.logger.addHandler(console_handler)
+
+        # ── success.log (DEBUG–WARNING, JSON Lines) ────────────────────────
+        class _BelowError(logging.Filter):
+            def filter(self, record: logging.LogRecord) -> bool:
                 return record.levelno < logging.ERROR
-                
-        # 1. Success / Main log file handler
-        main_file_handler = logging.handlers.RotatingFileHandler(
+
+        success_handler = logging.handlers.RotatingFileHandler(
             self.log_dir / "success.log",
-            maxBytes=10 * 1024 * 1024,  # 10MB
+            maxBytes=10 * 1024 * 1024,
             backupCount=5,
-            encoding='utf-8'
+            encoding="utf-8",
         )
-        main_file_handler.setLevel(logging.DEBUG)
-        main_file_handler.addFilter(NonErrorFilter())
-        main_file_handler.setFormatter(self.detailed_formatter)
-        self.logger.addHandler(main_file_handler)
-        
-        # 2. Error log file handler
-        error_file_handler = logging.handlers.RotatingFileHandler(
+        success_handler.setLevel(logging.DEBUG)
+        success_handler.addFilter(_BelowError())
+        success_handler.setFormatter(json_fmt)
+        self.logger.addHandler(success_handler)
+
+        # ── errors.log (ERROR+CRITICAL, JSON Lines) ───────────────────────
+        error_handler = logging.handlers.RotatingFileHandler(
             self.log_dir / "errors.log",
-            maxBytes=10 * 1024 * 1024,  # 10MB
+            maxBytes=10 * 1024 * 1024,
             backupCount=5,
-            encoding='utf-8'
+            encoding="utf-8",
         )
-        error_file_handler.setLevel(logging.ERROR)
-        error_file_handler.setFormatter(self.detailed_formatter)
-        self.logger.addHandler(error_file_handler)
-        
-        # 3. Signals logger setup
-        self.signals_logger = logging.getLogger('signals')
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(json_fmt)
+        self.logger.addHandler(error_handler)
+
+        # ── warnings.log (WARNING only, JSON Lines) ────────────────────────
+        class _WarningOnly(logging.Filter):
+            def filter(self, record: logging.LogRecord) -> bool:
+                return record.levelno == logging.WARNING
+
+        warnings_handler = logging.handlers.RotatingFileHandler(
+            self.log_dir / "warnings.log",
+            maxBytes=10 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        warnings_handler.setLevel(logging.WARNING)
+        warnings_handler.addFilter(_WarningOnly())
+        warnings_handler.setFormatter(json_fmt)
+        self.logger.addHandler(warnings_handler)
+
+        # ── signals logger (plain text, signal events) ─────────────────────
+        self.signals_logger = logging.getLogger("signals")
         self.signals_logger.setLevel(logging.INFO)
         self.signals_logger.propagate = False
-        signals_handler = logging.handlers.RotatingFileHandler(
+        self.signals_logger.handlers.clear()
+        sig_handler = logging.handlers.RotatingFileHandler(
             self.log_dir / "signals.log",
             maxBytes=10 * 1024 * 1024,
             backupCount=5,
-            encoding='utf-8'
+            encoding="utf-8",
         )
-        signals_handler.setFormatter(self.simple_formatter)
-        self.signals_logger.addHandler(signals_handler)
-        # 4. Performance logger setup
-        self.performance_logger = logging.getLogger('performance')
+        sig_handler.setFormatter(plain_fmt)
+        self.signals_logger.addHandler(sig_handler)
+        self.signals_logger.addHandler(console_handler)
+
+        # ── performance logger (plain text, timing events) ──────────────────
+        self.performance_logger = logging.getLogger("performance")
         self.performance_logger.setLevel(logging.INFO)
         self.performance_logger.propagate = False
-        performance_handler = logging.handlers.RotatingFileHandler(
+        self.performance_logger.handlers.clear()
+        perf_handler = logging.handlers.RotatingFileHandler(
             self.log_dir / "performance.log",
             maxBytes=10 * 1024 * 1024,
             backupCount=5,
-            encoding='utf-8'
+            encoding="utf-8",
         )
-        performance_handler.setFormatter(self.simple_formatter)
-        self.performance_logger.addHandler(performance_handler)
-    
-    def _setup_console_handler(self):
-        """Setup console handler for real-time monitoring"""
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(self.simple_formatter)
-        self.logger.addHandler(console_handler)
-        self.signals_logger.addHandler(console_handler)
+        perf_handler.setFormatter(plain_fmt)
+        self.performance_logger.addHandler(perf_handler)
         self.performance_logger.addHandler(console_handler)
-    
-    def get_logger(self, name: str = None) -> logging.Logger:
-        """
-        Get logger instance for a specific module
-        
-        Args:
-            name: Module name (optional, uses calling module if not provided)
-            
-        Returns:
-            Logger instance configured for the module
-        """
+
+        self.logger.debug("StockAnalysisLogger initialized (JSON file handlers active)")
+
+    # ------------------------------------------------------------------
+    # Public helpers
+    # ------------------------------------------------------------------
+
+    def get_logger(self, name: Optional[str] = None) -> logging.Logger:
+        """Return a child logger scoped to *name* under 'stockanalysis.*'."""
         if name:
             return self.logger.getChild(name)
         return self.logger
-    
+
+    def get_counts(self) -> Dict[str, Any]:
+        """Delegate to CountingHandler — returns live level counters."""
+        return self.counting_handler.get_counts()
+
+    def reset_counts(self) -> None:
+        """Reset in-memory level counters (call on system reset)."""
+        self.counting_handler.reset()
 
 
+# ---------------------------------------------------------------------------
+# Module-level singletons & convenience API
+# ---------------------------------------------------------------------------
 
-# Global logger instance
-logger_instance = StockAnalysisLogger()
+_logger_instance = StockAnalysisLogger()
 
-def get_logger(name: str = None) -> logging.Logger:
-    """
-    Convenience function to get logger instance
-    
+
+def get_logger(name: Optional[str] = None) -> logging.Logger:
+    """Get a module-scoped child logger.
+
     Args:
-        name: Module name (optional)
-        
+        name: Sub-logger name (e.g. ``'tasks'``, ``'broker'``).
+              When *None*, returns the root ``stockanalysis`` logger.
+
     Returns:
-        Logger instance
+        A ``logging.Logger`` instance pre-configured with all handlers.
+
+    Example::
+
+        logger = get_logger("strategy")
+        logger.info("Signal generated", extra={"symbol": "BTCUSD", "signal": "BUY"})
     """
-    return logger_instance.get_logger(name)
+    return _logger_instance.get_logger(name)
 
 
-# Module-specific logger getters for convenience
-def get_data_provider_logger():
-    """Get logger for data provider module"""
-    return get_logger('data_provider')
+def get_log_counts() -> Dict[str, Any]:
+    """Return in-memory log-level counters accumulated since startup (or last reset).
 
-def get_mongodb_logger():
-    """Get logger for MongoDB operations"""
-    return get_logger('mongodb')
+    Returns:
+        Dict with keys: ``debug``, ``info``, ``warning``, ``error``,
+        ``critical``, ``total``, ``session_start`` (ISO-8601 string).
 
-def get_redis_logger():
-    """Get logger for Redis operations"""
-    return get_logger('redis')
+    Example::
 
-def get_celery_logger():
-    """Get logger for Celery tasks"""
-    return get_logger('celery')
+        counts = get_log_counts()
+        # {"debug": 0, "info": 412, "warning": 23, "error": 7,
+        #  "critical": 0, "total": 442, "session_start": "2026-09-22T16:44:00+00:00"}
+    """
+    return _logger_instance.get_counts()
 
-def get_strategies_logger():
-    """Get logger for strategies"""
-    return get_logger('strategies')
 
-def get_main_logger():
-    """Get main application logger"""
-    return get_logger('main')
+def reset_log_counts() -> None:
+    """Reset all in-memory level counters and refresh session-start timestamp.
 
-def get_signals_logger():
-    """Get logger that writes to logs/signals.log (Algo Signals dashboard panel)"""
-    return logger_instance.signals_logger
+    Call this from the system reset endpoint so the UI shows counts since
+    the last manual reset, not since process startup.
+    """
+    _logger_instance.reset_counts()
 
-def get_performance_logger():
-    """Get logger that writes to logs/performance.log (Performance & Statistics dashboard panel)"""
-    return logger_instance.performance_logger
 
+# ---------------------------------------------------------------------------
+# Module-specific convenience getters (backward-compatible)
+# ---------------------------------------------------------------------------
+
+def get_data_provider_logger() -> logging.Logger:
+    """Get logger for data provider module."""
+    return get_logger("data_provider")
+
+
+def get_mongodb_logger() -> logging.Logger:
+    """Get logger for MongoDB operations."""
+    return get_logger("mongodb")
+
+
+def get_redis_logger() -> logging.Logger:
+    """Get logger for Redis operations."""
+    return get_logger("redis")
+
+
+def get_celery_logger() -> logging.Logger:
+    """Get logger for Celery tasks."""
+    return get_logger("celery")
+
+
+def get_strategies_logger() -> logging.Logger:
+    """Get logger for strategy modules."""
+    return get_logger("strategies")
+
+
+def get_main_logger() -> logging.Logger:
+    """Get the root application logger."""
+    return get_logger("main")
+
+
+def get_signals_logger() -> logging.Logger:
+    """Get the signals logger — writes to logs/signals.log."""
+    return _logger_instance.signals_logger
+
+
+def get_performance_logger() -> logging.Logger:
+    """Get the performance logger — writes to logs/performance.log."""
+    return _logger_instance.performance_logger

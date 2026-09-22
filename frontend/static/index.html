@@ -138,6 +138,96 @@
             border: 1px solid #bfdbfe;
         }
 
+        /* ── Ticker Bar ────────────────────────────────────────────── */
+        /* ── Full-Width Sticky Top Ticker Bar ─────────────────────── */
+        #tickerBar {
+            background: linear-gradient(90deg, #090d16 0%, #0f172a 50%, #0d1527 100%);
+            border-bottom: 1px solid #1e3a5f;
+            overflow: hidden;
+            height: 32px;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            width: 100%;
+            flex-shrink: 0;
+        }
+        body.has-ticker #appSidebar,
+        body:has(#tickerBar:not(.hidden)) #appSidebar {
+            top: 32px !important;
+            height: calc(100vh - 32px) !important;
+        }
+        body.has-ticker header,
+        body:has(#tickerBar:not(.hidden)) header {
+            top: 32px !important;
+        }
+        .ticker-track {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            white-space: nowrap;
+            animation: tickerScroll 30s linear infinite;
+        }
+        .ticker-track:hover { animation-play-state: paused; }
+        @keyframes tickerScroll {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        .ticker-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 0 20px;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+            color: #94a3b8;
+            border-right: 1px solid #1e3a5f;
+            height: 32px;
+            cursor: default;
+            transition: background 0.15s;
+        }
+        .ticker-item:hover { background: rgba(255,255,255,0.04); }
+        .ticker-item .t-sym  { color: #e2e8f0; font-weight: 700; }
+        .ticker-item .t-price{ color: #f8fafc; }
+        .ticker-item .t-chg.up   { color: #34d399; }
+        .ticker-item .t-chg.down { color: #f87171; }
+        .ticker-item .t-chg.flat { color: #94a3b8; }
+        .ticker-dot.up   { background: #34d399; }
+        .ticker-dot.down { background: #f87171; }
+        .ticker-dot.flat { background: #94a3b8; }
+
+        /* ── Market Feed Cards ─────────────────────────────────────── */
+        .mf-card {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            border: 1px solid #1e3a5f;
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+        .mf-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, #3b82f6, #06b6d4);
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .mf-card:hover::before { opacity: 1; }
+        .mf-card:hover { border-color: #2d5a8e; box-shadow: 0 8px 32px rgba(59,130,246,0.12); }
+        .mf-card.up::before { background: linear-gradient(90deg, #10b981, #34d399); opacity: 1; }
+        .mf-card.down::before { background: linear-gradient(90deg, #ef4444, #f87171); opacity: 1; }
+        .mf-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; font-weight: 600; }
+        .mf-value { font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #e2e8f0; }
+        .mf-price { font-size: 28px; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: #f8fafc; line-height: 1; }
+        .mf-price.up   { color: #34d399; }
+        .mf-price.down { color: #f87171; }
+        .mf-divider { border-top: 1px solid #1e3a5f; margin: 12px 0; }
+        .mf-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        canvas.sparkline { display: block; width: 100%; height: 40px; }
+
         /* Sidebar Collapsed Behavior */
         #appSidebar.collapsed {
             width: 4.5rem;
@@ -186,10 +276,18 @@
         }
     </style>
 </head>
-<body class="h-full text-slate-800 antialiased overflow-x-hidden">
+<body class="h-full text-slate-800 antialiased overflow-x-hidden flex flex-col min-h-screen">
+
+    <!-- ═══ FULL-WIDTH LIVE TICKER BAR (Across Entire Page Width Above Sidebar & Content) ═══ -->
+    <div id="tickerBar" class="hidden w-full shrink-0">
+        <div class="ticker-track" id="tickerTrack">
+            <!-- Populated dynamically by renderTickerBar() -->
+            <div class="ticker-item"><span class="t-sym">BTCUSD</span><span class="t-price">$--</span><span class="t-chg flat">--</span></div>
+        </div>
+    </div>
 
     <!-- App Shell Wrapper -->
-    <div class="min-h-full flex flex-col md:flex-row">
+    <div class="flex-1 flex flex-col md:flex-row min-h-0">
 
         <!-- ==================================================== -->
         <!-- 1. DESKTOP COLLAPSIBLE SIDEBAR                       -->
@@ -227,6 +325,12 @@
                     <i data-lucide="activity" class="w-4 h-4 flex-shrink-0"></i>
                     <span class="nav-text truncate">Strategies & Signals</span>
                     <span id="sbActiveStrategiesBadge" class="nav-badge ml-auto text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">6</span>
+                </a>
+
+                <a href="#marketfeed" onclick="switchTab('marketfeed')" data-tab="marketfeed" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-50 text-xs font-medium transition">
+                    <i data-lucide="bar-chart-2" class="w-4 h-4 flex-shrink-0"></i>
+                    <span class="nav-text truncate">Market Feed</span>
+                    <span id="mfNavBadge" class="nav-badge ml-auto text-[10px] text-cyan-600 bg-cyan-50 px-1.5 py-0.5 rounded font-mono">LIVE</span>
                 </a>
 
                 <a href="#livebroker" onclick="switchTab('livebroker')" data-tab="livebroker" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-50 text-xs font-medium transition">
@@ -302,7 +406,7 @@
         <!-- 2. MAIN CONTENT AREA & RESPONSIVE HEADER            -->
         <!-- ==================================================== -->
         <div class="flex-1 flex flex-col min-w-0 pb-16 md:pb-6">
-            
+
             <!-- Sticky Top Header (Kite / Fyers Style) -->
             <header class="sticky top-0 z-20 h-14 bg-white/95 backdrop-blur-sm border-b border-slate-200 px-3 md:px-6 flex items-center justify-between">
                 
@@ -362,7 +466,33 @@
 
             <!-- Main Dynamic Container -->
             <main class="flex-1 p-3 md:p-6 max-w-7xl w-full mx-auto space-y-5">
-                
+
+                <!-- Global IP Whitelist Alert Banner (Visible across all tabs if IP not whitelisted) -->
+                <div id="globalIpWhitelistBanner" class="hidden bg-amber-50 border border-amber-300 rounded-lg p-4 flex items-start justify-between gap-3 shadow-xs">
+                    <div class="flex items-start gap-3">
+                        <div class="text-amber-500 mt-0.5 shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-amber-800">⚠️ Delta Exchange IP Not Whitelisted — API Access Blocked</div>
+                            <div class="text-xs text-amber-700 mt-0.5">
+                                Server outgoing IP <code id="globalBannerServerIp" class="font-mono bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200 text-amber-900 font-bold">127.0.0.1</code> is not whitelisted for your Delta Exchange API key.
+                            </div>
+                            <div class="text-xs text-amber-600 mt-1">
+                                Go to <a href="https://www.india.delta.exchange" target="_blank" class="underline font-semibold hover:text-amber-800">india.delta.exchange</a> &rarr; <strong>Profile &rarr; API Keys &rarr; Edit &rarr; Add IP to Whitelist</strong>.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button onclick="copyServerIp()" class="px-2.5 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 rounded text-xs font-semibold transition cursor-pointer">
+                            📋 Copy IP
+                        </button>
+                        <button onclick="switchTab('admin')" class="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-semibold transition cursor-pointer">
+                            Admin Settings
+                        </button>
+                    </div>
+                </div>
+
                 <!-- ==================================================== -->
                 <!-- TAB 1: SYSTEM MONITOR & OBSERVABILITY                -->
                 <!-- ==================================================== -->
@@ -555,7 +685,97 @@
                         </div>
                     </div>
 
+
+                    <!-- ── Log Intelligence: Live Level Counters & File Inventory ── -->
+                    <div class="bg-white rounded-lg border border-slate-200 p-4 shadow-2xs space-y-3">
+                        <!-- Card Header -->
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                            <div class="flex items-center gap-2.5">
+                                <div class="w-7 h-7 rounded bg-violet-50 text-violet-600 flex items-center justify-center">
+                                    <i data-lucide="file-text" class="w-4 h-4"></i>
+                                </div>
+                                <div>
+                                    <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wider">Log Intelligence</h3>
+                                    <p class="text-[11px] text-slate-500">In-process level counters + file inventory — refreshed every 15s</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span id="logIntelSessionBadge" class="pill-badge pill-neutral text-[10px] font-mono">Session: --</span>
+                                <button onclick="resetLogCounts()" class="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 transition-colors">
+                                    <i data-lucide="refresh-cw" class="w-3 h-3"></i> Reset Counts
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                            <!-- LEFT: Level counter badges -->
+                            <div>
+                                <div class="text-[11px] font-semibold text-slate-500 mb-2 uppercase tracking-wider">Log Level Counters (Since Startup / Last Reset)</div>
+                                <div class="grid grid-cols-2 gap-2">
+
+                                    <!-- ERROR -->
+                                    <div class="flex items-center justify-between bg-rose-50 border border-rose-200 rounded-md px-3 py-2">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+                                            <span class="text-xs font-semibold text-rose-700">ERROR</span>
+                                        </div>
+                                        <span id="logCountError" class="text-lg font-black tabular-num text-rose-700">0</span>
+                                    </div>
+
+                                    <!-- WARNING -->
+                                    <div class="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                                            <span class="text-xs font-semibold text-amber-700">WARNING</span>
+                                        </div>
+                                        <span id="logCountWarning" class="text-lg font-black tabular-num text-amber-700">0</span>
+                                    </div>
+
+                                    <!-- INFO -->
+                                    <div class="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                            <span class="text-xs font-semibold text-emerald-700">INFO</span>
+                                        </div>
+                                        <span id="logCountInfo" class="text-lg font-black tabular-num text-emerald-700">0</span>
+                                    </div>
+
+                                    <!-- CRITICAL -->
+                                    <div class="flex items-center justify-between bg-purple-50 border border-purple-200 rounded-md px-3 py-2">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+                                            <span class="text-xs font-semibold text-purple-700">CRITICAL</span>
+                                        </div>
+                                        <span id="logCountCritical" class="text-lg font-black tabular-num text-purple-700">0</span>
+                                    </div>
+
+                                    <!-- TOTAL -->
+                                    <div class="col-span-2 flex items-center justify-between bg-slate-50 border border-slate-200 rounded-md px-3 py-2">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+                                            <span class="text-xs font-semibold text-slate-700">TOTAL LOG EVENTS</span>
+                                        </div>
+                                        <span id="logCountTotal" class="text-lg font-black tabular-num text-slate-800">0</span>
+                                    </div>
+
+                                </div>
+                            </div>
+
+                            <!-- RIGHT: File inventory -->
+                            <div>
+                                <div class="text-[11px] font-semibold text-slate-500 mb-2 uppercase tracking-wider">Log File Inventory</div>
+                                <div id="logFileInventory" class="space-y-2">
+                                    <!-- Populated dynamically -->
+                                    <div class="text-[11px] text-slate-400 py-2">Loading file stats...</div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
                     <!-- Infrastructure Hardware & Host Metrics Grid -->
+
                     <div class="bg-white rounded-lg border border-slate-200 p-4 shadow-2xs space-y-3">
                         <div class="flex items-center justify-between border-b border-slate-100 pb-2">
                             <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide">Host Machine & Container Health</h3>
@@ -707,7 +927,7 @@
                                 <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide">Algorithmic Strategies Matrix</h3>
                                 <p class="text-[11px] text-slate-400">Configure independent execution routes (Paper vs Real Delta Broker)</p>
                             </div>
-                            <span class="text-xs font-mono text-slate-500">3 Symbols &times; 2 Strategies</span>
+                            <span id="strategyMatrixCountBadge" class="text-xs font-mono text-slate-500">Loading...</span>
                         </div>
 
                         <div id="detailedStrategyCardsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -794,6 +1014,28 @@
                 <!-- ==================================================== -->
                 <section id="tab-livebroker" class="tab-panel space-y-4">
                     
+                    <!-- IP Whitelist Warning Banner (hidden by default) -->
+                    <div id="ipWhitelistBanner" class="hidden bg-amber-50 border border-amber-300 rounded-lg p-4 flex items-start gap-3">
+                        <div class="text-amber-500 mt-0.5 flex-shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm font-bold text-amber-800">⚠️ IP Not Whitelisted — API Access Blocked</div>
+                            <div class="text-xs text-amber-700 mt-1">Your server IP <code id="bannerServerIp" class="font-mono bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200 text-amber-900 font-bold">...</code> is not whitelisted for this Delta Exchange API key.</div>
+                            <div class="text-xs text-amber-600 mt-2 space-y-1">
+                                <div class="font-semibold">How to fix:</div>
+                                <ol class="list-decimal list-inside space-y-0.5 pl-1">
+                                    <li>Login to <a href="https://www.india.delta.exchange" target="_blank" class="underline hover:text-amber-800">Delta Exchange India</a></li>
+                                    <li>Go to <strong>Profile → API Keys</strong></li>
+                                    <li>Click <strong>Edit</strong> on your API key</li>
+                                    <li>Add IP <code id="bannerServerIp2" class="font-mono font-bold">...</code> to the whitelist</li>
+                                    <li>Save &amp; re-verify connection in Admin tab</li>
+                                </ol>
+                            </div>
+                            <div class="mt-2 text-[11px] text-amber-500">💡 Live price feed (Virtual Positions PnL) still works — it uses the public WebSocket without IP restrictions.</div>
+                        </div>
+                    </div>
+
                     <!-- Live Broker Margin Cards -->
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div class="bg-white p-4 rounded-lg border border-slate-200 shadow-2xs">
@@ -814,7 +1056,7 @@
                                 <span class="pill-badge pill-bull">HMAC-SHA256</span>
                                 <span class="text-xs font-semibold text-slate-700">DELTA INDIA</span>
                             </div>
-                            <div class="text-[11px] text-slate-400 mt-1">Direct REST & WSS protocol</div>
+                            <div class="text-[11px] text-slate-400 mt-1">Direct REST &amp; WSS protocol</div>
                         </div>
                     </div>
 
@@ -916,7 +1158,13 @@
                     <div id="subtab-paper-positions" class="sub-tab-panel active space-y-3">
                         <div class="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-2xs p-4">
                             <div class="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
-                                <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide">Active Virtual Positions</h3>
+                                <div class="flex items-center gap-2">
+                                    <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide">Active Virtual Positions</h3>
+                                    <span id="priceFeedBadge" class="hidden items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-medium">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                        LIVE PRICES
+                                    </span>
+                                </div>
                                 <span class="text-xs font-mono text-slate-400">Automatic TP/SL Checked on Every Cycle</span>
                             </div>
                             <div class="overflow-x-auto border border-slate-100 rounded-md">
@@ -1463,6 +1711,48 @@
 
                 </section>
 
+                <!-- ==================================================== -->
+                <!-- TAB: MARKET FEED (Live Delta Exchange Ticker Data)    -->
+                <!-- ==================================================== -->
+                <section id="tab-marketfeed" class="tab-panel" style="background:#0a0f1e; min-height:80vh; margin:-1.5rem; padding:1.5rem;">
+
+                    <!-- Header Row -->
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                                Live Market Feed
+                            </h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Delta Exchange India · Public WebSocket · Real-time v2/ticker stream</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <!-- ZMQ Throughput Widget -->
+                            <div class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-center">
+                                <div class="text-[10px] text-slate-500 uppercase tracking-wider">ZMQ PUB</div>
+                                <div id="mfZmqPackets" class="text-sm font-mono font-bold text-cyan-400">0 pkts</div>
+                            </div>
+                            <div class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-center">
+                                <div class="text-[10px] text-slate-500 uppercase tracking-wider">Feed Status</div>
+                                <div id="mfFeedStatus" class="text-sm font-mono font-bold text-slate-500">CONNECTING</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Symbol Cards Grid -->
+                    <div id="marketFeedGrid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                        <!-- Populated by renderMarketFeed() -->
+                        <div class="mf-card">
+                            <div class="text-slate-600 text-xs text-center py-8">Connecting to Delta Exchange live feed…</div>
+                        </div>
+                    </div>
+
+                    <!-- Data Source Note -->
+                    <div class="mt-6 flex items-center gap-2 text-[11px] text-slate-600">
+                        <span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
+                        Data sourced from Delta Exchange India public WebSocket (wss://socket.india.delta.exchange) · No API key required · ZMQ PUB :5557
+                    </div>
+                </section>
+
             </main>
         </div>
     </div>
@@ -1837,6 +2127,7 @@
             const titles = {
                 monitoring: 'System Monitor & Host Metrics',
                 signals: 'Algorithmic Strategies, Controls & Signals',
+                marketfeed: 'Live Market Feed — Delta Exchange Real-time Data',
                 livebroker: 'Real Broker (Delta Exchange India)',
                 papertrading: 'Simulated Paper Trading Sandbox',
                 admin: 'Admin Control Panel & Settings',
@@ -1878,6 +2169,8 @@
                 fetchErrorLogs();
             } else if (currentTab === 'signals') {
                 fetchSignalsPage();
+            } else if (currentTab === 'marketfeed') {
+                fetchMarketFeed();
             } else if (currentTab === 'livebroker') {
                 fetchBrokerData();
             } else if (currentTab === 'papertrading') {
@@ -1888,7 +2181,7 @@
             } else if (currentTab === 'logs') {
                 fetchLogs();
             }
-            // 'flow' tab is fully static — no API calls needed
+            // 'flow' and 'marketfeed' live data comes through /ws/live
         }
 
         // ====================================================
@@ -1952,13 +2245,22 @@
             if (data.status) renderStatus(data.status);
             if (data.positions) renderLivePositions(data.positions);
             if (data.orders) renderLiveOrders(data.orders);
-            if (data.paper_positions) renderPaperPositions(data.paper_positions);
+            if (data.paper_positions) renderPaperPositions(data.paper_positions, data.price_feed_active);
             if (data.signals && signalsLiveSyncEnabled && signalsCurrentPage === 1 && !signalsSearchQuery) {
                 rawSignalsData = data.signals;
                 signalsTotalCount = Math.max(signalsTotalCount, data.signals.length);
                 renderSignalsTableWithPagination();
             }
             if (data.detailed_strategies) renderDetailedStrategyCards(data.detailed_strategies);
+            // Live ticker bar and market feed
+            if (data.live_tickers && Object.keys(data.live_tickers).length > 0) {
+                renderTickerBar(data.live_tickers);
+                if (currentTab === 'marketfeed') {
+                    renderMarketFeed(data.live_tickers, data.price_feed_active, data.price_feed_packets || 0);
+                }
+            } else if (data.live_prices && Object.keys(data.live_prices).length > 0) {
+                renderTickerBar(null, data.live_prices);
+            }
         }
 
         function renderBalance(bal) {
@@ -1975,6 +2277,37 @@
             if (lbUsd) lbUsd.textContent = usd;
             if (lbInr) lbInr.innerHTML = inr;
             if (lbMarg) lbMarg.textContent = usd;
+
+            // IP Whitelist Banners handling (global banner & live broker tab banner)
+            const globalBanner = document.getElementById('globalIpWhitelistBanner');
+            const banner = document.getElementById('ipWhitelistBanner');
+            if (bal.ip_whitelisted === false) {
+                const ip = bal.server_ip || '—';
+                window._lastKnownServerIp = ip;
+                const gIp = document.getElementById('globalBannerServerIp');
+                if (gIp) gIp.textContent = ip;
+                if (globalBanner) {
+                    globalBanner.classList.remove('hidden');
+                    globalBanner.classList.add('flex');
+                }
+                const ipEl1 = document.getElementById('bannerServerIp');
+                const ipEl2 = document.getElementById('bannerServerIp2');
+                if (ipEl1) ipEl1.textContent = ip;
+                if (ipEl2) ipEl2.textContent = ip;
+                if (banner) {
+                    banner.classList.remove('hidden');
+                    banner.classList.add('flex');
+                }
+            } else if (bal.ip_whitelisted === true) {
+                if (globalBanner) {
+                    globalBanner.classList.add('hidden');
+                    globalBanner.classList.remove('flex');
+                }
+                if (banner) {
+                    banner.classList.add('hidden');
+                    banner.classList.remove('flex');
+                }
+            }
         }
 
         function renderStatus(status) {
@@ -2009,6 +2342,93 @@
                 if (armedState) { armedState.textContent = 'DISARMED (SAFE)'; armedState.className = 'text-xs font-semibold text-emerald-600'; }
                 if (sigMode) sigMode.textContent = 'ROUTING: SIMULATED PAPER TRADING';
                 if (sigArmed) { sigArmed.textContent = 'DISARMED'; sigArmed.className = 'pill-badge pill-neutral'; }
+            }
+        }
+
+        async function fetchLogStats() {
+            try {
+                const res = await fetch('/api/logs/stats');
+                if (res.ok) {
+                    const data = await res.json();
+                    renderLogStats(data);
+                }
+            } catch (e) {
+                console.error("Error fetching log stats:", e);
+            }
+        }
+
+        function renderLogStats(data) {
+            if (!data) return;
+            const counts = data.counts || {};
+            const files = data.files || [];
+
+            // Update session badge
+            const sessionBadge = document.getElementById('logIntelSessionBadge');
+            if (sessionBadge && counts.session_start) {
+                const d = new Date(counts.session_start);
+                sessionBadge.textContent = 'Session: ' + d.toLocaleTimeString();
+            }
+
+            // Update count badges
+            const eError = document.getElementById('logCountError');
+            if (eError) eError.textContent = counts.error || 0;
+            const eWarn = document.getElementById('logCountWarning');
+            if (eWarn) eWarn.textContent = counts.warning || 0;
+            const eInfo = document.getElementById('logCountInfo');
+            if (eInfo) eInfo.textContent = counts.info || 0;
+            const eCrit = document.getElementById('logCountCritical');
+            if (eCrit) eCrit.textContent = counts.critical || 0;
+            const eTotal = document.getElementById('logCountTotal');
+            if (eTotal) eTotal.textContent = counts.total || 0;
+
+            // Render file inventory
+            const inventory = document.getElementById('logFileInventory');
+            if (inventory) {
+                if (files.length === 0) {
+                    inventory.innerHTML = '<div class="text-[11px] text-slate-400 py-2">No log files found.</div>';
+                    return;
+                }
+                inventory.innerHTML = files.map(f => {
+                    const exists = f.exists;
+                    const sizeStr = exists ? `${f.size_mb.toFixed(2)} MB` : '0 MB';
+                    const linesStr = exists ? `${f.line_count} lines` : '0 lines';
+                    
+                    return `
+                        <div class="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-100 text-xs">
+                            <div class="flex items-center gap-2">
+                                <i data-lucide="file-text" class="w-3.5 h-3.5 text-slate-400"></i>
+                                <span class="font-mono font-medium text-slate-700">${f.name}</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span class="text-slate-500">${linesStr}</span>
+                                <span class="font-mono text-slate-600 w-16 text-right">${sizeStr}</span>
+                                <a href="/api/logs/${f.log_type}/download" ${!exists ? 'style="pointer-events:none;opacity:0.5"' : ''} class="inline-flex items-center justify-center w-6 h-6 rounded bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 transition-colors" title="Download ${f.name}">
+                                    <i data-lucide="download" class="w-3 h-3"></i>
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+                // Re-render lucide icons inside the dynamically updated content
+                if (window.lucide && typeof lucide.createIcons === 'function') {
+                    lucide.createIcons();
+                }
+            }
+        }
+
+        async function resetLogCounts() {
+            try {
+                const res = await fetch('/api/logs/counts/reset', { method: 'POST' });
+                if (res.ok) {
+                    showToast("Log counters reset successfully", "success");
+                    fetchLogStats();
+                } else {
+                    showToast("Failed to reset log counters", "error");
+                }
+            } catch (e) {
+                console.error("Error resetting log counts:", e);
+                showToast("Error resetting log counters", "error");
             }
         }
 
@@ -2120,21 +2540,26 @@
                 upText.textContent = `Uptime: ${upHours}h ${upMins}m • ${totalCompleted} Tasks`;
             }
 
-            // Worker Process Chips — with real active/idle state highlighting
+            // Worker Process Chips — real active/idle state using backend-supplied active_pids
             const procGrid = document.getElementById('celeryProcessesGrid');
             if (procGrid) {
                 const procs = node.processes || [17, 18, 19, 20, 21, 22, 23, 24, 25];
-                // Active processes: those currently executing a task (from active_tasks list if available)
-                const activePids = new Set(
-                    (node.active_tasks || node.active || []).map(t => t.pid || t.worker_pid).filter(Boolean)
-                );
                 const totalWorkers = procs.length;
-                const activeCount = activePids.size || (celery.queue_depth > 0 ? Math.min(celery.queue_depth, 3) : 0);
+
+                // Prefer exact PIDs from backend (node.active_pids) ← set by health_monitor when tasks run.
+                // Fall back: spread node.active_tasks_count across the first N process slots.
+                const exactActivePids = new Set((node.active_pids || []).filter(Boolean));
+                const fallbackActiveCount = exactActivePids.size > 0
+                    ? 0  // exact data available — no fallback needed
+                    : (node.active_tasks_count || 0);
+
                 let renderedActive = 0;
 
                 procGrid.innerHTML = procs.map((pid, idx) => {
-                    // A worker is visually active if it's in activePids OR we spread active load across first N workers
-                    const isActive = activePids.has(pid) || (activePids.size === 0 && idx < activeCount);
+                    // Mark running if the PID is explicitly in active_pids,
+                    // OR (when exact data is missing) the slot index is within the active count.
+                    const isActive = exactActivePids.has(pid)
+                        || (exactActivePids.size === 0 && idx < fallbackActiveCount);
                     if (isActive) renderedActive++;
                     return isActive
                         ? `<div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-50 border border-emerald-300 text-xs font-mono text-emerald-800 shadow-sm ring-1 ring-emerald-200">
@@ -2440,6 +2865,13 @@
                     const detData = await detRes.json().catch(() => ({}));
                     if (detData && detData.status === 'success') {
                         renderDetailedStrategyCards(detData.strategies || []);
+                        // Update the matrix header badge with real counts
+                        const badge = document.getElementById('strategyMatrixCountBadge');
+                        if (badge) {
+                            const nSym = detData.total_symbols || new Set((detData.strategies||[]).map(s=>s.symbol)).size;
+                            const nStr = detData.total_strategies || new Set((detData.strategies||[]).map(s=>s.strategy_id)).size;
+                            badge.textContent = `${nSym} Symbol${nSym!==1?'s':''} × ${nStr} Strateg${nStr!==1?'ies':'y'}`;
+                        }
                     }
                 }
             } catch (e) {
@@ -2690,16 +3122,32 @@
                     const bEl = document.getElementById('paperBalanceValue');
                     if (bEl) bEl.textContent = `$${(st.paper_balance || 100).toFixed(2)}`;
                 }
-                renderPaperPositions(pos.positions || []);
+                const positions = Array.isArray(pos) ? pos : (pos.positions || []);
+                // Infer if price feed is active from whether any position has a live price
+                const feedActive = positions.some(p => p.has_live_price);
+                renderPaperPositions(positions, feedActive);
                 renderPaperTrades(trd.trades || []);
             } catch (e) {
                 console.error("Error fetching paper data:", e);
             }
         }
 
-        function renderPaperPositions(positions) {
+
+        function renderPaperPositions(positions, priceFeedActive) {
             const tbody = document.getElementById('paperPositionsTableBody');
             if (!tbody) return;
+
+            // Update LIVE PRICES badge on the virtual positions heading
+            const feedBadge = document.getElementById('priceFeedBadge');
+            if (feedBadge) {
+                if (priceFeedActive) {
+                    feedBadge.classList.remove('hidden');
+                    feedBadge.classList.add('inline-flex');
+                } else {
+                    feedBadge.classList.add('hidden');
+                    feedBadge.classList.remove('inline-flex');
+                }
+            }
 
             if (!positions || positions.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400 text-xs">No active simulated paper positions.</td></tr>`;
@@ -2709,7 +3157,13 @@
             tbody.innerHTML = positions.map(pos => {
                 const pnl = pos.unrealized_pnl || 0;
                 const pnlClass = pnl >= 0 ? 'text-emerald-600' : 'text-rose-600';
+                const pnlSign = pnl >= 0 ? '+' : '';
                 const sideClass = (pos.side || '').toUpperCase() === 'BUY' ? 'pill-bull' : 'pill-bear';
+                const markPrice = pos.mark_price || pos.entry_price || 0;
+                // Show a subtle live-price indicator dot when we have a real live price
+                const liveDot = pos.has_live_price
+                    ? `<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ml-1" title="Live price"></span>`
+                    : '';
 
                 return `
                     <tr>
@@ -2717,8 +3171,10 @@
                         <td><span class="pill-badge ${sideClass}">${escapeHtml(pos.side || 'LONG')}</span></td>
                         <td class="text-right font-mono font-medium">${pos.size || 0}</td>
                         <td class="text-right font-mono">$${(pos.entry_price || 0).toFixed(2)}</td>
-                        <td class="text-right font-mono">$${(pos.mark_price || 0).toFixed(2)}</td>
-                        <td class="text-right font-mono font-bold ${pnlClass}">$${pnl.toFixed(2)}</td>
+                        <td class="text-right font-mono">
+                            $${markPrice.toFixed(2)}${liveDot}
+                        </td>
+                        <td class="text-right font-mono font-bold ${pnlClass}">${pnlSign}$${Math.abs(pnl).toFixed(4)}</td>
                         <td class="text-center font-mono text-xs text-slate-500">
                             SL: $${(pos.stop_loss || 0).toFixed(2)} / TP: $${(pos.take_profit || 0).toFixed(2)}
                         </td>
@@ -2882,8 +3338,9 @@
                     body: JSON.stringify({ api_key: apiKey, api_secret: apiSecret })
                 });
                 const data = await res.json();
-                if (data.status === 'success') {
-                    showToast("✅ Delta credentials saved securely.");
+                if (data.success || data.status === 'success') {
+                    showToast("✅ Delta credentials saved. Verifying authority...");
+                    verifyBrokerAuthority();
                 } else {
                     showToast(`❌ ${data.message || 'Failed to save credentials'}`);
                 }
@@ -2897,11 +3354,17 @@
             try {
                 const res = await fetch('/api/broker/verify-authority', { method: 'POST' });
                 const data = await res.json();
-                if (data.status === 'success') {
-                    showToast("✅ Verified! Connected to Delta Exchange.");
+                if (data.authorized || data.success || data.status === 'success') {
+                    showToast("✅ Verified & Authorized! Connected to Delta Exchange.");
+                    isDeltaAuthorized = true;
+                    _hideAuthGate();
+                    checkDeltaAuth(true);
                     fetchBrokerData();
                 } else {
-                    showToast(`❌ Verification failed: ${data.message || 'Invalid keys'}`);
+                    showToast(`❌ Verification failed: ${data.message || data.error || 'Invalid keys'}`);
+                    if (data.ip_whitelisted === false) {
+                        checkDeltaAuth(true);
+                    }
                 }
             } catch (e) {
                 showToast("❌ Verification request failed.");
@@ -2975,6 +3438,11 @@
         }
 
         async function runBatchPipelineNow() {
+            if (!isDeltaAuthorized) {
+                showToast("❌ Delta Exchange authentication required for Paper & Live modes.", "error");
+                _showAuthGate('unauthorized');
+                return;
+            }
             const btn = document.getElementById('btnRunPipelineHeader');
             if (btn) btn.disabled = true;
             showToast("⚡ Triggering Celery batch chord cycle...");
@@ -3179,6 +3647,429 @@
         }
 
         // ====================================================
+        // TICKER BAR
+        // ====================================================
+        function renderTickerBar(tickers, pricesOnly) {
+            const bar = document.getElementById('tickerBar');
+            const track = document.getElementById('tickerTrack');
+            if (!bar || !track) return;
+
+            const items = tickers
+                ? Object.entries(tickers)
+                : pricesOnly ? Object.entries(pricesOnly).map(([sym, price]) => [sym, { mark_price: price, price_change_pct: 0 }]) : [];
+
+            if (items.length === 0) return;
+
+            bar.classList.remove('hidden');
+            document.body.classList.add('has-ticker');
+
+            const html = items.map(([sym, t]) => {
+                const price = t.mark_price || t || 0;
+                const chgPct = t.price_change_pct || 0;
+                const dir = chgPct > 0.001 ? 'up' : chgPct < -0.001 ? 'down' : 'flat';
+                const sign = chgPct >= 0 ? '+' : '';
+                return `<div class="ticker-item">
+                    <span class="w-1.5 h-1.5 rounded-full ticker-dot ${dir}"></span>
+                    <span class="t-sym">${sym}</span>
+                    <span class="t-price">$${Number(price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+                    <span class="t-chg ${dir}">${sign}${Number(chgPct).toFixed(2)}%</span>
+                </div>`;
+            }).join('');
+
+            // Duplicate for seamless loop
+            track.innerHTML = html + html;
+
+            // Adjust animation duration based on item count
+            const duration = Math.max(20, items.length * 6);
+            track.style.animation = `tickerScroll ${duration}s linear infinite`;
+        }
+
+        // ====================================================
+        // MARKET FEED PAGE
+        // ====================================================
+        const _sparklineCharts = {};  // symbol → Chart.js instance
+
+        async function fetchMarketFeed() {
+            try {
+                const res = await fetch('/api/market/tickers');
+                const data = await res.json();
+                if (data.status === 'success' && data.tickers) {
+                    renderMarketFeed(data.tickers, data.price_feed_active, data.packets_published || 0);
+                }
+            } catch (e) {
+                console.error('Error fetching market tickers:', e);
+            }
+        }
+
+        function renderMarketFeed(tickers, feedActive, packets) {
+            const grid = document.getElementById('marketFeedGrid');
+            const statusEl = document.getElementById('mfFeedStatus');
+            const pktsEl = document.getElementById('mfZmqPackets');
+            if (!grid) return;
+
+            if (statusEl) {
+                statusEl.textContent = feedActive ? 'LIVE' : 'CONNECTING';
+                statusEl.className = feedActive
+                    ? 'text-sm font-mono font-bold text-cyan-400'
+                    : 'text-sm font-mono font-bold text-amber-400';
+            }
+            if (pktsEl) pktsEl.textContent = (packets || 0).toLocaleString() + ' pkts';
+
+            if (!tickers || Object.keys(tickers).length === 0) return;
+
+            // Check if cards already exist (update in-place vs full rebuild)
+            const existing = grid.querySelectorAll('.mf-card[data-sym]');
+            const existingSyms = new Set([...existing].map(el => el.dataset.sym));
+            const newSyms = new Set(Object.keys(tickers));
+            const needRebuild = [...newSyms].some(s => !existingSyms.has(s)) || existing.length !== newSyms.size;
+
+            if (needRebuild) {
+                grid.innerHTML = '';
+                Object.entries(tickers).forEach(([sym, t]) => {
+                    const card = document.createElement('div');
+                    card.className = 'mf-card';
+                    card.dataset.sym = sym;
+                    card.innerHTML = _buildCardHTML(sym, t);
+                    grid.appendChild(card);
+                    _initSparkline(sym, t.price_history || []);
+                });
+            } else {
+                // Fast in-place update
+                Object.entries(tickers).forEach(([sym, t]) => {
+                    _updateCardInPlace(sym, t);
+                    _updateSparkline(sym, t.price_history || []);
+                });
+            }
+        }
+
+        function _buildCardHTML(sym, t) {
+            const price = t.mark_price || 0;
+            const chgPct = t.price_change_pct || 0;
+            const dir = chgPct > 0.001 ? 'up' : chgPct < -0.001 ? 'down' : 'flat';
+            const chgColor = dir === 'up' ? '#34d399' : dir === 'down' ? '#f87171' : '#94a3b8';
+            const sign = chgPct >= 0 ? '+' : '';
+            const fmt = (n, dp=2) => Number(n || 0).toLocaleString('en-US', {minimumFractionDigits: dp, maximumFractionDigits: dp});
+            const spread = t.spread || 0;
+
+            return `
+                <div class="flex items-start justify-between mb-3">
+                    <div>
+                        <div class="text-base font-bold text-white tracking-tight">${sym}</div>
+                        <div class="mf-label mt-0.5">Delta Exchange India</div>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                        <span class="text-[10px] font-mono text-cyan-400 font-semibold">LIVE</span>
+                    </div>
+                </div>
+
+                <div class="mf-price ${dir}" data-field="mark_price">$${fmt(price)}</div>
+                <div style="color:${chgColor}" class="text-sm font-mono font-semibold mt-1" data-field="price_change">${sign}${fmt(chgPct)}% (24h)</div>
+
+                <!-- Sparkline -->
+                <div class="my-3" style="height:44px">
+                    <canvas id="spark-${sym}" class="sparkline"></canvas>
+                </div>
+
+                <div class="mf-divider"></div>
+
+                <div class="mf-row"><span class="mf-label">24h High</span><span class="mf-value" data-field="high_24h">$${fmt(t.high_24h)}</span></div>
+                <div class="mf-row"><span class="mf-label">24h Low</span><span class="mf-value" data-field="low_24h">$${fmt(t.low_24h)}</span></div>
+                <div class="mf-row"><span class="mf-label">Volume (24h)</span><span class="mf-value" data-field="volume_24h">${fmt(t.volume_24h, 0)}</span></div>
+                <div class="mf-row"><span class="mf-label">Open Interest</span><span class="mf-value" data-field="open_interest">${fmt(t.open_interest, 0)}</span></div>
+
+                <div class="mf-divider"></div>
+
+                <div class="mf-row">
+                    <div><span class="mf-label">Bid</span><br><span class="mf-value" style="color:#34d399" data-field="best_bid">$${fmt(t.best_bid)}</span></div>
+                    <div class="text-center"><span class="mf-label">Spread</span><br><span class="mf-value text-slate-400" data-field="spread">$${fmt(spread, 4)}</span></div>
+                    <div class="text-right"><span class="mf-label">Ask</span><br><span class="mf-value" style="color:#f87171" data-field="best_ask">$${fmt(t.best_ask)}</span></div>
+                </div>
+
+                <div class="mf-divider"></div>
+
+                <div class="mf-row">
+                    <span class="mf-label">Funding Rate</span>
+                    <span class="mf-value" style="color:${(t.funding_rate||0)>=0?'#34d399':'#f87171'}" data-field="funding_rate">${fmt(t.funding_rate || 0, 4)}%</span>
+                </div>
+                <div class="mf-row">
+                    <span class="mf-label">Last Price</span>
+                    <span class="mf-value" data-field="last_price">$${fmt(t.last_price)}</span>
+                </div>
+            `;
+        }
+
+        function _updateCardInPlace(sym, t) {
+            const card = document.querySelector(`.mf-card[data-sym="${sym}"]`);
+            if (!card) return;
+            const fmt = (n, dp=2) => Number(n || 0).toLocaleString('en-US', {minimumFractionDigits: dp, maximumFractionDigits: dp});
+            const chgPct = t.price_change_pct || 0;
+            const dir = chgPct > 0.001 ? 'up' : chgPct < -0.001 ? 'down' : 'flat';
+
+            // Update card border color class
+            card.classList.remove('up', 'down');
+            if (dir !== 'flat') card.classList.add(dir);
+
+            const up = (field, val) => {
+                const el = card.querySelector(`[data-field="${field}"]`);
+                if (el) el.textContent = val;
+            };
+            up('mark_price', `$${fmt(t.mark_price)}`);
+            const sign = chgPct >= 0 ? '+' : '';
+            const chgEl = card.querySelector('[data-field="price_change"]');
+            if (chgEl) {
+                chgEl.textContent = `${sign}${fmt(chgPct)}% (24h)`;
+                chgEl.style.color = dir === 'up' ? '#34d399' : dir === 'down' ? '#f87171' : '#94a3b8';
+            }
+            const priceEl = card.querySelector('[data-field="mark_price"]');
+            if (priceEl) { priceEl.className = `mf-price ${dir}`; }
+            up('high_24h', `$${fmt(t.high_24h)}`);
+            up('low_24h', `$${fmt(t.low_24h)}`);
+            up('volume_24h', fmt(t.volume_24h, 0));
+            up('open_interest', fmt(t.open_interest, 0));
+            up('best_bid', `$${fmt(t.best_bid)}`);
+            up('best_ask', `$${fmt(t.best_ask)}`);
+            up('spread', `$${fmt(t.spread || 0, 4)}`);
+            up('funding_rate', `${fmt(t.funding_rate || 0, 4)}%`);
+            up('last_price', `$${fmt(t.last_price)}`);
+        }
+
+        function _initSparkline(sym, history) {
+            const canvas = document.getElementById(`spark-${sym}`);
+            if (!canvas) return;
+            if (_sparklineCharts[sym]) { _sparklineCharts[sym].destroy(); }
+            const data = history && history.length > 0 ? history : [0, 0];
+            const minV = Math.min(...data);
+            const maxV = Math.max(...data);
+            const up = data[data.length - 1] >= data[0];
+            const color = up ? '#34d399' : '#f87171';
+            const ctx = canvas.getContext('2d');
+            _sparklineCharts[sym] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map((_, i) => i),
+                    datasets: [{
+                        data: data,
+                        borderColor: color,
+                        backgroundColor: `${color}18`,
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        fill: true,
+                        tension: 0.4,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    scales: {
+                        x: { display: false },
+                        y: { display: false, min: minV * 0.999, max: maxV * 1.001 }
+                    }
+                }
+            });
+        }
+
+        function _updateSparkline(sym, history) {
+            const chart = _sparklineCharts[sym];
+            if (!chart || !history || history.length < 2) return;
+            const up = history[history.length - 1] >= history[0];
+            const color = up ? '#34d399' : '#f87171';
+            chart.data.labels = history.map((_, i) => i);
+            chart.data.datasets[0].data = history;
+            chart.data.datasets[0].borderColor = color;
+            chart.data.datasets[0].backgroundColor = `${color}18`;
+            const minV = Math.min(...history);
+            const maxV = Math.max(...history);
+            chart.options.scales.y.min = minV * 0.999;
+            chart.options.scales.y.max = maxV * 1.001;
+            chart.update('none');  // Skip animation for performance
+        }
+
+        // ====================================================
+        // DELTA AUTH GATE & IP WHITELIST NOTIFICATIONS
+        // ====================================================
+        let _authCheckDone = false;
+        let isDeltaAuthorized = false;
+        window._lastKnownServerIp = '127.0.0.1';
+
+        function copyServerIp(ip) {
+            const targetIp = (ip || window._lastKnownServerIp || (document.getElementById('globalBannerServerIp') ? document.getElementById('globalBannerServerIp').textContent : '') || '').trim();
+            if (targetIp && targetIp !== '—' && targetIp !== '--') {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(targetIp).then(() => {
+                        showToast('IP copied to clipboard: ' + targetIp, 'success');
+                    }).catch(() => {
+                        prompt('Copy server IP:', targetIp);
+                    });
+                } else {
+                    prompt('Copy server IP:', targetIp);
+                }
+            }
+        }
+
+        async function checkDeltaAuth(force = false) {
+            if (_authCheckDone && !force) return;
+            try {
+                const res = await fetch('/api/broker/status');
+                const data = await res.json();
+                if (data.server_ip) {
+                    window._lastKnownServerIp = data.server_ip;
+                    const gIp = document.getElementById('globalBannerServerIp');
+                    if (gIp) gIp.textContent = data.server_ip;
+                    const ipEl1 = document.getElementById('bannerServerIp');
+                    const ipEl2 = document.getElementById('bannerServerIp2');
+                    if (ipEl1) ipEl1.textContent = data.server_ip;
+                    if (ipEl2) ipEl2.textContent = data.server_ip;
+                }
+
+                const btn = document.getElementById('btnRunPipelineHeader');
+                if (data.ip_whitelisted === false) {
+                    isDeltaAuthorized = false;
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.classList.add('opacity-50', 'cursor-not-allowed');
+                        btn.title = 'Delta Exchange Authentication & IP Whitelist Required';
+                    }
+                    const globalBanner = document.getElementById('globalIpWhitelistBanner');
+                    if (globalBanner) {
+                        globalBanner.classList.remove('hidden');
+                        globalBanner.classList.add('flex');
+                    }
+                    _showAuthGate('ip_blocked', data);
+                } else if (!data.delta_configured) {
+                    isDeltaAuthorized = false;
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.classList.add('opacity-50', 'cursor-not-allowed');
+                        btn.title = 'Delta Exchange Authentication Required';
+                    }
+                    _showAuthGate('unconfigured', data);
+                } else if (data.is_authorized === false) {
+                    isDeltaAuthorized = false;
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.classList.add('opacity-50', 'cursor-not-allowed');
+                        btn.title = 'Delta Exchange Authorization Failed';
+                    }
+                    _showAuthGate('unauthorized', data);
+                } else {
+                    isDeltaAuthorized = true;
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                        btn.title = 'Run Batch Strategy Cycle';
+                    }
+                    const globalBanner = document.getElementById('globalIpWhitelistBanner');
+                    if (globalBanner) {
+                        globalBanner.classList.add('hidden');
+                        globalBanner.classList.remove('flex');
+                    }
+                    _hideAuthGate();
+                    _authCheckDone = true;
+                }
+            } catch (e) {
+                console.debug('checkDeltaAuth error:', e);
+            }
+        }
+
+        function _showAuthGate(reason, data) {
+            let overlay = document.getElementById('authGateOverlay');
+            const serverIp = (data && data.server_ip) || window._lastKnownServerIp || '127.0.0.1';
+            let title = 'Delta Exchange Setup Required';
+            let sub = 'Delta Exchange API credentials are not configured.<br>Historical candles (15m) and indicators require authorized API access (Paper &amp; Live modes).';
+            let badgeColor = '#3b82f6';
+            let iconSvg = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>`;
+            let stepsHtml = `
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                    <span style="width:20px;height:20px;background:#1e3a5f;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#60a5fa;font-weight:700;flex-shrink:0;">1</span>
+                    <span style="font-size:12px;color:#94a3b8;">Log in to <a href="https://www.india.delta.exchange" target="_blank" style="color:#60a5fa;text-decoration:none;">india.delta.exchange</a></span>
+                </div>
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                    <span style="width:20px;height:20px;background:#1e3a5f;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#60a5fa;font-weight:700;flex-shrink:0;">2</span>
+                    <span style="font-size:12px;color:#94a3b8;">Go to <strong style="color:#e2e8f0;">Profile → API Keys → Create New</strong></span>
+                </div>
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                    <span style="width:20px;height:20px;background:#1e3a5f;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#60a5fa;font-weight:700;flex-shrink:0;">3</span>
+                    <span style="font-size:12px;color:#94a3b8;">Copy API Key &amp; Secret → paste in Admin tab</span>
+                </div>
+            `;
+
+            if (reason === 'ip_blocked') {
+                title = '⚠️ Delta IP Whitelist Required';
+                sub = `Delta Exchange rejected requests because server IP <strong style="color:#fbbf24;font-family:monospace;">${serverIp}</strong> is not whitelisted on your API key.`;
+                badgeColor = '#f59e0b';
+                iconSvg = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`;
+                stepsHtml = `
+                    <div style="display:flex;gap:10px;align-items:flex-start;">
+                        <span style="width:20px;height:20px;background:#451a03;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fbbf24;font-weight:700;flex-shrink:0;">1</span>
+                        <span style="font-size:12px;color:#cbd5e1;">Log in to <a href="https://www.india.delta.exchange" target="_blank" style="color:#60a5fa;text-decoration:none;">india.delta.exchange</a></span>
+                    </div>
+                    <div style="display:flex;gap:10px;align-items:flex-start;">
+                        <span style="width:20px;height:20px;background:#451a03;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fbbf24;font-weight:700;flex-shrink:0;">2</span>
+                        <span style="font-size:12px;color:#cbd5e1;">Go to <strong style="color:#e2e8f0;">Profile → API Keys → Edit</strong></span>
+                    </div>
+                    <div style="display:flex;gap:10px;align-items:flex-start;">
+                        <span style="width:20px;height:20px;background:#451a03;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fbbf24;font-weight:700;flex-shrink:0;">3</span>
+                        <span style="font-size:12px;color:#cbd5e1;">Add IP <strong style="color:#fbbf24;font-family:monospace;">${serverIp}</strong> to the whitelist</span>
+                    </div>
+                `;
+            } else if (reason === 'unauthorized') {
+                title = 'Delta Authority Check Failed';
+                sub = 'Your configured Delta Exchange credentials could not be verified with the API. Please re-check API Key & Secret.';
+            }
+
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'authGateOverlay';
+                overlay.style.cssText = `position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
+                    background:rgba(10,15,30,0.92);backdrop-filter:blur(8px);`;
+                document.body.appendChild(overlay);
+            }
+
+            overlay.innerHTML = `
+                <div style="max-width:440px;width:90%;background:#0f172a;border:1px solid #1e3a5f;border-radius:16px;padding:32px;text-align:center;box-shadow:0 32px 64px rgba(0,0,0,0.6);">
+                    <div style="width:56px;height:56px;background:#1e293b;border-radius:14px;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;border:1px solid #1e3a5f;">
+                        ${iconSvg}
+                    </div>
+                    <h2 style="font-size:18px;font-weight:700;color:#f8fafc;margin-bottom:8px;">${title}</h2>
+                    <p style="font-size:13px;color:#94a3b8;line-height:1.6;margin-bottom:20px;">
+                        ${sub}
+                    </p>
+                    <div style="background:#0a0f1e;border:1px solid #1e3a5f;border-radius:10px;padding:16px;margin-bottom:20px;text-align:left;">
+                        <div style="font-size:11px;color:${badgeColor};font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">How to Resolve</div>
+                        <div style="display:flex;flex-direction:column;gap:10px;">
+                            ${stepsHtml}
+                        </div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        ${reason === 'ip_blocked' ? `
+                            <button onclick="copyServerIp('${serverIp}')" style="padding:10px;background:#d97706;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background='#b45309'" onmouseout="this.style.background='#d97706'">
+                                📋 Copy Server IP: ${serverIp}
+                            </button>
+                        ` : ''}
+                        <div style="display:flex;gap:10px;">
+                            <button onclick="switchTab('admin');_hideAuthGate()" style="flex:1;padding:10px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">
+                                ⚙️ Go to Admin Settings
+                            </button>
+                            <button onclick="checkDeltaAuth(true)" style="flex:1;padding:10px;background:#1e293b;color:#94a3b8;border:1px solid #1e3a5f;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;" onmouseover="this.style.color='#e2e8f0'" onmouseout="this.style.color='#94a3b8'">
+                                🔄 Re-Check Authority
+                            </button>
+                        </div>
+                    </div>
+                    <p style="font-size:11px;color:#94a3b8;margin-top:16px;">🔒 <strong>Authentication Required (Paper &amp; Live):</strong> Both Paper mode and Live execution rely exclusively on Delta Exchange to download 15m historical candles, indicators, and market data.</p>
+                </div>
+            `;
+            overlay.style.display = 'flex';
+        }
+
+        function _hideAuthGate() {
+            const overlay = document.getElementById('authGateOverlay');
+            if (overlay) overlay.style.display = 'none';
+        }
+
+        // ====================================================
         // INITIALIZATION
         // ====================================================
         window.addEventListener('DOMContentLoaded', () => {
@@ -3198,6 +4089,13 @@
             try { fetchBrokerProfile(); } catch (e) { console.error("Profile error:", e); }
             try { fetchSystemMetrics(); } catch (e) { console.error("Metrics error:", e); }
             try { fetchErrorLogs(); } catch (e) { console.error("Logs error:", e); }
+            try { fetchLogStats(); } catch (e) { console.error("Log Stats error:", e); }
+
+            // Auth gate check on startup
+            setTimeout(checkDeltaAuth, 1500);
+
+            // Initial market feed load (REST, before WS connects)
+            setTimeout(fetchMarketFeed, 800);
 
             // Periodic fallback background refresh (every 3s)
             setInterval(() => {
@@ -3205,6 +4103,13 @@
                     fetchSystemMetrics();
                 }
             }, 3000);
+
+            // Periodic Log Stats refresh (every 15s)
+            setInterval(() => {
+                if (currentTab === 'monitoring') {
+                    fetchLogStats();
+                }
+            }, 15000);
         });
     </script>
 </body>

@@ -14,10 +14,16 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.health_monitor import start_health_collector
+from app.broker.delta.price_feed import (
+    get_delta_price_feed,
+    get_all_live_prices,
+    get_all_live_tickers,
+    get_price_history,
+)
 from app.services.broker_service import get_broker_service
 from app.services.strategy_service import get_strategy_service
 from app.services.system_service import get_system_service
@@ -70,8 +76,16 @@ class LiveStreamManager:
 live_stream_manager = LiveStreamManager()
 
 
+def _build_live_tickers_with_history() -> dict[str, Any]:
+    """Build live_tickers payload with sparkline history attached to each symbol."""
+    tickers = get_all_live_tickers()
+    for symbol, ticker in tickers.items():
+        ticker["price_history"] = get_price_history(symbol)
+    return tickers
+
+
 async def _background_stream_loop() -> None:
-    """Periodically broadcast live positions, orders, and telemetry to connected browsers."""
+    """Periodically broadcast live positions, orders, telemetry, live prices, and full ticker data."""
     while True:
         try:
             await asyncio.sleep(1.0)
@@ -81,6 +95,7 @@ async def _background_stream_loop() -> None:
             broker_service = get_broker_service()
             system_service = get_system_service()
             strategy_service = get_strategy_service()
+            price_feed = get_delta_price_feed()
 
             positions, orders, balance, status, metrics, signals, strategies, detailed_strategies = await asyncio.gather(
                 asyncio.to_thread(broker_service.get_positions, "LIVE"),
@@ -94,6 +109,11 @@ async def _background_stream_loop() -> None:
             )
             paper_positions = await asyncio.to_thread(broker_service.get_paper_positions)
 
+            # Full ticker data (price, volume, OI, funding rate, bid/ask) + sparkline history
+            live_tickers = await asyncio.to_thread(_build_live_tickers_with_history)
+            live_prices = {sym: t.get("mark_price", 0.0) for sym, t in live_tickers.items()} or get_all_live_prices()
+            price_feed_status = price_feed.get_status()
+
             payload = {
                 "type": "live_stream",
                 "timestamp": time.time(),
@@ -106,6 +126,10 @@ async def _background_stream_loop() -> None:
                 "signals": signals,
                 "strategies": strategies,
                 "detailed_strategies": detailed_strategies,
+                "live_prices": live_prices,
+                "live_tickers": live_tickers,
+                "price_feed_active": price_feed_status.get("is_connected", False),
+                "price_feed_packets": price_feed_status.get("packets_published", 0),
             }
             await live_stream_manager.broadcast(payload)
         except asyncio.CancelledError:
@@ -117,12 +141,20 @@ async def _background_stream_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager initializing background health monitoring and WebSocket streaming."""
+    """Application lifespan manager: health monitor, Delta price feed, WebSocket stream."""
     try:
         start_health_collector()
         logger.info("✅ Health monitoring collector initialized on dashboard startup.")
-    except Exception as exc:  # noqa: BLE001 - Non-blocking startup for background health monitor
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Could not auto-start health collector: %s", exc)
+
+    # Start Delta public price feed (no API keys required — public WebSocket)
+    try:
+        price_feed = get_delta_price_feed()
+        price_feed.start()
+        logger.info("✅ Delta live price feed started on dashboard startup.")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not start Delta price feed: %s", exc)
 
     stream_task = asyncio.create_task(_background_stream_loop())
     try:
@@ -138,7 +170,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="TradeBuddy - Trading & System Dashboard API",
     description="Decoupled frontend dashboard API for real-time strategy monitoring, Delta Exchange execution, and observability.",
-    version="2.2.0",
+    version="2.3.0",
     lifespan=lifespan,
 )
 
@@ -153,14 +185,57 @@ app.include_router(analytics_router)
 app.include_router(log_router)
 
 
+# ─── Market Feed REST Endpoint ────────────────────────────────────────────────
+
+@app.get("/api/market/tickers")
+async def get_market_tickers() -> JSONResponse:
+    """Return all live ticker data (mark price, volume, OI, funding rate, bid/ask) for configured symbols.
+
+    Used for initial page load before the WebSocket stream connects.
+    """
+    tickers = await asyncio.to_thread(_build_live_tickers_with_history)
+    return JSONResponse(content={
+        "status": "success",
+        "tickers": tickers,
+        "price_feed_active": get_delta_price_feed().get_status().get("is_connected", False),
+        "packets_published": get_delta_price_feed().get_status().get("packets_published", 0),
+    })
+
+
+@app.get("/api/market/ticker/{symbol}")
+async def get_market_ticker_symbol(symbol: str) -> JSONResponse:
+    """Return ticker data for a single symbol.
+
+    Args:
+        symbol: Symbol string, e.g. 'BTCUSD' or 'BTC-USD'.
+    """
+    from app.broker.delta.price_feed import get_live_ticker, get_price_history
+    clean = symbol.replace("-", "").upper()
+    ticker = get_live_ticker(clean)
+    if ticker is None:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": f"No live data for {symbol} yet. Price feed may still be connecting."}
+        )
+    ticker["price_history"] = get_price_history(clean)
+    return JSONResponse(content={"status": "success", "ticker": ticker})
+
+
+# ─── WebSocket Live Stream ────────────────────────────────────────────────────
+
 @app.websocket("/ws/live")
 async def websocket_live_endpoint(websocket: WebSocket) -> None:
-    """Real-time bidirectional WebSocket stream for live orders, positions, and telemetry."""
+    """Real-time bidirectional WebSocket stream for live orders, positions, telemetry, and market tickers."""
     await live_stream_manager.connect(websocket)
     try:
         broker_service = get_broker_service()
         system_service = get_system_service()
         strategy_service = get_strategy_service()
+        price_feed = get_delta_price_feed()
+
+        live_tickers = _build_live_tickers_with_history()
+        live_prices = {sym: t.get("mark_price", 0.0) for sym, t in live_tickers.items()}
+        pf_status = price_feed.get_status()
 
         snapshot = {
             "type": "snapshot",
@@ -174,6 +249,10 @@ async def websocket_live_endpoint(websocket: WebSocket) -> None:
             "signals": strategy_service.get_signals_log(limit=25),
             "strategies": strategy_service.get_strategies_stats(),
             "detailed_strategies": strategy_service.get_strategies_detailed(),
+            "live_prices": live_prices,
+            "live_tickers": live_tickers,
+            "price_feed_active": pf_status.get("is_connected", False),
+            "price_feed_packets": pf_status.get("packets_published", 0),
         }
         await websocket.send_json(snapshot)
 

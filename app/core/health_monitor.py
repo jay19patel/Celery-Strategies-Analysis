@@ -202,6 +202,13 @@ def _check_celery_workers() -> Dict[str, Any]:
             node_completed = sum(total_tasks.values()) if isinstance(total_tasks, dict) else 0
             total_tasks_all += node_completed
 
+            # Extract PIDs of processes currently executing a task.
+            # Celery's inspect.active() returns task dicts with a `worker_pid` field.
+            node_active_tasks = (active_res or {}).get(w_name, [])
+            active_pids = list({
+                t.get("worker_pid") for t in node_active_tasks if t.get("worker_pid")
+            })
+
             worker_nodes.append({
                 "name": w_name,
                 "status": "ONLINE",
@@ -212,7 +219,8 @@ def _check_celery_workers() -> Dict[str, Any]:
                 "memory_rss_mb": memory_mb,
                 "total_tasks_completed": node_completed,
                 "tasks_breakdown": total_tasks if isinstance(total_tasks, dict) else {},
-                "active_tasks_count": len((active_res or {}).get(w_name, [])),
+                "active_tasks_count": len(node_active_tasks),
+                "active_pids": active_pids,
             })
 
         all_registered = []
