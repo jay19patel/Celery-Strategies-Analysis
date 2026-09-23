@@ -446,11 +446,6 @@
                         <span id="wsStatusText" class="hidden sm:inline font-semibold">LIVE</span>
                     </div>
 
-                    <!-- Quick Batch Run Trigger Button -->
-                    <button onclick="runBatchPipelineNow()" id="btnRunPipelineHeader" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-semibold shadow-xs transition cursor-pointer min-h-[36px]">
-                        <i data-lucide="play" class="w-3.5 h-3.5 fill-white stroke-none"></i>
-                        <span class="hidden sm:inline">Run Cycle</span>
-                    </button>
 
                     <!-- Header Refresh Button -->
                     <button onclick="refreshCurrentTab()" title="Force Refresh Data" class="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition min-w-[36px] min-h-[36px] flex items-center justify-center">
@@ -825,11 +820,11 @@
                             <!-- SQLite Database -->
                             <div class="bg-slate-50 p-3 rounded-md border border-slate-100">
                                 <div class="flex justify-between text-xs text-slate-500 mb-1">
-                                    <span>SQLite Database (WAL)</span>
+                                    <span>SQLite Database (TRUNCATE)</span>
                                     <span id="sqliteLatencyBadge" class="font-mono text-[11px] text-emerald-600 font-semibold">0 ms</span>
                                 </div>
                                 <div id="sqliteSizeValue" class="text-lg font-bold text-slate-900 tabular-num">0.00 MB</div>
-                                <div id="sqliteWALText" class="text-[10px] text-slate-400 mt-3 truncate">WAL: 0 MB &bull; Embedded fast storage</div>
+                                <div id="sqliteWALText" class="text-[10px] text-slate-400 mt-3 truncate">Journal: 0 MB &bull; Embedded fast storage</div>
                             </div>
                         </div>
                     </div>
@@ -925,7 +920,7 @@
                         <div class="flex items-center justify-between border-b border-slate-100 pb-2">
                             <div>
                                 <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide">Algorithmic Strategies Matrix</h3>
-                                <p class="text-[11px] text-slate-400">Configure independent execution routes (Paper vs Real Delta Broker)</p>
+                                <p class="text-[11px] text-slate-400">Configure paper execution for each strategy and symbol</p>
                             </div>
                             <span id="strategyMatrixCountBadge" class="text-xs font-mono text-slate-500">Loading...</span>
                         </div>
@@ -1076,11 +1071,10 @@
                                         <th class="text-right">Entry Price</th>
                                         <th class="text-right">Mark Price</th>
                                         <th class="text-right">Unrealized PnL</th>
-                                        <th class="text-center">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody id="livePositionsTableBody">
-                                    <tr><td colspan="7" class="text-center py-6 text-slate-400 text-xs">No active live positions found on Delta Exchange.</td></tr>
+                                    <tr><td colspan="6" class="text-center py-6 text-slate-400 text-xs">No active live positions found on Delta Exchange.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -1138,6 +1132,16 @@
                         </div>
                     </div>
 
+                    <div id="paperStatsGrid" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
+                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Equity</div><div id="paperStatEquity" class="font-bold tabular-num">$100.00</div></div>
+                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Total PnL</div><div class="flex items-baseline gap-2"><div id="paperStatPnl" class="font-bold tabular-num">$0.00</div><div id="paperStatReturn" class="font-bold tabular-num text-[10px]">0.00%</div></div></div>
+                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Win Rate</div><div id="paperStatWinRate" class="font-bold tabular-num">0.00%</div></div>
+                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Trades</div><div id="paperStatTrades" class="font-bold tabular-num">0</div></div>
+                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Open</div><div id="paperStatOpen" class="font-bold tabular-num">0</div></div>
+                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Profit Factor</div><div id="paperStatProfitFactor" class="font-bold tabular-num">0.00</div></div>
+                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Max Drawdown</div><div id="paperStatDrawdown" class="font-bold tabular-num">0.00%</div></div>
+                    </div>
+
                     <!-- Paper Sub-tab Navigation Navigation -->
                     <div class="flex items-center gap-2 border-b border-slate-200 pb-2">
                         <button onclick="switchPaperSubTab('paper-positions')" class="sub-pill-btn px-3 py-1.5 rounded-md text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition active" data-subtab="paper-positions">
@@ -1178,10 +1182,11 @@
                                             <th class="text-right">Mark Price</th>
                                             <th class="text-right">Unrealized PnL</th>
                                             <th class="text-center">Stop Loss / TP</th>
+                                            <th class="text-center">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody id="paperPositionsTableBody">
-                                        <tr><td colspan="7" class="text-center py-6 text-slate-400 text-xs">No active simulated paper positions.</td></tr>
+                                        <tr><td colspan="8" class="text-center py-6 text-slate-400 text-xs">No active simulated paper positions.</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -1200,18 +1205,23 @@
 
                     <!-- Sub-tab Panel 3: Paper Analytics & Equity Chart -->
                     <div id="subtab-paper-analytics" class="sub-tab-panel hidden space-y-3">
+                        <div id="paperAdvancedStats" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
                         <div class="bg-white rounded-lg border border-slate-200 p-4 shadow-2xs">
-                            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide mb-3">Simulated Equity Curve</h3>
+                            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide mb-3">Paper Equity Curve</h3>
                             <div class="w-full h-64">
                                 <canvas id="equityChartCanvas"></canvas>
                             </div>
+                        </div>
+                        <div class="bg-white rounded-lg border border-slate-200 p-4 shadow-2xs">
+                            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide mb-3">Cumulative PnL</h3>
+                            <div class="w-full h-56"><canvas id="paperPnlChartCanvas"></canvas></div>
                         </div>
                     </div>
 
                     <!-- Sub-tab Panel 4: Paper Trades History -->
                     <div id="subtab-paper-trades" class="sub-tab-panel hidden space-y-3">
                         <div class="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-2xs p-4">
-                            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide mb-2">Simulated Trade Ledger</h3>
+                            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide mb-2">Paper Positions</h3>
                             <div class="overflow-x-auto border border-slate-100 rounded-md">
                                 <table class="w-full text-left trade-table">
                                     <thead>
@@ -1232,6 +1242,46 @@
                         </div>
                     </div>
                 </section>
+
+                <div id="paperProtectionModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 px-4" onclick="if(event.target === this) closePaperProtectionModal()">
+                    <div class="w-full max-w-md rounded-md border border-slate-200 bg-white p-5 shadow-xl">
+                        <div class="flex items-center justify-between mb-4">
+                            <div><h3 class="text-sm font-bold text-slate-900">Update Protection</h3><p id="paperProtectionLabel" class="text-xs text-slate-500 mt-1"></p></div>
+                            <button onclick="closePaperProtectionModal()" class="p-1.5 text-slate-500 hover:text-slate-900" title="Close"><i data-lucide="x" class="w-4 h-4"></i></button>
+                        </div>
+                        <input id="paperProtectionStrategy" type="hidden"><input id="paperProtectionSymbol" type="hidden">
+                        <div class="grid grid-cols-2 gap-3">
+                            <label class="text-xs font-medium text-slate-700">Stop Loss<input id="paperStopInput" type="number" min="0" step="any" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono"></label>
+                            <label class="text-xs font-medium text-slate-700">Target<input id="paperTargetInput" type="number" min="0" step="any" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono"></label>
+                        </div>
+                        <div class="mt-4 flex justify-end gap-2">
+                            <button onclick="closePaperProtectionModal()" class="px-3 py-2 text-xs font-semibold text-slate-600">Cancel</button>
+                            <button onclick="savePaperProtection()" class="px-3 py-2 rounded-md bg-blue-600 text-xs font-semibold text-white hover:bg-blue-700">Save Levels</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Trade Details Modal -->
+                <div id="tradeDetailsModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 px-4" onclick="if(event.target === this) closeTradeDetailsModal()">
+                    <div class="w-full max-w-lg rounded-md border border-slate-200 bg-white p-5 shadow-xl">
+                        <div class="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
+                            <div>
+                                <h3 class="text-sm font-bold text-slate-900">Position Details</h3>
+                                <p id="tdModalSymbol" class="text-xs text-slate-500 mt-0.5 font-mono font-semibold"></p>
+                            </div>
+                            <button onclick="closeTradeDetailsModal()" class="p-1.5 text-slate-500 hover:text-slate-900" title="Close"><i data-lucide="x" class="w-4 h-4"></i></button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-y-3 gap-x-4 text-xs" id="tdModalContent">
+                            <!-- Populated dynamically -->
+                        </div>
+                        <div id="tdModalHistory" class="mt-3 pt-3 border-t border-slate-100 text-xs">
+                            <!-- Populated dynamically -->
+                        </div>
+                        <div class="mt-5 flex justify-end">
+                            <button onclick="closeTradeDetailsModal()" class="px-4 py-2 rounded-md bg-slate-100 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition">Close</button>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- ==================================================== -->
                 <!-- TAB 5: ADMIN CONTROL PANEL & SETTINGS                -->
@@ -1273,32 +1323,16 @@
                         </div>
                     </div>
 
-                    <!-- Mode Switcher: Paper vs Real Trading -->
+                    <!-- Strategy Execution Controls -->
                     <div class="bg-white rounded-lg border border-slate-200 p-4 shadow-2xs space-y-3">
-                        <div class="flex items-center justify-between border-b border-slate-100 pb-2">
-                            <div class="flex items-center gap-2">
-                                <div class="w-6 h-6 rounded bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                                    <i data-lucide="toggle-left" class="w-3.5 h-3.5"></i>
-                                </div>
-                                <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide">Execution Mode Switcher</h3>
+                        <div class="flex items-center gap-2 border-b border-slate-100 pb-2">
+                            <div class="w-6 h-6 rounded bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                                <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5"></i>
                             </div>
-                            <span class="text-[11px] font-semibold text-slate-500">Live Protection Gate</span>
+                            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide">Strategy Execution Controls</h3>
                         </div>
-
-                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                            <div>
-                                <div class="text-xs font-semibold text-slate-800">Switch Engine Routing Mode</div>
-                                <p class="text-[11px] text-slate-400">Real trading requires armed state and confirmed disclaimer acceptance.</p>
-                            </div>
-
-                            <div class="inline-flex rounded-md border border-slate-200 p-1 bg-slate-50">
-                                <button onclick="handleSwitchToPaper()" id="btnSwitchPaper" class="px-3 py-1.5 rounded text-xs font-semibold text-slate-700 bg-white shadow-2xs transition">
-                                    Simulated Paper Mode
-                                </button>
-                                <button onclick="handleSwitchToReal()" id="btnSwitchReal" class="px-3 py-1.5 rounded text-xs font-semibold text-slate-500 hover:text-slate-800 transition">
-                                    Real Delta Broker
-                                </button>
-                            </div>
+                        <div id="adminStrategiesList" class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                            <div class="text-xs text-slate-400">Loading strategies...</div>
                         </div>
                     </div>
 
@@ -1512,7 +1546,7 @@
                                     <span class="mt-0.5 w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></span>
                                     <div>
                                         <div class="font-semibold text-slate-700">SQLite Database</div>
-                                        <div class="text-slate-400">Embedded ACID-compliant local DB. Stores signals_log, trades, positions, broker_accounts. WAL mode enabled.</div>
+                                        <div class="text-slate-400">Embedded ACID-compliant local DB. Stores signals_log, trades, positions, broker_accounts. TRUNCATE journal mode.</div>
                                     </div>
                                 </div>
                                 <div class="flex items-start gap-2">
@@ -1953,6 +1987,7 @@
         let currentPublicIp = '127.0.0.1';
         let wsConnection = null;
         let equityChartInstance = null;
+        let paperPnlChartInstance = null;
 
         // Signals Stream Pagination & Filter State
         let signalsCurrentPage = 1;
@@ -2129,7 +2164,7 @@
                 signals: 'Algorithmic Strategies, Controls & Signals',
                 marketfeed: 'Live Market Feed — Delta Exchange Real-time Data',
                 livebroker: 'Real Broker (Delta Exchange India)',
-                papertrading: 'Simulated Paper Trading Sandbox',
+                papertrading: 'Paper Trading Sandbox',
                 admin: 'Admin Control Panel & Settings',
                 logs: 'System Logs & Audit Trail',
                 flow: 'System Architecture & Execution Flow'
@@ -2162,7 +2197,6 @@
 
         // Data Refresh
         function refreshCurrentTab() {
-            fetchSystemMetrics();
             fetchBrokerProfile();
             if (currentTab === 'monitoring') {
                 fetchSystemMetrics();
@@ -2178,6 +2212,8 @@
                 if (currentPaperSubTab === 'paper-strategies') fetchOverview();
                 else if (currentPaperSubTab === 'paper-analytics') fetchAnalytics();
                 else if (currentPaperSubTab === 'paper-trades') fetchTrades();
+            } else if (currentTab === 'admin') {
+                fetchAdminStrategies();
             } else if (currentTab === 'logs') {
                 fetchLogs();
             }
@@ -2489,7 +2525,7 @@
             const sqWal = document.getElementById('sqliteWALText');
             if (sqSize) sqSize.textContent = `${sqliteMb} MB`;
             if (sqLat) sqLat.textContent = `${sqlite.latency_ms || 0} ms`;
-            if (sqWal) sqWal.textContent = `WAL: ${sqlite.wal_size_mb || 0} MB • Embedded Fast ACID`;
+            if (sqWal) sqWal.textContent = `Journal: ${sqlite.journal_size_mb || 0} MB • TRUNCATE • Embedded Fast ACID`;
 
             // Sidebar telemetry
             const sbCpu = document.getElementById('sbCpuText');
@@ -2653,8 +2689,8 @@
                         <td>${zmq.packets_published || 0} packets • Non-blocking PUB/SUB</td>
                     </tr>
                     <tr>
-                        <td class="font-semibold text-slate-800">SQLite Storage (WAL)</td>
-                        <td><span class="pill-badge pill-bull">WAL MODE</span></td>
+                        <td class="font-semibold text-slate-800">SQLite Storage</td>
+                        <td><span class="pill-badge pill-bull">TRUNCATE</span></td>
                         <td>${sqliteMb} MB • Fast Embedded ACID Engine</td>
                     </tr>
                 `;
@@ -2867,10 +2903,14 @@
                         renderDetailedStrategyCards(detData.strategies || []);
                         // Update the matrix header badge with real counts
                         const badge = document.getElementById('strategyMatrixCountBadge');
+                        const nSym = detData.total_symbols !== undefined ? detData.total_symbols : new Set((detData.strategies||[]).map(s=>s.symbol)).size;
+                        const nStr = detData.total_strategies !== undefined ? detData.total_strategies : new Set((detData.strategies||[]).map(s=>s.strategy_id)).size;
                         if (badge) {
-                            const nSym = detData.total_symbols || new Set((detData.strategies||[]).map(s=>s.symbol)).size;
-                            const nStr = detData.total_strategies || new Set((detData.strategies||[]).map(s=>s.strategy_id)).size;
                             badge.textContent = `${nSym} Symbol${nSym!==1?'s':''} × ${nStr} Strateg${nStr!==1?'ies':'y'}`;
+                        }
+                        const sbBadge = document.getElementById('sbActiveStrategiesBadge');
+                        if (sbBadge) {
+                            sbBadge.textContent = nStr;
                         }
                     }
                 }
@@ -2959,9 +2999,13 @@
                 return;
             }
 
+            const symbols = new Set(strategies.map(strat => strat.symbol).filter(Boolean));
+            const strategyIds = new Set(strategies.map(strat => strat.strategy_id).filter(Boolean));
+            const countBadge = document.getElementById('strategyMatrixCountBadge');
+            if (countBadge) countBadge.textContent = `${symbols.size} Symbol${symbols.size !== 1 ? 's' : ''} × ${strategyIds.size} Strateg${strategyIds.size !== 1 ? 'ies' : 'y'}`;
+
             container.innerHTML = strategies.map(strat => {
                 const isPaper = strat.paper_enabled !== false;
-                const isReal = strat.real_enabled === true;
 
                 return `
                     <div class="bg-slate-50 rounded-md border border-slate-200 p-3.5 space-y-2.5">
@@ -2991,27 +3035,23 @@
                         <div class="flex items-center justify-between pt-1">
                             <div class="flex items-center gap-2">
                                 <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-                                    <input type="checkbox" onchange="toggleStrategyExecution('${strat.id}', this.checked, ${isReal})" ${isPaper ? 'checked' : ''} class="rounded text-blue-600 focus:ring-blue-500">
+                                    <input type="checkbox" onchange="toggleStrategyExecution('${strat.strategy_id || strat.id}', this.checked)" ${isPaper ? 'checked' : ''} class="rounded text-blue-600 focus:ring-blue-500">
                                     Paper
                                 </label>
-                                <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer ml-2">
-                                    <input type="checkbox" onchange="toggleStrategyExecution('${strat.id}', ${isPaper}, this.checked)" ${isReal ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500">
-                                    Real
-                                </label>
                             </div>
-                            <span class="text-[11px] text-slate-400 font-mono">ID: ${strat.id}</span>
+                            <span class="text-[11px] text-slate-400 font-mono">ID: ${escapeHtml(strat.id || `${strat.strategy_id}_${(strat.symbol || '').replaceAll('-', '_')}`)}</span>
                         </div>
                     </div>
                 `;
             }).join('');
         }
 
-        async function toggleStrategyExecution(stratId, isPaper, isReal) {
+        async function toggleStrategyExecution(stratId, isPaper) {
             try {
-                const res = await fetch(`/api/strategy/${stratId}/execution`, {
+                const res = await fetch('/api/strategy/toggle', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ paper_enabled: isPaper, real_enabled: isReal })
+                    body: JSON.stringify({ strategy_id: stratId, is_paper_enabled: isPaper, is_real_enabled: false })
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
@@ -3052,13 +3092,15 @@
             if (!tbody) return;
 
             if (!positions || positions.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400 text-xs">No active live positions found on Delta Exchange.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400 text-xs">No active live positions found on Delta Exchange.</td></tr>`;
                 return;
             }
 
             tbody.innerHTML = positions.map(pos => {
                 const pnl = pos.unrealized_pnl || 0;
-                const pnlClass = pnl >= 0 ? 'text-emerald-600' : 'text-rose-600';
+                const pnlClass = pnl >= 0
+                    ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                    : 'text-rose-700 bg-rose-50 border-rose-200';
                 const sideClass = (pos.side || '').toUpperCase() === 'BUY' ? 'pill-bull' : 'pill-bear';
 
                 return `
@@ -3069,9 +3111,6 @@
                         <td class="text-right font-mono text-slate-600">$${(pos.entry_price || 0).toFixed(2)}</td>
                         <td class="text-right font-mono text-slate-600">$${(pos.mark_price || 0).toFixed(2)}</td>
                         <td class="text-right font-mono font-bold ${pnlClass}">$${pnl.toFixed(2)}</td>
-                        <td class="text-center">
-                            <button onclick="closeLivePosition('${pos.symbol}')" class="px-2 py-1 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold">Close</button>
-                        </td>
                     </tr>
                 `;
             }).join('');
@@ -3109,29 +3148,43 @@
         // ====================================================
         async function fetchPaperData() {
             try {
-                const [posRes, trdRes, stRes] = await Promise.all([
+                const [posRes, dashboardRes] = await Promise.all([
                     fetch('/api/broker/paper-positions'),
-                    fetch('/api/broker/paper-trades'),
-                    fetch('/api/broker/status')
+                    fetch('/api/analytics/paper-dashboard')
                 ]);
                 const pos = await posRes.json();
-                const trd = await trdRes.json();
-                const st = await stRes.json();
-
-                if (st.paper_balance) {
-                    const bEl = document.getElementById('paperBalanceValue');
-                    if (bEl) bEl.textContent = `$${(st.paper_balance || 100).toFixed(2)}`;
-                }
+                const dashboard = await dashboardRes.json();
                 const positions = Array.isArray(pos) ? pos : (pos.positions || []);
-                // Infer if price feed is active from whether any position has a live price
                 const feedActive = positions.some(p => p.has_live_price);
                 renderPaperPositions(positions, feedActive);
-                renderPaperTrades(trd.trades || []);
+                renderPaperSummary(dashboard.summary || {});
+                renderPaperTrades(dashboard.trades || []);
             } catch (e) {
                 console.error("Error fetching paper data:", e);
             }
         }
 
+        function setPaperMetric(id, value, signed = false) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = value;
+            if (signed) el.className = `font-bold tabular-num ${parseFloat(value.replace(/[^0-9.-]/g, '')) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`;
+        }
+
+        function renderPaperSummary(s) {
+            const equity = Number(s.equity || 100);
+            const pnl = Number(s.total_pnl || 0);
+            const balance = document.getElementById('paperBalanceValue');
+            if (balance) balance.textContent = `$${equity.toFixed(2)}`;
+            setPaperMetric('paperStatEquity', `$${equity.toFixed(2)}`);
+            setPaperMetric('paperStatPnl', `${pnl >= 0 ? '+' : '-'}$${Math.abs(pnl).toFixed(2)}`, true);
+            setPaperMetric('paperStatReturn', `${Number(s.pnl_pct || 0).toFixed(2)}%`, true);
+            setPaperMetric('paperStatWinRate', `${Number(s.win_rate || 0).toFixed(2)}%`);
+            setPaperMetric('paperStatTrades', String(s.total_trades || 0));
+            setPaperMetric('paperStatOpen', String(s.open_positions || 0));
+            setPaperMetric('paperStatProfitFactor', s.profit_factor === null ? 'No losses' : Number(s.profit_factor || 0).toFixed(2));
+            setPaperMetric('paperStatDrawdown', `${Number(s.max_drawdown_pct || 0).toFixed(2)}%`);
+        }
 
         function renderPaperPositions(positions, priceFeedActive) {
             const tbody = document.getElementById('paperPositionsTableBody');
@@ -3150,23 +3203,26 @@
             }
 
             if (!positions || positions.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400 text-xs">No active simulated paper positions.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-slate-400 text-xs">No active paper positions.</td></tr>`;
                 return;
             }
 
             tbody.innerHTML = positions.map(pos => {
                 const pnl = pos.unrealized_pnl || 0;
                 const pnlClass = pnl >= 0 ? 'text-emerald-600' : 'text-rose-600';
-                const pnlSign = pnl >= 0 ? '+' : '';
+                const pnlSign = pnl >= 0 ? '+' : '-';
                 const sideClass = (pos.side || '').toUpperCase() === 'BUY' ? 'pill-bull' : 'pill-bear';
                 const markPrice = pos.mark_price || pos.entry_price || 0;
                 // Show a subtle live-price indicator dot when we have a real live price
                 const liveDot = pos.has_live_price
                     ? `<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ml-1" title="Live price"></span>`
                     : '';
+                const strategyArg = encodeURIComponent(pos.strategy_name || '');
+                const symbolArg = encodeURIComponent(pos.symbol || '');
+                const posJson = escapeHtml(JSON.stringify(pos));
 
                 return `
-                    <tr>
+                    <tr class="cursor-pointer hover:bg-slate-50 transition" onclick="showTradeDetails('${posJson}')">
                         <td class="font-bold text-slate-900">${escapeHtml(pos.symbol || '')}</td>
                         <td><span class="pill-badge ${sideClass}">${escapeHtml(pos.side || 'LONG')}</span></td>
                         <td class="text-right font-mono font-medium">${pos.size || 0}</td>
@@ -3174,13 +3230,132 @@
                         <td class="text-right font-mono">
                             $${markPrice.toFixed(2)}${liveDot}
                         </td>
-                        <td class="text-right font-mono font-bold ${pnlClass}">${pnlSign}$${Math.abs(pnl).toFixed(4)}</td>
+                        <td class="text-right"><span class="inline-flex min-w-24 flex-col items-end rounded border px-2 py-1 font-mono font-bold ${pnlClass}"><span>${pnlSign}$${Math.abs(pnl).toFixed(4)}</span><span class="text-[10px] font-semibold">${pnlSign}${Number(pos.unrealized_pnl_pct || 0).toFixed(2)}%</span></span></td>
                         <td class="text-center font-mono text-xs text-slate-500">
                             SL: $${(pos.stop_loss || 0).toFixed(2)} / TP: $${(pos.take_profit || 0).toFixed(2)}
+                        </td>
+                        <td class="text-center whitespace-nowrap">
+                            <button onclick="event.stopPropagation(); openPaperProtectionModal('${strategyArg}','${symbolArg}',${pos.stop_loss || 0},${pos.take_profit || 0},${markPrice})" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit stop loss and target"><i data-lucide="sliders-horizontal" class="w-4 h-4"></i></button>
+                            <button onclick="event.stopPropagation(); closePaperPosition('${strategyArg}','${symbolArg}')" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded" title="Close paper position"><i data-lucide="circle-x" class="w-4 h-4"></i></button>
                         </td>
                     </tr>
                 `;
             }).join('');
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function openPaperProtectionModal(strategy, symbol, stopPrice, targetPrice, markPrice) {
+            strategy = decodeURIComponent(strategy); symbol = decodeURIComponent(symbol);
+            document.getElementById('paperProtectionStrategy').value = strategy;
+            document.getElementById('paperProtectionSymbol').value = symbol;
+            document.getElementById('paperStopInput').value = stopPrice || '';
+            document.getElementById('paperTargetInput').value = targetPrice || '';
+            document.getElementById('paperProtectionLabel').textContent = `${strategy} · ${symbol} · Mark $${Number(markPrice).toFixed(2)}`;
+            const modal = document.getElementById('paperProtectionModal');
+            modal.classList.remove('hidden'); modal.classList.add('flex');
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function closePaperProtectionModal() {
+            const modal = document.getElementById('paperProtectionModal');
+            modal.classList.add('hidden'); modal.classList.remove('flex');
+        }
+
+        function showTradeDetails(posStr) {
+            try {
+                const pos = typeof posStr === 'string' ? JSON.parse(posStr) : posStr;
+                const modal = document.getElementById('tradeDetailsModal');
+                document.getElementById('tdModalSymbol').textContent = pos.symbol || 'Unknown';
+                
+                let content = '';
+                for (const [key, value] of Object.entries(pos)) {
+                    if (typeof value === 'object' && value !== null) continue;
+                    content += `
+                        <div class="flex flex-col border-b border-slate-50 pb-1">
+                            <span class="text-[10px] uppercase font-semibold text-slate-400">${escapeHtml(key)}</span>
+                            <span class="font-mono text-slate-800">${escapeHtml(String(value))}</span>
+                        </div>
+                    `;
+                }
+                document.getElementById('tdModalContent').innerHTML = content;
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                renderPositionHistory(pos.position_id);
+            } catch (e) { console.error('Error showing trade details:', e); }
+        }
+
+        function closeTradeDetailsModal() {
+            const modal = document.getElementById('tradeDetailsModal');
+            modal.classList.add('hidden'); modal.classList.remove('flex');
+        }
+
+        async function renderPositionHistory(positionId) {
+            const container = document.getElementById('tdModalHistory');
+            if (!container) return;
+            if (!positionId) {
+                container.innerHTML = `<p class="text-slate-400 italic">No history available (opened before audit tracking).</p>`;
+                return;
+            }
+            container.innerHTML = `<p class="text-slate-400">Loading history...</p>`;
+            try {
+                const res = await fetch(`/api/broker/paper-position/history?position_id=${encodeURIComponent(positionId)}`);
+                const events = await res.json();
+                if (!res.ok || !Array.isArray(events) || events.length === 0) {
+                    container.innerHTML = `<p class="text-slate-400 italic">No history recorded yet.</p>`;
+                    return;
+                }
+                const rows = events.map(ev => {
+                    const byClass = ev.changed_by === 'SYSTEM' ? 'pill-bear' : 'pill-bull';
+                    const slChange = (ev.previous_stop_price || ev.new_stop_price)
+                        ? `SL: $${Number(ev.previous_stop_price || 0).toFixed(2)} → $${Number(ev.new_stop_price || 0).toFixed(2)}`
+                        : '';
+                    const tpChange = (ev.previous_target_price || ev.new_target_price)
+                        ? `TP: $${Number(ev.previous_target_price || 0).toFixed(2)} → $${Number(ev.new_target_price || 0).toFixed(2)}`
+                        : '';
+                    const reasonHtml = ev.reason
+                        ? `<span class="font-semibold text-rose-600">${escapeHtml(ev.reason)}</span>`
+                        : '';
+                    return `
+                        <div class="flex items-start justify-between gap-2 border-b border-slate-50 py-1.5">
+                            <div class="flex flex-col gap-0.5">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="pill-badge ${byClass}">${escapeHtml(ev.changed_by || '')}</span>
+                                    <span class="font-semibold text-slate-700">${escapeHtml(ev.event_type || '')}</span>
+                                </div>
+                                <span class="font-mono text-[11px] text-slate-500">${escapeHtml([slChange, tpChange].filter(Boolean).join(' · '))}</span>
+                                ${reasonHtml}
+                            </div>
+                            <span class="text-[10px] text-slate-400 whitespace-nowrap">${formatIST(ev.created_at)}</span>
+                        </div>
+                    `;
+                }).join('');
+                container.innerHTML = `<h4 class="text-[10px] uppercase font-semibold text-slate-400 mb-1">Protection & Exit History</h4>${rows}`;
+            } catch (e) {
+                console.error('Error loading position history:', e);
+                container.innerHTML = `<p class="text-slate-400 italic">Could not load history.</p>`;
+            }
+        }
+
+        async function savePaperProtection() {
+            const payload = {
+                strategy_name: document.getElementById('paperProtectionStrategy').value,
+                symbol: document.getElementById('paperProtectionSymbol').value,
+                stop_price: Number(document.getElementById('paperStopInput').value),
+                target_price: Number(document.getElementById('paperTargetInput').value),
+            };
+            const res = await fetch('/api/broker/paper-position/protection', {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+            const data = await res.json();
+            if (!res.ok) return showToast(data.detail || 'Could not update protective levels.', 'error');
+            closePaperProtectionModal(); showToast('Stop loss and target updated.'); fetchPaperData();
+        }
+
+        async function closePaperPosition(strategy, symbol) {
+            strategy = decodeURIComponent(strategy); symbol = decodeURIComponent(symbol);
+            if (!confirm(`Close ${symbol} paper position at the current live price?`)) return;
+            const res = await fetch('/api/broker/paper-position/close', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({strategy_name: strategy, symbol})});
+            const data = await res.json();
+            if (!res.ok) return showToast(data.detail || 'Could not close paper position.', 'error');
+            showToast('Paper position closed.'); fetchPaperData();
         }
 
         function renderPaperTrades(trades) {
@@ -3188,7 +3363,7 @@
             if (!tbody) return;
 
             if (!trades || trades.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400 text-xs">No simulated trades executed yet.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400 text-xs">No closed paper positions yet.</td></tr>`;
                 return;
             }
 
@@ -3196,16 +3371,17 @@
                 const pnl = t.pnl || 0;
                 const pnlClass = pnl >= 0 ? 'text-emerald-600' : 'text-rose-600';
                 const sideClass = (t.side || '').toUpperCase() === 'BUY' ? 'pill-bull' : 'pill-bear';
-                const istTime = formatIST(t.timestamp || t.created_at || '');
+                const istTime = formatIST(t.exit_time || t.timestamp || t.created_at || '');
+                const tJson = escapeHtml(JSON.stringify(t));
 
                 return `
-                    <tr>
+                    <tr class="cursor-pointer hover:bg-slate-50 transition" onclick="showTradeDetails('${tJson}')">
                         <td class="font-mono text-slate-600 text-xs whitespace-nowrap">${escapeHtml(istTime)}</td>
                         <td class="font-bold text-slate-900">${escapeHtml(t.symbol || '')}</td>
                         <td><span class="pill-badge ${sideClass}">${escapeHtml(t.side || '')}</span></td>
-                        <td class="text-right font-mono">$${(t.price || 0).toFixed(2)}</td>
+                        <td class="text-right font-mono">$${Number(t.exit_price || t.price || 0).toFixed(2)}</td>
                         <td class="text-right font-mono font-bold ${pnlClass}">$${pnl.toFixed(2)}</td>
-                        <td><span class="pill-badge pill-neutral font-mono text-[10px]">${escapeHtml(t.reason || 'TAKE_PROFIT')}</span></td>
+                        <td><span class="pill-badge pill-neutral font-mono text-[10px]">${escapeHtml(t.reason || 'Closed')}</span></td>
                     </tr>
                 `;
             }).join('');
@@ -3213,20 +3389,20 @@
 
         async function fetchOverview() {
             try {
-                const res = await fetch('/api/analytics/overview');
+                const res = await fetch('/api/analytics/paper-dashboard');
                 const data = await res.json();
                 const container = document.getElementById('paperStrategiesGrid');
                 if (!container) return;
 
-                if (data.status === 'success' && data.strategies) {
+                if (data.strategies) {
                     container.innerHTML = data.strategies.map(s => `
                         <div class="bg-slate-50 p-3.5 rounded-md border border-slate-200">
                             <div class="flex justify-between font-bold text-xs text-slate-900">
-                                <span>${escapeHtml(s.name)}</span>
-                                <span class="${s.pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}">$${(s.pnl || 0).toFixed(2)}</span>
+                                <span>${escapeHtml(s.strategy_name)} · ${escapeHtml(s.symbol)}</span>
+                                <span class="${s.total_pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}">$${Number(s.total_pnl || 0).toFixed(2)}</span>
                             </div>
                             <div class="text-[11px] text-slate-500 mt-1 flex justify-between">
-                                <span>Trades: ${s.trades || 0}</span>
+                                <span>Trades: ${s.total_trades || 0}</span>
                                 <span>Win Rate: ${(s.win_rate || 0).toFixed(1)}%</span>
                             </div>
                         </div>
@@ -3239,9 +3415,11 @@
 
         async function fetchAnalytics() {
             try {
-                const res = await fetch('/api/analytics/monthly');
+                const res = await fetch('/api/analytics/paper-dashboard');
                 const data = await res.json();
-                renderEquityCurve(data.points || []);
+                renderPaperSummary(data.summary || {});
+                renderPaperAdvancedStats(data.summary || {});
+                renderEquityCurve(data.equity_curve || []);
             } catch (e) {
                 console.error("Error fetching analytics:", e);
             }
@@ -3249,7 +3427,7 @@
 
         async function fetchTrades() {
             try {
-                const res = await fetch('/api/analytics/trades');
+                const res = await fetch('/api/analytics/paper-dashboard');
                 const data = await res.json();
                 renderPaperTrades(data.trades || []);
             } catch (e) {
@@ -3264,15 +3442,15 @@
             if (equityChartInstance) equityChartInstance.destroy();
 
             const labels = points.map(p => p.date || p.time || '');
-            const values = points.map(p => p.equity || p.balance || 100);
+            const values = points.map(p => Number(p.equity || 100));
 
             equityChartInstance = new Chart(canvas, {
                 type: 'line',
                 data: {
-                    labels: labels.length ? labels : ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5'],
+                    labels: labels.length ? labels.map(formatIST) : ['Start'],
                     datasets: [{
                         label: 'Portfolio Equity ($)',
-                        data: values.length ? values : [100, 101.5, 99.8, 103.2, 105.4],
+                        data: values.length ? values : [100],
                         borderColor: '#1e88e5',
                         backgroundColor: 'rgba(30, 136, 229, 0.08)',
                         fill: true,
@@ -3293,6 +3471,31 @@
                     }
                 }
             });
+
+            const pnlCanvas = document.getElementById('paperPnlChartCanvas');
+            if (!pnlCanvas) return;
+            if (paperPnlChartInstance) paperPnlChartInstance.destroy();
+            paperPnlChartInstance = new Chart(pnlCanvas, {
+                type: 'line',
+                data: {labels: labels.length ? labels.map(formatIST) : ['Start'], datasets: [{label: 'Cumulative PnL ($)', data: points.length ? points.map(p => Number(p.pnl || 0)) : [0], borderColor: '#059669', backgroundColor: 'rgba(5,150,105,.08)', fill: true, tension: .25, borderWidth: 2, pointRadius: 2}]},
+                options: {responsive: true, maintainAspectRatio: false, scales: {x: {grid: {color: '#f1f5f9'}}, y: {grid: {color: '#f1f5f9'}}}, plugins: {legend: {display: false}}}
+            });
+        }
+
+        function renderPaperAdvancedStats(s) {
+            const container = document.getElementById('paperAdvancedStats');
+            if (!container) return;
+            const items = [
+                ['Realized PnL', `$${Number(s.realized_pnl || 0).toFixed(2)}`],
+                ['Live Unrealized', `$${Number(s.unrealized_pnl || 0).toFixed(2)}`],
+                ['Average Win', `$${Number(s.average_win || 0).toFixed(2)}`],
+                ['Average Loss', `$${Number(s.average_loss || 0).toFixed(2)}`],
+                ['Best Trade', `$${Number(s.best_trade || 0).toFixed(2)}`],
+                ['Worst Trade', `$${Number(s.worst_trade || 0).toFixed(2)}`],
+                ['Winning / Losing', `${s.winning_trades || 0} / ${s.losing_trades || 0}`],
+                ['Trading Fees', `$${Number(s.total_fees || 0).toFixed(2)}`],
+            ];
+            container.innerHTML = items.map(([label, value]) => `<div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">${label}</div><div class="font-bold tabular-num text-slate-900">${value}</div></div>`).join('');
         }
 
         // ====================================================
@@ -3349,6 +3552,67 @@
             }
         }
 
+        async function fetchAdminStrategies() {
+            try {
+                const res = await fetch('/api/strategy/list');
+                const strategies = await res.json();
+                const container = document.getElementById('adminStrategiesList');
+                if (!container) return;
+                
+                if (!strategies || strategies.length === 0) {
+                    container.innerHTML = '<div class="col-span-full text-xs text-slate-400">No strategies configured.</div>';
+                    return;
+                }
+
+                container.innerHTML = strategies.map(s => `
+                    <div class="border border-slate-200 rounded p-3 flex flex-col gap-2 bg-slate-50">
+                        <div class="font-semibold text-xs text-slate-900">${escapeHtml(s.name)}</div>
+                        <div class="flex items-center justify-between mt-1">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" class="w-3 h-3 text-blue-600 rounded border-slate-300" 
+                                    ${s.is_paper_enabled ? 'checked' : ''}
+                                    onchange="toggleAdminStrategy('${s.strategy_id}', this.checked, null)">
+                                <span class="text-[11px] font-medium text-slate-700">Paper Mode</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer opacity-50 cursor-not-allowed" title="Live mode requires deep risk config">
+                                <input type="checkbox" disabled class="w-3 h-3 text-rose-600 rounded border-slate-300" 
+                                    ${s.is_real_enabled ? 'checked' : ''}>
+                                <span class="text-[11px] font-medium text-slate-700">Live Mode</span>
+                            </label>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error("Error fetching admin strategies:", e);
+            }
+        }
+
+        async function toggleAdminStrategy(strategyId, paperEnabled, realEnabled) {
+            try {
+                const payload = { strategy_id: strategyId };
+                if (paperEnabled !== null) payload.is_paper_enabled = paperEnabled;
+                if (realEnabled !== null) payload.is_real_enabled = realEnabled;
+
+                const res = await fetch('/api/strategy/toggle', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                
+                if (res.ok) {
+                    showToast('Strategy execution toggled successfully', 'success');
+                    fetchOverview(); // Refresh matrix if needed
+                } else {
+                    const data = await res.json();
+                    showToast(data.detail || 'Failed to toggle strategy', 'error');
+                    fetchAdminStrategies(); // Revert toggle visually
+                }
+            } catch (e) {
+                showToast("Network error toggling strategy", 'error');
+                fetchAdminStrategies(); // Revert
+            }
+        }
+
         async function verifyBrokerAuthority() {
             showToast("Testing connection with Delta Exchange API...");
             try {
@@ -3385,32 +3649,6 @@
                 }
             } catch (e) {
                 console.error("Failed to switch mode:", e);
-            }
-        }
-
-        function handleSwitchToReal() {
-            const modal = document.getElementById('armConfirmModal');
-            if (modal) modal.classList.remove('hidden');
-        }
-
-        function closeArmModal() {
-            const modal = document.getElementById('armConfirmModal');
-            if (modal) modal.classList.add('hidden');
-        }
-
-        async function confirmArmLiveTrading() {
-            closeArmModal();
-            try {
-                const res = await fetch('/api/broker/arm', { method: 'POST' });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    showToast("🚨 LIVE TRADING ARMED & ACTIVE!");
-                    fetchBrokerData();
-                } else {
-                    showToast(`❌ ${data.message || 'Failed to arm live trading'}`);
-                }
-            } catch (e) {
-                showToast("❌ Request error arming live trading.");
             }
         }
 
@@ -3559,7 +3797,6 @@
             { title: 'Engine System Logs', category: 'Tab', action: () => switchTab('logs') },
             { title: 'Run Celery Batch Cycle Now', category: 'Action', action: () => runBatchPipelineNow() },
             { title: 'Switch to Paper Mode', category: 'Safety', action: () => handleSwitchToPaper() },
-            { title: 'Arm Live Trading Orders', category: 'Safety', action: () => handleSwitchToReal() },
             { title: 'Reset Paper Sandbox to $100', category: 'Action', action: () => resetPaperBalancesPrompt() },
             { title: 'Inject Manual Strategy Signal', category: 'Action', action: () => triggerManualSignal() },
             { title: 'Copy Server Host IP', category: 'Action', action: () => copyServerIp() },
@@ -3613,27 +3850,9 @@
                 openQuickSearch();
             } else if (e.key === 'Escape') {
                 closeQuickSearch();
-                closeArmModal();
                 closeManualSignalModal();
             }
         });
-
-        async function closeLivePosition(symbol) {
-            if (!confirm(`Are you sure you want to market close live position for ${symbol}?`)) return;
-            showToast(`Closing live position for ${symbol}...`);
-            try {
-                const res = await fetch(`/api/broker/close-position?symbol=${symbol}`, { method: 'POST' });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    showToast(`Position closed: ${data.message || 'Success'}`);
-                    fetchBrokerData();
-                } else {
-                    showToast(`Error: ${data.message || 'Close failed'}`);
-                }
-            } catch (e) {
-                showToast("Request error closing position.");
-            }
-        }
 
         // Utility: HTML Escaping
         function escapeHtml(text) {
@@ -4097,12 +4316,12 @@
             // Initial market feed load (REST, before WS connects)
             setTimeout(fetchMarketFeed, 800);
 
-            // Periodic fallback background refresh (every 3s)
+            // REST fallback only while the live WebSocket is unavailable.
             setInterval(() => {
-                if (currentTab === 'monitoring') {
+                if (currentTab === 'monitoring' && (!wsConnection || wsConnection.readyState !== WebSocket.OPEN)) {
                     fetchSystemMetrics();
                 }
-            }, 3000);
+            }, 5000);
 
             // Periodic Log Stats refresh (every 15s)
             setInterval(() => {

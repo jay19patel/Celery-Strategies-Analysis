@@ -3,12 +3,12 @@
 Production-Grade Centralized Logging System.
 
 Architecture:
-  - Console handler  → human-readable colored format  (for `docker logs`)
+  - Console handler  -> deterministic one-line format (for `docker logs`)
   - success.log      → JSON Lines, DEBUG–WARNING       (10 MB rotating, 5 backups)
   - errors.log       → JSON Lines, ERROR+CRITICAL      (10 MB rotating, 5 backups)
   - warnings.log     → JSON Lines, WARNING only        (10 MB rotating, 3 backups)
-  - signals.log      → plain text, signal events       (10 MB rotating, 5 backups)
-  - performance.log  → plain text, timing events       (10 MB rotating, 5 backups)
+  - signals.log      -> JSON Lines signal audit events (10 MB rotating, 5 backups)
+  - performance.log  -> JSON Lines timing events       (10 MB rotating, 5 backups)
   - CountingHandler  → in-memory level counters        (zero I/O overhead)
 
 Usage:
@@ -131,24 +131,13 @@ class JsonLinesFormatter(logging.Formatter):
 # Colored console formatter — human-readable, `docker logs` friendly
 # ---------------------------------------------------------------------------
 
-class ColoredConsoleFormatter(logging.Formatter):
-    """ANSI-colored console output for human readability."""
-
-    _COLORS = {
-        "DEBUG":    "\033[36m",   # Cyan
-        "INFO":     "\033[32m",   # Green
-        "WARNING":  "\033[33m",   # Yellow
-        "ERROR":    "\033[31m",   # Red
-        "CRITICAL": "\033[35m",   # Magenta
-    }
-    _RESET = "\033[0m"
+class ConsoleFormatter(logging.Formatter):
+    """Deterministic single-line console output suitable for containers."""
 
     def format(self, record: logging.LogRecord) -> str:
-        color = self._COLORS.get(record.levelname, "")
-        reset = self._RESET
-        ts = datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
+        ts = datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat()
         msg = record.getMessage()
-        base = f"{ts} | {color}{record.levelname:8s}{reset} | {record.name} | {msg}"
+        base = f"{ts} | {record.levelname:8s} | {record.name} | {msg}"
         if record.exc_info:
             base += "\n" + self.formatException(record.exc_info)
         return base
@@ -198,12 +187,7 @@ class StockAnalysisLogger:
         self.logger.propagate = False
 
         json_fmt = JsonLinesFormatter()
-        console_fmt = ColoredConsoleFormatter()
-        plain_fmt = logging.Formatter(
-            fmt="%(asctime)s | %(levelname)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-
+        console_fmt = ConsoleFormatter()
         # ── CountingHandler (must be first — catches everything) ──────────
         self.counting_handler = CountingHandler()
         self.logger.addHandler(self.counting_handler)
@@ -268,7 +252,7 @@ class StockAnalysisLogger:
             backupCount=5,
             encoding="utf-8",
         )
-        sig_handler.setFormatter(plain_fmt)
+        sig_handler.setFormatter(json_fmt)
         self.signals_logger.addHandler(sig_handler)
         self.signals_logger.addHandler(console_handler)
 
@@ -283,7 +267,7 @@ class StockAnalysisLogger:
             backupCount=5,
             encoding="utf-8",
         )
-        perf_handler.setFormatter(plain_fmt)
+        perf_handler.setFormatter(json_fmt)
         self.performance_logger.addHandler(perf_handler)
         self.performance_logger.addHandler(console_handler)
 
@@ -365,11 +349,6 @@ def reset_log_counts() -> None:
 def get_data_provider_logger() -> logging.Logger:
     """Get logger for data provider module."""
     return get_logger("data_provider")
-
-
-def get_mongodb_logger() -> logging.Logger:
-    """Get logger for MongoDB operations."""
-    return get_logger("mongodb")
 
 
 def get_redis_logger() -> logging.Logger:

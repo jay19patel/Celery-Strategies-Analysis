@@ -6,13 +6,21 @@ Routes incoming HTTP requests to app.services.SystemService.
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
+from app.core.prometheus_metrics import PROMETHEUS_REGISTRY
 from app.services.system_service import get_system_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["System"])
+
+
+@router.get("/metrics", include_in_schema=False)
+def get_prometheus_metrics() -> Response:
+    """Expose the cached health snapshot in Prometheus text format."""
+    return Response(generate_latest(PROMETHEUS_REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
 
 class ResetRequest(BaseModel):
@@ -198,6 +206,4 @@ def get_system_public_ip() -> dict[str, Any]:
         "public_ip": ip_addr,
         "status": "success",
     }
-
-
 

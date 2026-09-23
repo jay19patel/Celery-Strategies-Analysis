@@ -12,7 +12,7 @@ x-common-env: &common-env
   REDIS_RESULT_URL: redis://redis:6379/1
   REDIS_PUBSUB_URL: redis://redis:6379/2
   
-  # SQLite Database (Lightweight, embedded, zero MongoDB container dependency)
+  # SQLite database (lightweight embedded persistence)
   SQLITE_DB_PATH: /app/data/stockanalysis.db
   
   # Application Configuration

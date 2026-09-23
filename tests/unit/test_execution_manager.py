@@ -1,7 +1,6 @@
 """Unit tests for ExecutionManager routing, arming, and mode switching."""
 
 from datetime import UTC, datetime
-from unittest.mock import PropertyMock, patch
 
 import pytest
 
@@ -12,7 +11,7 @@ from app.models.strategy_models import SignalType
 def test_execution_manager_defaults():
     """Verify default mode is PAPER and disarmed."""
     mgr = ExecutionManager()
-    assert mgr.get_mode() in ("PAPER", "LIVE")
+    assert mgr.get_mode() == "PAPER"
 
 
 def test_execution_manager_mode_switch():
@@ -22,24 +21,15 @@ def test_execution_manager_mode_switch():
     assert mgr.get_mode() == "PAPER"
 
 
-def test_execution_manager_arm_invalid_confirmation():
-    """Verify error on incorrect confirmation string."""
+def test_execution_manager_rejects_live_arming():
+    """Delta remains monitoring-only regardless of confirmation or credentials."""
     mgr = ExecutionManager()
-    with pytest.raises(ValueError, match="Confirmation phrase"):
+    with pytest.raises(ValueError, match="disabled"):
         mgr.arm_live_trading("wrong phrase")
-
-
-def test_execution_manager_arm_valid_with_mock():
-    """Verify arming succeeds when Delta credentials are configured and confirmation matches."""
-    mgr = ExecutionManager()
-    with patch.object(type(mgr.delta_client), "is_configured", new_callable=PropertyMock, return_value=True):
-        res = mgr.arm_live_trading(ARM_CONFIRMATION_PHRASE)
-        assert res["armed"] is True
-        assert res["mode"] == "LIVE"
-        assert mgr.is_armed() is True
-
-    # Safely disarm afterwards
-    mgr.disarm_live_trading()
+    with pytest.raises(ValueError, match="disabled"):
+        mgr.arm_live_trading(ARM_CONFIRMATION_PHRASE)
+    with pytest.raises(ValueError, match="must remain PAPER"):
+        mgr.set_mode("LIVE")
     assert mgr.is_armed() is False
 
 

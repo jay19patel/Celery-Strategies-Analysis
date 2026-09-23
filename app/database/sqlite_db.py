@@ -1,7 +1,7 @@
 """Thread-safe and process-safe SQLite database manager for trading pipeline data.
 
-Replaces MongoDB with a lightweight, embedded SQLite database running in WAL mode
-(Write-Ahead Logging). Supports concurrent readers and single writer with a busy timeout.
+Uses a lightweight embedded SQLite database in TRUNCATE journal mode, selected for
+reliable locking on container-mounted volumes, with a busy timeout for contention.
 """
 
 import logging
@@ -27,7 +27,7 @@ class DatabaseConnectionError(DatabaseError):
 
 
 class SQLiteDatabase:
-    """Process-safe, thread-local SQLite manager with WAL mode and auto-schema initialization."""
+    """Process-safe, thread-local SQLite manager with automatic schema initialization."""
 
     _instance: Optional["SQLiteDatabase"] = None
     _lock = threading.RLock()
@@ -66,7 +66,7 @@ class SQLiteDatabase:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
     def get_connection(self) -> sqlite3.Connection:
-        """Get or create a thread-local SQLite connection configured with WAL mode.
+        """Get or create a thread-local SQLite connection in TRUNCATE journal mode.
 
         Returns:
             sqlite3.Connection for current thread.
@@ -231,6 +231,34 @@ class SQLiteDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_exit_time ON broker_trades(exit_time);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_strategy ON broker_trades(strategy_name);")
+            try:
+                cursor.execute("ALTER TABLE broker_trades ADD COLUMN position_id TEXT;")
+            except sqlite3.OperationalError:
+                pass
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_position_id ON broker_trades(position_id);")
+
+            # 2b. Position protection events (SL/TP change + open/close audit trail)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS position_protection_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    position_id TEXT NOT NULL,
+                    strategy_name TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    changed_by TEXT NOT NULL DEFAULT 'MANUAL',
+                    previous_stop_price REAL,
+                    previous_target_price REAL,
+                    new_stop_price REAL,
+                    new_target_price REAL,
+                    reference_price REAL,
+                    reason TEXT,
+                    created_at TEXT NOT NULL
+                );
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_protection_events_position "
+                "ON position_protection_events(position_id);"
+            )
 
             # 3. Portfolio state
             cursor.execute("""
@@ -317,43 +345,9 @@ class SQLiteDatabase:
                 );
             """)
 
-            # 8. Live orders (Delta Exchange orders audit)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS live_orders (
-                    id TEXT PRIMARY KEY,
-                    product_id INTEGER NOT NULL,
-                    symbol TEXT NOT NULL,
-                    side TEXT NOT NULL,
-                    size REAL NOT NULL,
-                    order_type TEXT NOT NULL,
-                    limit_price REAL,
-                    stop_price REAL,
-                    status TEXT NOT NULL,
-                    is_bracket INTEGER NOT NULL DEFAULT 0,
-                    raw_data TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-            """)
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_live_orders_symbol ON live_orders(symbol);")
-
-            # 9. Live positions (Delta Exchange open positions)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS live_positions (
-                    symbol TEXT PRIMARY KEY,
-                    product_id INTEGER NOT NULL,
-                    side TEXT NOT NULL,
-                    size REAL NOT NULL,
-                    entry_price REAL NOT NULL,
-                    mark_price REAL NOT NULL,
-                    liquidation_price REAL,
-                    leverage INTEGER NOT NULL,
-                    unrealized_pnl REAL NOT NULL DEFAULT 0.0,
-                    realized_pnl REAL NOT NULL DEFAULT 0.0,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-            """)
+            # Delta orders and positions are transient WebSocket state, never database state.
+            cursor.execute("DROP TABLE IF EXISTS live_orders;")
+            cursor.execute("DROP TABLE IF EXISTS live_positions;")
 
             # 10. System config
             cursor.execute("""
@@ -379,19 +373,30 @@ class SQLiteDatabase:
             """)
 
             now_iso = datetime.now(UTC).isoformat()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT OR IGNORE INTO strategy_configs (strategy_id, name, symbols, timeframe, is_paper_enabled, is_real_enabled, created_at, updated_at)
                 VALUES ('CombinedPortfolioStrategy', 'Combined Portfolio Strategy (Long & Short)', 'BTC-USD,ETH-USD,SOL-USD', '1h', 1, 0, ?, ?);
-            """, (now_iso, now_iso))
-            cursor.execute("""
+            """,
+                (now_iso, now_iso),
+            )
+            cursor.execute(
+                """
                 INSERT OR IGNORE INTO strategy_configs (strategy_id, name, symbols, timeframe, is_paper_enabled, is_real_enabled, created_at, updated_at)
                 VALUES ('MotherCandleStrategy', 'Mother Candle Multi-Timeframe Strategy', 'BTC-USD,ETH-USD,SOL-USD', '15m', 1, 0, ?, ?);
-            """, (now_iso, now_iso))
-            cursor.execute("""
+            """,
+                (now_iso, now_iso),
+            )
+            cursor.execute(
+                """
                 INSERT OR IGNORE INTO strategy_configs (strategy_id, name, symbols, timeframe, is_paper_enabled, is_real_enabled, created_at, updated_at)
-                VALUES ('DummyHeavyStrategy', 'Dummy Heavy Strategy', 'BTC-USD', '1m', 1, 0, ?, ?);
-            """, (now_iso, now_iso))
-            logger.info("✅ SQLite schema and indexes initialized successfully.")
+                VALUES ('RandomScalpingStrategy', 'Random Scalping Strategy (Test)', 'BTC-USD,ETH-USD,SOL-USD', '1m', 1, 0, ?, ?);
+            """,
+                (now_iso, now_iso),
+            )
+            cursor.execute("DELETE FROM strategy_configs WHERE strategy_id = 'DummyHeavyStrategy';")
+            cursor.execute("UPDATE strategy_configs SET is_real_enabled = 0 WHERE is_real_enabled != 0;")
+            logger.info("sqlite_schema_initialized path=%s", self.db_path)
         except Exception as exc:
             logger.error(f"Failed to initialize SQLite schema: {exc}", exc_info=True)
             raise DatabaseError(f"Schema initialization failed: {exc}") from exc
@@ -399,23 +404,22 @@ class SQLiteDatabase:
             cursor.close()
 
     def get_database_stats(self) -> dict[str, Any]:
-        """Collect metrics on SQLite file size, WAL file size, and row counts.
+        """Collect metrics on SQLite file size, journal file size, and row counts.
 
         Returns:
             Dictionary with database statistics.
         """
         db_size_bytes = self.db_path.stat().st_size if self.db_path.exists() else 0
-        wal_path = Path(f"{self.db_path}-wal")
-        wal_size_bytes = wal_path.stat().st_size if wal_path.exists() else 0
+        journal_path = Path(f"{self.db_path}-journal")
+        journal_size_bytes = journal_path.stat().st_size if journal_path.exists() else 0
 
         tables = [
             "broker_accounts",
             "broker_trades",
+            "position_protection_events",
             "portfolio_trades",
             "signals_log",
             "batch_results",
-            "live_orders",
-            "live_positions",
             "strategy_configs",
         ]
         counts: dict[str, int] = {}
@@ -429,7 +433,9 @@ class SQLiteDatabase:
         return {
             "db_path": str(self.db_path),
             "size_mb": round(db_size_bytes / (1024 * 1024), 2),
-            "wal_size_mb": round(wal_size_bytes / (1024 * 1024), 2),
+            "journal_mode": "truncate",
+            "journal_size_mb": round(journal_size_bytes / (1024 * 1024), 2),
+            "wal_size_mb": 0.0,
             "table_counts": counts,
         }
 

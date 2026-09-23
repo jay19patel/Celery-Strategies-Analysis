@@ -599,9 +599,8 @@ def build_direction_array(df, strategy, window=CONDITION_WINDOW):
             if strategy_key not in _warned_missing_signals:
                 _warned_missing_signals.add(strategy_key)
                 logger.warning(
-                    f"⚠️  Strategy combo '{strategy_key}' references missing column {e} - "
-                    f"this combo will never fire until the feature is implemented. "
-                    f"(This warning will not repeat for this combo.)"
+                    "strategy_feature_missing strategy=%s column=%s action=disabled_until_implemented",
+                    strategy_key, e,
                 )
             return np.zeros(len(df))
         mask = cond_mask if mask is None else (mask & cond_mask)

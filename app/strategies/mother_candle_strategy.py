@@ -22,7 +22,7 @@ class MotherCandleStrategy(BaseStrategy):
              df_15m = fetch_historical_data(symbol, period=5, interval="15m")
         except Exception as e:
              df_15m = None
-             logger.error(f"❌ Error fetching 15m data for {symbol}: {e}")
+             logger.warning("strategy_data_fetch_failed strategy=mother_candle symbol=%s error=%s", symbol, e)
 
         if df_15m is None or df_15m.empty:
              execution_time = time.time() - start_time
@@ -53,7 +53,7 @@ class MotherCandleStrategy(BaseStrategy):
         
         try:
             if len(df_15m) < 2:
-                 logger.info(f"📊 MotherCandleStrategy | {symbol} | Insufficient Data")
+                 logger.info("strategy_signal_skipped strategy=mother_candle symbol=%s reason=insufficient_data", symbol)
                  execution_time = time.time() - start_time
                  return StrategyResult(
                     strategy_name=self.name,
@@ -135,12 +135,15 @@ class MotherCandleStrategy(BaseStrategy):
                     used_timeframe_name = tf["name"]
                     break
         except Exception as e:
-            logger.error(f"❌ Error in MotherCandleStrategy processing {symbol}: {str(e)}", exc_info=True)
+            logger.exception("strategy_execution_failed strategy=mother_candle symbol=%s error=%s", symbol, e)
 
         execution_time = time.time() - start_time
 
         if final_signal != SignalType.HOLD:
-            logger.info(f"📊 MotherCandleStrategy | {symbol} | triggered by {used_timeframe_name} | {final_signal}")
+            logger.info(
+                "strategy_signal strategy=mother_candle symbol=%s timeframe=%s signal=%s",
+                symbol, used_timeframe_name, final_signal.value,
+            )
 
         return StrategyResult(
             strategy_name=self.name,

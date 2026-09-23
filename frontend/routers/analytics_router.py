@@ -45,3 +45,13 @@ def get_strategy_analytics() -> list[dict[str, Any]]:
     except Exception as exc:
         logger.exception("Failed to compile strategy analytics")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/api/analytics/paper-dashboard")
+def get_paper_dashboard() -> dict[str, Any]:
+    """Retrieve mark-to-market paper account statistics, chart data, and trade history."""
+    try:
+        return get_analytics_service().get_paper_dashboard()
+    except Exception as exc:
+        logger.exception("Failed to compile paper dashboard")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

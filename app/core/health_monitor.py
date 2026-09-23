@@ -124,6 +124,7 @@ def _check_redis() -> Dict[str, Any]:
             "uptime_seconds": info.get("uptime_in_seconds", 0),
             "connected_clients": client.info(section="clients").get("connected_clients", 0),
             "used_memory_human": memory_info.get("used_memory_human", "0M"),
+            "used_memory_bytes": memory_info.get("used_memory", 0),
         }
     except Exception as exc:
         logger.error(f"Redis health check failed: {exc}")
@@ -143,7 +144,8 @@ def _check_sqlite() -> Dict[str, Any]:
             "status": "pass" if row and row.get("ping") == 1 else "fail",
             "latency_ms": latency_ms,
             "size_mb": stats.get("size_mb", 0.0),
-            "wal_size_mb": stats.get("wal_size_mb", 0.0),
+            "journal_mode": stats.get("journal_mode", "truncate"),
+            "journal_size_mb": stats.get("journal_size_mb", 0.0),
             "table_counts": stats.get("table_counts", {}),
         }
     except Exception as exc:
@@ -333,11 +335,11 @@ def _check_trading_status() -> Dict[str, Any]:
         paper_row = db.execute_one("SELECT COUNT(*) as cnt FROM broker_accounts WHERE open_position IS NOT NULL;")
         paper_open = paper_row["cnt"] if paper_row else 0
 
-        live_row = db.execute_one("SELECT COUNT(*) as cnt FROM live_positions WHERE size != 0;")
-        live_open = live_row["cnt"] if live_row else 0
+        from app.broker.delta.websocket import get_delta_websocket_client
 
-        orders_row = db.execute_one("SELECT COUNT(*) as cnt FROM live_orders WHERE status = 'OPEN' OR status = 'FILLED';")
-        live_orders = orders_row["cnt"] if orders_row else 0
+        stream_status = get_delta_websocket_client().get_status()
+        live_open = stream_status["live_positions"]
+        live_orders = stream_status["live_orders"]
 
         return {
             "status": "pass",
@@ -400,7 +402,7 @@ def _collect_all_metrics() -> Dict[str, Any]:
 def _collector_loop() -> None:
     """Daemon thread that periodically updates cached metrics."""
     global _cached_metrics
-    logger.info("🩺 Health monitor collector loop started.")
+    logger.info("health_collector_loop_started interval_seconds=%s", _SAMPLE_INTERVAL)
 
     while _collector_running:
         try:
@@ -421,7 +423,7 @@ def _collector_loop() -> None:
             time.sleep(_STOP_CHECK_SEC)
             elapsed += _STOP_CHECK_SEC
 
-    logger.info("🩺 Health monitor collector loop stopped.")
+    logger.info("health_collector_loop_stopped")
 
 
 def start_health_collector() -> None:

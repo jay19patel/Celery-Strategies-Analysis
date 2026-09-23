@@ -15,9 +15,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.broker.delta import DeltaAPIError, DeltaClient
-from app.broker.delta.price_feed import get_delta_price_feed, get_live_price
-from app.broker.execution_manager import ARM_CONFIRMATION_PHRASE, get_execution_manager
+from app.broker.delta.price_feed import get_live_price
+from app.broker.delta.websocket import get_delta_websocket_client
+from app.broker.execution_manager import get_execution_manager
 from app.core.settings import get_symbols, settings
+from app.database import position_events_store
 from app.database.sqlite_db import get_sqlite_db
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,17 @@ class BrokerService:
         self.last_ip_whitelisted: bool | None = None
         self.last_rejected_ip: str | None = None
         self._load_saved_profile_on_startup()
+        self._configure_private_stream()
+
+    def _configure_private_stream(self) -> None:
+        """Keep the private Delta stream aligned with the active broker profile."""
+        ws_client = get_delta_websocket_client()
+        ws_client.configure(
+            self.delta_client.api_key,
+            self.delta_client.api_secret,
+        )
+        if ws_client.is_configured:
+            ws_client.start()
 
     def _load_saved_profile_on_startup(self) -> None:
         """Load stored broker credentials from SQLite if available and initialize client."""
@@ -68,7 +81,7 @@ class BrokerService:
                     self.delta_client.client_id = int(client_id)
                 if self.delta_client.is_configured:
                     self.delta_client._init_client()
-                logger.info("✅ Broker profile loaded and DeltaClient initialized from SQLite config.")
+                logger.info("broker_profile_loaded backend=sqlite")
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not restore saved broker profile: %s", exc)
 
@@ -203,6 +216,7 @@ class BrokerService:
 
         if self.delta_client.is_configured:
             self.delta_client._init_client()
+            self._configure_private_stream()
 
         # Persist to SQLite
         profile_data = {
@@ -293,13 +307,14 @@ class BrokerService:
             self.delta_client.api_secret = target_secret
             self.delta_client.client_id = target_client_id
             self.delta_client._init_client()
+            self._configure_private_stream()
 
             self.last_ip_whitelisted = True
             self.last_rejected_ip = None
 
             return {
                 "authorized": True,
-                "message": "✅ Delta Exchange API credentials verified and authorized successfully!",
+                "message": "Delta Exchange API credentials verified successfully.",
                 "latency_ms": latency_ms,
                 "balances": balances,
                 "verified_at": now_utc,
@@ -316,9 +331,9 @@ class BrokerService:
                     server_ip = match.group(1)
                 self.last_ip_whitelisted = False
                 self.last_rejected_ip = server_ip
-                msg = f"❌ IP Not Whitelisted: Delta Exchange rejected server IP {server_ip}. Please whitelist this IP in Delta API key settings."
+                msg = f"Delta Exchange rejected server IP {server_ip}. Add this IP to the API key allowlist."
             else:
-                msg = f"❌ Authorization failed: {exc}"
+                msg = f"Authorization failed: {exc}"
             logger.warning("Authority verification failed: %s", exc)
             return {
                 "authorized": False,
@@ -332,30 +347,10 @@ class BrokerService:
     def toggle_live_trading(self, enabled: bool, confirmation: str | None = None) -> dict[str, Any]:
         """Enable or disable live broker order execution with safety gating."""
         if enabled:
-            if not self.delta_client.is_configured:
-                raise ValueError(
-                    "Cannot enable Live Trading: Delta Exchange credentials are not configured or authorized."
-                )
-
-            # Verify arming phrase
-            if not self.mgr.is_armed():
-                if not confirmation or confirmation.strip() != ARM_CONFIRMATION_PHRASE:
-                    raise ValueError(
-                        f"Confirmation phrase must exactly match '{ARM_CONFIRMATION_PHRASE}' to enable live trading."
-                    )
-                self.mgr.arm_live_trading(confirmation)
-
-            self.mgr.set_mode("LIVE")
-            logger.warning("🟢 LIVE TRADING HAS BEEN ENABLED by user.")
-            return {
-                "enabled": True,
-                "execution_mode": "LIVE",
-                "is_armed": True,
-                "message": "Live Trading is ENABLED. Real orders will be routed to Delta Exchange.",
-            }
+            raise ValueError("Delta is read-only. All trading is executed in the Paper Broker.")
         else:
             self.mgr.disarm_live_trading()
-            logger.info("🟡 LIVE TRADING DISABLED. System safely in PAPER mode.")
+            logger.info("live_trading_disabled execution_mode=PAPER")
             return {
                 "enabled": False,
                 "execution_mode": "PAPER",
@@ -365,11 +360,7 @@ class BrokerService:
 
     def arm_live_trading(self, confirmation: str) -> dict[str, Any]:
         """Arm live trade execution after verifying the explicit confirmation phrase."""
-        if not confirmation or confirmation.strip() != ARM_CONFIRMATION_PHRASE:
-            raise ValueError(
-                f"Confirmation phrase must exactly match '{ARM_CONFIRMATION_PHRASE}' to arm live trading."
-            )
-        return self.mgr.arm_live_trading(confirmation)
+        raise ValueError("Delta is read-only. Live trading cannot be armed.")
 
     def disarm_live_trading(self) -> dict[str, Any]:
         """Disarm live execution and safely revert execution mode to PAPER."""
@@ -378,13 +369,8 @@ class BrokerService:
     def set_execution_mode(self, mode: str) -> dict[str, Any]:
         """Switch execution mode between PAPER and LIVE with safety validation."""
         clean_mode = mode.strip().upper()
-        if clean_mode not in ("PAPER", "LIVE"):
-            raise ValueError("Execution mode must be either 'PAPER' or 'LIVE'.")
-
-        if clean_mode == "LIVE" and not self.mgr.is_armed():
-            raise ValueError(
-                f"Live trading must be armed first using confirmation phrase '{ARM_CONFIRMATION_PHRASE}'."
-            )
+        if clean_mode != "PAPER":
+            raise ValueError("Delta is read-only. Execution mode must remain PAPER.")
 
         self.mgr.set_mode(clean_mode)
         return {"execution_mode": self.mgr.get_mode(), "is_armed": self.mgr.is_armed()}
@@ -413,10 +399,7 @@ class BrokerService:
                 server_ip = match.group(1) if match else self.get_server_ip()
                 self.last_ip_whitelisted = False
                 self.last_rejected_ip = server_ip
-                logger.warning(
-                    "Delta API IP not whitelisted (server IP: %s). Add this IP to your Delta API key whitelist.",
-                    server_ip,
-                )
+                logger.warning("delta_api_access_denied reason=ip_not_allowed server_ip=%s", server_ip)
                 return {
                     "configured": True,
                     "ip_whitelisted": False,
@@ -462,102 +445,113 @@ class BrokerService:
             pos_type = (pos_dict.get("type") or "LONG").upper()
             size = float(pos_dict.get("size", 0.0))
             entry_price = float(pos_dict.get("entry_price", 0.0))
-            sl = float(pos_dict.get("stop_loss", 0.0)) if pos_dict.get("stop_loss") else None
-            tp = float(pos_dict.get("take_profit", 0.0)) if pos_dict.get("take_profit") else None
+            sl = float(pos_dict.get("stop_price", 0.0)) if pos_dict.get("stop_price") else None
+            tp = float(pos_dict.get("target_price", 0.0)) if pos_dict.get("target_price") else None
 
             # Enrich with live mark price from public WebSocket price feed
             symbol = r.get("symbol") or ""
             mark_price = get_live_price(symbol) or entry_price
             is_long = pos_type == "LONG"
-            if mark_price and entry_price:
-                if is_long:
-                    unrealized_pnl = (mark_price - entry_price) * size
-                else:
-                    unrealized_pnl = (entry_price - mark_price) * size
-            else:
-                unrealized_pnl = 0.0
+            pnl = self.mgr.paper_broker._calc_pnl(pos_dict, mark_price) if mark_price else {"net_pnl": 0.0}
+            unrealized_pnl = float(pnl["net_pnl"])
+            margin_used = float(pos_dict.get("margin_used", 0.0))
 
-            positions.append({
-                "strategy_name": r.get("strategy_name"),
-                "symbol": symbol,
-                "side": "BUY" if is_long else "SELL",
-                "position_type": pos_type,
-                "is_long": is_long,
-                "size": size,
-                "entry_price": entry_price,
-                "mark_price": mark_price,
-                "stop_loss": sl,
-                "take_profit": tp,
-                "entry_time": pos_dict.get("entry_time"),
-                "capital": float(r.get("capital", 100.0)),
-                "unrealized_pnl": round(unrealized_pnl, 4),
-                "has_live_price": mark_price != entry_price,
-                "is_paper": True,
-            })
+            positions.append(
+                {
+                    "strategy_name": r.get("strategy_name"),
+                    "symbol": symbol,
+                    "position_id": pos_dict.get("position_id"),
+                    "side": "BUY" if is_long else "SELL",
+                    "position_type": pos_type,
+                    "is_long": is_long,
+                    "size": size,
+                    "entry_price": entry_price,
+                    "mark_price": mark_price,
+                    "stop_loss": sl,
+                    "take_profit": tp,
+                    "entry_time": pos_dict.get("entry_time"),
+                    "capital": float(r.get("capital", 100.0)),
+                    "unrealized_pnl": round(unrealized_pnl, 4),
+                    "unrealized_pnl_pct": round((unrealized_pnl / margin_used) * 100, 2) if margin_used else 0.0,
+                    "margin_used": margin_used,
+                    "leverage": float(pos_dict.get("leverage", 1.0)),
+                    "liquidation_price": pos_dict.get("liquidation_price"),
+                    "has_live_price": mark_price != entry_price,
+                    "is_paper": True,
+                }
+            )
         return positions
 
     def get_paper_orders(self, limit: int = 50) -> list[dict[str, Any]]:
         """Fetch simulated paper trading orders/trades from broker_trades table."""
         rows = self.db.execute_query(
-            "SELECT id, strategy_name, symbol, type, entry_price, exit_price, pnl, reason, entry_time, exit_time FROM broker_trades ORDER BY exit_time DESC LIMIT ?;",
+            """SELECT id, strategy_name, symbol, type, entry_price, exit_price,
+                      pnl, reason, entry_time, exit_time, position_id
+               FROM broker_trades ORDER BY exit_time DESC LIMIT ?;""",
             (limit,),
         )
         orders: list[dict[str, Any]] = []
         for r in rows:
             pos_type = (r.get("type") or "LONG").upper()
-            orders.append({
-                "id": f"PAPER-{r['id']}",
-                "strategy_name": r.get("strategy_name"),
-                "symbol": r.get("symbol"),
-                "side": "BUY" if pos_type == "LONG" else "SELL",
-                "position_type": pos_type,
-                "order_role": "PAPER_TRADE",
-                "entry_price": float(r.get("entry_price", 0.0)),
-                "exit_price": float(r.get("exit_price", 0.0)) if r.get("exit_price") else None,
-                "pnl": float(r.get("pnl", 0.0)),
-                "exit_reason": r.get("reason") or "Closed",
-                "entry_time": r.get("entry_time"),
-                "exit_time": r.get("exit_time"),
-                "state": "filled",
-                "is_paper": True,
-            })
+            orders.append(
+                {
+                    "id": f"PAPER-{r['id']}",
+                    "strategy_name": r.get("strategy_name"),
+                    "symbol": r.get("symbol"),
+                    "position_id": r.get("position_id"),
+                    "side": "BUY" if pos_type == "LONG" else "SELL",
+                    "position_type": pos_type,
+                    "order_role": "PAPER_TRADE",
+                    "entry_price": float(r.get("entry_price", 0.0)),
+                    "exit_price": float(r.get("exit_price", 0.0)) if r.get("exit_price") else None,
+                    "pnl": float(r.get("pnl", 0.0)),
+                    "exit_reason": r.get("reason") or "Closed",
+                    "entry_time": r.get("entry_time"),
+                    "exit_time": r.get("exit_time"),
+                    "state": "filled",
+                    "is_paper": True,
+                }
+            )
         return orders
 
-    def get_live_positions(self) -> list[dict[str, Any]]:
-        """Fetch real live positions from Delta Exchange API or SQLite cache."""
-        if self.delta_client.is_configured:
-            try:
-                positions = self.delta_client.get_all_open_positions()
-                self.last_ip_whitelisted = True
-                self.last_rejected_ip = None
-                return positions
-            except (DeltaAPIError, Exception) as exc:  # noqa: BLE001 - Fallback to SQLite cache on broker network error
-                exc_str = str(exc)
-                if "ip_not_whitelisted_for_api_key" in exc_str:
-                    match = re.search(r'"client_ip"\s*:\s*"([^"]+)"', exc_str)
-                    server_ip = match.group(1) if match else self.get_server_ip()
-                    self.last_ip_whitelisted = False
-                    self.last_rejected_ip = server_ip
-                    logger.warning(
-                        "Delta API IP not whitelisted (server IP: %s) — live positions unavailable.",
-                        server_ip,
-                    )
-                else:
-                    logger.warning("Could not fetch positions from Delta API, falling back to cache: %s", exc)
+    def update_paper_protection(
+        self, strategy_name: str, symbol: str, stop_price: float, target_price: float
+    ) -> dict[str, Any]:
+        """Update protective prices for a paper position."""
+        current_price = get_live_price(symbol)
+        if not current_price:
+            positions = self.get_paper_positions()
+            match = next(
+                (p for p in positions if p["strategy_name"] == strategy_name and p["symbol"] == symbol),
+                None,
+            )
+            current_price = match["mark_price"] if match else None
+        position = self.mgr.paper_broker.update_protection(
+            strategy_name, symbol, stop_price, target_price, float(current_price or 0)
+        )
+        return {"success": True, "position": position}
 
-        rows = self.db.execute_query("SELECT * FROM live_positions WHERE size != 0;")
-        return [dict(r) for r in rows]
+    def close_paper_position(self, strategy_name: str, symbol: str) -> dict[str, Any]:
+        """Manually close a paper position at its latest public price."""
+        current_price = get_live_price(symbol)
+        if not current_price:
+            raise ValueError("Live market price is unavailable; position was not closed.")
+        account = self.mgr.paper_broker.close_manually(strategy_name, symbol, float(current_price))
+        return {"success": True, "capital": account["capital"]}
+
+    def get_paper_position_history(self, position_id: str) -> list[dict[str, Any]]:
+        """Return the SL/TP change and close-reason audit trail for one paper position instance."""
+        if not position_id:
+            raise ValueError("position_id is required.")
+        return position_events_store.get_events_by_position(position_id)
+
+    def get_live_positions(self) -> list[dict[str, Any]]:
+        """Return positions maintained by the live Delta private stream."""
+        return get_delta_websocket_client().get_positions()
 
     def get_live_orders(self) -> list[dict[str, Any]]:
-        """Fetch real live orders from Delta Exchange API or SQLite cache."""
-        if self.delta_client.is_configured:
-            try:
-                return self.delta_client.get_all_open_orders()
-            except (DeltaAPIError, Exception) as exc:  # noqa: BLE001 - Fallback to SQLite cache on broker network error
-                logger.warning("Could not fetch orders from Delta API, falling back to cache: %s", exc)
-
-        rows = self.db.execute_query("SELECT * FROM live_orders ORDER BY created_at DESC LIMIT 50;")
-        return [dict(r) for r in rows]
+        """Return open orders maintained by the live Delta private stream."""
+        return get_delta_websocket_client().get_orders()
 
     def get_positions(self, mode: str | None = None) -> list[dict[str, Any]]:
         """Fetch active positions based on execution mode ('PAPER' or 'LIVE')."""
@@ -574,21 +568,12 @@ class BrokerService:
         return self.get_live_orders()
 
     def cancel_order(self, order_id: str, product_id: int | None = None) -> dict[str, Any]:
-        """Cancel a specific live order via Delta Exchange."""
-        if not self.delta_client.is_configured:
-            return {"success": False, "message": "Delta Exchange API is not configured."}
-
-        try:
-            res = self.delta_client.cancel_all_orders(product_id=product_id)
-            return {"success": True, "result": res}
-        except (DeltaAPIError, Exception) as exc:  # noqa: BLE001 - Return error message on order cancellation failure
-            logger.error("Failed to cancel order %s: %s", order_id, exc)
-            return {"success": False, "error": str(exc)}
+        """Reject mutations because Delta integration is monitoring-only."""
+        raise ValueError("Delta is read-only; order actions are disabled.")
 
     def emergency_exit(self) -> dict[str, Any]:
-        """Execute the atomic panic kill-switch: cancel all orders and market-close all positions."""
-        logger.warning("🚨 EMERGENCY EXIT triggered via BrokerService")
-        return self.mgr.emergency_exit()
+        """Reject mutations because Delta integration is monitoring-only."""
+        raise ValueError("Delta is read-only; position actions are disabled.")
 
 
 _broker_service: BrokerService | None = None

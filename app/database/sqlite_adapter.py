@@ -1,6 +1,6 @@
 """SQLite database adapter providing collection-style interface.
 
-Provides MongoDB-like collection interfaces (`find`, `find_one`, `insert_one`,
+Provides collection-style interfaces (`find`, `find_one`, `insert_one`,
 `replace_one`, `delete_many`, `count_documents`) backed directly by the embedded
 SQLite database. Enables cleanly structured repository access across services.
 """
@@ -8,12 +8,69 @@ SQLite database. Enables cleanly structured repository access across services.
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from app.database.sqlite_db import get_sqlite_db
 
 logger = logging.getLogger(__name__)
+
+_TABLE_COLUMNS: dict[str, frozenset[str]] = {
+    "signals_log": frozenset({
+        "id", "strategy_name", "symbol", "signal_type", "price", "timestamp",
+        "execution_time", "subscribers_received", "mode", "action", "created_at",
+    }),
+    "broker_accounts": frozenset({
+        "id", "strategy_name", "symbol", "capital", "total_trades", "winning_trades",
+        "win_rate", "open_position", "updated_at",
+    }),
+    "broker_trades": frozenset({
+        "id", "strategy_name", "symbol", "type", "entry_time", "exit_time", "entry_price",
+        "exit_price", "size", "capital_allocated", "margin_used", "leverage", "notional_value",
+        "liquidation_price", "gross_pnl", "entry_fee", "exit_fee", "total_fees", "pnl",
+        "return_pct", "reason", "stop_price", "target_price", "position_id", "created_at",
+    }),
+    "system_status": frozenset({"id", "data", "updated_at"}),
+    "batch_results": frozenset({
+        "id", "batch_data", "total_symbols", "total_strategies", "total_results", "created_at",
+    }),
+}
+
+
+@dataclass(frozen=True)
+class UpdateResult:
+    matched_count: int
+    modified_count: int
+    upserted_id: Any = None
+
+
+@dataclass(frozen=True)
+class DeleteResult:
+    deleted_count: int
+
+
+def _column_name(table_name: str, field_name: str) -> str:
+    columns = _TABLE_COLUMNS.get(table_name)
+    if columns is None:
+        raise ValueError(f"Unsupported collection: {table_name}")
+    column = "id" if field_name == "_id" else field_name
+    if column not in columns:
+        raise ValueError(f"Unsupported field '{field_name}' for collection '{table_name}'")
+    return column
+
+
+def _build_where_clause(table_name: str, filter_dict: dict[str, Any] | None) -> tuple[str, tuple[Any, ...]]:
+    """Build a parameterized equality filter after validating all field names."""
+    clauses: list[str] = []
+    params: list[Any] = []
+    for field_name, value in (filter_dict or {}).items():
+        if isinstance(value, (dict, list, tuple, set)):
+            raise ValueError(f"Unsupported filter value for '{field_name}': equality values only")
+        clauses.append(f"{_column_name(table_name, field_name)} = ?")
+        params.append(value)
+    where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    return where_sql, tuple(params)
 
 
 def _now_iso() -> str:
@@ -30,6 +87,8 @@ class SQLiteCollectionAdapter:
         Args:
             table_name: Name of underlying SQLite table.
         """
+        if table_name not in _TABLE_COLUMNS:
+            raise ValueError(f"Unsupported collection: {table_name}")
         self.table_name = table_name
         self.db = get_sqlite_db()
 
@@ -95,8 +154,8 @@ class SQLiteCollectionAdapter:
                     strategy_name, symbol, type, entry_time, exit_time, entry_price, exit_price,
                     size, capital_allocated, margin_used, leverage, notional_value, liquidation_price,
                     gross_pnl, entry_fee, exit_fee, total_fees, pnl, return_pct, reason,
-                    stop_price, target_price, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    stop_price, target_price, position_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
             row_id = self.db.execute_modify(
                 sql,
@@ -112,6 +171,7 @@ class SQLiteCollectionAdapter:
                     str(item.get("reason", "")),
                     float(item.get("stop_price", 0.0)) if item.get("stop_price") else None,
                     float(item.get("target_price", 0.0)) if item.get("target_price") else None,
+                    item.get("position_id"),
                     now_str,
                 ),
             )
@@ -151,11 +211,22 @@ class SQLiteCollectionAdapter:
 
     def find(self, filter_dict: dict[str, Any] | None = None) -> "SQLiteCursor":
         """Query documents matching filter."""
-        return SQLiteCursor(self.table_name, filter_dict)
+        return SQLiteCursor(self.table_name, filter_dict, db=self.db)
 
     def replace_one(self, filter_dict: dict[str, Any], replacement: dict[str, Any], upsert: bool = False) -> Any:
         """Replace a document matching the filter."""
-        return self.insert_one(replacement)
+        existing = self.find_one(filter_dict)
+        if existing is None and not upsert:
+            return UpdateResult(matched_count=0, modified_count=0)
+        item = dict(replacement)
+        if "_id" not in item:
+            item["_id"] = existing.get("_id") if existing else filter_dict.get("_id")
+        result = self.insert_one(item)
+        return UpdateResult(
+            matched_count=1 if existing else 0,
+            modified_count=1 if existing else 0,
+            upserted_id=None if existing else result.inserted_id,
+        )
 
     def update_one(self, filter_dict: dict[str, Any], update_dict: dict[str, Any], upsert: bool = False) -> Any:
         """Update a document matching the filter."""
@@ -164,40 +235,43 @@ class SQLiteCollectionAdapter:
             set_vals = update_dict.get("$set", update_dict)
             existing.update(set_vals)
             self.insert_one(existing)
+            return UpdateResult(matched_count=1, modified_count=1)
         elif upsert:
             set_vals = update_dict.get("$set", update_dict)
             merged = {**filter_dict, **set_vals}
-            self.insert_one(merged)
+            result = self.insert_one(merged)
+            return UpdateResult(matched_count=0, modified_count=0, upserted_id=result.inserted_id)
+        return UpdateResult(matched_count=0, modified_count=0)
 
     def delete_many(self, filter_dict: dict[str, Any]) -> Any:
         """Delete documents matching the filter."""
-        if not filter_dict:
-            self.db.execute_modify(f"DELETE FROM {self.table_name};")
-            class DeleteResult:
-                deleted_count = 1
-            return DeleteResult()
-
-        class DeleteResult:
-            deleted_count = 0
-        return DeleteResult()
+        where_sql, params = _build_where_clause(self.table_name, filter_dict)
+        deleted_count = self.db.execute_modify(f"DELETE FROM {self.table_name}{where_sql};", params)
+        return DeleteResult(deleted_count=deleted_count)
 
     def count_documents(self, filter_dict: dict[str, Any] | None = None) -> int:
-        """Count total documents in collection."""
-        row = self.db.execute_one(f"SELECT COUNT(*) as cnt FROM {self.table_name};")
+        """Count documents matching the filter."""
+        where_sql, params = _build_where_clause(self.table_name, filter_dict)
+        row = self.db.execute_one(f"SELECT COUNT(*) as cnt FROM {self.table_name}{where_sql};", params)
         return row["cnt"] if row else 0
 
 
 class SQLiteCursor:
     """Cursor wrapper for collection-style queries over SQLite."""
 
-    def __init__(self, table_name: str, filter_dict: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        table_name: str,
+        filter_dict: dict[str, Any] | None = None,
+        db: Any | None = None,
+    ) -> None:
         self.table_name = table_name
         self.filter_dict = filter_dict or {}
         self._limit: int | None = None
         self._skip: int = 0
         self._sort_field: str | None = None
         self._sort_dir: int = 1
-        self.db = get_sqlite_db()
+        self.db = db or get_sqlite_db()
 
     def sort(self, key_or_list: Any, direction: int = 1) -> "SQLiteCursor":
         if isinstance(key_or_list, list):
@@ -209,29 +283,22 @@ class SQLiteCursor:
         return self
 
     def limit(self, count: int) -> "SQLiteCursor":
+        if not isinstance(count, int) or count < 0:
+            raise ValueError("limit must be a non-negative integer")
         self._limit = count
         return self
 
     def skip(self, count: int) -> "SQLiteCursor":
+        if not isinstance(count, int) or count < 0:
+            raise ValueError("skip must be a non-negative integer")
         self._skip = count
         return self
 
     def _execute(self) -> list[dict[str, Any]]:
-        where_clauses: list[str] = []
-        params: list[Any] = []
-
-        for k, v in self.filter_dict.items():
-            if k == "_id":
-                where_clauses.append("id = ?")
-                params.append(str(v))
-            elif k in ("symbol", "strategy_name"):
-                where_clauses.append(f"{k} = ?")
-                params.append(str(v))
-
-        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        where_sql, params = _build_where_clause(self.table_name, self.filter_dict)
         order_sql = ""
         if self._sort_field:
-            col = "id" if self._sort_field == "_id" else self._sort_field
+            col = _column_name(self.table_name, self._sort_field)
             dir_str = "ASC" if self._sort_dir == 1 else "DESC"
             order_sql = f"ORDER BY {col} {dir_str}"
 
@@ -240,7 +307,7 @@ class SQLiteCursor:
             limit_sql = f"LIMIT {self._limit} OFFSET {self._skip}"
 
         sql = f"SELECT * FROM {self.table_name} {where_sql} {order_sql} {limit_sql};".strip()
-        rows = self.db.execute_query(sql, tuple(params))
+        rows = self.db.execute_query(sql, params)
 
         results: list[dict[str, Any]] = []
         for r in rows:
@@ -300,10 +367,6 @@ class DatabaseConnection:
         pass
 
 
-# Backward compatibility alias
-MongoDBConnection = DatabaseConnection
-
-
 def get_database() -> Any:
     """Return database proxy delegating to SQLite."""
     return DatabaseConnection.get_database()
@@ -330,4 +393,9 @@ def get_latest_batch_results(limit: int = 10) -> list[dict[str, Any]]:
 def get_symbol_results(symbol: str, limit: int = 10) -> list[dict[str, Any]]:
     """Retrieve batch results for a specific symbol from SQLite."""
     adapter = SQLiteCollectionAdapter("batch_results")
-    return list(adapter.find({"symbol": symbol}).sort("created_at", -1).limit(limit))
+    batches = adapter.find().sort("created_at", -1)
+    return [
+        batch
+        for batch in batches
+        if any(result.get("symbol") == symbol for result in batch.get("results", []))
+    ][:limit]

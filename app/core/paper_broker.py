@@ -1,12 +1,13 @@
-import time
-from datetime import datetime
+import uuid
+from datetime import UTC, datetime
 from typing import Any, Dict
 
-from app.models.strategy_models import SignalType
-from app.database.sqlite_adapter import DatabaseConnection, MongoDBConnection
-from app.database.redis_publisher import get_redis_client
 from app.core.logger import get_celery_logger
 from app.core.settings import settings
+from app.database import position_events_store
+from app.database.redis_publisher import get_redis_client
+from app.database.sqlite_adapter import DatabaseConnection
+from app.models.strategy_models import SignalType
 
 logger = get_celery_logger()
 
@@ -17,7 +18,7 @@ class PaperBroker:
     strategy trading multiple symbols (e.g. ETHUSD and BTCUSD) holds an independent
     position and capital balance in each rather than sharing one slot across symbols.
 
-    Tracks capital, an open position (if any), and trade history in MongoDB.
+    Tracks capital, an open position (if any), and trade history in SQLite.
     On an opposite signal, the existing position is closed and no new position is opened
     immediately (no signal reversal). Freezes an account once its capital drops to $1 or
     below. A Redis lock guards each account against concurrent updates.
@@ -29,17 +30,17 @@ class PaperBroker:
 
     @property
     def db(self) -> Any:
-        """Returns the MongoDB database instance dynamically to ensure fork-safety."""
-        return MongoDBConnection.get_database()
+        """Returns the SQLite database proxy dynamically to ensure fork-safety."""
+        return DatabaseConnection.get_database()
 
     @property
     def accounts_coll(self) -> Any:
-        """Returns the broker_accounts MongoDB collection dynamically."""
+        """Returns the broker_accounts SQLite adapter dynamically."""
         return self.db.broker_accounts
 
     @property
     def trades_coll(self) -> Any:
-        """Returns the broker_trades MongoDB collection dynamically."""
+        """Returns the broker_trades SQLite adapter dynamically."""
         return self.db.broker_trades
 
     @property
@@ -99,6 +100,8 @@ class PaperBroker:
         if not pos:
             return account
 
+        position_id = pos.get("position_id") or str(uuid.uuid4())
+
         pnl_components = self._calc_pnl(pos, current_price)
         gross_pnl = pnl_components["gross_pnl"]
         exit_fee = pnl_components["exit_fee"]
@@ -138,21 +141,41 @@ class PaperBroker:
             "reason": reason,
             "stop_price": pos.get("stop_price"),
             "target_price": pos.get("target_price"),
+            "position_id": position_id,
         }
         self.trades_coll.insert_one(trade_record)
 
+        position_events_store.record_event(
+            position_id=position_id,
+            strategy_name=account["strategy_name"],
+            symbol=pos["symbol"],
+            event_type="CLOSED",
+            changed_by="MANUAL" if reason == "Manual Close" else "SYSTEM",
+            previous_stop_price=pos.get("stop_price"),
+            previous_target_price=pos.get("target_price"),
+            reference_price=current_price,
+            reason=reason,
+        )
+
         account["open_position"] = None
 
-        logger.info(f"📊 BROKER | {account['_id']} CLOSED {pos['type']} | PnL: ${net_pnl:.2f} (fees: ${entry_fee + exit_fee:.2f}) | Balance: ${account['capital']:.2f}")
+        logger.info(
+            "paper_position_closed account=%s side=%s pnl=%.2f fees=%.2f balance=%.2f",
+            account["_id"],
+            pos["type"],
+            net_pnl,
+            entry_fee + exit_fee,
+            account["capital"],
+        )
         return account
 
     def _open_position(
-        self, account: Dict[str, Any], pos_type: str, symbol: str, price: float, entry_time: datetime
+        self, account: Dict[str, Any], pos_type: str, symbol: str, price: float, entry_time: datetime, custom_stop: float = None, custom_target: float = None
     ) -> Dict[str, Any]:
         """Opens a new position using 20x default leverage, allocating available capital as margin.
 
         Also sets a stop-loss and take-profit level (from settings.broker_stop_loss_pct /
-        broker_take_profit_pct) so the position has a protective exit even if the strategy
+        broker_take_profit_pct, or custom from strategy) so the position has a protective exit even if the strategy
         itself keeps signaling HOLD - see check_protective_exit().
         """
         capital = account["capital"]
@@ -168,15 +191,17 @@ class PaperBroker:
         stop_dist = price * (settings.broker_stop_loss_pct / 100)
         target_dist = price * (settings.broker_take_profit_pct / 100)
         if pos_type == "LONG":
-            stop_price = price - stop_dist
-            target_price = price + target_dist
+            stop_price = custom_stop if custom_stop is not None else price - stop_dist
+            target_price = custom_target if custom_target is not None else price + target_dist
             liquidation_price = price * (1.0 - (1.0 / leverage))
         else:  # SHORT
-            stop_price = price + stop_dist
-            target_price = price - target_dist
+            stop_price = custom_stop if custom_stop is not None else price + stop_dist
+            target_price = custom_target if custom_target is not None else price - target_dist
             liquidation_price = price * (1.0 + (1.0 / leverage))
 
+        position_id = str(uuid.uuid4())
         account["open_position"] = {
+            "position_id": position_id,
             "type": pos_type,
             "symbol": symbol,
             "entry_price": price,
@@ -195,14 +220,38 @@ class PaperBroker:
             "unrealized_pnl": None,
         }
 
+        position_events_store.record_event(
+            position_id=position_id,
+            strategy_name=account["strategy_name"],
+            symbol=symbol,
+            event_type="OPENED",
+            changed_by="SYSTEM",
+            new_stop_price=stop_price,
+            new_target_price=target_price,
+            reference_price=price,
+        )
+
         logger.info(
-            f"📊 BROKER | {account['_id']} OPENED {pos_type} ({leverage:.0f}x Margin) | "
-            f"Size: {size:.4f} @ ${price:.2f} (Notional: ${size * price:.2f}, Margin Used: ${margin_used:.2f} of ${capital:.2f} Capital) | "
-            f"Fee: ${fee:.2f} | Stop: ${stop_price:.2f} | Target: ${target_price:.2f} | Liq: ${liquidation_price:.2f}"
+            "paper_position_opened account=%s side=%s leverage=%.0f size=%.4f price=%.2f notional=%.2f "
+            "margin=%.2f capital=%.2f fee=%.2f stop_price=%.2f target_price=%.2f liquidation_price=%.2f",
+            account["_id"],
+            pos_type,
+            leverage,
+            size,
+            price,
+            size * price,
+            margin_used,
+            capital,
+            fee,
+            stop_price,
+            target_price,
+            liquidation_price,
         )
         return account
 
-    def check_protective_exit(self, strategy_name: str, symbol: str, current_price: float, current_time: datetime) -> None:
+    def check_protective_exit(
+        self, strategy_name: str, symbol: str, current_price: float, current_time: datetime
+    ) -> None:
         """Closes a strategy's open position if the current price has crossed its
         stop-loss, take-profit, or liquidation level; otherwise snapshots the live price and
         unrealized PnL onto the position so the dashboard can show it.
@@ -218,7 +267,9 @@ class PaperBroker:
         lock = self.redis.lock(lock_name, timeout=10)
 
         if not lock.acquire(blocking=True, blocking_timeout=5):
-            logger.warning(f"⚠️ BROKER | Could not acquire lock for {strategy_name}:{symbol}, skipping protective-exit check.")
+            logger.warning(
+                "paper_protective_exit_skipped strategy=%s symbol=%s reason=lock_held", strategy_name, symbol
+            )
             return
 
         try:
@@ -264,10 +315,12 @@ class PaperBroker:
                 if entry_dt:
                     if entry_dt.tzinfo is None:
                         from datetime import timezone
+
                         entry_dt = entry_dt.replace(tzinfo=timezone.utc)
                     curr_dt = current_time
                     if curr_dt.tzinfo is None:
                         from datetime import timezone
+
                         curr_dt = curr_dt.replace(tzinfo=timezone.utc)
 
                     holding_hours = (curr_dt - entry_dt).total_seconds() / 3600.0
@@ -281,7 +334,9 @@ class PaperBroker:
             elif hit_target:
                 account = self._close_position(account, target_price, current_time, "Take Profit Hit")
             elif hit_time_limit:
-                account = self._close_position(account, current_price, current_time, f"Time Exceeded ({max_hold_hours:.0f}h Limit)")
+                account = self._close_position(
+                    account, current_price, current_time, f"Time Exceeded ({max_hold_hours:.0f}h Limit)"
+                )
             else:
                 pos["last_price"] = current_price
                 pos["last_price_time"] = current_time
@@ -290,14 +345,16 @@ class PaperBroker:
             self.accounts_coll.update_one({"_id": account["_id"]}, {"$set": account})
 
         except Exception as e:
-            logger.error(f"❌ BROKER | Error checking protective exit for {strategy_name}:{symbol}: {str(e)}", exc_info=True)
+            logger.exception("paper_protective_exit_failed strategy=%s symbol=%s error=%s", strategy_name, symbol, e)
         finally:
             try:
                 lock.release()
             except Exception:
                 pass
 
-    def process_signal(self, strategy_name: str, symbol: str, signal: SignalType, price: float, timestamp: datetime) -> None:
+    def process_signal(
+        self, strategy_name: str, symbol: str, signal: SignalType, price: float, timestamp: datetime, stop_loss: float = None, take_profit: float = None
+    ) -> None:
         """Opens a new position in response to a signal — only when no position is currently open.
 
         If a position is already open, ALL signals are ignored. The position will only be
@@ -311,7 +368,7 @@ class PaperBroker:
         lock = self.redis.lock(lock_name, timeout=10)
 
         if not lock.acquire(blocking=True, blocking_timeout=5):
-            logger.warning(f"⚠️ BROKER | Could not acquire lock for {strategy_name}:{symbol}, skipping signal.")
+            logger.warning("paper_signal_skipped strategy=%s symbol=%s reason=lock_held", strategy_name, symbol)
             return
 
         try:
@@ -327,57 +384,105 @@ class PaperBroker:
             # Position closes ONLY when SL or TP is hit (check_protective_exit).
             if pos:
                 logger.debug(
-                    f"📊 BROKER | {strategy_name}:{symbol} already has an open {pos['type']} position. "
-                    f"Signal {signal.value} ignored — waiting for SL/TP."
+                    "paper_signal_skipped strategy=%s symbol=%s reason=position_open side=%s signal=%s",
+                    strategy_name,
+                    symbol,
+                    pos["type"],
+                    signal.value,
                 )
                 return
 
             # No open position — open a new one based on signal.
             if signal == SignalType.BUY:
-                account = self._open_position(account, "LONG", symbol, price, timestamp)
+                account = self._open_position(account, "LONG", symbol, price, timestamp, stop_loss, take_profit)
             elif signal == SignalType.SELL:
-                account = self._open_position(account, "SHORT", symbol, price, timestamp)
-
-            # ── COMMENTED: Signal Exit (no reversal, but closes on opposite signal) ──
-            # if signal == SignalType.BUY:
-            #     if pos:
-            #         if pos["type"] == "SHORT":
-            #             account = self._close_position(account, price, timestamp, "Signal Exit (BUY)")
-            #         # Already LONG - no-op.
-            #     else:
-            #         account = self._open_position(account, "LONG", symbol, price, timestamp)
-            # elif signal == SignalType.SELL:
-            #     if pos:
-            #         if pos["type"] == "LONG":
-            #             account = self._close_position(account, price, timestamp, "Signal Exit (SELL)")
-            #         # Already SHORT - no-op.
-            #     else:
-            #         account = self._open_position(account, "SHORT", symbol, price, timestamp)
-
-            # ── COMMENTED: Signal Reverse (closes + immediately opens opposite) ──────
-            # if signal == SignalType.BUY:
-            #     if pos:
-            #         if pos["type"] == "SHORT":
-            #             account = self._close_position(account, price, timestamp, "Signal Reverse (BUY)")
-            #             account = self._open_position(account, "LONG", symbol, price, timestamp)
-            #         # Already LONG - no-op.
-            #     else:
-            #         account = self._open_position(account, "LONG", symbol, price, timestamp)
-            # elif signal == SignalType.SELL:
-            #     if pos:
-            #         if pos["type"] == "LONG":
-            #             account = self._close_position(account, price, timestamp, "Signal Reverse (SELL)")
-            #             account = self._open_position(account, "SHORT", symbol, price, timestamp)
-            #         # Already SHORT - no-op.
-            #     else:
-            #         account = self._open_position(account, "SHORT", symbol, price, timestamp)
+                account = self._open_position(account, "SHORT", symbol, price, timestamp, stop_loss, take_profit)
 
             self.accounts_coll.update_one({"_id": account["_id"]}, {"$set": account})
 
         except Exception as e:
-            logger.error(f"❌ BROKER | Error processing signal for {strategy_name}:{symbol}: {str(e)}", exc_info=True)
+            logger.exception("paper_signal_processing_failed strategy=%s symbol=%s error=%s", strategy_name, symbol, e)
         finally:
             try:
                 lock.release()
             except Exception:
                 pass
+
+    def update_protection(
+        self,
+        strategy_name: str,
+        symbol: str,
+        stop_price: float,
+        target_price: float,
+        current_price: float,
+    ) -> dict[str, Any]:
+        """Update SL/TP for an open paper position after validating price direction."""
+        lock = self.redis.lock(f"lock:broker:{strategy_name}:{symbol}", timeout=10)
+        if not lock.acquire(blocking=True, blocking_timeout=5):
+            raise ValueError("Position is busy; try again.")
+        try:
+            account = self.accounts_coll.find_one({"_id": f"{strategy_name}::{symbol}"})
+            if not account:
+                raise ValueError("Paper account not found.")
+            position = account.get("open_position")
+            if not position:
+                raise ValueError("No open paper position found.")
+            if stop_price <= 0 or target_price <= 0 or current_price <= 0:
+                raise ValueError("Stop loss, target, and current price must be positive.")
+
+            if position["type"] == "LONG" and not (stop_price < current_price < target_price):
+                raise ValueError("For a long position: stop loss < current price < target.")
+            if position["type"] == "SHORT" and not (target_price < current_price < stop_price):
+                raise ValueError("For a short position: target < current price < stop loss.")
+
+            previous_stop = position.get("stop_price")
+            previous_target = position.get("target_price")
+            if not position.get("position_id"):
+                position["position_id"] = str(uuid.uuid4())
+
+            position["stop_price"] = round(stop_price, 8)
+            position["target_price"] = round(target_price, 8)
+            account["open_position"] = position
+            self.accounts_coll.update_one({"_id": account["_id"]}, {"$set": account})
+
+            position_events_store.record_event(
+                position_id=position["position_id"],
+                strategy_name=strategy_name,
+                symbol=symbol,
+                event_type="PROTECTION_CHANGED",
+                changed_by="MANUAL",
+                previous_stop_price=previous_stop,
+                previous_target_price=previous_target,
+                new_stop_price=position["stop_price"],
+                new_target_price=position["target_price"],
+                reference_price=current_price,
+            )
+
+            logger.info(
+                "paper_protection_updated account=%s stop=%s target=%s",
+                account["_id"],
+                stop_price,
+                target_price,
+            )
+            return position
+        finally:
+            lock.release()
+
+    def close_manually(self, strategy_name: str, symbol: str, current_price: float) -> dict[str, Any]:
+        """Close an open paper position at the latest public market price."""
+        if current_price <= 0:
+            raise ValueError("A valid live price is required to close the position.")
+        lock = self.redis.lock(f"lock:broker:{strategy_name}:{symbol}", timeout=10)
+        if not lock.acquire(blocking=True, blocking_timeout=5):
+            raise ValueError("Position is busy; try again.")
+        try:
+            account = self.accounts_coll.find_one({"_id": f"{strategy_name}::{symbol}"})
+            if not account:
+                raise ValueError("Paper account not found.")
+            if not account.get("open_position"):
+                raise ValueError("No open paper position found.")
+            account = self._close_position(account, current_price, datetime.now(UTC), "Manual Close")
+            self.accounts_coll.update_one({"_id": account["_id"]}, {"$set": account})
+            return account
+        finally:
+            lock.release()

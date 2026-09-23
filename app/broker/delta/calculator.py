@@ -52,7 +52,7 @@ class TradeCalculator:
                 "safe_leverage_limit": 1,
             }
 
-        # 🛡️ Safe Leverage Calculation Logic:
+        # Keep leverage within the configured liquidation-risk boundary.
         # Liquidation Distance ≈ 1 / Leverage. Stop Loss Distance = risk_ratio.
         # Enforce: 1 / Leverage > risk_ratio with an 80% safety buffer.
         safety_buffer = 0.8

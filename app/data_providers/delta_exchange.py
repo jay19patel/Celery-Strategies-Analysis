@@ -11,15 +11,16 @@ depend on columns like 9EMA, RSI, Candle_Signal being present in the
 returned DataFrame.
 """
 
+import os
+import threading
 import time
-from datetime import datetime, timezone
 
+import msgpack
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
 import redis
 import requests
-import msgpack
 
 from app.core.logger import get_data_provider_logger
 from app.core.settings import settings
@@ -30,14 +31,33 @@ logger = get_data_provider_logger()
 # --- Redis cache (DB 3, separate from Celery) ---
 _CACHE_DURATION = 120  # 2 minutes default
 
-try:
-    _base_redis_url = settings.redis_broker_url.rsplit("/", 1)[0]
-    _redis_client: redis.Redis | None = redis.Redis.from_url(
-        f"{_base_redis_url}/3", decode_responses=False
-    )
-except Exception as exc:
-    logger.error(f"❌ Failed to initialize Redis cache: {exc}")
-    _redis_client = None
+_redis_client: redis.Redis | None = None
+_redis_pid: int | None = None
+_redis_lock = threading.Lock()
+
+
+def _get_redis_client() -> redis.Redis:
+    """Return a lazy Redis cache client scoped to the current worker process."""
+    global _redis_client, _redis_pid
+    current_pid = os.getpid()
+    if _redis_client is None or _redis_pid != current_pid:
+        with _redis_lock:
+            if _redis_client is None or _redis_pid != current_pid:
+                if _redis_client is not None:
+                    try:
+                        _redis_client.close()
+                    except Exception:
+                        logger.debug("Failed to close inherited Redis cache client", exc_info=True)
+                base_redis_url = settings.redis_broker_url.rsplit("/", 1)[0]
+                _redis_client = redis.Redis.from_url(
+                    f"{base_redis_url}/3",
+                    decode_responses=False,
+                    socket_connect_timeout=5,
+                    socket_keepalive=True,
+                    health_check_interval=30,
+                )
+                _redis_pid = current_pid
+    return _redis_client
 
 
 def _get_cache_key(symbol: str, period: int, interval: str) -> str:
@@ -47,10 +67,8 @@ def _get_cache_key(symbol: str, period: int, interval: str) -> str:
 
 def _read_cache(cache_key: str) -> pd.DataFrame | None:
     """Retrieve a cached DataFrame from Redis, or None on miss/error."""
-    if not _redis_client:
-        return None
     try:
-        raw = _redis_client.get(cache_key)
+        raw = _get_redis_client().get(cache_key)
         if raw:
             data_dict = msgpack.unpackb(raw)
             df = pd.DataFrame(
@@ -62,14 +80,12 @@ def _read_cache(cache_key: str) -> pd.DataFrame | None:
             df["DateTime"] = df.index
             return df
     except Exception as exc:
-        logger.error(f"⚠️  Redis read error: {exc}")
+        logger.warning("market_cache_read_failed key=%s error=%s", cache_key, exc)
     return None
 
 
 def _write_cache(cache_key: str, data: pd.DataFrame, ttl: int | None = None) -> None:
     """Serialize and write a DataFrame to Redis with TTL."""
-    if not _redis_client:
-        return
     try:
         data = data.drop(columns=["DateTime"], errors="ignore")
         data_dict = data.to_dict(orient="split")
@@ -82,11 +98,11 @@ def _write_cache(cache_key: str, data: pd.DataFrame, ttl: int | None = None) -> 
         serialized = msgpack.packb(data_dict)
         expiry = ttl if ttl is not None else _CACHE_DURATION
         if expiry <= 0:
-            logger.warning(f"⚠️  Skipping cache write for {cache_key}: invalid ttl={expiry}")
+            logger.warning("market_cache_write_skipped key=%s invalid_ttl=%s", cache_key, expiry)
             return
-        _redis_client.setex(cache_key, int(expiry), serialized)
+        _get_redis_client().setex(cache_key, int(expiry), serialized)
     except Exception as exc:
-        logger.error(f"⚠️  Redis write error: {exc}")
+        logger.warning("market_cache_write_failed key=%s error=%s", cache_key, exc)
 
 
 class DeltaExchangeProvider(BaseDataProvider):
@@ -144,11 +160,12 @@ class DeltaExchangeProvider(BaseDataProvider):
         cache_key = _get_cache_key(symbol, period, interval)
         cached = _read_cache(cache_key)
         if cached is not None:
-            logger.info(f"♻️  Cache HIT: {symbol} | period={period}, interval={interval}")
+            logger.debug("market_cache_hit symbol=%s period_days=%s interval=%s", symbol, period, interval)
             return cached
 
         logger.info(
-            f"🌐 Cache MISS: Fetching fresh data for {symbol} ({api_symbol}) | period={period}, interval={interval}"
+            "market_cache_miss symbol=%s api_symbol=%s period_days=%s interval=%s",
+            symbol, api_symbol, period, interval,
         )
 
         # Determine actual API resolution
@@ -214,29 +231,30 @@ class DeltaExchangeProvider(BaseDataProvider):
                                 "time": "first",
                             }
                             df = df.resample(rule).agg(ohlc_dict).dropna()
-                            logger.info(
-                                f"🔄 Resampled 1d data to {target_interval}: {len(df)} candles"
-                            )
+                            logger.info("market_data_resampled interval=%s candles=%s", target_interval, len(df))
 
                         df["DateTime"] = df.index
                         df["Date"] = df.index.strftime("%d/%m/%Y")
                         df["Time"] = df.index.strftime("%I:%M %p")
 
-                        logger.info(f"✅ API fetch successful: {symbol} | {len(df)} candles")
+                        logger.info("market_data_fetch_completed symbol=%s candles=%s", symbol, len(df))
                         break
                     else:
                         last_error = "API returned success=false or empty result"
-                        logger.warning(f"⚠️  {last_error} for {symbol}")
+                        logger.warning("market_data_fetch_empty symbol=%s error=%s", symbol, last_error)
                 else:
                     last_error = f"Bad status code: {response.status_code}"
-                    logger.warning(f"⚠️  {last_error} for {symbol}")
+                    logger.warning("market_data_fetch_http_error symbol=%s error=%s", symbol, last_error)
 
             except requests.exceptions.Timeout:
                 last_error = "Request timeout"
-                logger.warning(f"⚠️  Timeout on attempt {attempt + 1} for {symbol}")
+                logger.warning("market_data_fetch_timeout symbol=%s attempt=%s", symbol, attempt + 1)
             except Exception as exc:
                 last_error = str(exc)
-                logger.warning(f"⚠️  Error on attempt {attempt + 1} for {symbol}: {last_error}")
+                logger.warning(
+                    "market_data_fetch_attempt_failed symbol=%s attempt=%s error=%s",
+                    symbol, attempt + 1, last_error,
+                )
 
             if attempt < self._MAX_RETRIES - 1:
                 wait_time = 2**attempt
@@ -251,7 +269,7 @@ class DeltaExchangeProvider(BaseDataProvider):
         # --- Technical indicators ---
         self._add_indicators(df)
 
-        logger.info(f"✅ Processing complete: {symbol} | {len(df)} rows | Indicators calculated")
+        logger.info("market_data_processing_completed symbol=%s rows=%s", symbol, len(df))
 
         # Save to cache
         _write_cache(cache_key, df, ttl)
@@ -345,35 +363,3 @@ class DeltaExchangeProvider(BaseDataProvider):
 
         # Cleanup
         df.drop(columns=["time"], errors="ignore", inplace=True)
-
-
-def get_cache_stats() -> dict:
-    """Get cache statistics for monitoring.
-
-    Returns:
-        Dictionary with cache information.
-    """
-    if not _redis_client:
-        return {"error": "Redis not initialized"}
-    try:
-        keys = _redis_client.keys("stock_data:*")
-        return {
-            "total_entries": len(keys),
-            "cache_duration_seconds": _CACHE_DURATION,
-            "backend": "redis",
-        }
-    except Exception as exc:
-        return {"error": str(exc)}
-
-
-def clear_cache() -> None:
-    """Clear all cached stock data."""
-    if not _redis_client:
-        return
-    try:
-        keys = _redis_client.keys("stock_data:*")
-        if keys:
-            _redis_client.delete(*keys)
-        logger.info("🗑️  Data cache cleared (Redis)")
-    except Exception as exc:
-        logger.error(f"❌ Failed to clear cache: {exc}")

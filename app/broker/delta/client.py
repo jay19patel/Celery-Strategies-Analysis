@@ -87,7 +87,7 @@ class DeltaClient:
                 api_key=self.api_key,
                 api_secret=self.api_secret,
             )
-            logger.info("✅ DeltaClient initialized successfully.")
+            logger.info("delta_client_initialized")
         except Exception as exc:
             logger.exception("Failed to initialize DeltaRestClient")
             raise DeltaAPIError(f"Delta initialization failed: {exc}") from exc

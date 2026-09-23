@@ -1,7 +1,7 @@
 """PortfolioManager: trades the 2 Portfolio strategies together on ONE
 shared, risk-managed paper account - ported from the Portfolio
 project's livetest/portfolio_manager.py (same risk-management rules, same
-math), adapted to resume from MongoDB-persisted state instead of a local
+math), adapted to resume from SQLite-persisted state instead of a local
 JSON file.
 
 Signals from this system are meant to inform REAL trades (see the strategy

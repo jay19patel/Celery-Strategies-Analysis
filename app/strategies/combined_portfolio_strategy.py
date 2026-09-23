@@ -78,7 +78,10 @@ class CombinedPortfolioStrategy(BaseStrategy):
                 signal_type = SignalType.SELL
 
             if triggered_strategy_key:
-                logger.info(f"📊 CombinedPortfolioStrategy | {symbol} | triggered by {triggered_strategy_key} | {signal_type}")
+                logger.info(
+                    "strategy_signal strategy=combined_portfolio symbol=%s trigger=%s signal=%s",
+                    symbol, triggered_strategy_key, signal_type.value,
+                )
 
             return StrategyResult(
                 strategy_name=self.name,
@@ -91,7 +94,7 @@ class CombinedPortfolioStrategy(BaseStrategy):
             )
 
         except Exception as e:
-            logger.error(f"❌ Error in CombinedPortfolioStrategy for {symbol}: {str(e)}", exc_info=True)
+            logger.exception("strategy_execution_failed strategy=combined_portfolio symbol=%s error=%s", symbol, e)
             return StrategyResult(
                 strategy_name=self.name,
                 symbol=symbol,

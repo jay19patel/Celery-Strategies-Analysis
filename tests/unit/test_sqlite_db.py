@@ -3,6 +3,8 @@
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from app.database.sqlite_db import SQLiteDatabase
 
 
@@ -75,8 +77,81 @@ def test_sqlite_adapter_compatibility():
         "subscribers_received": 1,
     })
 
-    signals = list(coll.find({"symbol": "BTC-USD"}))
+    signals = list(coll.find({"symbol": "BTC-USD", "strategy_name": "TestStrategy"}))
     assert len(signals) >= 1
     assert signals[0]["strategy_name"] == "TestStrategy"
     assert signals[0]["price"] == 60000.0
 
+
+def test_sqlite_adapter_filters_counts_deletes_and_rejects_unknown_fields(tmp_path):
+    """Collection filters remain scoped and invalid fields never widen a query."""
+    from app.database.sqlite_adapter import SQLiteCollectionAdapter
+
+    adapter = SQLiteCollectionAdapter("signals_log")
+    adapter.db = SQLiteDatabase(db_path=tmp_path / "adapter.db")
+    for symbol in ("BTC-USD", "ETH-USD", "BTC-USD"):
+        adapter.insert_one({
+            "strategy_name": "TestStrategy",
+            "symbol": symbol,
+            "signal_type": "BUY",
+            "price": 100.0,
+            "execution_time": 0.01,
+        })
+
+    assert adapter.count_documents({"symbol": "BTC-USD"}) == 2
+    assert adapter.delete_many({"symbol": "ETH-USD"}).deleted_count == 1
+    assert adapter.count_documents() == 2
+    with pytest.raises(ValueError, match="Unsupported field"):
+        list(adapter.find({"unknown": "value"}))
+    with pytest.raises(ValueError, match="Unsupported field"):
+        list(adapter.find().sort("unknown"))
+
+
+def test_sqlite_adapter_replace_and_upsert_semantics(tmp_path):
+    """Replacement respects the filter and reports matches and upserts."""
+    from app.database.sqlite_adapter import SQLiteCollectionAdapter
+
+    adapter = SQLiteCollectionAdapter("broker_accounts")
+    adapter.db = SQLiteDatabase(db_path=tmp_path / "replace.db")
+    account = {
+        "_id": "Strategy::BTC-USD",
+        "strategy_name": "Strategy",
+        "symbol": "BTC-USD",
+        "capital": 100.0,
+    }
+    adapter.insert_one(account)
+
+    result = adapter.replace_one(
+        {"_id": account["_id"]},
+        {**account, "capital": 125.0},
+    )
+    assert result.matched_count == 1
+    assert adapter.find_one({"_id": account["_id"]})["capital"] == 125.0
+
+    missing = adapter.replace_one(
+        {"_id": "Strategy::ETH-USD"},
+        {**account, "_id": "Strategy::ETH-USD", "symbol": "ETH-USD"},
+    )
+    assert missing.matched_count == 0
+    assert adapter.find_one({"_id": "Strategy::ETH-USD"}) is None
+
+    upsert = adapter.replace_one(
+        {"_id": "Strategy::ETH-USD"},
+        {**account, "_id": "Strategy::ETH-USD", "symbol": "ETH-USD"},
+        upsert=True,
+    )
+    assert upsert.upserted_id == "Strategy::ETH-USD"
+
+
+def test_get_symbol_results_filters_nested_batch_payload(monkeypatch, tmp_path):
+    """Symbol history filters the nested results instead of a nonexistent SQL column."""
+    from app.database import sqlite_adapter
+
+    db = SQLiteDatabase(db_path=tmp_path / "batches.db")
+    monkeypatch.setattr(sqlite_adapter, "get_sqlite_db", lambda: db)
+    adapter = sqlite_adapter.SQLiteCollectionAdapter("batch_results")
+    adapter.insert_one({"_id": "btc", "results": [{"symbol": "BTC-USD"}], "total_results": 1})
+    adapter.insert_one({"_id": "eth", "results": [{"symbol": "ETH-USD"}], "total_results": 1})
+
+    batches = sqlite_adapter.get_symbol_results("BTC-USD")
+    assert [batch["_id"] for batch in batches] == ["btc"]

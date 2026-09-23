@@ -1,9 +1,4 @@
-"""Backward-compatible data fetching interface.
-
-This module preserves the original ``fetch_historical_data`` function signature
-so that existing callers (strategies, tasks, portfolio_tasks) continue to work
-without any import changes. Under the hood, it now delegates to the pluggable
-``BaseDataProvider`` system in ``app.data_providers``.
+"""Provider-neutral market data facade used by strategies and tasks.
 
 To switch from Delta Exchange to another provider, set the ``DATA_PROVIDER``
 environment variable (e.g. ``DATA_PROVIDER=angel``). No code changes required.
@@ -12,7 +7,6 @@ environment variable (e.g. ``DATA_PROVIDER=angel``). No code changes required.
 import pandas as pd
 
 from app.data_providers.factory import get_data_provider
-from app.data_providers.delta_exchange import get_cache_stats, clear_cache  # re-export
 
 
 def fetch_historical_data(

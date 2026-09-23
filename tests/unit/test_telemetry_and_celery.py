@@ -1,10 +1,11 @@
 """Unit tests for Celery inspection, WebSocket status, and ZeroMQ telemetry."""
 
 from fastapi.testclient import TestClient
-from frontend.main import app
-from app.core.health_monitor import _check_celery_workers, _check_websocket, _check_zeromq
-from app.broker.delta.websocket import get_delta_websocket_client
+
+from app.broker.delta.websocket import DeltaWebSocketClient, get_delta_websocket_client
 from app.core.event_bus import get_event_bus
+from app.core.health_monitor import _check_celery_workers, _check_websocket, _check_zeromq
+from frontend.main import app
 
 client = TestClient(app)
 
@@ -38,6 +39,22 @@ def test_check_websocket_status():
     hw = _check_websocket()
     assert "status" in hw
     assert "is_connected" in hw
+
+
+def test_delta_private_stream_keeps_live_state_in_memory():
+    """Order and position events update memory without database persistence."""
+    ws = DeltaWebSocketClient(api_key="key", api_secret="secret")
+    ws._handle_orders([{"id": 11, "state": "open", "symbol": "BTCUSD"}])
+    ws._handle_positions([{"product_symbol": "BTCUSD", "size": "2"}])
+
+    assert ws.get_orders() == [{"id": 11, "state": "open", "symbol": "BTCUSD"}]
+    assert ws.get_positions() == [{"product_symbol": "BTCUSD", "size": "2"}]
+    assert ws.get_status()["storage"] == "memory"
+
+    ws._handle_orders([{"id": 11, "state": "cancelled"}])
+    ws._handle_positions([{"product_symbol": "BTCUSD", "size": "0"}])
+    assert ws.get_orders() == []
+    assert ws.get_positions() == []
 
 
 def test_check_zeromq_status():

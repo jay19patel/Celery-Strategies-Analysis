@@ -226,7 +226,7 @@ class DeltaLivePriceFeed:
             self._zmq_pub = self._zmq_ctx.socket(zmq.PUB)
             self._zmq_pub.bind(f"tcp://0.0.0.0:{self._zmq_port}")
             self._zmq_bound = True
-            logger.info("✅ ZeroMQ PUB socket bound on tcp://0.0.0.0:%d", self._zmq_port)
+            logger.info("price_feed_zeromq_bound port=%s", self._zmq_port)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not bind ZeroMQ PUB socket: %s", exc)
             self._zmq_bound = False
@@ -246,7 +246,7 @@ class DeltaLivePriceFeed:
         )
         self._thread.start()
         logger.info(
-            "🔌 Delta public price feed started — symbols: %s",
+            "delta_price_feed_started symbols=%s",
             ", ".join(self._delta_symbols),
         )
 
@@ -258,7 +258,7 @@ class DeltaLivePriceFeed:
                 self._ws.close()
             except Exception:  # noqa: BLE001
                 pass
-        logger.info("🔌 Delta public price feed stopped.")
+        logger.info("delta_price_feed_stopped")
 
     def update_symbols(self, symbols: list[str]) -> None:
         """Reload the symbol list and re-subscribe (for settings changes).
@@ -277,7 +277,7 @@ class DeltaLivePriceFeed:
                     ]},
                 }
                 self._ws.send(json.dumps(payload))
-                logger.info("🔄 Re-subscribed price feed to: %s", self._delta_symbols)
+                logger.info("delta_price_feed_resubscribed symbols=%s", self._delta_symbols)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to re-subscribe: %s", exc)
 
@@ -300,9 +300,8 @@ class DeltaLivePriceFeed:
                 self._reconnect_count += 1
                 backoff = min(30, 5 * self._reconnect_count)
                 logger.info(
-                    "Delta price feed reconnecting in %ds (attempt %d)...",
-                    backoff,
-                    self._reconnect_count,
+                    "delta_price_feed_reconnecting delay_seconds=%s attempt=%s",
+                    backoff, self._reconnect_count,
                 )
                 time.sleep(backoff)
 
@@ -310,7 +309,7 @@ class DeltaLivePriceFeed:
         """Send subscription payload on connection open."""
         self._is_connected = True
         self._reconnect_count = 0  # Reset on successful connect
-        logger.info("✅ Delta public price feed connected — subscribing to v2/ticker...")
+        logger.info("delta_price_feed_connected channel=v2/ticker")
         payload = {
             "type": "subscribe",
             "payload": {"channels": [
@@ -367,16 +366,12 @@ class DeltaLivePriceFeed:
     def _on_error(self, ws: Any, error: Exception) -> None:
         """Log WebSocket errors."""
         self._last_error = str(error)
-        logger.warning("Delta price feed WS error: %s", error)
+        logger.warning("delta_price_feed_error error=%s", error)
 
     def _on_close(self, ws: Any, close_code: Any, close_msg: Any) -> None:
         """Handle WebSocket disconnection."""
         self._is_connected = False
-        logger.info(
-            "Delta price feed disconnected: code=%s, msg=%s",
-            close_code,
-            close_msg,
-        )
+        logger.info("delta_price_feed_disconnected code=%s message=%s", close_code, close_msg)
 
     def get_status(self) -> dict[str, Any]:
         """Return status telemetry for the system monitor dashboard.

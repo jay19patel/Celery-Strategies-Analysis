@@ -35,7 +35,7 @@ class RedisPublisher:
     def _connect(cls, pid: int):
         """Establish Redis connection"""
         try:
-            logger.info("🔌 Initializing Redis Pub/Sub connection...")
+            logger.info("redis_pubsub_connecting pid=%s", pid)
             
             # Close stale connection from parent process if any
             if cls._client is not None:
@@ -56,13 +56,13 @@ class RedisPublisher:
             cls._client.ping()
             cls._pid = pid
             
-            logger.info(f"✅ Redis Pub/Sub connected successfully | PID: {pid}")
+            logger.info("redis_pubsub_connected pid=%s", pid)
 
         except redis.ConnectionError as e:
-            logger.error(f"❌ Redis connection failed: {e!s}")
+            logger.error("redis_pubsub_connection_failed error=%s", e)
             raise
         except Exception as e:
-            logger.error(f"❌ Redis initialization error: {e!s}")
+            logger.exception("redis_pubsub_initialization_failed error=%s", e)
             raise
 
     @classmethod
@@ -86,15 +86,14 @@ class RedisPublisher:
             subscriber_count = client.publish(channel, json_message)
 
             logger.info(
-                f"📡 Published to '{channel}' | "
-                f"Subscribers: {subscriber_count} | "
-                f"Size: {len(json_message)} bytes"
+                "redis_message_published channel=%s subscribers=%s payload_bytes=%s",
+                channel, subscriber_count, len(json_message),
             )
 
             return subscriber_count
 
         except Exception as e:
-            logger.error(f"❌ Error publishing to '{channel}': {e!s}", exc_info=True)
+            logger.exception("redis_publish_failed channel=%s error=%s", channel, e)
             raise
 
     @classmethod
@@ -104,7 +103,7 @@ class RedisPublisher:
             cls._client.close()
             cls._client = None
             cls._pid = None
-            logger.info("🔌 Redis connection closed")
+            logger.info("redis_pubsub_closed")
 
 
 def get_redis_client() -> redis.Redis:
@@ -136,7 +135,7 @@ def publish_batch_complete(batch_data: dict[str, Any]) -> dict[str, Any]:
         }
         
     except Exception as e:
-        logger.error(f"❌ Error publishing batch complete: {e!s}")
+        logger.exception("batch_publish_failed error=%s", e)
         return {
             "channel": settings.pubsub_channel_batch,
             "subscriber_count": 0,

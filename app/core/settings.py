@@ -1,5 +1,6 @@
 import importlib
 import inspect
+import logging
 import pkgutil
 from functools import lru_cache
 from pathlib import Path
@@ -9,6 +10,8 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 from app.core.base_strategy import BaseStrategy
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -146,7 +149,7 @@ def get_pipeline_settings_override() -> dict[str, Any]:
         if row and row.get("value"):
             return json.loads(row["value"])
     except Exception:
-        pass
+        logger.warning("Unable to read pipeline settings override; using environment defaults", exc_info=True)
     return {}
 
 

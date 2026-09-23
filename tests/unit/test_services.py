@@ -1,7 +1,5 @@
 """Unit tests for the Services layer (app/services/)."""
 
-from unittest.mock import MagicMock, PropertyMock, patch
-
 import pytest
 
 from app.services.analytics_service import AnalyticsService, get_analytics_service
@@ -26,6 +24,8 @@ def test_system_service_singleton_and_methods():
     assert "sqlite" in metrics
     assert "redis" in metrics
     assert "celery" in metrics
+    assert "batch_staleness" in metrics
+    assert "trading" in metrics
 
     # get_config
     config = service.get_config()
@@ -56,30 +56,21 @@ def test_broker_service_status_and_modes():
     assert res_paper["execution_mode"] == "PAPER"
 
     # Toggle to invalid mode
-    with pytest.raises(ValueError, match="Execution mode must be"):
+    with pytest.raises(ValueError, match="must remain PAPER"):
         service.set_execution_mode("INVALID_MODE")
 
     # Toggle to LIVE without arming first
-    with pytest.raises(ValueError, match="Live trading must be armed first"):
+    with pytest.raises(ValueError, match="must remain PAPER"):
         service.set_execution_mode("LIVE")
 
     # Arming with wrong phrase
-    with pytest.raises(ValueError, match="Confirmation phrase must exactly match"):
+    with pytest.raises(ValueError, match="read-only"):
         service.arm_live_trading("wrong")
 
-    # Arming with valid phrase using mock
-    mock_client = MagicMock()
-    type(mock_client).is_configured = PropertyMock(return_value=True)
-    mock_service = BrokerService(delta_client=mock_client)
-    with patch.object(type(mock_service.mgr.delta_client), "is_configured", new_callable=PropertyMock, return_value=True):
-        arm_res = mock_service.arm_live_trading("ARM LIVE TRADING")
-        assert arm_res["armed"] is True
-        assert mock_service.mgr.is_armed() is True
-
     # Disarm
-    disarm_res = mock_service.disarm_live_trading()
+    disarm_res = service.disarm_live_trading()
     assert disarm_res["armed"] is False
-    assert mock_service.mgr.is_armed() is False
+    assert service.mgr.is_armed() is False
 
 
 def test_broker_profile_and_authority_verification():
@@ -104,19 +95,14 @@ def test_broker_profile_and_authority_verification():
     assert service.delta_client.api_key == "test_api_key_12345"
 
     # Toggle live trading without arming/confirmation
-    with pytest.raises(ValueError, match="Confirmation phrase"):
+    with pytest.raises(ValueError, match="read-only"):
         service.toggle_live_trading(enabled=True, confirmation="WRONG")
+    with pytest.raises(ValueError, match="read-only"):
+        service.toggle_live_trading(enabled=True, confirmation="ARM LIVE TRADING")
 
-    # Toggle live trading with valid confirmation (mocking DeltaClient.is_configured)
-    with patch.object(type(service.delta_client), "is_configured", new_callable=PropertyMock, return_value=True):
-        toggle_res = service.toggle_live_trading(enabled=True, confirmation="ARM LIVE TRADING")
-        assert toggle_res["enabled"] is True
-        assert toggle_res["execution_mode"] == "LIVE"
-
-        # Toggle live trading disabled
-        dis_res = service.toggle_live_trading(enabled=False)
-        assert dis_res["enabled"] is False
-        assert dis_res["execution_mode"] == "PAPER"
+    dis_res = service.toggle_live_trading(enabled=False)
+    assert dis_res["enabled"] is False
+    assert dis_res["execution_mode"] == "PAPER"
 
 
 def test_strategy_service_methods():

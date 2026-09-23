@@ -12,10 +12,6 @@ from typing import Any
 
 from app.broker.execution_manager import get_execution_manager
 from app.core.health_monitor import (
-    _check_celery_workers,
-    _check_redis,
-    _check_sqlite,
-    _check_system_resources,
     get_latest_health,
 )
 from app.core.settings import (
@@ -45,37 +41,20 @@ class SystemService:
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
     def get_metrics(self) -> dict[str, Any]:
-        """Collect real-time host resource metrics: CPU, RAM, Disk, SQLite, Redis, Celery, ZeroMQ."""
-        resources = _check_system_resources()
-        sqlite_stats = _check_sqlite()
-        redis_stats = _check_redis()
-        celery_stats = _check_celery_workers()
-
-        # ZeroMQ EventBus telemetry
-        zmq_stats: dict[str, Any] = {}
-        try:
-            from app.core.event_bus import get_event_bus
-            zmq_stats = get_event_bus().get_status()
-        except Exception:  # noqa: BLE001
-            zmq_stats = {"status": "unknown", "packets_published": 0, "port": 5557, "is_bound": False}
-
-        # WebSocket status
-        ws_stats: dict[str, Any] = {}
-        try:
-            from app.core.health_monitor import _check_websocket  # type: ignore[attr-defined]
-            ws_stats = _check_websocket()
-        except Exception:  # noqa: BLE001
-            ws_stats = {"status": "unknown", "is_connected": False}
+        """Return the shared collector snapshot without repeating expensive health checks."""
+        health = get_latest_health()
 
         return {
             "status": "success",
-            "timestamp": datetime.now(UTC).isoformat(),
-            "resources": resources,
-            "sqlite": sqlite_stats,
-            "redis": redis_stats,
-            "celery": celery_stats,
-            "zeromq": zmq_stats,
-            "websocket": ws_stats,
+            "timestamp": health.get("collected_at", datetime.now(UTC).isoformat()),
+            "resources": health.get("system", {}),
+            "sqlite": health.get("sqlite", {}),
+            "redis": health.get("redis", {}),
+            "celery": health.get("celery", {}),
+            "zeromq": health.get("zeromq", {}),
+            "websocket": health.get("websocket", {}),
+            "batch_staleness": health.get("batch_staleness", {}),
+            "trading": health.get("trading", {}),
         }
 
     def get_health(self) -> dict[str, Any]:
@@ -197,8 +176,6 @@ class SystemService:
             "signals_log",
             "system_status",
             "batch_results",
-            "live_orders",
-            "live_positions",
         ]
         cleared_counts: dict[str, int] = {}
         for tbl in tables:
@@ -219,7 +196,7 @@ class SystemService:
         except Exception:  # noqa: BLE001
             pass
 
-        logger.warning("🔴 SYSTEM RESET performed | tables cleared: %s | logs: %s", cleared_counts, cleared_logs)
+        logger.warning("system_reset_completed tables=%s logs=%s", cleared_counts, cleared_logs)
         return {"ok": True, "cleared_tables": cleared_counts, "cleared_logs": cleared_logs}
 
 
@@ -277,11 +254,7 @@ class SystemService:
         trades_count = cnt_row["c"] if cnt_row else 0
         self.db.execute_modify("DELETE FROM broker_trades;")
 
-        logger.info(
-            "Paper accounts reset to $%.2f | Cleared %d closed trades",
-            clean_capital,
-            trades_count,
-        )
+        logger.info("paper_accounts_reset starting_capital=%.2f cleared_trades=%s", clean_capital, trades_count)
         return {
             "success": True,
             "starting_capital": clean_capital,

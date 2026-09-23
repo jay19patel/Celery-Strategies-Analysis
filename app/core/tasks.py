@@ -9,7 +9,7 @@ from app.core.celery_app import celery_app
 from app.core.settings import get_schedule_seconds, get_strategies, get_symbols, settings
 from app.core.strategy_manager import StrategyManager
 from app.database.sqlite_adapter import get_collection, save_batch_results
-from app.database.redis_publisher import publish_batch_complete, publish_message
+from app.database.redis_publisher import get_redis_client, publish_batch_complete, publish_message
 from app.core.logger import get_celery_logger, get_signals_logger, get_performance_logger
 from app.core.paper_broker import PaperBroker
 
@@ -53,7 +53,10 @@ def execute_strategy_task(self, strategy_class_path: str, symbol: str, task_numb
     strategy_name = strategy_class_path.split('.')[-1]
     
     try:
-        logger.info(f"📊 STEP 2.{task_number}/{total_tasks} | Processing: {symbol} | Strategy: {strategy_name}")
+        logger.info(
+            "strategy_execution_started task=%s/%s symbol=%s strategy=%s",
+            task_number, total_tasks, symbol, strategy_name,
+        )
         
         StrategyClass = _load_strategy_class(strategy_class_path)
         strategy = StrategyClass()
@@ -69,18 +72,17 @@ def execute_strategy_task(self, strategy_class_path: str, symbol: str, task_numb
         
         execution_time = time.time() - start_time
         logger.info(
-            f"✅ STEP 2.{task_number}/{total_tasks} COMPLETED | {symbol} | {strategy_name} | "
-            f"Signal: {result_dict.get('signal_type')} | Confidence: {result_dict.get('confidence', 0):.2f} | "
-            f"Time: {execution_time:.2f}s"
+            "strategy_execution_completed task=%s/%s symbol=%s strategy=%s signal=%s confidence=%.2f duration_seconds=%.2f",
+            task_number, total_tasks, symbol, strategy_name, result_dict.get("signal_type"),
+            result_dict.get("confidence", 0), execution_time,
         )
         return result_dict
         
     except Exception as e:
         execution_time = time.time() - start_time
-        logger.error(
-            f"❌ STEP 2.{task_number}/{total_tasks} FAILED | {symbol} | {strategy_name} | "
-            f"Error: {str(e)} | Time: {execution_time:.2f}s", 
-            exc_info=True
+        logger.exception(
+            "strategy_execution_failed task=%s/%s symbol=%s strategy=%s duration_seconds=%.2f error=%s",
+            task_number, total_tasks, symbol, strategy_name, execution_time, e,
         )
         # Return a None or error dict so the chord continues and we can filter it later
         # Returning None is standard for "failed but handled"
@@ -93,18 +95,16 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
     STEP 3: Process all strategy results after completion
     """
     try:
-        logger.info("=" * 80)
-        logger.info("🔄 STEP 3: PROCESSING BATCH RESULTS")
-        logger.info("=" * 80)
+        logger.info("batch_result_processing_started received_tasks=%s", len(results))
         
         # Count successful results
         valid_results = [r for r in results if r]
         failed_count = len(results) - len(valid_results)
         
         if failed_count > 0:
-            logger.warning(f"⚠️  {failed_count} tasks failed during execution")
+            logger.warning("batch_strategy_failures count=%s", failed_count)
         
-        logger.info(f"✅ Successfully completed: {len(valid_results)} tasks")
+        logger.info("batch_strategy_results valid=%s failed=%s", len(valid_results), failed_count)
         
         # Aggregate results
         manager = StrategyManager()
@@ -136,10 +136,7 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
         has_signals = _has_actionable_signal(aggregated_result)
         
         if not has_signals:
-            logger.info("=" * 80)
-            logger.info("ℹ️  STEP 3 RESULT: All signals are HOLD - Skipping publish/save")
-            logger.info(aggregated_result.get("summary", {}))
-            logger.info("=" * 80)
+            logger.info("batch_result_skipped reason=no_actionable_signals summary=%s", aggregated_result.get("summary", {}))
             return {
                 "batch_id": None,
                 "summary": aggregated_result.get("summary", {}),
@@ -148,8 +145,7 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
             }
 
         # STEP 3.1: Prepare Data & Publish to Redis
-        logger.info("-" * 80)
-        logger.info("📡 STEP 3.1: Publishing to Redis Pub/Sub")
+        logger.info("batch_publish_started")
         
         # Generate Batch ID upfront
         batch_id_str = uuid.uuid4().hex[:24]
@@ -172,12 +168,14 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
         }
 
         pubsub_response = publish_batch_complete(publish_payload)
-        logger.info(f"✅ STEP 3.1 COMPLETED: Published to channel '{pubsub_response.get('channel')}'")
+        logger.info(
+            "batch_publish_completed channel=%s subscribers=%s status=%s",
+            pubsub_response.get("channel"), pubsub_response.get("subscriber_count", 0), pubsub_response.get("status"),
+        )
         signals_logger.info(
-            f"BATCH_COMPLETE | channel={pubsub_response.get('channel')} | batch_id={batch_id_str} | "
-            f"total_results={len(aggregated_result.get('results', []))} | "
-            f"subscribers_received={pubsub_response.get('subscriber_count', 0)} | "
-            f"status={pubsub_response.get('status')}"
+            "batch_complete channel=%s batch_id=%s total_results=%s subscribers=%s status=%s",
+            pubsub_response.get("channel"), batch_id_str, len(aggregated_result.get("results", [])),
+            pubsub_response.get("subscriber_count", 0), pubsub_response.get("status"),
         )
 
         # STEP 3.1.5: Pass Actionable Signals to PaperBroker
@@ -212,22 +210,25 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
                             }
                             subscriber_count = publish_message(settings.pubsub_channel_strategy, signal_payload)
                             signals_logger.info(
-                                f"SIGNAL_PUBLISHED | channel={settings.pubsub_channel_strategy} | "
-                                f"strategy={strat_res.get('strategy_name')} | symbol={symbol} | "
-                                f"signal={signal} | price={price} | "
-                                f"subscribers_received={subscriber_count}"
+                                "signal_published channel=%s strategy=%s symbol=%s signal=%s price=%s subscribers=%s",
+                                settings.pubsub_channel_strategy, strat_res.get("strategy_name"), symbol,
+                                signal, price, subscriber_count,
                             )
                         except Exception as redis_err:
-                            logger.error(f"Failed to publish signal to Redis: {redis_err}", exc_info=True)
+                            logger.exception("signal_publish_failed symbol=%s error=%s", symbol, redis_err)
                             signals_logger.error(
-                                f"SIGNAL_PUBLISH_FAILED | channel={settings.pubsub_channel_strategy} | "
-                                f"strategy={strat_res.get('strategy_name')} | symbol={symbol} | error={redis_err}"
+                                "signal_publish_failed channel=%s strategy=%s symbol=%s error=%s",
+                                settings.pubsub_channel_strategy, strat_res.get("strategy_name"), symbol, redis_err,
                             )
 
                         # 2. Process the signal via ExecutionManager (routes to PaperBroker or Live Delta Broker based on mode)
                         from app.broker.execution_manager import get_execution_manager
                         exec_mgr = get_execution_manager()
-                        exec_res = exec_mgr.process_signal(strat_res.get("strategy_name"), symbol, sig_enum, price, timestamp)
+                        stop_loss = strat_res.get("stop_loss")
+                        take_profit = strat_res.get("take_profit")
+                        exec_res = exec_mgr.process_signal(
+                            strat_res.get("strategy_name"), symbol, sig_enum, price, timestamp, stop_loss=stop_loss, take_profit=take_profit
+                        )
 
                         # 3. Log signal with execution routing info
                         try:
@@ -243,30 +244,27 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
                                 "action": exec_res.get("action", "recorded")
                             })
                         except Exception as db_err:
-                            logger.error(f"Failed to log signal to signals_log: {db_err}", exc_info=True)
+                            logger.exception("signal_persistence_failed symbol=%s error=%s", symbol, db_err)
                 except Exception as e:
-                    logger.error(f"Failed to process signal with execution manager: {e}", exc_info=True)
+                    logger.exception("signal_processing_failed symbol=%s error=%s", symbol, e)
         
         # Update result with metadata for storage
         aggregated_result["_id"] = batch_id_str  # Use the pre-generated ID
         aggregated_result["pubsub"] = pubsub_response.get("subscriber_count", 0)
 
         # STEP 3.2: Save to SQLite Database
-        logger.info("-" * 80)
-        logger.info("📡 STEP 3.2: Saving to SQLite Database")
+        logger.info("batch_persistence_started backend=sqlite")
         
         # Save (this will use the _id we added to aggregated_result)
         batch_id = save_batch_results(aggregated_result)
-        logger.info(f"✅ STEP 3.2 COMPLETED: Batch saved with ID: {batch_id}")
+        logger.info("batch_persistence_completed batch_id=%s", batch_id)
         
         # Final summary
-        logger.info("=" * 80)
-        logger.info("🎉 STEP 3: BATCH PROCESSING COMPLETED SUCCESSFULLY")
-        logger.info(f"   Batch ID: {batch_id}")
-        logger.info(f"   Total Results: {len(valid_results)}")
-        logger.info(f"   Symbols Processed: {aggregated_result.get('summary', {}).get('total_symbols')}")
-        logger.info(f"   Strategies Used: {aggregated_result.get('summary', {}).get('total_strategies')}")
-        logger.info("=" * 80)
+        logger.info(
+            "batch_processing_completed batch_id=%s results=%s symbols=%s strategies=%s",
+            batch_id, len(valid_results), aggregated_result.get("summary", {}).get("total_symbols"),
+            aggregated_result.get("summary", {}).get("total_strategies"),
+        )
 
         # Performance & Statistics log: per-strategy execution timings for this batch
         exec_times = [
@@ -277,21 +275,18 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
         total_exec_time = sum(exec_times)
         avg_exec_time = (total_exec_time / len(exec_times)) if exec_times else 0.0
         performance_logger.info(
-            f"BATCH_PERFORMANCE | batch_id={batch_id} | total_tasks={len(results)} | "
-            f"successful={len(valid_results)} | failed={failed_count} | "
-            f"symbols={aggregated_result.get('summary', {}).get('total_symbols')} | "
-            f"strategies={aggregated_result.get('summary', {}).get('total_strategies')} | "
-            f"total_execution_time={total_exec_time:.2f}s | avg_execution_time={avg_exec_time:.2f}s | "
-            f"pubsub_subscribers_received={pubsub_response.get('subscriber_count', 0)}"
+            "batch_performance batch_id=%s total_tasks=%s successful=%s failed=%s symbols=%s strategies=%s "
+            "total_duration_seconds=%.2f average_duration_seconds=%.2f subscribers=%s",
+            batch_id, len(results), len(valid_results), failed_count,
+            aggregated_result.get("summary", {}).get("total_symbols"),
+            aggregated_result.get("summary", {}).get("total_strategies"), total_exec_time, avg_exec_time,
+            pubsub_response.get("subscriber_count", 0),
         )
 
         return {"batch_id": str(batch_id), "summary": aggregated_result.get("summary", {})}
         
     except Exception as e:
-        logger.error("=" * 80)
-        logger.error(f"❌ STEP 3 FAILED: Error processing batch results: {str(e)}")
-        logger.error("=" * 80)
-        logger.error("Error details:", exc_info=True)
+        logger.exception("batch_result_processing_failed error=%s", e)
         raise
 
 
@@ -304,8 +299,13 @@ def trigger_batch_execution(self, force: bool = False) -> Dict[str, Any]:
     now_utc = datetime.now(timezone.utc)
     interval = get_schedule_seconds()
 
+    schedule_lock = None
     if not force:
         try:
+            schedule_lock = get_redis_client().lock("lock:batch_schedule", timeout=30)
+            if not schedule_lock.acquire(blocking=False):
+                return {"status": "skipped", "reason": "Batch scheduler lock is held"}
+
             status_doc = get_collection("system_status").find_one({"_id": "batch_schedule"})
             if status_doc and status_doc.get("last_triggered_at"):
                 raw_last = status_doc["last_triggered_at"]
@@ -320,6 +320,8 @@ def trigger_batch_execution(self, force: bool = False) -> Dict[str, Any]:
                         elapsed,
                         interval,
                     )
+                    schedule_lock.release()
+                    schedule_lock = None
                     return {
                         "status": "skipped",
                         "reason": f"Interval not reached ({elapsed:.1f}s / {interval}s)",
@@ -327,12 +329,17 @@ def trigger_batch_execution(self, force: bool = False) -> Dict[str, Any]:
                         "interval_seconds": interval,
                     }
         except Exception as check_err:
-            logger.debug("Error checking batch schedule elapsed time: %s", check_err)
+            if schedule_lock is not None:
+                try:
+                    schedule_lock.release()
+                except Exception:
+                    logger.warning("Failed to release batch scheduler lock", exc_info=True)
+                schedule_lock = None
+            logger.warning("Unable to enforce the batch schedule gate: %s", check_err, exc_info=True)
+            raise
 
     try:
-        logger.info("=" * 80)
-        logger.info("🚀 STEP 1: INITIATING BATCH EXECUTION")
-        logger.info("=" * 80)
+        logger.info("batch_dispatch_started force=%s interval_seconds=%s", force, interval)
 
         try:
             get_collection("system_status").update_one(
@@ -344,19 +351,26 @@ def trigger_batch_execution(self, force: bool = False) -> Dict[str, Any]:
                 upsert=True,
             )
         except Exception as e:
-            logger.error(f"⚠️  Failed to record batch schedule status: {e}")
+            logger.exception("batch_schedule_status_write_failed error=%s", e)
+            raise
+        finally:
+            if schedule_lock is not None:
+                try:
+                    schedule_lock.release()
+                except Exception:
+                    logger.warning("Failed to release batch scheduler lock", exc_info=True)
+                schedule_lock = None
 
         symbols = get_symbols()
         strategies = get_strategies()
         
-        logger.info(f"📋 Configuration:")
-        logger.info(f"   Symbols: {symbols}")
-        logger.info(f"   Strategies: {[s.split('.')[-1] for s in strategies]}")
-        logger.info(f"   Total combinations: {len(symbols)} symbols × {len(strategies)} strategies = {len(symbols) * len(strategies)} tasks")
+        logger.info(
+            "batch_configuration symbols=%s strategies=%s task_count=%s",
+            symbols, [s.split(".")[-1] for s in strategies], len(symbols) * len(strategies),
+        )
         
         # Pre-cache data for all symbols
-        logger.info("-" * 80)
-        logger.info("💾 STEP 1.1: PRE-CACHING DATA")
+        logger.info("batch_precache_started symbol_count=%s", len(symbols))
         from app.utility.data_provider import fetch_historical_data
         
         pre_cache_count = 0
@@ -366,9 +380,9 @@ def trigger_batch_execution(self, force: bool = False) -> Dict[str, Any]:
                 fetch_historical_data(symbol, period=30, interval="15m")
                 pre_cache_count += 1
             except Exception as e:
-                logger.error(f"⚠️  Failed to pre-cache data for {symbol}: {str(e)}")
+                logger.warning("batch_precache_failed symbol=%s error=%s", symbol, e)
         
-        logger.info(f"✅ STEP 1.1 COMPLETED: Pre-cached data for {pre_cache_count}/{len(symbols)} symbols")
+        logger.info("batch_precache_completed cached=%s requested=%s", pre_cache_count, len(symbols))
 
         manager = StrategyManager()
         manager.add_symbols(symbols)
@@ -378,17 +392,10 @@ def trigger_batch_execution(self, force: bool = False) -> Dict[str, Any]:
         tasks_sigs = manager.create_task_signatures_with_numbering()
 
         if not tasks_sigs:
-            logger.warning("⚠️  No tasks to run (empty configuration)")
-            logger.info("=" * 80)
+            logger.warning("batch_dispatch_skipped reason=empty_configuration")
             return {"status": "skipped", "reason": "empty_batch"}
 
-        logger.info("-" * 80)
-        logger.info(f"✅ STEP 1.2 COMPLETED: Generated {len(tasks_sigs)} tasks")
-        logger.info("=" * 80)
-        logger.info("")
-        logger.info("=" * 80)
-        logger.info(f"🔄 STEP 2: EXECUTING {len(tasks_sigs)} TASKS")
-        logger.info("=" * 80)
+        logger.info("batch_tasks_generated count=%s", len(tasks_sigs))
 
         # Use Celery Chord: group(tasks) | callback
         from celery import chord
@@ -412,8 +419,11 @@ def trigger_batch_execution(self, force: bool = False) -> Dict[str, Any]:
         }
         
     except Exception as e:
-        logger.error("=" * 80)
-        logger.error(f"❌ STEP 1 FAILED: Error triggering batch task: {str(e)}")
-        logger.error("=" * 80)
-        logger.error("Error details:", exc_info=True)
+        logger.exception("batch_dispatch_failed error=%s", e)
         raise
+    finally:
+        if schedule_lock is not None:
+            try:
+                schedule_lock.release()
+            except Exception:
+                logger.warning("Failed to release batch scheduler lock", exc_info=True)

@@ -1,1 +1,1 @@
-# Database package for MongoDB and Redis pub/sub functionality
+"""SQLite persistence and Redis messaging integrations."""

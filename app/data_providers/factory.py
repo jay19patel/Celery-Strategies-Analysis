@@ -44,11 +44,13 @@ def get_data_provider(provider_name: str | None = None) -> BaseDataProvider:
     import importlib
     import os
 
-    name = provider_name or os.getenv("DATA_PROVIDER", "delta")
-    name = name.strip().lower()
+    configured_name = (provider_name or os.getenv("DATA_PROVIDER", "delta")).strip()
+    name = configured_name.lower()
 
     dotted_path = _PROVIDER_REGISTRY.get(name)
-    if dotted_path is None:
+    if dotted_path is None and "." in configured_name:
+        dotted_path = configured_name
+    elif dotted_path is None:
         available = ", ".join(sorted(_PROVIDER_REGISTRY))
         raise ValueError(
             f"Unknown data provider '{name}'. Available: {available}"
@@ -57,9 +59,11 @@ def get_data_provider(provider_name: str | None = None) -> BaseDataProvider:
     module_path, class_name = dotted_path.rsplit(".", 1)
     module = importlib.import_module(module_path)
     provider_class = getattr(module, class_name)
+    if not isinstance(provider_class, type) or not issubclass(provider_class, BaseDataProvider):
+        raise TypeError(f"Data provider '{dotted_path}' must inherit BaseDataProvider")
     instance = provider_class()
 
-    logger.info(f"✅ Data provider initialized: {instance.name} (key='{name}')")
+    logger.info("data_provider_initialized provider=%s key=%s", instance.name, name)
     return instance
 
 
@@ -77,4 +81,4 @@ def register_provider(key: str, dotted_class_path: str) -> None:
     _PROVIDER_REGISTRY[key.strip().lower()] = dotted_class_path
     # Clear cached singleton so next call picks up the new provider
     get_data_provider.cache_clear()
-    logger.info(f"📦 Registered data provider: '{key}' → {dotted_class_path}")
+    logger.info("data_provider_registered key=%s class=%s", key, dotted_class_path)

@@ -1,7 +1,7 @@
 """SQLite persistence for the Portfolio paper-trading engine.
 
 Stores state in the `portfolio_state` table (single row with id='portfolio')
-and completed trades in `portfolio_trades`. Replaces MongoDB with fast,
+and completed trades in `portfolio_trades`. Provides fast,
 embedded SQLite storage.
 """
 
@@ -132,7 +132,7 @@ def save_state(state: dict[str, Any]) -> None:
             now_utc,
         ),
     )
-    logger.info(f"💾 Portfolio state saved to SQLite | balance={balance:.2f}")
+    logger.info("portfolio_state_saved backend=sqlite balance=%.2f", balance)
 
 
 def append_trades(trades: list[dict[str, Any]]) -> None:
@@ -232,7 +232,7 @@ def append_trades(trades: list[dict[str, Any]]) -> None:
                 ),
             )
 
-    logger.info(f"💾 {len(trades)} new Portfolio trade(s) saved to SQLite")
+    logger.info("portfolio_trades_saved backend=sqlite count=%s", len(trades))
 
 
 def get_trades(limit: int = 200, skip: int = 0) -> list[dict[str, Any]]:

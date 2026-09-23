@@ -1,13 +1,14 @@
-"""WebSocket client for Delta Exchange real-time order and position streams.
+"""Authenticated Delta Exchange WebSocket state for live orders and positions."""
 
-Subscribes to orders and positions and persists updates to SQLite.
-"""
-
+import hashlib
+import hmac
 import json
 import logging
 import threading
 import time
 from collections.abc import Callable
+from copy import deepcopy
+from datetime import UTC, datetime
 from typing import Any
 
 try:
@@ -15,16 +16,13 @@ try:
 except ImportError:
     websocket = None
 
-from app.broker.delta.calculator import TradeCalculator
-from app.broker.delta.client import DeltaClient
 from app.core.settings import settings
-from app.database.sqlite_db import get_sqlite_db
 
 logger = logging.getLogger(__name__)
 
 
 class DeltaWebSocketClient:
-    """Manages real-time WebSocket connection to Delta Exchange India."""
+    """Maintain live broker state in memory from Delta private channels."""
 
     def __init__(
         self,
@@ -34,48 +32,69 @@ class DeltaWebSocketClient:
         on_order: Callable[[dict[str, Any]], None] | None = None,
         on_position: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
-        """Initialize WebSocket client."""
         self.ws_url = websocket_url or settings.delta_websocket_url
         self.api_key = api_key or settings.delta_api_key
         self.api_secret = api_secret or settings.delta_api_secret
         self.on_order = on_order
         self.on_position = on_position
-
-        self.ws: websocket.WebSocketApp | None = None
+        self.ws: Any = None
         self._thread: threading.Thread | None = None
-        self._running: bool = False
-        self._is_connected: bool = False
-        self._messages_received: int = 0
+        self._lock = threading.RLock()
+        self._running = False
+        self._is_connected = False
+        self._messages_received = 0
         self._last_message_at: str | None = None
         self._last_error: str | None = None
-        self._reconnect_count: int = 0
-        self._subscribed_channels: list[str] = ["orders", "positions"]
-        self.db = get_sqlite_db()
-        self.delta_client = DeltaClient()
+        self._reconnect_count = 0
+        self._orders: dict[str, dict[str, Any]] = {}
+        self._positions: dict[str, dict[str, Any]] = {}
+        self._subscribed_channels = ["orders", "positions"]
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.api_key and self.api_secret and websocket is not None)
+
+    def configure(self, api_key: str | None, api_secret: str | None) -> None:
+        """Apply credentials and restart an active stream when they change."""
+        if (api_key, api_secret) == (self.api_key, self.api_secret):
+            return
+        was_running = self._running
+        if was_running:
+            self.stop()
+        self.api_key, self.api_secret = api_key, api_secret
+        self.clear()
+        if was_running and self.is_configured:
+            self.start()
 
     def start(self) -> None:
-        """Start WebSocket listener in a background daemon thread."""
-        if not self.api_key or not self.api_secret:
-            logger.info("Delta API keys not set. Skipping WebSocket listener start.")
+        """Start the private stream."""
+        if not self.is_configured:
+            logger.info("delta_private_stream_not_configured")
             return
-
         if self._running:
             return
-
         self._running = True
-        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="DeltaWebSocket")
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="DeltaPrivateStream")
         self._thread.start()
-        logger.info("🔌 Delta WebSocket listener started in background thread.")
+        logger.info("delta_private_stream_started")
 
     def stop(self) -> None:
-        """Stop WebSocket connection."""
         self._running = False
         if self.ws:
             self.ws.close()
-        logger.info("🔌 Delta WebSocket listener stopped.")
+        thread = self._thread
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=2)
+        self._thread = None
+        self._is_connected = False
+        logger.info("delta_private_stream_stopped")
+
+    def clear(self) -> None:
+        with self._lock:
+            self._orders.clear()
+            self._positions.clear()
 
     def _run_loop(self) -> None:
-        """Connection and reconnect loop."""
         while self._running:
             try:
                 self.ws = websocket.WebSocketApp(
@@ -87,139 +106,105 @@ class DeltaWebSocketClient:
                 )
                 self.ws.run_forever(ping_interval=30, ping_timeout=10)
             except Exception:
-                logger.exception("WebSocket loop exception")
-
+                logger.exception("delta_private_stream_loop_failed")
             if self._running:
                 time.sleep(5)
 
-    def _on_open(self, ws: websocket.WebSocketApp) -> None:
-        """Handle connection open event: subscribe to orders and positions."""
+    def _on_open(self, ws: Any) -> None:
+        timestamp = str(int(time.time()))
+        signature = hmac.new(self.api_secret.encode(), f"GET{timestamp}/live".encode(), hashlib.sha256).hexdigest()
+        ws.send(
+            json.dumps(
+                {
+                    "type": "key-auth",
+                    "payload": {"api-key": self.api_key, "signature": signature, "timestamp": timestamp},
+                }
+            )
+        )
+        ws.send(
+            json.dumps(
+                {
+                    "type": "subscribe",
+                    "payload": {
+                        "channels": [
+                            {"name": "orders", "symbols": ["all"]},
+                            {"name": "positions", "symbols": ["all"]},
+                        ]
+                    },
+                }
+            )
+        )
         self._is_connected = True
-        logger.info("✅ Delta WebSocket connected. Sending subscription payload...")
-        sub_payload = {
-            "type": "subscribe",
-            "payload": {
-                "channels": [
-                    {"name": "orders", "symbols": ["all"]},
-                    {"name": "positions", "symbols": ["all"]},
-                ]
-            }
-        }
-        ws.send(json.dumps(sub_payload))
+        self._last_error = None
+        logger.info("delta_private_stream_connected")
 
-    def _on_message(self, ws: websocket.WebSocketApp, message: str) -> None:
-        """Handle incoming WebSocket messages."""
-        from datetime import UTC, datetime
-
+    def _on_message(self, ws: Any, message: str) -> None:
         self._messages_received += 1
         self._last_message_at = datetime.now(UTC).isoformat()
         try:
             data = json.loads(message)
-            channel = data.get("type", "")
-
-            if channel == "orders":
+            if data.get("type") == "orders":
                 self._handle_orders(data.get("orders", []))
-            elif channel == "positions":
+            elif data.get("type") == "positions":
                 self._handle_positions(data.get("positions", []))
-
         except Exception:
-            logger.exception("Error parsing WebSocket message")
+            logger.exception("delta_private_message_invalid")
 
     def _handle_orders(self, orders: list[dict[str, Any]]) -> None:
-        """Process order updates and persist into SQLite live_orders table."""
-        for o in orders:
-            try:
-                oid = str(o.get("id", ""))
-                if not oid:
-                    continue
-                product_id = int(o.get("product_id", 0))
-                symbol = str(o.get("product_symbol", o.get("symbol", "")))
-                side = str(o.get("side", ""))
-                size = float(o.get("size", 0.0))
-                order_type = str(o.get("order_type", "MARKET"))
-                state = str(o.get("state", "OPEN"))
-                now_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-                sql = """
-                    INSERT INTO live_orders (id, product_id, symbol, side, size, order_type, status, raw_data, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, raw_data = excluded.raw_data;
-                """
-                self.db.execute_modify(sql, (oid, product_id, symbol, side, size, order_type, state, json.dumps(o), now_utc, now_utc))
-
-                if self.on_order:
-                    self.on_order(o)
-            except Exception:
-                logger.exception("Failed to handle order update")
+        terminal_states = {"cancelled", "closed", "filled", "rejected"}
+        for order in orders:
+            order_id = str(order.get("id", ""))
+            if not order_id:
+                continue
+            state = str(order.get("state", order.get("status", ""))).lower()
+            with self._lock:
+                if state in terminal_states:
+                    self._orders.pop(order_id, None)
+                else:
+                    self._orders[order_id] = deepcopy(order)
+            if self.on_order:
+                self.on_order(order)
 
     def _handle_positions(self, positions: list[dict[str, Any]]) -> None:
-        """Process position updates, persist into SQLite, and attach bracket orders if needed."""
-        for pos in positions:
+        for position in positions:
+            symbol = str(position.get("product_symbol") or position.get("symbol") or "")
+            if not symbol:
+                continue
             try:
-                action = str(pos.get("action", "")).lower()
-                symbol = str(pos.get("product_symbol", pos.get("symbol", "")))
-                if not symbol:
-                    continue
+                size = float(position.get("size", 0))
+            except (TypeError, ValueError):
+                size = 0.0
+            with self._lock:
+                if str(position.get("action", "")).lower() == "delete" or size == 0:
+                    self._positions.pop(symbol, None)
+                else:
+                    self._positions[symbol] = deepcopy(position)
+            if self.on_position:
+                self.on_position(position)
 
-                if action == "delete":
-                    self.db.execute_modify("DELETE FROM live_positions WHERE symbol = ?;", (symbol,))
-                    logger.info(f"Position closed on Delta Exchange for {symbol}")
-                    continue
+    def get_orders(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return deepcopy(list(self._orders.values()))
 
-                product_id = int(pos.get("product_id", 0))
-                size = float(pos.get("size", 0.0))
-                side = "buy" if size > 0 else "sell"
-                entry_price = float(pos.get("entry_price", 0.0))
-                mark_price = float(pos.get("mark_price", entry_price))
-                liq_price = float(pos.get("liquidation_price", 0.0))
-                leverage = int(pos.get("leverage", 1))
-                unrealized = float(pos.get("unrealized_pnl", 0.0))
-                realized = float(pos.get("realized_pnl", 0.0))
-                now_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    def get_positions(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return deepcopy(list(self._positions.values()))
 
-                sql = """
-                    INSERT INTO live_positions (symbol, product_id, side, size, entry_price, mark_price, liquidation_price, leverage, unrealized_pnl, realized_pnl, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(symbol) DO UPDATE SET
-                        size = excluded.size,
-                        mark_price = excluded.mark_price,
-                        unrealized_pnl = excluded.unrealized_pnl,
-                        realized_pnl = excluded.realized_pnl,
-                        updated_at = excluded.updated_at;
-                """
-                self.db.execute_modify(sql, (symbol, product_id, side, size, entry_price, mark_price, liq_price, leverage, unrealized, realized, now_utc, now_utc))
-
-                # If brand new position created, automatically ensure bracket stoploss & target
-                if action == "create" and entry_price > 0:
-                    stop_target = TradeCalculator.calculate_stop_target(entry_price, side, liq_price)
-                    self.delta_client.create_stoploss_target(
-                        product_id=product_id,
-                        symbol=symbol,
-                        stoploss_price=stop_target["stop_loss"],
-                        target_price=stop_target["target"],
-                    )
-                    logger.info(f"🛡️ Auto-bracket created for {symbol}: SL={stop_target['stop_loss']}, TP={stop_target['target']}")
-
-                if self.on_position:
-                    self.on_position(pos)
-            except Exception:
-                logger.exception("Failed to handle position update")
-
-    def _on_error(self, ws: websocket.WebSocketApp, error: Exception) -> None:
-        """Handle WebSocket error."""
+    def _on_error(self, ws: Any, error: Exception) -> None:
         self._last_error = str(error)
-        logger.error(f"Delta WebSocket error: {error}")
+        logger.error("delta_private_stream_error error=%s", error)
 
-    def _on_close(self, ws: websocket.WebSocketApp, close_status_code: Any, close_msg: Any) -> None:
-        """Handle WebSocket closure."""
+    def _on_close(self, ws: Any, close_status_code: Any, close_msg: Any) -> None:
         self._is_connected = False
         self._reconnect_count += 1
-        logger.info(f"Delta WebSocket connection closed: code={close_status_code}, msg={close_msg}")
+        self.clear()
+        logger.info("delta_private_stream_closed code=%s message=%s", close_status_code, close_msg)
 
     def get_status(self) -> dict[str, Any]:
-        """Return real-time connection status and telemetry metrics."""
+        with self._lock:
+            position_count, order_count = len(self._positions), len(self._orders)
         return {
-            "is_configured": bool(self.api_key and self.api_secret),
+            "is_configured": self.is_configured,
             "is_running": self._running,
             "is_connected": self._is_connected,
             "ws_url": self.ws_url,
@@ -228,6 +213,9 @@ class DeltaWebSocketClient:
             "last_message_at": self._last_message_at,
             "reconnect_count": self._reconnect_count,
             "last_error": self._last_error,
+            "live_positions": position_count,
+            "live_orders": order_count,
+            "storage": "memory",
         }
 
 
@@ -235,7 +223,7 @@ _delta_ws_client: DeltaWebSocketClient | None = None
 
 
 def get_delta_websocket_client() -> DeltaWebSocketClient:
-    """Singleton accessor for DeltaWebSocketClient."""
+    """Return the process-wide private Delta stream."""
     global _delta_ws_client
     if _delta_ws_client is None:
         _delta_ws_client = DeltaWebSocketClient()

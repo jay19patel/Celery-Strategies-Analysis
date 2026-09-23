@@ -5,7 +5,7 @@ Fetches a rolling window of OHLCV (via the same data_provider used by the
 other strategies, so it benefits from the existing Redis cache), builds the
 Portfolio feature set, advances the PortfolioManager simulation by
 whatever new candles have arrived since the last run, and persists the result
-to MongoDB. Signals from this feed are meant to inform REAL trades, so every
+to SQLite. Signals from this feed are meant to inform REAL trades, so every
 number persisted (entry price, stop, target, position size, leverage) is
 exactly what the risk-managed simulation actually computed - nothing rounded
 away or approximated for display purposes only.
@@ -51,12 +51,12 @@ def run_portfolio_task(self):
         lock = redis_client.lock("lock:portfolio_task", timeout=300)
         
         if not lock.acquire(blocking=False):
-            logger.warning("⚠️ Portfolio task already running. Skipping this cycle.")
+            logger.warning("portfolio_task_skipped reason=lock_held")
             return {"ok": False, "reason": "locked"}
 
         df = fetch_historical_data(SYMBOL, period=FETCH_PERIOD_DAYS, interval=INTERVAL)
         if df is None or df.empty or len(df) < 150:
-            logger.warning(f"⚠️  Portfolio portfolio: not enough data yet for {SYMBOL} ({INTERVAL})")
+            logger.warning("portfolio_task_skipped reason=insufficient_data symbol=%s interval=%s", SYMBOL, INTERVAL)
             return {"ok": False, "error": "not enough data"}
 
         features_df = build_features(df)
@@ -101,7 +101,10 @@ def run_portfolio_task(self):
                 "interval": INTERVAL,
             }
             save_state(new_state)
-            logger.info(f"🚀 Portfolio portfolio bootstrapped | {SYMBOL} {INTERVAL} | balance=${settings.portfolio_initial_capital}")
+            logger.info(
+                "portfolio_bootstrapped symbol=%s interval=%s initial_balance=%s",
+                SYMBOL, INTERVAL, settings.portfolio_initial_capital,
+            )
             return {"ok": True, "bootstrap": True, "balance": settings.portfolio_initial_capital}
 
         prior_pending = [tuple(p) for p in state.get("pending_entries", [])]
@@ -120,15 +123,15 @@ def run_portfolio_task(self):
             append_trades(trades)
             for t in trades:
                 logger.info(
-                    f"📈 Portfolio trade CLOSED | {t['strategy']} {t['direction']} | "
-                    f"{t['exit_reason']} | pnl={t['pnl']:+.2f} | equity=${t['equity_after']:.2f}"
+                    "portfolio_trade_closed strategy=%s direction=%s reason=%s pnl=%.2f equity=%.2f",
+                    t["strategy"], t["direction"], t["exit_reason"], t["pnl"], t["equity_after"],
                 )
 
         if pending_entries and pending_entries != prior_pending:
             for name, direction in pending_entries:
                 logger.info(
-                    f"🔔 Portfolio NEW SIGNAL | {name} | {'LONG' if direction == 1 else 'SHORT'} | "
-                    f"will fill on next candle's open"
+                    "portfolio_signal_created strategy=%s direction=%s fill=next_candle_open",
+                    name, "LONG" if direction == 1 else "SHORT",
                 )
 
         new_state = {
@@ -152,8 +155,8 @@ def run_portfolio_task(self):
         }
 
     except Exception as e:
-        logger.error(f"❌ Portfolio task failed: {str(e)}", exc_info=True)
-        raise e  # Ensure Celery marks the task as failed
+        logger.exception("portfolio_task_failed error=%s", e)
+        raise
     finally:
         if lock and lock.locked():
             try:

@@ -25,6 +25,16 @@ def test_system_metrics_endpoint():
     assert "celery" in data
 
 
+def test_prometheus_metrics_endpoint():
+    """Verify Prometheus can scrape the cached application health snapshot."""
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "tradebuddy_system_cpu_percent" in response.text
+    assert "tradebuddy_sqlite_up" in response.text
+    assert "tradebuddy_sqlite_table_rows" in response.text
+
+
 def test_broker_status_endpoint():
     """Verify broker status endpoint returns execution mode and settings."""
     response = client.get("/api/broker/status")
@@ -118,6 +128,14 @@ def test_analytics_and_trades_endpoints():
     assert analytics_res.status_code == 200
     assert isinstance(analytics_res.json(), list)
 
+    paper_res = client.get("/api/analytics/paper-dashboard")
+    assert paper_res.status_code == 200
+    paper = paper_res.json()
+    assert "summary" in paper
+    assert "equity_curve" in paper
+    assert "strategies" in paper
+    assert "total_pnl" in paper["summary"]
+
 
 def test_trading_calendar_endpoint():
     """Verify trading calendar API endpoint."""
@@ -176,6 +194,12 @@ def test_strategy_list_and_toggle_endpoints():
     assert "total_signals" in strat
     assert "paper_orders_count" in strat
 
+    detailed_res = client.get("/api/strategy/detailed")
+    assert detailed_res.status_code == 200
+    detailed = detailed_res.json()
+    assert detailed["total_cards"] == detailed["total_symbols"] * detailed["total_strategies"]
+    assert all(card.get("id") and card.get("strategy_id") for card in detailed["strategies"])
+
     # Test toggling paper execution
     toggle_payload = {
         "strategy_id": strat["strategy_id"],
@@ -230,4 +254,3 @@ def test_system_pipeline_settings_endpoints():
     assert "strategies" in cfg
     assert "schedule_seconds" in cfg
     assert cfg["schedule_seconds"] == 60
-

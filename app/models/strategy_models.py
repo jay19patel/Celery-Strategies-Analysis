@@ -1,8 +1,8 @@
-from pydantic import BaseModel
+from datetime import datetime
 from enum import Enum
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
-from typing import Optional
+
+from pydantic import BaseModel, ConfigDict
+
 
 class SignalType(str, Enum):
     BUY = "BUY"
@@ -10,13 +10,14 @@ class SignalType(str, Enum):
     HOLD = "HOLD"
 
 class StrategyResult(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
     strategy_name: str
     symbol: str
     signal_type: SignalType
     execution_time: float
     timestamp: datetime
-    price: Optional[float] = None
-    success: Optional[bool] = False
-
-    class Config:
-        use_enum_values = True
+    price: float | None = None
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    success: bool | None = False

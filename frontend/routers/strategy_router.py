@@ -86,6 +86,7 @@ def get_strategy_signals(
         logger.exception("Failed to fetch strategy signals")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+
 class TriggerSignalPayload(BaseModel):
     strategy_name: str | None = None
     strategy: str | None = None
@@ -143,33 +144,7 @@ def get_strategy_detailed() -> dict[str, Any]:
     """
     try:
         service = get_strategy_service()
-        configs = service.get_strategies_detailed()
-
-        cards: list[dict[str, Any]] = []
-        for cfg in configs:
-            symbols = cfg.get("symbols") or ["BTC-USD"]
-            # symbols may already be a list (service returns list[str])
-            if isinstance(symbols, str):
-                symbols = [s.strip() for s in symbols.split(",") if s.strip()]
-
-            for sym in symbols:
-                cards.append({
-                    "id": f"{cfg['strategy_id']}_{sym.replace('-', '_')}",
-                    "strategy_id": cfg["strategy_id"],
-                    "name": cfg["name"],
-                    "symbol": sym,
-                    "interval": cfg.get("timeframe", "1m"),
-                    "category": "MOMENTUM",
-                    "paper_enabled": cfg.get("is_paper_enabled", True),
-                    "real_enabled": cfg.get("is_real_enabled", False),
-                    "total_trades": cfg.get("paper_orders_count", 0),
-                    "win_rate": cfg.get("win_rate", 0.0),
-                    "pnl": round(cfg.get("capital", 100.0) - 100.0, 2),
-                    "total_signals": cfg.get("total_signals", 0),
-                    "return_pct": cfg.get("return_pct", 0.0),
-                    "open_position": cfg.get("open_position"),
-                    "updated_at": cfg.get("updated_at", ""),
-                })
+        cards = service.get_strategy_cards()
 
         # Unique symbol set across all strategies
         all_symbols = list({c["symbol"] for c in cards})

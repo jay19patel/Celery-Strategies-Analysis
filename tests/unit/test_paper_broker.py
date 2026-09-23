@@ -9,8 +9,8 @@ from app.models.strategy_models import SignalType
 
 @pytest.fixture
 def mock_db_and_redis():
-    """Mock MongoDB database and Redis client for the PaperBroker tests."""
-    with patch("app.core.paper_broker.MongoDBConnection") as mock_mongo_conn, \
+    """Mock the SQLite adapter and Redis client for the PaperBroker tests."""
+    with patch("app.core.paper_broker.DatabaseConnection") as mock_mongo_conn, \
          patch("app.core.paper_broker.get_redis_client") as mock_redis_client:
         
         # Mock database and collections
@@ -38,7 +38,7 @@ def mock_db_and_redis():
 
 
 def test_paper_broker_get_account_new(mock_db_and_redis: dict) -> None:
-    """Test retrieving an account when it does not exist in MongoDB."""
+    """Test retrieving an account when it does not exist in SQLite."""
     mock_accounts = mock_db_and_redis["accounts_coll"]
     mock_accounts.find_one.return_value = None  # Account does not exist
     
@@ -52,7 +52,7 @@ def test_paper_broker_get_account_new(mock_db_and_redis: dict) -> None:
 
 
 def test_paper_broker_get_account_existing(mock_db_and_redis: dict) -> None:
-    """Test retrieving an account when it already exists in MongoDB."""
+    """Test retrieving an account when it already exists in SQLite."""
     mock_accounts = mock_db_and_redis["accounts_coll"]
     existing_account = {
         "_id": "TestStrategy::BTC-USD",
@@ -164,3 +164,110 @@ def test_paper_broker_process_signal_buy(mock_db_and_redis: dict) -> None:
     assert saved_account["open_position"]["type"] == "LONG"
     assert saved_account["open_position"]["entry_price"] == 50000.0
 
+
+def test_open_position_generates_position_id_and_records_opened_event(mock_db_and_redis: dict) -> None:
+    """Opening a position stamps a position_id and logs an OPENED/SYSTEM audit event."""
+    with patch("app.core.paper_broker.position_events_store.record_event") as mock_record:
+        broker = PaperBroker()
+        account = {
+            "_id": "TestStrategy::BTC-USD",
+            "strategy_name": "TestStrategy",
+            "symbol": "BTC-USD",
+            "capital": 100.0,
+            "total_trades": 0,
+            "winning_trades": 0,
+            "win_rate": 0.0,
+            "open_position": None,
+        }
+
+        entry_time = datetime.now(UTC)
+        updated_account = broker._open_position(account, "LONG", "BTC-USD", 50000.0, entry_time)
+        pos = updated_account["open_position"]
+
+        assert pos["position_id"]
+        mock_record.assert_called_once()
+        kwargs = mock_record.call_args.kwargs
+        assert kwargs["position_id"] == pos["position_id"]
+        assert kwargs["event_type"] == "OPENED"
+        assert kwargs["changed_by"] == "SYSTEM"
+
+
+def test_update_protection_records_change_event_with_old_and_new_values(mock_db_and_redis: dict) -> None:
+    """Adjusting SL/TP on an open position logs a PROTECTION_CHANGED/MANUAL event with previous and new values."""
+    mock_accounts = mock_db_and_redis["accounts_coll"]
+    account = {
+        "_id": "TestStrategy::BTC-USD",
+        "strategy_name": "TestStrategy",
+        "symbol": "BTC-USD",
+        "capital": 100.0,
+        "open_position": {
+            "position_id": "pos-123",
+            "type": "LONG",
+            "symbol": "BTC-USD",
+            "entry_price": 50000.0,
+            "stop_price": 48000.0,
+            "target_price": 53000.0,
+        },
+    }
+    mock_accounts.find_one.return_value = account
+
+    with patch("app.core.paper_broker.position_events_store.record_event") as mock_record:
+        broker = PaperBroker()
+        broker.update_protection("TestStrategy", "BTC-USD", 48500.0, 53500.0, 50000.0)
+
+        mock_record.assert_called_once()
+        kwargs = mock_record.call_args.kwargs
+        assert kwargs["position_id"] == "pos-123"
+        assert kwargs["event_type"] == "PROTECTION_CHANGED"
+        assert kwargs["changed_by"] == "MANUAL"
+        assert kwargs["previous_stop_price"] == 48000.0
+        assert kwargs["previous_target_price"] == 53000.0
+        assert kwargs["new_stop_price"] == 48500.0
+        assert kwargs["new_target_price"] == 53500.0
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected_changed_by"),
+    [("Manual Close", "MANUAL"), ("Stop Loss Hit", "SYSTEM")],
+)
+def test_close_position_records_closed_event_with_reason_and_changed_by(
+    mock_db_and_redis: dict, reason: str, expected_changed_by: str
+) -> None:
+    """Closing a position logs a CLOSED event whose changed_by reflects a manual vs automatic reason,
+    and stamps position_id onto the persisted trade record."""
+    mock_trades = mock_db_and_redis["trades_coll"]
+    broker = PaperBroker()
+
+    entry_time = datetime.now(UTC)
+    account = {
+        "_id": "TestStrategy::BTC-USD",
+        "strategy_name": "TestStrategy",
+        "symbol": "BTC-USD",
+        "capital": 100.0,
+        "total_trades": 0,
+        "winning_trades": 0,
+        "win_rate": 0.0,
+        "open_position": {
+            "position_id": "pos-456",
+            "type": "LONG",
+            "symbol": "BTC-USD",
+            "entry_price": 50000.0,
+            "size": 0.002,
+            "capital_allocated": 100.0,
+            "entry_time": entry_time,
+        },
+    }
+
+    with patch("app.core.paper_broker.position_events_store.record_event") as mock_record:
+        exit_time = datetime.now(UTC)
+        broker._close_position(account, 60000.0, exit_time, reason)
+
+        trade_record = mock_trades.insert_one.call_args[0][0]
+        assert trade_record["position_id"] == "pos-456"
+
+        mock_record.assert_called_once()
+        kwargs = mock_record.call_args.kwargs
+        assert kwargs["position_id"] == "pos-456"
+        assert kwargs["event_type"] == "CLOSED"
+        assert kwargs["changed_by"] == expected_changed_by
+        assert kwargs["reason"] == reason

@@ -68,7 +68,7 @@ graph TD
 
     %% Storage & Telemetry
     subgraph PERSISTENCE_LAYER ["6. Transactional Storage & Event Bus"]
-        SQLITE[("SQLite Database (WAL Mode)<br/>data/stockanalysis.db<br/>- broker_accounts<br/>- broker_trades<br/>- live_positions<br/>- signals_log")]:::dbStyle
+        SQLITE[("SQLite Database (TRUNCATE Mode)<br/>data/stockanalysis.db<br/>- broker_accounts<br/>- broker_trades<br/>- signals_log")]:::dbStyle
         ZMQ["ZeroMQ EventBus<br/>PUB/SUB Socket on Port 5557<br/>app/core/event_bus.py"]:::externalStyle
     end
 
@@ -146,7 +146,7 @@ Below is the execution walkthrough of a single automated trading cycle:
      - **Both Disabled (`LOG_ONLY`):** Recorded strictly as an audit entry in `signals_log` with `action: "logged_only_both_disabled"` without capital risk.
 8. **Step 3.3: Telemetry & Persistence:**
    - Batch summary is broadcasted to Redis Pub/Sub channels `stockanalysis:batch_complete` and `stockanalysis:strategy_result`.
-   - Results are committed transactionally to `stockanalysis.db` (SQLite in WAL mode).
+   - Results are committed transactionally to `stockanalysis.db` (SQLite in TRUNCATE journal mode).
 
 ---
 
@@ -271,7 +271,7 @@ An architecture review of the active codebase yields the following performance a
 - **Batch Idempotency:**
   - `trigger_batch_execution` verifies `(now_utc - last_triggered_at).total_seconds() < interval` via the database. If multiple timer triggers fire concurrently, duplicate batch executions are discarded early.
 - **Database Concurrency & ACID Safety:**
-  - `SQLiteDatabase` ([sqlite_db.py](file:///Users/jaypatel/Desktop/Development/Jay/Celery-Strategies-Analysis/app/database/sqlite_db.py)) uses `PRAGMA journal_mode = TRUNCATE` / `WAL` with `PRAGMA busy_timeout = 15000` and thread re-entrant locks (`threading.RLock()`).
+  - `SQLiteDatabase` (`app/database/sqlite_db.py`) uses `PRAGMA journal_mode = TRUNCATE` with `PRAGMA busy_timeout = 15000` and thread re-entrant locks (`threading.RLock()`).
   - Table mutations utilize explicit `BEGIN IMMEDIATE;` transactions and SQLite `ON CONFLICT(...) DO UPDATE` upserts for positions and accounts. This prevents race conditions between simultaneous signal updates.
 
 ---

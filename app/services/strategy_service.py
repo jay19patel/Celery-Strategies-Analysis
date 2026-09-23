@@ -68,15 +68,17 @@ class StrategyService:
                 except (json.JSONDecodeError, TypeError):
                     open_pos = None
 
-            results.append({
-                "strategy_name": acc["strategy_name"],
-                "symbol": acc["symbol"],
-                "capital": round(cap, 2),
-                "return_pct": round(ret_pct, 2),
-                "total_trades": int(acc["total_trades"]),
-                "win_rate": round(float(acc["win_rate"]), 2),
-                "open_position": open_pos,
-            })
+            results.append(
+                {
+                    "strategy_name": acc["strategy_name"],
+                    "symbol": acc["symbol"],
+                    "capital": round(cap, 2),
+                    "return_pct": round(ret_pct, 2),
+                    "total_trades": int(acc["total_trades"]),
+                    "win_rate": round(float(acc["win_rate"]), 2),
+                    "open_position": open_pos,
+                }
+            )
 
         if not results:
             # Provide initial registered strategy matrix if no trades recorded yet
@@ -84,15 +86,17 @@ class StrategyService:
             default_strats = ["CombinedPortfolioStrategy", "MotherCandleStrategy"]
             for s_name in default_strats:
                 for sym in default_symbols:
-                    results.append({
-                        "strategy_name": s_name,
-                        "symbol": sym,
-                        "capital": 100.0,
-                        "return_pct": 0.0,
-                        "total_trades": 0,
-                        "win_rate": 0.0,
-                        "open_position": None,
-                    })
+                    results.append(
+                        {
+                            "strategy_name": s_name,
+                            "symbol": sym,
+                            "capital": 100.0,
+                            "return_pct": 0.0,
+                            "total_trades": 0,
+                            "win_rate": 0.0,
+                            "open_position": None,
+                        }
+                    )
 
         return results
 
@@ -203,10 +207,11 @@ class StrategyService:
             )
             paper_orders_count = paper_row["cnt"] if paper_row else 0
 
-            # Count real orders created (if live_orders table has records)
+            # Live execution attempts are durable audit events in the signal log.
             real_row = self.db.execute_one(
-                "SELECT COUNT(*) as cnt FROM live_orders WHERE raw_data LIKE ?;",
-                (f"%{s_id}%",),
+                """SELECT COUNT(*) as cnt FROM signals_log
+                   WHERE (strategy_name = ? OR strategy_name = ?) AND mode = 'LIVE';""",
+                (s_id, name),
             )
             real_orders_count = real_row["cnt"] if real_row else 0
 
@@ -220,7 +225,11 @@ class StrategyService:
             open_pos = None
             if acc_row and acc_row.get("open_position"):
                 try:
-                    open_pos = json.loads(acc_row["open_position"]) if isinstance(acc_row["open_position"], str) else acc_row["open_position"]
+                    open_pos = (
+                        json.loads(acc_row["open_position"])
+                        if isinstance(acc_row["open_position"], str)
+                        else acc_row["open_position"]
+                    )
                 except Exception:
                     open_pos = None
 
@@ -228,24 +237,64 @@ class StrategyService:
             raw_syms = cfg.get("symbols", "BTC-USD,ETH-USD,SOL-USD")
             symbols_list = [s.strip() for s in raw_syms.split(",") if s.strip()]
 
-            results.append({
-                "strategy_id": s_id,
-                "name": name,
-                "timeframe": cfg.get("timeframe", "1h"),
-                "symbols": symbols_list,
-                "is_paper_enabled": bool(cfg.get("is_paper_enabled", 1)),
-                "is_real_enabled": bool(cfg.get("is_real_enabled", 0)),
-                "total_signals": total_signals,
-                "paper_orders_count": paper_orders_count,
-                "real_orders_count": real_orders_count,
-                "capital": round(capital, 2),
-                "win_rate": round(win_rate, 2),
-                "return_pct": round(((capital - 100.0) / 100.0) * 100.0, 2),
-                "open_position": open_pos,
-                "updated_at": cfg.get("updated_at", ""),
-            })
+            results.append(
+                {
+                    "strategy_id": s_id,
+                    "name": name,
+                    "timeframe": cfg.get("timeframe", "1h"),
+                    "symbols": symbols_list,
+                    "is_paper_enabled": bool(cfg.get("is_paper_enabled", 1)),
+                    "is_real_enabled": bool(cfg.get("is_real_enabled", 0)),
+                    "total_signals": total_signals,
+                    "paper_orders_count": paper_orders_count,
+                    "real_orders_count": real_orders_count,
+                    "capital": round(capital, 2),
+                    "win_rate": round(win_rate, 2),
+                    "return_pct": round(((capital - 100.0) / 100.0) * 100.0, 2),
+                    "open_position": open_pos,
+                    "updated_at": cfg.get("updated_at", ""),
+                }
+            )
 
         return results
+
+    def get_strategy_cards(self) -> list[dict[str, Any]]:
+        """Expand strategy definitions into one dashboard card per configured symbol."""
+        cards: list[dict[str, Any]] = []
+        for strategy in self.get_strategies_detailed():
+            strategy_id = strategy["strategy_id"]
+            strategy_name = strategy["name"]
+            for symbol in strategy.get("symbols") or ["BTC-USD"]:
+                account = self.db.execute_one(
+                    """SELECT capital, total_trades, win_rate, open_position
+                       FROM broker_accounts
+                       WHERE (strategy_name = ? OR strategy_name = ?) AND symbol = ?
+                       ORDER BY total_trades DESC
+                       LIMIT 1;""",
+                    (strategy_id, strategy_name, symbol),
+                )
+                pnl_row = self.db.execute_one(
+                    """SELECT COALESCE(SUM(pnl), 0) AS pnl
+                       FROM broker_trades
+                       WHERE (strategy_name = ? OR strategy_name = ?) AND symbol = ?;""",
+                    (strategy_id, strategy_name, symbol),
+                )
+                cards.append(
+                    {
+                        "id": f"{strategy_id}_{symbol.replace('-', '_')}",
+                        "strategy_id": strategy_id,
+                        "name": strategy_name,
+                        "symbol": symbol,
+                        "interval": strategy.get("timeframe", "1m"),
+                        "category": "MOMENTUM",
+                        "paper_enabled": strategy.get("is_paper_enabled", True),
+                        "total_trades": int(account.get("total_trades", 0)) if account else 0,
+                        "win_rate": float(account.get("win_rate", 0.0)) if account else 0.0,
+                        "pnl": float(pnl_row.get("pnl", 0.0)) if pnl_row else 0.0,
+                        "open_position": account.get("open_position") if account else None,
+                    }
+                )
+        return cards
 
     def toggle_strategy_execution(
         self,
@@ -264,7 +313,7 @@ class StrategyService:
             raise ValueError(f"Strategy '{strategy_id}' not found in configuration.")
 
         paper_val = int(is_paper_enabled) if is_paper_enabled is not None else cfg["is_paper_enabled"]
-        real_val = int(is_real_enabled) if is_real_enabled is not None else cfg["is_real_enabled"]
+        real_val = 0
         now_str = datetime.now(UTC).isoformat()
 
         sql = """

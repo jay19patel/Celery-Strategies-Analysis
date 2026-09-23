@@ -46,7 +46,7 @@ class ZeroMQEventBus:
                 self._pub_socket = self._ctx.socket(zmq.PUB)
                 self._pub_socket.bind(f"tcp://127.0.0.1:{self.telemetry_port}")
                 self._is_initialized = True
-                logger.info("⚡ ZeroMQ Telemetry EventBus publisher bound to port %s", self.telemetry_port)
+                logger.info("zeromq_publisher_bound port=%s", self.telemetry_port)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Could not bind ZeroMQ publisher on port %s: %s", self.telemetry_port, exc)
                 self._pub_socket = None
