@@ -87,8 +87,8 @@
         <td class="font-mono">${esc(p.strategy || "—")}</td>
         <td class="muted">${p.opened_at ? duration(Date.now() / 1000 - p.opened_at) : "—"}</td>
         <td class="r space-x-1">
-          ${broker === "paper" ? `<button class="btn btn-sm" data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}" data-entry="${p.entry_price}" data-side="${esc(p.side)}"><i data-lucide="pencil"></i>SL/TP</button>` : ""}
-          <button class="btn btn-sm btn-danger" data-close="${esc(p.symbol)}"><i data-lucide="x"></i>Close</button>
+          ${broker === "paper" ? `<button class="btn btn-sm" data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}" data-entry="${p.entry_price}" data-side="${esc(p.side)}"><i data-lucide="pencil"></i>SL/TP</button>
+          <button class="btn btn-sm btn-danger" data-close="${esc(p.symbol)}"><i data-lucide="x"></i>Close</button>` : ""}
         </td></tr>`, `No open ${broker} positions`, 13);
       TB.rows("legs", legs, (o) => `<tr>
         <td class="font-semibold">${esc(o.symbol)}</td><td><span class="badge">${esc(o.type)}</span></td><td>${side(o.side)}</td>
@@ -106,8 +106,8 @@
   function bind() {
     document.querySelectorAll("[data-close]").forEach((b) => b.onclick = async () => {
       const symbol = b.dataset.close;
-      if (!await TB.ask({ title: `Close ${symbol}?`, body: `Market-close the ${esc(symbol)} position on <b>${broker}</b>.`, ok: "Close position", danger: true })) return;
-      try { await TB.post(`/api/positions/${broker}/${encodeURIComponent(symbol)}/close`); TB.toast(`${symbol} closed`, "ok"); } catch (err) { TB.toast(err.message, "error"); }
+      if (!await TB.ask({ title: `Close ${symbol}?`, body: `Market-close the ${esc(symbol)} position on <b>all active brokers</b>.`, ok: "Close position", danger: true })) return;
+      try { await TB.post(`/api/positions/all/${encodeURIComponent(symbol)}/close`); TB.toast(`${symbol} closed`, "ok"); } catch (err) { TB.toast(err.message, "error"); }
       load();
     });
     document.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
@@ -126,25 +126,27 @@
       slPrice.value = currentSl;
       tpPrice.value = currentTp;
       
+      const isLong = side === 'buy' || side === 'long';
+
       const updatePcts = () => {
          if (slPrice.value) {
-            let diff = side === 'buy' ? entry - slPrice.value : slPrice.value - entry;
+            let diff = isLong ? entry - slPrice.value : slPrice.value - entry;
             slPct.value = ((diff / entry) * 100).toFixed(2);
          } else { slPct.value = ""; }
          if (tpPrice.value) {
-            let diff = side === 'buy' ? tpPrice.value - entry : entry - tpPrice.value;
+            let diff = isLong ? tpPrice.value - entry : entry - tpPrice.value;
             tpPct.value = ((diff / entry) * 100).toFixed(2);
          } else { tpPct.value = ""; }
       };
       
       const updatePrices = (isSl) => {
          if (isSl && slPct.value) {
-            let pct = parseFloat(slPct.value) / 100;
-            slPrice.value = side === 'buy' ? entry * (1 - pct) : entry * (1 + pct);
+            let pct = Math.abs(parseFloat(slPct.value)) / 100;
+            slPrice.value = isLong ? entry * (1 - pct) : entry * (1 + pct);
          }
          if (!isSl && tpPct.value) {
-            let pct = parseFloat(tpPct.value) / 100;
-            tpPrice.value = side === 'buy' ? entry * (1 + pct) : entry * (1 - pct);
+            let pct = Math.abs(parseFloat(tpPct.value)) / 100;
+            tpPrice.value = isLong ? entry * (1 + pct) : entry * (1 - pct);
          }
       };
 
@@ -163,7 +165,7 @@
          close();
          const sl = slPrice.value ? Number(slPrice.value) : 0;
          const tp = tpPrice.value ? Number(tpPrice.value) : 0;
-         try { await TB.post(`/api/paper/positions/${encodeURIComponent(symbol)}/protection`, { stop_loss: sl, take_profit: tp }); TB.toast("Protection updated", "ok"); } catch (err) { TB.toast(err.message, "error"); }
+         try { await TB.post(`/api/positions/all/${encodeURIComponent(symbol)}/protection`, { stop_loss: sl, take_profit: tp }); TB.toast("Protection updated on all accounts", "ok"); } catch (err) { TB.toast(err.message, "error"); }
          load();
       };
     });

@@ -142,13 +142,29 @@ class Api:
         return await self.system.close_all()
 
     async def close_position(self, broker: str, symbol: str) -> dict[str, Any]:
+        if broker == "all":
+            closed = []
+            for name, b in self.system.active.items():
+                try:
+                    await self._call(b.close_position(symbol))
+                    closed.append(name)
+                except BrokerError:
+                    pass
+            return {"closed": closed}
         return await self._call(self._broker(broker).close_position(symbol))
 
     async def protection(self, symbol: str, stop_loss: float, take_profit: float) -> dict[str, Any]:
-        try:
-            self.system.paper.update_protection(symbol, stop_loss, take_profit)
-        except BrokerError as exc:
-            raise ApiError(400, str(exc)) from exc
+        for name, broker in self.system.active.items():
+            if name == "paper":
+                try:
+                    self.system.paper.update_protection(symbol, stop_loss, take_profit)
+                except BrokerError:
+                    pass
+            elif hasattr(broker, "update_protection"):
+                try:
+                    await self._call(broker.update_protection(symbol, stop_loss, take_profit))
+                except BrokerError:
+                    pass
         return {"symbol": symbol, "stop_loss": stop_loss, "take_profit": take_profit}
 
     async def paper_reset(self) -> dict[str, Any]:

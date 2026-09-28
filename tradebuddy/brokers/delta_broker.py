@@ -92,6 +92,9 @@ class DeltaBroker:
             for o in await self.client.open_orders()
         ]
 
+    async def update_protection(self, symbol: str, stop_loss: float, take_profit: float) -> None:
+        await self.client.update_position_protection(symbol, stop_loss=stop_loss or None, take_profit=take_profit or None)
+
     async def close_position(self, symbol: str) -> dict[str, Any]:
         position = next((p for p in await self.positions() if p.symbol == symbol), None)
         if position is None:

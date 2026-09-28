@@ -185,7 +185,7 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
     async def close_position(broker: str, symbol: str) -> dict:
         return await call("close_position", broker=broker, symbol=symbol)
 
-    @app.post("/api/paper/positions/{symbol}/protection", dependencies=[Depends(protected)])
+    @app.post("/api/positions/all/{symbol}/protection", dependencies=[Depends(protected)])
     async def protection(symbol: str, body: Protection) -> dict:
         return await call("protection", symbol=symbol, stop_loss=body.stop_loss, take_profit=body.take_profit)
 

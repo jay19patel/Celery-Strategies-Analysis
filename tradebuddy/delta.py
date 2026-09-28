@@ -200,6 +200,58 @@ class DeltaClient:
             body["bracket_stop_trigger_method"] = "mark_price"
         return await self.request("POST", "/v2/orders", body=body, auth=True)
 
+    async def update_position_protection(
+        self,
+        symbol: str,
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
+    ) -> dict[str, Any]:
+        """Update Stop Loss and Take Profit by placing new reduce-only orders."""
+        position = next((p for p in await self.positions() if p.get("product_symbol") == symbol or (p.get("product") or {}).get("symbol") == symbol), None)
+        if not position:
+            return {}
+            
+        size = float(position.get("size", 0))
+        if not size:
+            return {}
+            
+        side = "sell" if size > 0 else "buy"
+        product = await self.product(symbol)
+        tick = float(product.get("tick_size") or 0.5)
+        
+        # 1. Cancel existing stop/TP orders for this product
+        await self.request("DELETE", "/v2/orders/all", body={"product_id": product["id"], "cancel_stop_orders": True}, auth=True)
+        
+        # 2. Place new stop loss order
+        if stop_loss:
+            body = {
+                "product_id": product["id"],
+                "size": int(abs(size)),
+                "side": side,
+                "order_type": "market_order",
+                "stop_order_type": "stop_loss_order",
+                "stop_price": round_to_tick(stop_loss, tick),
+                "stop_trigger_method": "mark_price",
+                "reduce_only": "true"
+            }
+            await self.request("POST", "/v2/orders", body=body, auth=True)
+            
+        # 3. Place new take profit order
+        if take_profit:
+            body = {
+                "product_id": product["id"],
+                "size": int(abs(size)),
+                "side": side,
+                "order_type": "market_order",
+                "stop_order_type": "take_profit_order",
+                "stop_price": round_to_tick(take_profit, tick),
+                "stop_trigger_method": "mark_price",
+                "reduce_only": "true"
+            }
+            await self.request("POST", "/v2/orders", body=body, auth=True)
+            
+        return {"updated": True}
+
     async def order_by_client_id(self, client_order_id: str) -> dict[str, Any] | None:
         """The order, or None when the exchange has never seen this id."""
         try:
