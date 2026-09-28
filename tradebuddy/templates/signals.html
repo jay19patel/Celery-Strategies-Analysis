@@ -18,7 +18,7 @@
   </div>
   <div class="scroll max-h-[70vh]">
     <table class="tbl">
-      <thead><tr><th>Time</th><th>Outcome</th><th>Strategy</th><th>Symbol</th><th>Side</th><th>Bar</th><th>Detail</th></tr></thead>
+      <thead><tr><th>Time</th><th>Outcome</th><th>Strategy</th><th>Symbol</th><th>Side</th><th>Broker</th><th>Bar</th><th>Detail</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
@@ -38,13 +38,14 @@
     <td class="font-mono">${esc(e.strategy)}</td>
     <td>${esc(e.symbol)}</td>
     <td>${e.side ? side(e.side) : "—"}</td>
+    <td>${e.broker ? `<span class="badge">${esc(e.broker)}</span>` : e.type === "TradeSkipped" ? '<span class="muted">all</span>' : "—"}</td>
     <td class="font-mono text-slate-500">${e.bar_time ? time(e.bar_time) : "—"}</td>
     <td class="wrap ${e.type === "StrategyError" ? "down" : "text-slate-600"}">${esc(e.reason || e.error || "")}</td></tr>`;
 
   function render() {
     const f = { strategy: $("fStrategy").value, symbol: $("fSymbol").value, type: $("fType").value };
     const list = all.filter((e) => (!f.strategy || e.strategy === f.strategy) && (!f.symbol || e.symbol === f.symbol) && (!f.type || e.type === f.type));
-    TB.rows("rows", list, row, "No signals match. Strategies emit signals when their candle closes.", 7);
+    TB.rows("rows", list, row, "No signals match. Strategies emit signals when their candle closes.", 8);
 
     const count = (t, sideName) => all.filter((e) => e.type === t && (!sideName || e.side === sideName)).length;
     const card = (label, text, cls = "") => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}">${text}</div></div>`;

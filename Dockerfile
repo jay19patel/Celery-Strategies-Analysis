@@ -15,6 +15,5 @@ RUN uv venv /opt/venv && uv sync --active --frozen --no-cache --no-dev
 COPY tradebuddy /app/tradebuddy
 
 EXPOSE 8080
-# HOST=0.0.0.0 inside a container needs API_TOKEN; publish the port on 127.0.0.1 only.
-ENV HOST=0.0.0.0
-CMD ["python", "-m", "tradebuddy"]
+# docker-compose passes the role: feed, engine, web or worker.
+ENTRYPOINT ["python", "-m", "tradebuddy"]

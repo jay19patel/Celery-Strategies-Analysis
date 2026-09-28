@@ -27,20 +27,28 @@ from tradebuddy.stream import PriceBook
 
 log = logging.getLogger(__name__)
 
-TRADING_KEY = "trading"
+
+def trading_key(broker: str) -> str:
+    """Per-broker trading switch in the header."""
+    return f"trading:{broker}"
+
+
+# Paper trades by default; a broker that moves real orders starts off.
+TRADING_DEFAULT = {"paper": True, "delta": False}
 
 # Exchange order states -> our order status.
 STATUS = {"open": "open", "pending": "open", "closed": "filled", "filled": "filled", "cancelled": "cancelled", "canceled": "cancelled", "rejected": "rejected"}
 
 
-def client_order_id(strategy: str, symbol: str, bar_time: int) -> str:
-    """Same strategy, symbol and bar -> same id, so one bar can never open two orders."""
-    digest = hashlib.sha256(f"{strategy}|{symbol}|{bar_time}".encode()).hexdigest()
+def client_order_id(broker: str, strategy: str, symbol: str, bar_time: int) -> str:
+    """Same broker, strategy, symbol and bar -> same id, so one bar can never open two orders on one broker."""
+    digest = hashlib.sha256(f"{broker}|{strategy}|{symbol}|{bar_time}".encode()).hexdigest()
     return f"tb{digest[:30]}"  # Delta allows 32 characters
 
 
 class Trader:
-    """Decides whether a signal becomes an order on the active broker. Every refusal is published with its reason."""
+    """Fans each signal out to every active broker and decides, per broker, whether it becomes an order.
+    Every refusal is published with its reason."""
 
     def __init__(
         self, bus: EventBus, store: Store, brokers: dict[str, Broker], prices: PriceBook, settings: Callable[[], Settings]
@@ -53,10 +61,19 @@ class Trader:
 
     async def on_signal(self, e: SignalGenerated) -> None:
         s = self.settings()
-        broker = self.brokers[s.broker]
+        if not self.store.enabled(strategy_key(e.strategy)):
+            self._skip(e, "", "strategy is switched off")
+            return
+        if not self.store.enabled(pair_key(e.strategy, e.symbol)):
+            self._skip(e, "", f"{e.symbol} is switched off for this strategy")
+            return
+        for name in s.active_brokers:
+            await self._route(e, self.brokers[name], s)
+
+    async def _route(self, e: SignalGenerated, broker: Broker, s: Settings) -> None:
         reason = await self._blocked(e, broker)
         if reason:
-            self.bus.publish(TradeSkipped(strategy=e.strategy, symbol=e.symbol, side=e.side, reason=reason))
+            self._skip(e, broker.name, reason)
             return
 
         price = self.prices.price(e.symbol)
@@ -65,7 +82,7 @@ class Trader:
         tp_pct = e.take_profit_pct or s.take_profit_pct
         direction = 1 if e.side == "buy" else -1
         order = {
-            "client_order_id": client_order_id(e.strategy, e.symbol, e.bar_time),
+            "client_order_id": client_order_id(broker.name, e.strategy, e.symbol, e.bar_time),
             "broker": broker.name,
             "strategy": e.strategy,
             "symbol": e.symbol,
@@ -76,17 +93,13 @@ class Trader:
             "take_profit": price * (1 + direction * tp_pct / 100),
         }
         if not self.store.reserve_order(**order):
-            self.bus.publish(TradeSkipped(strategy=e.strategy, symbol=e.symbol, side=e.side, reason="an order for this bar was already sent"))
+            self._skip(e, broker.name, "an order for this bar was already sent")
             return
         self.bus.publish(OrderRequested(**order))
 
     async def _blocked(self, e: SignalGenerated, broker: Broker) -> str:
-        if not self.store.enabled(TRADING_KEY, default=False):
+        if not self.store.enabled(trading_key(broker.name), default=TRADING_DEFAULT[broker.name]):
             return "trading is switched off"
-        if not self.store.enabled(strategy_key(e.strategy)):
-            return "strategy is switched off"
-        if not self.store.enabled(pair_key(e.strategy, e.symbol)):
-            return f"{e.symbol} is switched off for this strategy"
         if reason := broker.not_ready():
             return reason
         if self.prices.price(e.symbol) is None:
@@ -96,10 +109,13 @@ class Trader:
         try:
             positions = await broker.positions()
         except BrokerError as exc:
-            return f"could not read {broker.name} positions: {exc}"
+            return f"could not read positions: {exc}"
         if any(p.symbol == e.symbol for p in positions):
-            return f"a {e.symbol} position is already open on {broker.name}"
+            return f"a {e.symbol} position is already open"
         return ""
+
+    def _skip(self, e: SignalGenerated, broker: str, reason: str) -> None:
+        self.bus.publish(TradeSkipped(strategy=e.strategy, symbol=e.symbol, side=e.side, broker=broker, reason=reason))
 
 
 class Executor:

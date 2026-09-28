@@ -131,27 +131,41 @@
 
   // ── header ──────────────────────────────────────────────────────────────
   let header = null;
-  function brokerLabel(h) {
-    if (h.broker === "paper") return { text: `PAPER · ${h.data_env.toUpperCase()} PRICES`, cls: "badge-blue" };
-    if (h.is_real_money) return { text: "DELTA · LIVE MONEY", cls: "badge-solid-red" };
+  function brokerLabel(b) {
+    if (b.name === "paper") return { text: `PAPER · ${b.env.toUpperCase()} PRICES`, cls: "badge-blue" };
+    if (b.real_money) return { text: "DELTA · LIVE MONEY", cls: "badge-solid-red" };
     return { text: "DELTA · DEMO", cls: "badge-amber" };
   }
   function renderHeader(h) {
     header = h;
-    const b = brokerLabel(h);
-    $("brokerBadge").textContent = b.text;
-    $("brokerBadge").className = `badge ${b.cls}`;
-    $("brokerWarn").classList.toggle("hidden", !h.broker_ready);
-    $("brokerWarn").textContent = h.broker_ready;
-    $("tradingSwitch").checked = h.trading;
-    $("tradingText").textContent = h.trading ? "Trading ON" : "Trading OFF";
-    $("tradingText").className = `text-xs font-semibold w-20 ${h.trading ? "text-emerald-600" : "text-slate-500"}`;
+    $("brokerSwitches").innerHTML = h.brokers.map((b) => {
+      const label = brokerLabel(b);
+      const warn = b.not_ready ? `<i data-lucide="triangle-alert" class="w-3.5 h-3.5 text-amber-500"></i>` : "";
+      return `<div class="flex items-center gap-2 border border-slate-200 rounded-lg pl-2 pr-2.5 py-1 bg-white" title="${esc(b.not_ready || `Trading on ${b.name}`)}">
+        <span class="badge ${label.cls}">${esc(label.text)}</span>${warn}
+        <label class="switch sm"><input type="checkbox" data-broker-switch="${esc(b.name)}" ${b.trading ? "checked" : ""}><span class="track"></span></label>
+        <span class="text-[11px] font-semibold w-6 ${b.trading ? "text-emerald-600" : "text-slate-400"}">${b.trading ? "ON" : "OFF"}</span>
+      </div>`;
+    }).join("");
+    $("brokerSwitches").querySelectorAll("input[data-broker-switch]").forEach((el) => (el.onchange = () => switchBroker(el)));
     setDot("sbFeed", h.feed_connected);
     $("sbFeedText").textContent = h.feed_connected ? `Market stream · ${h.data_env}` : "Market stream down";
+    const delta = h.brokers.some((b) => b.name === "delta");
     setDot("sbPrivate", h.feed_authenticated);
-    if (h.broker !== "delta") $("sbPrivate").className = "dot";
-    $("sbPrivateText").textContent = h.broker === "delta" ? (h.feed_authenticated ? "Private channels" : "Private channels off") : "Private channels (Delta only)";
+    if (!delta) $("sbPrivate").className = "dot";
+    $("sbPrivateText").textContent = delta ? (h.feed_authenticated ? "Delta private channels" : "Delta private channels off") : "Delta not active";
     renderTicker(h.prices);
+    icons();
+  }
+  async function switchBroker(el) {
+    const name = el.dataset.brokerSwitch, enabled = el.checked;
+    const b = header?.brokers.find((x) => x.name === name);
+    if (enabled && b?.real_money) {
+      const ok = await ask({ title: "Enable REAL-MONEY trading?", body: "Signals will place real orders on your Delta live account.", ok: "Enable live trading", danger: true });
+      if (!ok) { el.checked = false; return; }
+    }
+    try { await post("/api/toggles", { key: `trading:${name}`, enabled }); } catch (err) { el.checked = !enabled; toast(err.message, "error"); }
+    loadHeader();
   }
   const lastPrice = {};
   function renderTicker(prices) {
@@ -168,17 +182,8 @@
   }
 
   function initChrome() {
-    $("tradingSwitch").onchange = async (ev) => {
-      const enabled = ev.target.checked;
-      if (enabled && header?.is_real_money) {
-        const ok = await ask({ title: "Enable REAL-MONEY trading?", body: "Signals will place real orders on your Delta live account.", ok: "Enable live trading", danger: true });
-        if (!ok) { ev.target.checked = false; return; }
-      }
-      try { await post("/api/toggles", { key: "trading", enabled }); } catch (err) { ev.target.checked = !enabled; toast(err.message, "error"); }
-      loadHeader();
-    };
     $("closeAllBtn").onclick = async () => {
-      const ok = await ask({ title: "Close everything?", body: `Trading is switched off, then every open position on the <b>${esc(header?.broker ?? "active")}</b> broker is closed at market.`, ok: "Close all", danger: true });
+      const ok = await ask({ title: "Close everything?", body: `Trading is switched off on every broker, then every open position on <b>${esc((header?.brokers || []).map((b) => b.name).join(" and ") || "the active brokers")}</b> is closed at market.`, ok: "Close all", danger: true });
       if (!ok) return;
       try { const r = await post("/api/close-all"); toast(`Closed ${r.closed.length} position(s)${r.errors.length ? `, ${r.errors.length} error(s)` : ""}`, r.errors.length ? "error" : "ok"); }
       catch (err) { toast(err.message, "error"); }
@@ -195,7 +200,7 @@
       header.prices[e.symbol] = { price: e.price, age_seconds: 0, fresh: true };
       renderTicker(header.prices);
     });
-    on("SettingsChanged", (e) => { if (e.trading_stopped) toast("Broker settings changed — trading switched off"); });
+    on("SettingsChanged", (e) => { if (e.trading_stopped) toast("Delta settings changed — Delta trading switched off"); });
     on("OrderFailed", (e) => toast(`Order failed: ${e.error}`, "error"));
     on("PositionClosed", (e) => toast(`${e.symbol} closed (${e.reason}) ${signed(e.pnl, 4)}`, e.pnl >= 0 ? "ok" : "error"));
   }

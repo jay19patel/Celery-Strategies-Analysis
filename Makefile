@@ -1,14 +1,20 @@
-.PHONY: help install run test lint fmt check token clean
+.PHONY: help up down logs install test lint fmt check token clean
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 
-install:  ## Install dependencies including dev extras
-	uv sync --extra dev
+up:  ## Start everything in the background (same as: docker compose up -d)
+	docker compose up -d
 
-run:  ## Start everything: http://127.0.0.1:8080
-	uv run python -m tradebuddy
+down:  ## Stop everything
+	docker compose down
+
+logs:  ## Follow logs
+	docker compose logs -f --tail=100
+
+install:  ## Local dev dependencies (tests, lint)
+	uv sync --extra dev
 
 test:  ## Run the tests
 	uv run pytest
@@ -22,7 +28,7 @@ fmt:  ## Auto-fix lint and format
 
 check: lint test  ## Everything CI runs
 
-token:  ## Generate an API_TOKEN
+token:  ## Generate an API_TOKEN for .env
 	@uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 clean:  ## Remove caches

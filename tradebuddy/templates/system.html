@@ -2,6 +2,19 @@
 {% block content %}
 <div id="kpis" class="grid grid-cols-2 md:grid-cols-5 gap-3"></div>
 
+<div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
+  <section class="card xl:col-span-3 min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="boxes"></i>Processes <span id="modeLabel" class="card-sub"></span></div></div>
+    <div class="scroll">
+      <table class="tbl"><thead><tr><th>Role</th><th>Host</th><th class="r">PID</th><th class="r">CPU</th><th class="r">Memory</th><th class="r">Loop lag</th><th class="r">Tasks</th><th>Uptime</th><th>Seen</th></tr></thead><tbody id="procs"></tbody></table>
+    </div>
+  </section>
+  <section class="card xl:col-span-2">
+    <div class="card-head"><div class="card-title"><i data-lucide="cpu"></i>Strategy evaluation <span id="evalMode" class="badge"></span></div></div>
+    <table class="tbl"><tbody id="evaluator"></tbody></table>
+  </section>
+</div>
+
 <section class="card">
   <div class="card-head"><div class="card-title"><i data-lucide="workflow"></i>Event flow</div></div>
   <div class="card-body overflow-x-auto">
@@ -44,7 +57,7 @@
   const { $, esc, num, ago, duration } = TB;
   let prev = null, prevAt = 0;
   const STEPS = [
-    ["DeltaStream", "Tick · CandleClosed"], ["StrategyRunner.on_candle_closed", "SignalGenerated"], ["Trader.on_signal", "OrderRequested · TradeSkipped"],
+    ["DeltaStream", "Tick · CandleClosed"], ["StrategyRunner.on_candle_closed", "jobs → evaluator"], ["StrategyRunner.on_evaluated", "SignalGenerated"], ["Trader.on_signal", "OrderRequested · TradeSkipped"],
     ["Executor.on_order_requested", "OrderPlaced · OrderFailed · OrderUnknown"], ["PaperBroker.on_tick", "PositionClosed"],
   ];
   const kpi = (label, value, hint = "", cls = "") => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}">${value}</div><div class="hint">${hint}</div></div>`;
@@ -66,6 +79,22 @@
       kpi("Dashboards", m.dashboard_clients, "live connections"),
       kpi("Orders", num(Object.values(m.orders).reduce((a, v) => a + v, 0), 0), Object.entries(m.orders).map(([k, v]) => `${k} ${v}`).join(" · ") || "none yet"),
     ].join("");
+
+    const ev = m.evaluator || {};
+    $("evalMode").textContent = ev.mode === "celery" ? "Celery workers" : "inline";
+    $("evalMode").className = `badge ${ev.mode === "celery" ? "badge-green" : "badge-blue"}`;
+    $("modeLabel").textContent = ev.mode === "celery" ? "distributed: feed · engine · web · Celery, joined by ZeroMQ" : "single process";
+    const evRows = ev.mode === "celery"
+      ? [["Broker", esc(ev.broker)], ["Workers online", ev.workers.length ? ev.workers.map(esc).join("<br>") : '<span class="down">none — start one: make worker</span>'],
+         ["Jobs dispatched", num(ev.submitted, 0)], ["Dispatch failures", `<span class="${ev.failed_to_submit ? "down" : ""}">${num(ev.failed_to_submit, 0)}</span>`],
+         ["Last checked", ago(ev.workers_checked_at)], ["Last error", `<span class="down">${esc(ev.last_error || "—")}</span>`]]
+      : [["Mode", "on the engine's event loop (no Celery, no Redis)"], ["Jobs run", num(ev.submitted, 0)], ["In flight", num(ev.in_flight, 0)]];
+    $("evaluator").innerHTML = evRows.map(([k, v]) => `<tr><td class="muted w-36">${k}</td><td class="font-mono wrap">${v}</td></tr>`).join("");
+    TB.rows("procs", m.processes || [], (p) => `<tr>
+      <td><span class="badge badge-blue">${esc(p.role)}</span></td><td class="font-mono">${esc(p.host)}</td><td class="r font-mono">${p.pid}</td>
+      <td class="r font-mono">${num(p.process_cpu_pct, 1)}%</td><td class="r font-mono">${num(p.process_memory_mb, 1)} MB</td>
+      <td class="r font-mono ${p.loop_lag_ms > 100 ? "down" : ""}">${num(p.loop_lag_ms, 1)} ms</td><td class="r font-mono">${p.asyncio_tasks}</td>
+      <td class="muted">${duration(p.uptime_seconds)}</td><td class="muted">${ago(p.at)}</td></tr>`, "", 9);
 
     const byName = Object.fromEntries(m.bus.workers.map((w) => [w.name, w]));
     $("flow").innerHTML = STEPS.map(([name, out], i) => {

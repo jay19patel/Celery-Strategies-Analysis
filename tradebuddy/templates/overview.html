@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>{% endblock %}
 {% block content %}
-<div id="kpis" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3"></div>
+<div id="kpis" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3"></div>
 
-<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+<div class="grid grid-cols-1 {{ 'xl:grid-cols-3' if 'paper' in active_brokers else 'xl:grid-cols-1' }} gap-5">
+  {% if "paper" in active_brokers %}
   <section class="card xl:col-span-2">
     <div class="card-head">
       <div class="card-title"><i data-lucide="line-chart"></i>Paper equity <span class="card-sub">closed trades</span></div>
@@ -11,6 +12,7 @@
     </div>
     <div class="card-body"><div class="h-64"><canvas id="equityChart"></canvas></div></div>
   </section>
+  {% endif %}
 
   <section class="card">
     <div class="card-head">
@@ -54,24 +56,31 @@
     `<div class="card kpi"><div class="label"><i data-lucide="${icon}"></i>${label}</div><div class="value ${cls}">${value}</div><div class="hint">${hint}</div></div>`;
 
   function activityLine(e) {
+    const where = e.broker ? `<span class="badge">${esc(e.broker)}</span>` : "";
     const detail = e.reason || e.error || (e.type === "PositionClosed" ? `${e.reason} · ${signed(e.pnl, 4)}` : e.status ? `${e.status} ${e.order_id || ""}` : "");
     return `<div class="px-4 py-2.5 text-xs flex gap-3 items-start">
       <span class="font-mono text-slate-400 w-16 shrink-0">${time(e.ts)}</span>
       <div class="min-w-0 space-y-1">
-        <div class="flex items-center gap-2 flex-wrap">${eventBadge(e.type)}<span class="font-mono">${esc(e.strategy || "")}</span><span>${esc(e.symbol || "")}</span>${e.side ? side(e.side) : ""}</div>
+        <div class="flex items-center gap-2 flex-wrap">${eventBadge(e.type)}<span class="font-mono">${esc(e.strategy || "")}</span><span>${esc(e.symbol || "")}</span>${e.side ? side(e.side) : ""}${where}</div>
         <div class="text-slate-500 break-words">${esc(detail)}</div>
       </div></div>`;
   }
 
   async function load() {
     const o = await TB.get("/api/overview");
-    const a = o.account, c = o.counts_24h, p = o.paper.overall;
+    const c = o.counts_24h, p = o.paper.overall;
     const open = Object.values(o.header.prices).length;
+    const brokerKpis = o.accounts.flatMap(({ broker, account: a, error }) => {
+      const name = broker === "paper" ? "Paper" : `Delta ${o.header.delta_env}`;
+      if (!a) return [kpi(`${name} equity`, "wallet", "—", error, "down")];
+      return [
+        kpi(`${name} equity`, "wallet", money(a.equity), `available ${money(a.available)} · margin ${money(a.margin_used)}`),
+        kpi(`${name} unrealized`, "trending-up", signed(a.unrealized_pnl), a.realized_pnl === null ? "open positions" : `realized ${signed(a.realized_pnl)}`, pnlClass(a.unrealized_pnl)),
+      ];
+    });
     $("kpis").innerHTML = [
-      kpi("Equity", "wallet", a ? money(a.equity) : "—", o.header.broker.toUpperCase() + (o.account_error ? " · unavailable" : "")),
-      kpi("Unrealized P&L", "trending-up", a ? signed(a.unrealized_pnl) : "—", "open positions", a ? pnlClass(a.unrealized_pnl) : ""),
-      kpi("Available", "banknote", a ? money(a.available) : "—", a ? `margin ${money(a.margin_used)}` : ""),
-      kpi("Paper realized", "flask-conical", signed(p.pnl), `${p.trades} trades · ${p.win_rate}% win`, pnlClass(p.pnl)),
+      ...brokerKpis,
+      ...(o.accounts.some((x) => x.broker === "paper") ? [kpi("Paper win rate", "trophy", `${num(p.win_rate, 1)}%`, `${p.trades} closed trades`)] : []),
       kpi("Signals 24h", "zap", num(c.SignalGenerated, 0), `${num(c.TradeSkipped, 0)} skipped`),
       kpi("Orders 24h", "send", num(c.OrderPlaced, 0), `${num(c.OrderFailed, 0)} failed`, c.OrderFailed ? "down" : ""),
       kpi("Closed 24h", "check-circle-2", num(c.PositionClosed, 0), "positions"),
@@ -90,7 +99,7 @@
 
     $("activity").innerHTML = o.recent.length ? o.recent.map(activityLine).join("") : `<div class="p-6 text-center text-xs muted">No signals yet. Strategies run when their candle closes.</div>`;
     renderPrices(o.header.prices);
-    renderChart(o.paper.equity_curve);
+    if ($("equityChart")) renderChart(o.paper.equity_curve);
     TB.icons();
   }
 

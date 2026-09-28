@@ -3,23 +3,24 @@
 <form id="form" class="space-y-5 pb-20" autocomplete="off">
 
   <section class="card">
-    <div class="card-head"><div class="card-title"><i data-lucide="route"></i>Execution broker <span class="card-sub">where signals become orders</span></div></div>
+    <div class="card-head"><div class="card-title"><i data-lucide="route"></i>Brokers <span class="card-sub">every signal goes to each active broker; switch trading per broker in the top bar</span></div></div>
     <div class="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
       <label class="broker-card cursor-pointer border-2 rounded-xl p-4 flex gap-3" data-broker="paper">
-        <input type="radio" name="broker" value="paper" class="mt-1">
+        <input type="checkbox" name="paper_active" class="mt-1">
         <div>
           <div class="flex items-center gap-2 font-semibold text-sm"><i data-lucide="flask-conical" class="w-4 h-4 text-brand-500"></i>Paper trading</div>
-          <p class="text-xs text-slate-500 mt-1">Simulated fills at the live WebSocket price with fees, slippage and leverage. No exchange account needed; nothing leaves this machine.</p>
+          <p class="text-xs text-slate-500 mt-1">Simulated fills at the live WebSocket price with fees, slippage and leverage. Nothing leaves this machine. Trading is on by default.</p>
         </div>
       </label>
       <label class="broker-card cursor-pointer border-2 rounded-xl p-4 flex gap-3" data-broker="delta">
-        <input type="radio" name="broker" value="delta" class="mt-1">
+        <input type="checkbox" name="delta_active" class="mt-1">
         <div>
           <div class="flex items-center gap-2 font-semibold text-sm"><i data-lucide="landmark" class="w-4 h-4 text-amber-500"></i>Delta Exchange</div>
-          <p class="text-xs text-slate-500 mt-1">Real orders on your Delta account (demo or live, below), with the stop loss and take profit sent as an exchange bracket.</p>
+          <p class="text-xs text-slate-500 mt-1">Real orders on your Delta account (demo or live, below), with stop loss and take profit sent as an exchange bracket. Trading starts switched off.</p>
         </div>
       </label>
     </div>
+    <p class="px-4 pb-4 -mt-1 text-[11px] muted">Turn a broker off to hide it everywhere. At least one stays active. Run both to compare paper against Delta on the same signals.</p>
   </section>
 
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
@@ -56,12 +57,12 @@
       <div class="card-head"><div class="card-title"><i data-lucide="radio"></i>Market data</div></div>
       <div class="card-body space-y-4">
         <div>
-          <label class="field-label" for="market_data">Price feed while paper trading</label>
+          <label class="field-label" for="market_data">Price feed when Delta is not active</label>
           <select id="market_data" name="market_data" class="select w-full mt-1">
             <option value="demo">Delta demo (testnet prices)</option>
             <option value="live">Delta live (real market prices, public data only)</option>
           </select>
-          <div class="field-help">Public data only — no keys needed. When the broker is Delta, prices always come from the Delta account you trade on.</div>
+          <div class="field-help">Public data only — no keys needed. While Delta is active, every broker (paper included) is priced by the Delta account you trade on, so both see the same market.</div>
         </div>
         <div class="rounded-lg bg-slate-50 border border-slate-100 p-3 text-xs space-y-1">
           <div class="flex justify-between"><span class="muted">Prices now from</span><span id="dataEnv" class="font-mono"></span></div>
@@ -96,7 +97,7 @@
   <section class="card">
     <div class="card-head"><div class="card-title"><i data-lucide="lock"></i>Safety</div></div>
     <div class="card-body grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-600">
-      <div class="flex gap-2"><i data-lucide="power" class="w-4 h-4 text-slate-400 shrink-0"></i><span>Trading is <b>off at every start</b> and switches off whenever the broker, Delta account, keys or price feed change.</span></div>
+      <div class="flex gap-2"><i data-lucide="power" class="w-4 h-4 text-slate-400 shrink-0"></i><span>Paper trades by default. <b>Delta trading is off at every start</b> and switches off whenever the Delta account or keys change.</span></div>
       <div class="flex gap-2"><i data-lucide="triangle-alert" class="w-4 h-4 text-slate-400 shrink-0"></i><span>Switching to <b>Delta live</b> asks you to type <span class="font-mono">{{ live_phrase }}</span>.</span></div>
       <div class="flex gap-2"><i data-lucide="key" class="w-4 h-4 text-slate-400 shrink-0"></i><span id="tokenInfo"></span></div>
     </div>
@@ -122,7 +123,8 @@
   function fill(s) {
     saved = s;
     env = s.delta_env;
-    document.querySelectorAll('input[name="broker"]').forEach((r) => (r.checked = r.value === s.broker));
+    document.querySelector('input[name="paper_active"]').checked = s.paper_active;
+    document.querySelector('input[name="delta_active"]').checked = s.delta_active;
     $("market_data").value = s.market_data;
     for (const k of NUMBERS) $(k).value = s[k];
     $("delta_api_key").value = ""; $("delta_api_secret").value = "";
@@ -138,7 +140,11 @@
   }
 
   function current() {
-    const out = { broker: document.querySelector('input[name="broker"]:checked')?.value, delta_env: env, market_data: $("market_data").value };
+    const out = {
+      paper_active: document.querySelector('input[name="paper_active"]').checked,
+      delta_active: document.querySelector('input[name="delta_active"]').checked,
+      delta_env: env, market_data: $("market_data").value,
+    };
     for (const k of NUMBERS) out[k] = Number($(k).value);
     const key = $("delta_api_key").value.trim(), secret = $("delta_api_secret").value.trim();
     if (key) out.delta_api_key = key;
@@ -157,12 +163,12 @@
   function paint() {
     const c = current();
     document.querySelectorAll(".broker-card").forEach((el) => {
-      const on = el.dataset.broker === c.broker;
+      const on = c[`${el.dataset.broker}_active`];
       el.classList.toggle("border-brand-500", on); el.classList.toggle("bg-brand-50", on);
       el.classList.toggle("border-slate-200", !on);
     });
     document.querySelectorAll("#envTabs button").forEach((b) => b.classList.toggle("on", b.dataset.env === env));
-    $("envHelp").innerHTML = env === "live" ? '<span class="down font-medium">Live account: orders use real money when the broker is Delta.</span>' : "Demo account: orders go to the Delta testnet.";
+    $("envHelp").innerHTML = env === "live" ? '<span class="down font-medium">Live account: Delta orders use real money.</span>' : "Demo account: Delta orders go to the testnet.";
     $("keyHost").textContent = HOSTS[env];
     $("dirty").classList.toggle("hidden", !Object.keys(changes()).length);
   }
@@ -178,8 +184,9 @@
     if (!Object.keys(diff).length) { TB.toast("Nothing to save"); return; }
     let confirm = "";
     const next = { ...saved, ...diff };
-    if (next.broker === "delta" && next.delta_env === "live" && !saved.is_real_money) {
-      confirm = await TB.ask({ title: "Switch to REAL-MONEY trading", body: `The broker will be your <b>live</b> Delta account. Type <span class="font-mono">${esc(PHRASE)}</span> to continue.`, input: "text", placeholder: PHRASE, ok: "Confirm", danger: true });
+    if (!next.paper_active && !next.delta_active) { TB.toast("Keep at least one broker active", "error"); return; }
+    if (next.delta_active && next.delta_env === "live" && !saved.is_real_money) {
+      confirm = await TB.ask({ title: "Switch to REAL-MONEY trading", body: `Delta orders will go to your <b>live</b> account. Type <span class="font-mono">${esc(PHRASE)}</span> to continue.`, input: "text", placeholder: PHRASE, ok: "Confirm", danger: true });
       if (confirm === null) return;
     }
     $("saveBtn").disabled = true;

@@ -19,3 +19,8 @@ results/
 requirements.txt
 .env
 
+data/
+logs/
+tests/
+.pytest_cache
+.ruff_cache

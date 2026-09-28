@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import socket
 import sys
 import time
 from collections.abc import Callable
@@ -16,21 +17,26 @@ from fastapi import WebSocket
 from tradebuddy.brokers import Broker, DeltaBroker, PaperBroker
 from tradebuddy.config import Config
 from tradebuddy.delta import DeltaClient
+from tradebuddy.errors import BrokerError
 from tradebuddy.events import (
     CandleClosed,
     Event,
     EventBus,
+    FeedHeartbeat,
     OrderRequested,
     OrderUpdate,
     SettingsChanged,
     SignalGenerated,
+    StrategyEvaluated,
     Tick,
     ToggleChanged,
 )
-from tradebuddy.runner import MarketData, StrategyRunner, pair_key, strategy_key
+from tradebuddy.runner import Evaluator, InlineEvaluator, MarketData, StrategyRunner, pair_key, strategy_key
 from tradebuddy.settings import (
+    BROKERS,
+    DELTA_ROUTING_FIELDS,
     ENVIRONMENTS,
-    ROUTING_FIELDS,
+    STREAM_FIELDS,
     Settings,
     apply_changes,
     changed_fields,
@@ -40,7 +46,7 @@ from tradebuddy.settings import (
 from tradebuddy.store import Store
 from tradebuddy.strategies import Strategy, discover
 from tradebuddy.stream import BarCloser, DeltaStream, PriceBook
-from tradebuddy.trading import TRADING_KEY, Executor, Trader
+from tradebuddy.trading import TRADING_DEFAULT, Executor, Trader, trading_key
 
 log = logging.getLogger(__name__)
 
@@ -62,13 +68,17 @@ class Broadcaster:
         self._last_tick: dict[str, float] = {}
 
     async def on_event(self, event: Event) -> None:
+        if self.clients:
+            await self.send(event.to_dict())
+
+    async def send(self, message: dict[str, Any]) -> None:
         if not self.clients:
             return
-        if isinstance(event, Tick):
-            if event.ts - self._last_tick.get(event.symbol, 0) < 1:
+        if message.get("type") == "Tick":
+            symbol, ts = message.get("symbol", ""), message.get("ts", 0)
+            if ts - self._last_tick.get(symbol, 0) < 1:
                 return
-            self._last_tick[event.symbol] = event.ts
-        message = event.to_dict()
+            self._last_tick[symbol] = ts
         for ws in list(self.clients):
             try:
                 await ws.send_json(message)
@@ -79,27 +89,40 @@ class Broadcaster:
 class Monitor:
     """Process and event-loop load."""
 
-    def __init__(self) -> None:
+    def __init__(self, role: str = "all") -> None:
+        self.role = role
         self.started_at = time.time()
         self.loop_lag_ms = 0.0
         self.loop_lag_max_ms = 0.0
         self._proc = psutil.Process(os.getpid())
         self._proc.cpu_percent(None)
 
+        self.cpu_pct = 0.0
+        self.system_cpu_pct = psutil.cpu_percent(None)
+
     async def run(self, interval: float = 0.5) -> None:
+        ticks = 0
         while True:
             before = time.perf_counter()
             await asyncio.sleep(interval)
             lag = max(0.0, (time.perf_counter() - before - interval) * 1000)
             self.loop_lag_ms = round(lag, 2)
             self.loop_lag_max_ms = round(max(self.loop_lag_max_ms, lag), 2)
+            ticks += 1
+            if ticks % 4 == 0:  # CPU over a fixed 2s window, not "since whoever asked last"
+                self.cpu_pct = self._proc.cpu_percent(None)
+                self.system_cpu_pct = psutil.cpu_percent(None)
 
     def snapshot(self) -> dict[str, Any]:
         with self._proc.oneshot():
             memory = self._proc.memory_info().rss
             threads = self._proc.num_threads()
-            cpu = self._proc.cpu_percent(None)
+        cpu = self.cpu_pct
         return {
+            "role": self.role,
+            "pid": os.getpid(),
+            "host": socket.gethostname(),
+            "at": time.time(),
             "uptime_seconds": round(time.time() - self.started_at),
             "process_cpu_pct": cpu,
             "process_memory_mb": round(memory / 1_048_576, 1),
@@ -107,19 +130,49 @@ class Monitor:
             "asyncio_tasks": len(asyncio.all_tasks()),
             "loop_lag_ms": self.loop_lag_ms,
             "loop_lag_max_ms": self.loop_lag_max_ms,
-            "system_cpu_pct": psutil.cpu_percent(None),
+            "system_cpu_pct": self.system_cpu_pct,
             "system_memory_pct": psutil.virtual_memory().percent,
             "load_avg": [round(x, 2) for x in os.getloadavg()],
         }
 
 
+class RemoteFeed:
+    """Engine-side view of the feed process, built from its heartbeats."""
+
+    STALE_AFTER = 15.0
+
+    def __init__(self) -> None:
+        self._status: dict[str, Any] = {"connected": False, "authenticated": False, "messages": {}, "bars_closed_by": {}}
+        self.process: dict[str, Any] | None = None
+        self.updated_at = 0.0
+
+    async def run(self) -> None:
+        return None
+
+    async def on_heartbeat(self, e: FeedHeartbeat) -> None:
+        self._status, self.process, self.updated_at = e.status, e.process, time.time()
+
+    def status(self) -> dict[str, Any]:
+        status = dict(self._status)
+        if time.time() - self.updated_at > self.STALE_AFTER:
+            status |= {"connected": False, "authenticated": False, "last_error": "no heartbeat from the feed process — is it running?"}
+        return status
+
+
 class System:
+    """The engine. In single-process mode it also owns the Delta stream; in
+    distributed mode the stream lives in the feed process and strategies run
+    on Celery workers, but every decision is still made here."""
+
     def __init__(
         self,
         cfg: Config,
         strategies: list[Strategy] | None = None,
         stream_factory: StreamFactory | None = None,
         client_factory: ClientFactory | None = None,
+        evaluator: Callable[[System], Evaluator] | None = None,
+        local_feed: bool = True,
+        role: str = "all",
     ) -> None:
         self.cfg = cfg
         self.bus = EventBus()
@@ -127,44 +180,58 @@ class System:
         self.settings: Settings = from_stored(self.store.load_settings())
         self.strategies = discover() if strategies is None else strategies
         self.prices = PriceBook()
-        self.monitor = Monitor()
+        self.monitor = Monitor(role)
         self.live = Broadcaster()
+        self.local_feed = local_feed
 
         self._client_factory = client_factory or DeltaClient
         self._stream_factory = stream_factory or DeltaStream
         self.market_client, self.delta_client = self._make_clients()
 
         pairs = {(sym, s.interval) for s in self.strategies for sym in s.symbols}
-        self.closer = BarCloser(self.bus, pairs)
-        self.stream: Stream = self._make_stream()
+        self.closer = BarCloser(self.bus, pairs) if local_feed else None
+        self.remote_feed = None if local_feed else RemoteFeed()
+        self.stream: Stream = self._make_stream() if local_feed else self.remote_feed
 
         self.paper = PaperBroker(self.store, self.bus, self.prices, specs=lambda sym: self.market_client.product(sym), settings=lambda: self.settings)
         self.delta = DeltaBroker(self.delta_client)
         self.brokers: dict[str, Broker] = {"paper": self.paper, "delta": self.delta}
 
         self.market = MarketData(self.market_client, self.prices)
-        self.runner = StrategyRunner(self.bus, self.store, self.market, self.strategies)
+        self.evaluator: Evaluator = evaluator(self) if evaluator else InlineEvaluator(self.bus, self.market)
+        self.runner = StrategyRunner(
+            self.bus, self.store, self.strategies, self.evaluator,
+            prices=lambda: {sym: p["price"] for sym, p in self.prices.snapshot().items() if p["fresh"]},
+            data_env=lambda: self.settings.data_env,
+        )
         self.trader = Trader(self.bus, self.store, self.brokers, self.prices, lambda: self.settings)
         self.executor = Executor(self.bus, self.store, self.brokers)
 
         self.bus.subscribe(self.prices.on_tick, Tick)
         self.bus.subscribe(self.paper.on_tick, Tick)
         self.bus.subscribe(self.runner.on_candle_closed, CandleClosed)
+        self.bus.subscribe(self.runner.on_evaluated, StrategyEvaluated)
+        if self.remote_feed:
+            self.bus.subscribe(self.remote_feed.on_heartbeat, FeedHeartbeat)
         self.bus.subscribe(self.trader.on_signal, SignalGenerated)
         self.bus.subscribe(self.executor.on_order_requested, OrderRequested)
         self.bus.subscribe(self.executor.on_order_update, OrderUpdate)
         self.bus.subscribe(self.record)
         self.bus.subscribe(self.live.on_event)
 
-        # Fail closed: every start begins with trading off, whatever it was before.
-        self.store.set_enabled(TRADING_KEY, False)
+        # Fail closed: a broker that moves real orders starts every run switched off.
+        self.store.set_enabled(trading_key("delta"), False)
         self._started = False
         self._stream_task: asyncio.Task | None = None
         self._tasks: list[asyncio.Task] = []
 
     @property
-    def broker(self) -> Broker:
-        return self.brokers[self.settings.broker]
+    def active(self) -> dict[str, Broker]:
+        """Brokers switched on in Settings, in display order."""
+        return {name: self.brokers[name] for name in self.settings.active_brokers}
+
+    def trading_on(self, broker: str) -> bool:
+        return self.store.enabled(trading_key(broker), default=TRADING_DEFAULT[broker])
 
     def _make_clients(self) -> tuple[DeltaClient, DeltaClient]:
         s = self.settings
@@ -174,14 +241,14 @@ class System:
 
     def _make_stream(self) -> Stream:
         s = self.settings
-        private = s.broker == "delta" and s.has_credentials  # orders/positions channels only for the live broker
+        private = s.delta_active and s.has_credentials  # Delta's orders/positions channels, only when Delta is in use
         return self._stream_factory(
             ENVIRONMENTS[s.data_env][1], self.bus, self.closer,
             s.delta_api_key if private else "", s.delta_api_secret if private else "",
         )
 
     async def record(self, event: Event) -> None:
-        if not isinstance(event, Tick):
+        if not isinstance(event, Tick | FeedHeartbeat):
             self.store.record_event(event.to_dict())
 
     # -- lifecycle ----------------------------------------------------------
@@ -189,12 +256,11 @@ class System:
     async def start(self) -> None:
         self.bus.start()
         self._started = True
-        self._stream_task = asyncio.create_task(self.stream.run(), name="stream")
-        self._tasks = [
-            asyncio.create_task(self.closer.run(), name="bar-clock"),
-            asyncio.create_task(self.monitor.run(), name="monitor"),
-        ]
-        log.info("system_started broker=%s data=%s strategies=%s", self.settings.broker, self.settings.data_env, [s.name for s in self.strategies])
+        self._tasks = [asyncio.create_task(self.monitor.run(), name="monitor")]
+        if self.local_feed:
+            self._stream_task = asyncio.create_task(self.stream.run(), name="stream")
+            self._tasks.append(asyncio.create_task(self.closer.run(), name="bar-clock"))
+        log.info("system_started brokers=%s data=%s strategies=%s", self.settings.active_brokers, self.settings.data_env, [s.name for s in self.strategies])
 
     async def stop(self) -> None:
         tasks = [t for t in (self._stream_task, *self._tasks) if t]
@@ -205,7 +271,18 @@ class System:
         await self.market_client.aclose()
         await self.delta_client.aclose()
 
+    async def drain(self) -> None:
+        """Wait until the bus and any inline evaluations are idle (tests, shutdown)."""
+        while True:
+            await self.bus.drain()
+            drain = getattr(self.evaluator, "drain", None)
+            if drain is None or not getattr(self.evaluator, "_tasks", None):
+                return
+            await drain()
+
     async def _restart_stream(self) -> None:
+        if not self.local_feed:
+            return  # the feed process restarts itself on SettingsChanged
         if self._stream_task:
             self._stream_task.cancel()
             await asyncio.gather(self._stream_task, return_exceptions=True)
@@ -229,10 +306,13 @@ class System:
         self.store.save_settings({f: getattr(new, f) for f in changed})
         self.settings = new
 
-        routing = any(f in ROUTING_FIELDS for f in changed)
-        if routing:
-            # Where orders or prices come from has changed: stop trading until someone looks again.
-            self.set_toggle(TRADING_KEY, False)
+        delta_routing = any(f in DELTA_ROUTING_FIELDS for f in changed)
+        if delta_routing:
+            # Where Delta orders go has changed: stop Delta trading until someone looks again.
+            self.set_toggle(trading_key("delta"), False)
+        if not new.paper_active and old.paper_active:
+            self.set_toggle(trading_key("paper"), False)
+        if any(f in STREAM_FIELDS for f in changed):
             old_clients = (self.market_client, self.delta_client)
             self.market_client, self.delta_client = self._make_clients()
             self.delta.client = self.delta_client
@@ -243,8 +323,8 @@ class System:
             # Requests still in flight on the old clients are allowed to finish.
             asyncio.get_running_loop().call_later(60, lambda: [asyncio.ensure_future(c.aclose()) for c in old_clients])
 
-        log.info("settings_changed fields=%s trading_stopped=%s", changed, routing)
-        self.bus.publish(SettingsChanged(changed=changed, trading_stopped=routing))
+        log.info("settings_changed fields=%s delta_trading_stopped=%s", changed, delta_routing)
+        self.bus.publish(SettingsChanged(changed=changed, trading_stopped=delta_routing))
         return new
 
     async def test_delta(self, env: str | None = None, api_key: str = "", api_secret: str = "") -> dict[str, Any]:
@@ -263,7 +343,7 @@ class System:
     # -- control ------------------------------------------------------------
 
     def toggle_keys(self) -> set[str]:
-        keys = {TRADING_KEY}
+        keys = {trading_key(b) for b in BROKERS}
         for s in self.strategies:
             keys.add(strategy_key(s.name))
             keys.update(pair_key(s.name, sym) for sym in s.symbols)
@@ -276,9 +356,19 @@ class System:
         self.bus.publish(ToggleChanged(key=key, enabled=enabled))
 
     async def close_all(self) -> dict[str, Any]:
-        """Kill switch: trading off first, then flatten the active broker."""
-        self.set_toggle(TRADING_KEY, False)
-        return await self.broker.close_all()
+        """Kill switch: every broker's trading off first, then flatten every active broker."""
+        for name in BROKERS:
+            self.set_toggle(trading_key(name), False)
+        closed, errors = [], []
+        for name, broker in self.active.items():
+            try:
+                result = await broker.close_all()
+            except BrokerError as exc:
+                errors.append(f"{name}: {exc}")
+                continue
+            closed += [f"{name}:{sym}" for sym in result["closed"]]
+            errors += [f"{name}: {err}" for err in result["errors"]]
+        return {"closed": closed, "errors": errors}
 
     # -- views --------------------------------------------------------------
 
@@ -286,12 +376,19 @@ class System:
         s = self.settings
         feed = self.stream.status()
         return {
-            "broker": s.broker,
+            "brokers": [
+                {
+                    "name": name,
+                    "env": s.delta_env if name == "delta" else s.data_env,
+                    "real_money": name == "delta" and s.is_real_money,
+                    "trading": self.trading_on(name),
+                    "not_ready": broker.not_ready(),
+                }
+                for name, broker in self.active.items()
+            ],
             "delta_env": s.delta_env,
             "data_env": s.data_env,
             "is_real_money": s.is_real_money,
-            "broker_ready": self.broker.not_ready() or "",
-            "trading": self.store.enabled(TRADING_KEY, default=False),
             "feed_connected": bool(feed.get("connected")),
             "feed_authenticated": bool(feed.get("authenticated")),
             "token_required": bool(self.cfg.api_token),
@@ -315,8 +412,9 @@ class System:
         ]
 
     def metrics(self) -> dict[str, Any]:
+        me = self.monitor.snapshot()
         return {
-            "system": self.monitor.snapshot(),
+            "system": me,
             "bus": self.bus.stats(),
             "feed": self.stream.status(),
             "rest": {
@@ -324,5 +422,7 @@ class System:
                 **{f"account · {k}": v for k, v in sorted(self.delta_client.calls.items())},
             },
             "orders": self.store.order_counts(),
+            "evaluator": self.evaluator.stats(),
+            "processes": [me, *([self.remote_feed.process] if self.remote_feed and self.remote_feed.process else [])],
             "dashboard_clients": len(self.live.clients),
         }

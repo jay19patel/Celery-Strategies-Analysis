@@ -52,7 +52,34 @@ class FeedStatus(Event):
     error: str = ""
 
 
+@dataclass(frozen=True, kw_only=True)
+class FeedHeartbeat(Event):
+    """The feed process's full status, every few seconds (distributed mode)."""
+
+    status: dict[str, Any]
+    process: dict[str, Any]
+
+
 # -- strategy -----------------------------------------------------------------
+
+
+@dataclass(frozen=True, kw_only=True)
+class StrategyEvaluated(Event):
+    """One strategy ran on one closed bar, inline or on a Celery worker. side == "" means no signal."""
+
+    strategy: str
+    version: int
+    symbol: str
+    resolution: str
+    bar_time: int
+    side: str = ""
+    reason: str = ""
+    stop_loss_pct: float | None = None
+    take_profit_pct: float | None = None
+    error: str = ""
+    ms: float = 0.0
+    worker: str = "inline"
+    dispatched_at: float = 0.0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -80,6 +107,7 @@ class TradeSkipped(Event):
     strategy: str
     symbol: str
     side: str
+    broker: str  # "" when the signal was refused before reaching any broker
     reason: str
 
 

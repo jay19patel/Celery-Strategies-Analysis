@@ -1,8 +1,8 @@
 """Runtime settings, stored in the database and edited from the Settings page.
 
-Fail closed: a change that would start real-money trading needs the
-confirmation phrase, and any change to broker, exchange or keys switches
-trading off.
+Paper and Delta are independent brokers: either or both can be active. Fail
+closed: a change that would start real-money trading needs the confirmation
+phrase, and any change to the Delta account or keys switches Delta trading off.
 """
 
 from __future__ import annotations
@@ -17,11 +17,15 @@ ENVIRONMENTS = {
 }
 LIVE_CONFIRM_PHRASE = "I UNDERSTAND THIS IS REAL MONEY"
 
+BROKERS = ("paper", "delta")
 SECRET_FIELDS = ("delta_api_key", "delta_api_secret")
-# Changing any of these changes where orders or prices come from.
-ROUTING_FIELDS = ("broker", "market_data", "delta_env", *SECRET_FIELDS)
+# Changing any of these changes where Delta orders go: Delta trading stops.
+DELTA_ROUTING_FIELDS = ("delta_active", "delta_env", *SECRET_FIELDS)
+# Changing any of these changes where prices come from: the stream restarts.
+STREAM_FIELDS = ("paper_active", "market_data", *DELTA_ROUTING_FIELDS)
 
-CHOICES = {"broker": ("paper", "delta"), "market_data": ("demo", "live"), "delta_env": ("demo", "live")}
+BOOL_FIELDS = ("paper_active", "delta_active")
+CHOICES = {"market_data": ("demo", "live"), "delta_env": ("demo", "live")}
 RANGES = {
     "stop_loss_pct": (0.05, 50.0),
     "take_profit_pct": (0.05, 100.0),
@@ -39,9 +43,10 @@ class SettingsError(ValueError):
 
 @dataclass(frozen=True)
 class Settings:
-    broker: str = "paper"  # where orders go: "paper" (simulated) | "delta"
-    market_data: str = "demo"  # price source while on paper: Delta "demo" | "live" (public data only)
-    delta_env: str = "demo"  # Delta account used when broker == "delta"
+    paper_active: bool = True  # simulated broker; shown and fed signals
+    delta_active: bool = False  # Delta broker; shown and fed signals
+    market_data: str = "demo"  # price source when Delta is not active: "demo" | "live" (public data only)
+    delta_env: str = "demo"  # Delta account: "demo" (testnet) | "live" (real money)
     delta_api_key: str = ""
     delta_api_secret: str = ""
     stop_loss_pct: float = 1.0
@@ -53,13 +58,17 @@ class Settings:
     paper_max_hold_hours: float = 72.0  # 0 = no time exit
 
     @property
+    def active_brokers(self) -> list[str]:
+        return [b for b in BROKERS if getattr(self, f"{b}_active")]
+
+    @property
     def data_env(self) -> str:
-        """Prices come from the exchange the orders go to; on paper, from the chosen feed."""
-        return self.delta_env if self.broker == "delta" else self.market_data
+        """With Delta active, every broker is priced by the exchange Delta trades on."""
+        return self.delta_env if self.delta_active else self.market_data
 
     @property
     def is_real_money(self) -> bool:
-        return self.broker == "delta" and self.delta_env == "live"
+        return self.delta_active and self.delta_env == "live"
 
     @property
     def has_credentials(self) -> bool:
@@ -72,6 +81,7 @@ class Settings:
         data["delta_api_key"] = f"••••{key[-4:]}" if len(key) > 8 else ("set" if key else "")
         data["delta_api_secret"] = "set" if self.delta_api_secret else ""
         data |= {
+            "active_brokers": self.active_brokers,
             "data_env": self.data_env,
             "is_real_money": self.is_real_money,
             "has_credentials": self.has_credentials,
@@ -96,6 +106,10 @@ def apply_changes(current: Settings, changes: dict[str, Any], confirm: str = "")
             if not value:
                 continue  # blank means "keep the stored secret"; use clear_credentials() to remove it
             clean[name] = value
+        elif name in BOOL_FIELDS:
+            if not isinstance(value, bool):
+                raise SettingsError(f"{name} must be true or false")
+            clean[name] = value
         elif name in CHOICES:
             value = str(value).strip().lower()
             if value not in CHOICES[name]:
@@ -112,6 +126,8 @@ def apply_changes(current: Settings, changes: dict[str, Any], confirm: str = "")
             clean[name] = number
 
     updated = replace(current, **clean)
+    if not updated.active_brokers:
+        raise SettingsError("keep at least one broker active")
     if updated.is_real_money and not current.is_real_money and confirm != LIVE_CONFIRM_PHRASE:
         raise SettingsError(f"real-money trading needs the confirmation phrase: {LIVE_CONFIRM_PHRASE}")
     return updated
@@ -123,15 +139,20 @@ def clear_credentials(current: Settings) -> Settings:
 
 def from_stored(values: dict[str, Any]) -> Settings:
     """Stored values are trusted but filtered: unknown or invalid keys fall back to defaults."""
-    settings = Settings()
+    valid = {}
     for name, value in values.items():
         if name not in FIELD_TYPES:
             continue
         try:
-            settings = apply_changes(settings, {name: value}, confirm=LIVE_CONFIRM_PHRASE)
+            # Validate each field on its own; the at-least-one-broker rule is checked on the whole below.
+            apply_changes(replace(Settings(), paper_active=True, delta_active=True), {name: value}, confirm=LIVE_CONFIRM_PHRASE)
         except SettingsError:
             continue
-    return settings
+        valid[name] = value
+    try:
+        return apply_changes(Settings(), valid, confirm=LIVE_CONFIRM_PHRASE)
+    except SettingsError:  # e.g. both brokers stored inactive
+        return apply_changes(Settings(), {k: v for k, v in valid.items() if k not in BOOL_FIELDS}, confirm=LIVE_CONFIRM_PHRASE)
 
 
 def changed_fields(before: Settings, after: Settings) -> list[str]:

@@ -5,7 +5,7 @@ import dataclasses
 import pytest
 from fastapi.testclient import TestClient
 
-from tradebuddy.app import PAGES, create_app
+from tradebuddy.app import PAGES, local_app
 from tradebuddy.events import Tick
 from tradebuddy.settings import LIVE_CONFIRM_PHRASE
 from tradebuddy.system import System
@@ -16,7 +16,7 @@ from .test_pipeline import AlwaysBuy
 
 def make(cfg, exchange, token=""):
     system = System(dataclasses.replace(cfg, api_token=token), strategies=[AlwaysBuy()], stream_factory=IdleStream, client_factory=exchange.client)
-    return system, TestClient(create_app(system))
+    return system, TestClient(local_app(system))
 
 
 @pytest.mark.parametrize(("page_id", "path", "title"), [(p[0], p[1], p[3]) for p in PAGES])
@@ -44,9 +44,9 @@ def test_settings_api_masks_secrets(cfg, exchange):
 
 def test_settings_api_refuses_live_without_phrase(cfg, exchange):
     system, client = make(cfg, exchange)
-    bad = client.put("/api/settings", json={"changes": {"broker": "delta", "delta_env": "live"}})
-    assert bad.status_code == 400 and system.settings.broker == "paper"
-    ok = client.put("/api/settings", json={"changes": {"broker": "delta", "delta_env": "live"}, "confirm": LIVE_CONFIRM_PHRASE})
+    bad = client.put("/api/settings", json={"changes": {"delta_active": True, "delta_env": "live"}})
+    assert bad.status_code == 400 and system.settings.active_brokers == ["paper"]
+    ok = client.put("/api/settings", json={"changes": {"delta_active": True, "delta_env": "live"}, "confirm": LIVE_CONFIRM_PHRASE})
     assert ok.status_code == 200 and ok.json()["is_real_money"] is True
 
 
@@ -56,7 +56,7 @@ def test_token_protects_every_write(cfg, exchange):
         ("put", "/api/settings", {"changes": {"stop_loss_pct": 2}}),
         ("post", "/api/settings/clear-credentials", {}),
         ("post", "/api/settings/test-delta", {}),
-        ("post", "/api/toggles", {"key": "trading", "enabled": True}),
+        ("post", "/api/toggles", {"key": "trading:paper", "enabled": True}),
         ("post", "/api/close-all", {}),
         ("post", "/api/paper/reset", {}),
         ("post", "/api/positions/paper/BTCUSD/close", {}),
@@ -89,5 +89,26 @@ async def test_close_position_route_closes_paper(cfg, exchange):
 def test_overview_works_without_delta(cfg, exchange):
     _, client = make(cfg, exchange)
     body = client.get("/api/overview").json()
-    assert body["account"]["broker"] == "paper" and body["account_error"] == ""
+    assert [a["broker"] for a in body["accounts"]] == ["paper"] and body["accounts"][0]["error"] == ""
     assert body["strategies"][0]["name"] == "always_buy"
+
+
+async def test_inactive_broker_is_hidden(cfg, exchange):
+    system, client = make(cfg, exchange)
+    await system.update_settings({"delta_active": True, "paper_active": False})
+    page = client.get("/positions").text
+    assert 'data-broker="delta"' in page and 'data-broker="paper"' not in page
+    assert 'href="/paper"' not in client.get("/").text
+    assert [b["name"] for b in client.get("/api/header").json()["brokers"]] == ["delta"]
+
+
+def test_header_lists_each_active_broker_with_its_switch(cfg, exchange):
+    _, client = make(cfg, exchange)
+    [paper] = client.get("/api/header").json()["brokers"]
+    assert (paper["name"], paper["trading"], paper["not_ready"]) == ("paper", True, "")
+
+
+def test_close_all_stops_every_broker(cfg, exchange):
+    system, client = make(cfg, exchange)
+    assert client.post("/api/close-all").json() == {"closed": [], "errors": []}
+    assert system.trading_on("paper") is False and system.trading_on("delta") is False

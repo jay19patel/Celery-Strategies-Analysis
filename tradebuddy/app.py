@@ -1,13 +1,14 @@
 """Dashboard: server-rendered pages (Jinja2) + JSON API + one WebSocket for live events.
 
-Routes stay thin: every one calls System or a broker.
+Routes are thin: each one calls a method on `Api` — the engine itself in
+single-process mode, or the engine over ZeroMQ RPC in distributed mode.
 """
 
 from __future__ import annotations
 
 import hmac
-import time
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +18,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from tradebuddy.brokers import Broker
-from tradebuddy.errors import BrokerError
-from tradebuddy.settings import LIVE_CONFIRM_PHRASE, SettingsError
-from tradebuddy.system import System
+from tradebuddy.api import Api, ApiError, RemoteApi
+from tradebuddy.settings import LIVE_CONFIRM_PHRASE
+from tradebuddy.system import Broadcaster, System
 
 HERE = Path(__file__).parent
 
@@ -38,8 +38,6 @@ PAGES = [
     ("events", "/events", "scroll-text", "Event Log", "Monitoring"),
     ("settings", "/settings", "settings", "Settings", "Admin"),
 ]
-
-SIGNAL_EVENTS = ["SignalGenerated", "TradeSkipped", "StrategyError"]
 
 
 class Toggle(BaseModel):
@@ -63,43 +61,39 @@ class Protection(BaseModel):
     take_profit: float
 
 
-def create_app(system: System) -> FastAPI:
-    @asynccontextmanager
-    async def lifespan(_: FastAPI):
-        await system.start()
-        yield
-        await system.stop()
+Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 
+
+def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | None = None, api_token: str = "") -> FastAPI:
     app = FastAPI(title="TradeBuddy", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
 
     def protected(x_api_token: str = Header(default="")) -> None:
-        token = system.cfg.api_token
-        if token and not hmac.compare_digest(x_api_token, token):
+        if api_token and not hmac.compare_digest(x_api_token, api_token):
             raise HTTPException(401, "missing or wrong API token")
 
-    def broker_for(name: str | None) -> Broker:
-        if name is None:
-            return system.broker
-        if name not in system.brokers:
-            raise HTTPException(404, f"unknown broker {name!r}")
-        return system.brokers[name]
-
-    async def call(coro):
+    async def call(method: str, **params: Any) -> Any:
         try:
-            return await coro
-        except BrokerError as exc:
-            raise HTTPException(502, str(exc)) from exc
+            return await getattr(api, method)(**params)
+        except ApiError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
 
     # -- pages --------------------------------------------------------------
 
-    def page(page_id: str, path: str, title: str):
+    def page(page_id: str, path: str, title: str) -> None:
         async def render(request: Request) -> HTMLResponse:
+            ctx = await call("page_context")
             return templates.TemplateResponse(
                 request,
                 f"{page_id}.html",
-                {"page": page_id, "title": title, "pages": PAGES, "live_phrase": LIVE_CONFIRM_PHRASE},
+                {
+                    "page": page_id,
+                    "title": title,
+                    "pages": [p for p in PAGES if p[0] != "paper" or ctx["paper_active"]],
+                    "active_brokers": ctx["active_brokers"],
+                    "live_phrase": LIVE_CONFIRM_PHRASE,
+                },
             )
 
         app.add_api_route(path, render, methods=["GET"], response_class=HTMLResponse, include_in_schema=False, name=f"page_{page_id}")
@@ -111,134 +105,114 @@ def create_app(system: System) -> FastAPI:
 
     @app.get("/api/header")
     async def header() -> dict:
-        return system.header()
+        return await call("header")
 
     @app.get("/api/overview")
     async def overview() -> dict:
-        day = time.time() - 86_400
-        try:
-            account = (await system.broker.account()).to_dict()
-            account_error = ""
-        except BrokerError as exc:
-            account, account_error = None, str(exc)
-        return {
-            "header": system.header(),
-            "account": account,
-            "account_error": account_error,
-            "counts_24h": {t: system.store.count_events_since(t, day) for t in ("SignalGenerated", "TradeSkipped", "OrderPlaced", "OrderFailed", "PositionClosed")},
-            "strategies": system.strategies_view(),
-            "recent": system.store.recent_events(15, types=[*SIGNAL_EVENTS, "OrderPlaced", "OrderFailed", "OrderUnknown", "PositionClosed"]),
-            "paper": system.paper.stats(),
-        }
+        return await call("overview")
 
     @app.get("/api/strategies")
     async def strategies() -> list[dict]:
-        return system.strategies_view()
+        return await call("strategies")
 
     @app.get("/api/signals")
     async def signals(limit: int = 300, strategy: str = "", symbol: str = "") -> list[dict]:
-        rows = system.store.recent_events(min(limit, 2000), types=SIGNAL_EVENTS)
-        return [r for r in rows if (not strategy or r.get("strategy") == strategy) and (not symbol or r.get("symbol") == symbol)]
+        return await call("signals", limit=limit, strategy=strategy, symbol=symbol)
 
     @app.get("/api/positions")
     async def positions(broker: str | None = None) -> list[dict]:
-        return [p.to_dict() for p in await call(broker_for(broker).positions())]
+        return await call("positions", broker=broker)
 
     @app.get("/api/orders")
     async def orders(broker: str | None = None, limit: int = 300) -> list[dict]:
-        return system.store.recent_orders(min(limit, 2000), broker=broker)
+        return await call("orders", broker=broker, limit=limit)
 
     @app.get("/api/open-orders")
     async def open_orders(broker: str | None = None) -> list[dict]:
-        return await call(broker_for(broker).open_orders())
+        return await call("open_orders", broker=broker)
 
     @app.get("/api/account")
     async def account(broker: str | None = None) -> dict:
-        return (await call(broker_for(broker).account())).to_dict()
+        return await call("account", broker=broker)
 
     @app.get("/api/paper/stats")
     async def paper_stats() -> dict:
-        return system.paper.stats()
+        return await call("paper_stats")
 
     @app.get("/api/paper/trades")
     async def paper_trades(limit: int = 300) -> list[dict]:
-        return system.paper.trades(min(limit, 5000))
+        return await call("paper_trades", limit=limit)
 
     @app.get("/api/metrics")
     async def metrics() -> dict:
-        return system.metrics()
+        return await call("metrics") | {"dashboard_clients": len(live.clients)}
 
     @app.get("/api/events")
     async def events(limit: int = 300, type: str = "") -> list[dict]:
-        return system.store.recent_events(min(limit, 2000), types=[type] if type else None)
-
-    def settings_view() -> dict:
-        return system.settings.public() | {"token_required": bool(system.cfg.api_token)}
+        return await call("events", limit=limit, type=type)
 
     @app.get("/api/settings")
     async def get_settings() -> dict:
-        return settings_view()
+        return await call("settings")
 
     # -- write --------------------------------------------------------------
 
     @app.put("/api/settings", dependencies=[Depends(protected)])
     async def put_settings(body: SettingsUpdate) -> dict:
-        try:
-            await system.update_settings(body.changes, body.confirm)
-        except SettingsError as exc:
-            raise HTTPException(400, str(exc)) from exc
-        return settings_view()
+        return await call("update_settings", changes=body.changes, confirm=body.confirm)
 
     @app.post("/api/settings/clear-credentials", dependencies=[Depends(protected)])
     async def clear_credentials() -> dict:
-        await system.clear_credentials()
-        return settings_view()
+        return await call("clear_credentials")
 
     @app.post("/api/settings/test-delta", dependencies=[Depends(protected)])
     async def test_delta(body: DeltaTest) -> dict:
-        return await system.test_delta(body.env, body.api_key.strip(), body.api_secret.strip())
+        return await call("test_delta", env=body.env, api_key=body.api_key, api_secret=body.api_secret)
 
     @app.post("/api/toggles", dependencies=[Depends(protected)])
     async def toggle(body: Toggle) -> dict:
-        try:
-            system.set_toggle(body.key, body.enabled)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-        return {"key": body.key, "enabled": body.enabled}
+        return await call("toggle", key=body.key, enabled=body.enabled)
 
     @app.post("/api/close-all", dependencies=[Depends(protected)])
     async def close_all() -> dict:
-        return await call(system.close_all())
+        return await call("close_all")
 
     @app.post("/api/positions/{broker}/{symbol}/close", dependencies=[Depends(protected)])
     async def close_position(broker: str, symbol: str) -> dict:
-        return await call(broker_for(broker).close_position(symbol))
+        return await call("close_position", broker=broker, symbol=symbol)
 
     @app.post("/api/paper/positions/{symbol}/protection", dependencies=[Depends(protected)])
     async def protection(symbol: str, body: Protection) -> dict:
-        try:
-            system.paper.update_protection(symbol, body.stop_loss, body.take_profit)
-        except BrokerError as exc:
-            raise HTTPException(400, str(exc)) from exc
-        return {"symbol": symbol, "stop_loss": body.stop_loss, "take_profit": body.take_profit}
+        return await call("protection", symbol=symbol, stop_loss=body.stop_loss, take_profit=body.take_profit)
 
     @app.post("/api/paper/reset", dependencies=[Depends(protected)])
     async def paper_reset() -> dict:
-        system.paper.reset()
-        return system.paper.stats()
+        return await call("paper_reset")
 
     # -- live ---------------------------------------------------------------
 
     @app.websocket("/ws")
-    async def live(ws: WebSocket) -> None:
-        await ws.accept()
-        system.live.clients.add(ws)
+    async def ws(socket: WebSocket) -> None:
+        await socket.accept()
+        live.clients.add(socket)
         try:
             while True:
-                await ws.receive_text()
+                await socket.receive_text()
         except WebSocketDisconnect:
             pass
         finally:
-            system.live.clients.discard(ws)
+            live.clients.discard(socket)
 
     return app
+
+
+def local_app(system: System) -> FastAPI:
+    """Single process: the dashboard talks to the engine directly."""
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        await system.start()
+        yield
+        await system.stop()
+
+    return create_app(Api(system), system.live, lifespan, system.cfg.api_token)

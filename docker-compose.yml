@@ -1,0 +1,75 @@
+# TradeBuddy
+#
+#   docker compose up            then open http://127.0.0.1:8080
+#
+# Every `up` rebuilds the image, so code changes are picked up. More strategy
+# workers: docker compose up --scale worker=4
+#
+# feed · engine · web · Celery workers, joined by ZeroMQ; Redis is the Celery
+# broker. Only the dashboard is published, and only on this machine's
+# loopback. The ZeroMQ ports carry commands and API keys and stay inside the
+# compose network.
+
+x-app: &app
+  # No shared image tag: four services building one tag in parallel collide on
+  # the first run. Each gets its own tag; BuildKit's cache makes that one build.
+  build: .
+  pull_policy: build
+  init: true
+  restart: unless-stopped
+  volumes:
+    - ./data:/app/data
+  environment: &env
+    DB_PATH: /app/data/tradebuddy.db
+    CELERY_BROKER_URL: redis://redis:6379/0
+    ZMQ_FEED_BIND: tcp://0.0.0.0:5555
+    ZMQ_FEED_URL: tcp://feed:5555
+    ZMQ_EVENTS_BIND: tcp://0.0.0.0:5556
+    ZMQ_EVENTS_URL: tcp://engine:5556
+    ZMQ_RPC_BIND: tcp://0.0.0.0:5557
+    ZMQ_RPC_URL: tcp://engine:5557
+    ZMQ_RESULTS_BIND: tcp://0.0.0.0:5558
+    ZMQ_RESULTS_URL: tcp://engine:5558
+    TZ: UTC
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  engine:
+    <<: *app
+    command: ["engine"]
+    depends_on:
+      redis: { condition: service_healthy }
+
+  feed:
+    <<: *app
+    command: ["feed"]
+    depends_on: [engine]
+
+  worker:
+    <<: *app
+    command: ["worker", "--concurrency", "4"]
+    depends_on:
+      redis: { condition: service_healthy }
+
+  web:
+    <<: *app
+    command: ["web"]
+    environment:
+      <<: *env
+      HOST: 0.0.0.0
+      DASHBOARD_LOOPBACK_ONLY: "true"  # matches the ports line below; remove it if you publish more widely
+      API_TOKEN: ${API_TOKEN:-}  # optional; put it in .env to protect every change
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on: [engine]

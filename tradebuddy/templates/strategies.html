@@ -42,7 +42,7 @@
           <div><div class="font-mono text-base font-semibold">${st.last_ms}<span class="text-[10px]">ms</span></div><div class="text-[10px] muted">last run</div></div>
         </div>
         <div class="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
-          <div class="text-[10px] uppercase tracking-wider muted mb-1">Last result · ${ago(st.last_run_at)}</div>
+          <div class="text-[10px] uppercase tracking-wider muted mb-1">Last result · ${ago(st.last_run_at)}${st.last_worker ? ` · ${esc(st.last_worker)} · ${st.last_latency_ms} ms end-to-end` : ""}${st.in_flight ? ` · ${st.in_flight} running` : ""}</div>
           <div class="font-mono text-xs break-words ${st.last_result.includes("error") ? "down" : ""}">${esc(st.last_result || "Waiting for the first candle close")}</div>
         </div>
         <a href="/signals?strategy=${encodeURIComponent(s.name)}" class="btn btn-sm w-full justify-center"><i data-lucide="activity"></i>Signal history</a>
@@ -56,7 +56,7 @@
     TB.bindToggles($("cards"));
     TB.icons();
   }
-  TB.on(["SignalGenerated", "StrategyError", "ToggleChanged", "CandleClosed"], () => setTimeout(load, 300));
+  TB.on(["StrategyEvaluated", "SignalGenerated", "StrategyError", "ToggleChanged", "CandleClosed"], () => setTimeout(load, 300));
   load();
   setInterval(load, 10000);
 })();
