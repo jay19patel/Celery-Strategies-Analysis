@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block content %}
+<form id="form" class="space-y-5 pb-20" autocomplete="off">
+
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="route"></i>Execution broker <span class="card-sub">where signals become orders</span></div></div>
+    <div class="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
+      <label class="broker-card cursor-pointer border-2 rounded-xl p-4 flex gap-3" data-broker="paper">
+        <input type="radio" name="broker" value="paper" class="mt-1">
+        <div>
+          <div class="flex items-center gap-2 font-semibold text-sm"><i data-lucide="flask-conical" class="w-4 h-4 text-brand-500"></i>Paper trading</div>
+          <p class="text-xs text-slate-500 mt-1">Simulated fills at the live WebSocket price with fees, slippage and leverage. No exchange account needed; nothing leaves this machine.</p>
+        </div>
+      </label>
+      <label class="broker-card cursor-pointer border-2 rounded-xl p-4 flex gap-3" data-broker="delta">
+        <input type="radio" name="broker" value="delta" class="mt-1">
+        <div>
+          <div class="flex items-center gap-2 font-semibold text-sm"><i data-lucide="landmark" class="w-4 h-4 text-amber-500"></i>Delta Exchange</div>
+          <p class="text-xs text-slate-500 mt-1">Real orders on your Delta account (demo or live, below), with the stop loss and take profit sent as an exchange bracket.</p>
+        </div>
+      </label>
+    </div>
+  </section>
+
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+    <section class="card">
+      <div class="card-head">
+        <div class="card-title"><i data-lucide="key-round"></i>Delta Exchange account</div>
+        <span id="credState" class="badge"></span>
+      </div>
+      <div class="card-body space-y-4">
+        <div>
+          <div class="field-label mb-1.5">Account</div>
+          <div class="tabs" id="envTabs"><button type="button" data-env="demo">Demo (testnet)</button><button type="button" data-env="live">Live (real money)</button></div>
+          <div class="field-help" id="envHelp"></div>
+        </div>
+        <div>
+          <label class="field-label" for="delta_api_key">API key</label>
+          <input id="delta_api_key" name="delta_api_key" class="input w-full mt-1 font-mono" autocomplete="off" spellcheck="false">
+          <div class="field-help">Create one with <b>Trading</b> permission at <span id="keyHost" class="font-mono"></span>. Leave blank to keep the stored key.</div>
+        </div>
+        <div>
+          <label class="field-label" for="delta_api_secret">API secret</label>
+          <input id="delta_api_secret" name="delta_api_secret" type="password" class="input w-full mt-1 font-mono" autocomplete="new-password" spellcheck="false">
+          <div class="field-help">Stored in the local database (<span class="font-mono">data/</span>, git-ignored). Never sent back to the browser.</div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" id="testBtn" class="btn"><i data-lucide="plug-zap"></i>Test connection</button>
+          <button type="button" id="clearBtn" class="btn btn-danger"><i data-lucide="trash-2"></i>Remove keys</button>
+          <span id="testResult" class="text-xs"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div class="card-title"><i data-lucide="radio"></i>Market data</div></div>
+      <div class="card-body space-y-4">
+        <div>
+          <label class="field-label" for="market_data">Price feed while paper trading</label>
+          <select id="market_data" name="market_data" class="select w-full mt-1">
+            <option value="demo">Delta demo (testnet prices)</option>
+            <option value="live">Delta live (real market prices, public data only)</option>
+          </select>
+          <div class="field-help">Public data only — no keys needed. When the broker is Delta, prices always come from the Delta account you trade on.</div>
+        </div>
+        <div class="rounded-lg bg-slate-50 border border-slate-100 p-3 text-xs space-y-1">
+          <div class="flex justify-between"><span class="muted">Prices now from</span><span id="dataEnv" class="font-mono"></span></div>
+          <div class="flex justify-between gap-3"><span class="muted">WebSocket</span><span id="wsUrl" class="font-mono truncate"></span></div>
+          <div class="flex justify-between gap-3"><span class="muted">Orders REST</span><span id="restUrl" class="font-mono truncate"></span></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+    <section class="card">
+      <div class="card-head"><div class="card-title"><i data-lucide="shield-check"></i>Risk <span class="card-sub">every entry, both brokers</span></div></div>
+      <div class="card-body grid grid-cols-2 gap-4">
+        <div><label class="field-label" for="stop_loss_pct">Stop loss %</label><input id="stop_loss_pct" name="stop_loss_pct" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">From entry price. A signal may override it.</div></div>
+        <div><label class="field-label" for="take_profit_pct">Take profit %</label><input id="take_profit_pct" name="take_profit_pct" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">From entry price. A signal may override it.</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div class="card-title"><i data-lucide="flask-conical"></i>Paper account</div></div>
+      <div class="card-body grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div><label class="field-label" for="paper_starting_balance">Starting balance $</label><input id="paper_starting_balance" name="paper_starting_balance" type="number" step="1" class="input w-full mt-1 font-mono"><div class="field-help">Applies on reset.</div></div>
+        <div><label class="field-label" for="paper_leverage">Leverage ×</label><input id="paper_leverage" name="paper_leverage" type="number" step="1" class="input w-full mt-1 font-mono"></div>
+        <div><label class="field-label" for="paper_fee_pct">Fee % per side</label><input id="paper_fee_pct" name="paper_fee_pct" type="number" step="0.01" class="input w-full mt-1 font-mono"></div>
+        <div><label class="field-label" for="paper_slippage_pct">Slippage %</label><input id="paper_slippage_pct" name="paper_slippage_pct" type="number" step="0.01" class="input w-full mt-1 font-mono"></div>
+        <div><label class="field-label" for="paper_max_hold_hours">Max hold (hours)</label><input id="paper_max_hold_hours" name="paper_max_hold_hours" type="number" step="1" class="input w-full mt-1 font-mono"><div class="field-help">0 = no time exit.</div></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="lock"></i>Safety</div></div>
+    <div class="card-body grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-600">
+      <div class="flex gap-2"><i data-lucide="power" class="w-4 h-4 text-slate-400 shrink-0"></i><span>Trading is <b>off at every start</b> and switches off whenever the broker, Delta account, keys or price feed change.</span></div>
+      <div class="flex gap-2"><i data-lucide="triangle-alert" class="w-4 h-4 text-slate-400 shrink-0"></i><span>Switching to <b>Delta live</b> asks you to type <span class="font-mono">{{ live_phrase }}</span>.</span></div>
+      <div class="flex gap-2"><i data-lucide="key" class="w-4 h-4 text-slate-400 shrink-0"></i><span id="tokenInfo"></span></div>
+    </div>
+  </section>
+
+  <div class="fixed bottom-0 right-0 left-0 lg:left-60 z-20 bg-white/95 backdrop-blur border-t border-slate-200 px-4 lg:px-6 py-3 flex items-center justify-end gap-3">
+    <span id="dirty" class="text-xs text-amber-700 mr-auto hidden">Unsaved changes</span>
+    <button type="button" id="discardBtn" class="btn">Discard</button>
+    <button type="submit" id="saveBtn" class="btn btn-primary"><i data-lucide="save"></i>Save settings</button>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const { $, esc, money } = TB;
+  const PHRASE = {{ live_phrase | tojson }};
+  const NUMBERS = ["stop_loss_pct", "take_profit_pct", "paper_starting_balance", "paper_leverage", "paper_fee_pct", "paper_slippage_pct", "paper_max_hold_hours"];
+  const HOSTS = { demo: "demo.delta.exchange", live: "www.delta.exchange" };
+  let saved = null, env = "demo";
+
+  function fill(s) {
+    saved = s;
+    env = s.delta_env;
+    document.querySelectorAll('input[name="broker"]').forEach((r) => (r.checked = r.value === s.broker));
+    $("market_data").value = s.market_data;
+    for (const k of NUMBERS) $(k).value = s[k];
+    $("delta_api_key").value = ""; $("delta_api_secret").value = "";
+    $("delta_api_key").placeholder = s.delta_api_key ? `stored: ${s.delta_api_key}` : "not set";
+    $("delta_api_secret").placeholder = s.delta_api_secret ? "stored" : "not set";
+    $("credState").textContent = s.has_credentials ? "keys stored" : "no keys";
+    $("credState").className = `badge ${s.has_credentials ? "badge-green" : ""}`;
+    $("dataEnv").textContent = `Delta ${s.data_env}`;
+    $("wsUrl").textContent = s.data_ws_url;
+    $("restUrl").textContent = s.rest_url;
+    $("tokenInfo").innerHTML = s.token_required ? "Changes here need the <b>API token</b> the server was started with." : "No API token set: anyone who can open this page can change settings. Fine on 127.0.0.1; set <span class='font-mono'>API_TOKEN</span> before exposing it.";
+    paint();
+  }
+
+  function current() {
+    const out = { broker: document.querySelector('input[name="broker"]:checked')?.value, delta_env: env, market_data: $("market_data").value };
+    for (const k of NUMBERS) out[k] = Number($(k).value);
+    const key = $("delta_api_key").value.trim(), secret = $("delta_api_secret").value.trim();
+    if (key) out.delta_api_key = key;
+    if (secret) out.delta_api_secret = secret;
+    return out;
+  }
+  function changes() {
+    const now = current(), diff = {};
+    for (const [k, v] of Object.entries(now)) {
+      if (k === "delta_api_key" || k === "delta_api_secret") { diff[k] = v; continue; }
+      if (String(v) !== String(saved[k])) diff[k] = v;
+    }
+    return diff;
+  }
+
+  function paint() {
+    const c = current();
+    document.querySelectorAll(".broker-card").forEach((el) => {
+      const on = el.dataset.broker === c.broker;
+      el.classList.toggle("border-brand-500", on); el.classList.toggle("bg-brand-50", on);
+      el.classList.toggle("border-slate-200", !on);
+    });
+    document.querySelectorAll("#envTabs button").forEach((b) => b.classList.toggle("on", b.dataset.env === env));
+    $("envHelp").innerHTML = env === "live" ? '<span class="down font-medium">Live account: orders use real money when the broker is Delta.</span>' : "Demo account: orders go to the Delta testnet.";
+    $("keyHost").textContent = HOSTS[env];
+    $("dirty").classList.toggle("hidden", !Object.keys(changes()).length);
+  }
+
+  document.querySelectorAll("#envTabs button").forEach((b) => (b.onclick = () => { env = b.dataset.env; paint(); }));
+  $("form").addEventListener("input", paint);
+  $("form").addEventListener("change", paint);
+  $("discardBtn").onclick = () => fill(saved);
+
+  $("form").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const diff = changes();
+    if (!Object.keys(diff).length) { TB.toast("Nothing to save"); return; }
+    let confirm = "";
+    const next = { ...saved, ...diff };
+    if (next.broker === "delta" && next.delta_env === "live" && !saved.is_real_money) {
+      confirm = await TB.ask({ title: "Switch to REAL-MONEY trading", body: `The broker will be your <b>live</b> Delta account. Type <span class="font-mono">${esc(PHRASE)}</span> to continue.`, input: "text", placeholder: PHRASE, ok: "Confirm", danger: true });
+      if (confirm === null) return;
+    }
+    $("saveBtn").disabled = true;
+    try {
+      await TB.put("/api/settings", { changes: diff, confirm });
+      fill(await TB.get("/api/settings"));
+      TB.toast("Settings saved", "ok");
+      TB.loadHeader();
+    } catch (err) { TB.toast(err.message, "error"); }
+    finally { $("saveBtn").disabled = false; }
+  };
+
+  $("testBtn").onclick = async () => {
+    $("testResult").innerHTML = '<span class="muted">Testing…</span>';
+    try {
+      const r = await TB.post("/api/settings/test-delta", { env, api_key: $("delta_api_key").value.trim(), api_secret: $("delta_api_secret").value.trim() });
+      $("testResult").innerHTML = r.ok ? `<span class="up">Connected to Delta ${esc(r.env)} · balance ${money(r.balance)} ${esc(r.currency)}</span>` : `<span class="down">${esc(r.error)}</span>`;
+    } catch (err) { $("testResult").innerHTML = `<span class="down">${esc(err.message)}</span>`; }
+  };
+  $("clearBtn").onclick = async () => {
+    if (!await TB.ask({ title: "Remove Delta keys?", body: "The stored API key and secret are deleted. Trading switches off.", ok: "Remove", danger: true })) return;
+    try { fill(await TB.post("/api/settings/clear-credentials")); TB.toast("Keys removed", "ok"); } catch (err) { TB.toast(err.message, "error"); }
+  };
+
+  TB.get("/api/settings").then(fill);
+  window.addEventListener("beforeunload", (e) => { if (saved && Object.keys(changes()).length) e.preventDefault(); });
+})();
+</script>
+{% endblock %}

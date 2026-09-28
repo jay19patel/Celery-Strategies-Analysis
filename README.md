@@ -1,144 +1,125 @@
-# Crypto Strategy Analysis
+# TradeBuddy
 
-A Celery-based crypto strategy engine with paper trading, optional Delta Exchange live execution, an operational FastAPI dashboard, SQLite persistence, and Redis-backed scheduling, caching, locks, and real-time updates.
+Event-driven strategy signals and execution on Delta Exchange India, with a
+built-in paper broker. One process: FastAPI dashboard + asyncio event bus +
+one Delta WebSocket + SQLite.
 
-## Architecture
-
-```text
-Celery Beat -> Redis broker -> Celery workers -> strategy tasks
-                                      |             |
-                                      |             +-> Delta Exchange market data
-                                      |             +-> Redis OHLCV cache (DB 3)
-                                      v
-                              SQLite persistence
-                                      |
-FastAPI dashboard <-> Redis pub/sub <-+
-```
-
-- **SQLite** stores accounts, trades, positions, signals, batch results, and runtime configuration. It uses TRUNCATE journal mode for reliable locking on container-mounted volumes.
-- **Redis DB 0** is the Celery broker, **DB 1** is the result backend, **DB 2** handles pub/sub and distributed locks, and **DB 3** caches OHLCV data.
-- **Celery Beat** wakes every 10 seconds. The task itself applies the user-configured interval and an atomic Redis lock before dispatching a strategy chord.
-- **ZeroMQ** is best-effort local telemetry only; it is not a durable trading-event transport.
-- **Prometheus** can scrape `GET /metrics`; the custom dashboard continues to use cached JSON and WebSocket snapshots.
-
-## Features
-
-- Parallel strategy execution across configured symbols
-- Paper accounts isolated by strategy and symbol
-- Optional armed live-order execution through Delta Exchange India
-- Shared, risk-managed portfolio simulation
-- FastAPI dashboard with WebSocket status updates
-- Runtime strategy, symbol, interval, risk, and broker configuration
-- Health, Celery, Redis, SQLite, WebSocket, and telemetry monitoring
-
-## Requirements
-
-- Docker and Docker Compose, or Python 3.13+
-- Redis 7+
-- Delta Exchange credentials only when live execution is required
-
-## Docker Setup
+## Quick start
 
 ```bash
-cp .env.example .env
-docker compose up --build
+make install
+make run            # http://127.0.0.1:8080
 ```
 
-The stack starts Redis, a Celery worker, Celery Beat, and the dashboard. Open `http://localhost:8080`.
+Then, in the dashboard:
 
-Persistent application data is stored in `./data/stockanalysis.db`; Redis data uses the `redis_data` Docker volume.
+1. **Settings** → choose the broker: **Paper** (simulated) or **Delta Exchange**.
+   For Delta, pick **Demo** or **Live**, paste the API key and secret, and
+   press **Test connection**.
+2. Switch **Trading** on in the top bar. It is off at every start and whenever
+   the broker, account, keys or price feed change.
+3. Turn strategies, and each strategy's symbols, on or off on **Strategies**.
 
-## Local Development
+No `.env` is needed. It only holds `HOST`, `PORT`, `DB_PATH` and `API_TOKEN`
+(see `.env.example`).
 
-```bash
-uv sync --extra dev
-docker compose up -d redis
-uv run celery -A app.core.celery_app.celery_app worker --loglevel=INFO
-uv run celery -A app.core.celery_app.celery_app beat --loglevel=INFO
-uv run uvicorn frontend.main:app --reload --port 8080
+## Pages
+
+| Page | What it shows |
+|---|---|
+| Overview | equity, P&L, signal/order counts, paper equity curve, live prices, strategies, recent activity |
+| Strategies | per-strategy and per-symbol switches, runs, signals, errors, last result |
+| Signals | every signal and why it did or did not trade, filterable |
+| Positions | open positions per broker, close, edit paper SL/TP, resting SL/TP legs |
+| Orders | every order the engine sent, per broker, with status |
+| Account | balance, available, margin, P&L per broker |
+| Paper Trading | equity curve, win rate, profit factor, drawdown, per-strategy stats, trade history, reset |
+| Market Data | live price charts, WebSocket channels, what closed each candle |
+| System | CPU, memory, loop lag, workers and queues, event rates, Delta REST latency |
+| Event Log | every event on the bus, live, filterable |
+| Settings | broker, Delta account and keys, price feed, risk, paper account |
+
+Every page updates live over the dashboard WebSocket (`/ws`).
+
+## How it flows
+
+```
+Delta WebSocket
+  v2/ticker ─────────────► Tick ─────────► PriceBook · PaperBroker (SL/TP/liquidation on every tick)
+  candlestick_1m/5m/15m ─► CandleClosed ─► StrategyRunner ─► SignalGenerated
+  (or the clock, if the stream is quiet)                            │
+                                                                    ▼
+                         Trader: trading on? strategy on? pair on? broker ready?
+                                 live price? nothing in flight? no open position?
+                                      │ no ─► TradeSkipped(reason)
+                                      ▼ yes
+                                 OrderRequested ─► Executor ─► active Broker
+                                                               ├─ PaperBroker (simulated)
+                                                               └─ DeltaBroker (REST, bracket SL/TP)
+                          OrderPlaced | OrderFailed | OrderUnknown ─► look up by id, never resend
+  orders, positions (private, Delta) ─► OrderUpdate, PositionUpdate
 ```
 
-Run the test suite and lint checks with:
+## Layout
 
-```bash
-uv run pytest
-uv run ruff check .
+```
+tradebuddy/
+  config.py        process bootstrap (host, port, db, token)
+  settings.py      runtime settings, validated; stored in SQLite
+  events.py        event types + EventBus
+  delta.py         Delta REST client
+  stream.py        Delta WebSocket, BarCloser, PriceBook
+  runner.py        CandleClosed -> strategies -> SignalGenerated
+  trading.py       Trader (gate) and Executor (orders)
+  brokers/         Broker interface, PaperBroker, DeltaBroker
+  store.py         SQLite schema and queries
+  system.py        wiring, settings changes, dashboard views
+  app.py           pages + JSON API + /ws
+  templates/       Jinja2 pages
+  static/          CSS and JS
+  strategies/      one file per strategy, auto-discovered
 ```
 
-## Configuration
+## Writing a strategy
 
-Configuration is read from environment variables and selected pipeline settings can be changed from the dashboard and persisted in SQLite.
-
-| Variable | Default | Purpose |
-|---|---:|---|
-| `SQLITE_DB_PATH` | `data/stockanalysis.db` | SQLite database path |
-| `REDIS_BROKER_URL` | `redis://localhost:6379/0` | Celery broker |
-| `REDIS_RESULT_URL` | `redis://localhost:6379/1` | Celery result backend |
-| `REDIS_PUBSUB_URL` | `redis://localhost:6379/2` | Pub/sub and lock client |
-| `SYMBOLS` | `BTC-USD,ETH-USD,SOL-USD` | Comma-separated symbols |
-| `STRATEGIES` | `*` | Strategy class paths, or automatic discovery |
-| `SCHEDULE_SECONDS` | `60` | Batch interval; minimum 10 seconds |
-| `EXECUTION_MODE` | `PAPER` | `PAPER` or `LIVE` |
-| `LIVE_TRADING_ARMED` | `false` | Explicit live-order safety gate |
-| `DELTA_API_KEY` | empty | Delta Exchange API key |
-| `DELTA_API_SECRET` | empty | Delta Exchange API secret |
-| `DELTA_CLIENT_ID` | `0` | Delta Exchange client ID |
-
-See [app/core/settings.py](app/core/settings.py) for all risk and portfolio settings.
-
-## Manual Execution
+Add a file to `tradebuddy/strategies/`:
 
 ```python
-from app.core.tasks import run_all_batch_task
+"""Close above EMA20 on 5-minute candles."""
+from tradebuddy.strategies.base import Context, Signal, Strategy
+from tradebuddy.strategies.indicators import ema
 
-result = run_all_batch_task.delay()
-print(result.get())
+class MyStrategy(Strategy):
+    name = "my_strategy"        # stable: toggles and history key off it
+    version = 1                 # bump when the logic changes
+    interval = "5m"             # runs when a 5m candle closes
+    symbols = ("BTCUSD", "ETHUSD")
+    size = 1                    # contracts per trade
+    lookback = 50               # closed candles in ctx.candles
+
+    async def on_candle(self, ctx: Context) -> Signal | None:
+        closes = [c.close for c in ctx.candles]
+        if closes[-1] > ema(closes, 20)[-1]:
+            return Signal("buy", "close above EMA20")
+        return None
 ```
 
-Pass `force=True` only for an intentional manual run that should bypass the configured interval.
+Restart and it appears on the Strategies page. `ctx.market` also offers
+`price(symbol)`, `candles(...)` and `option_chain(underlying)`.
 
-## Adding A Strategy
+Included: `random_1m`, `rsi_5m`, `ema_cross_15m`, `pcr_options`.
 
-Create one module under `app/strategies/` containing a concrete `BaseStrategy` subclass. With `STRATEGIES=*`, it is discovered automatically; no registry or package import list needs editing. To select strategies explicitly, provide comma-separated dotted class paths in `STRATEGIES`.
+## Safety
 
-## Adding A Data Provider
-
-Create a `BaseDataProvider` subclass and set `DATA_PROVIDER` to its dotted class path:
-
-```text
-DATA_PROVIDER=my_package.market_data.CustomProvider
-```
-
-The factory validates the interface at startup. Built-in short names such as `delta` remain supported.
-
-## Operations
-
-```bash
-docker compose ps
-docker compose logs -f worker
-docker compose logs -f beat
-docker compose logs -f dashboard
-docker exec -it stockanalysis-redis redis-cli
-```
-
-The dashboard exposes system health and runtime controls at `http://localhost:8080`. Live trading remains disabled until credentials are configured and the explicit arming flow succeeds.
-
-### Observability
-
-The dashboard uses `/ws/live` for one-second market ticks and five-second operational snapshots. When the socket is disconnected, it falls back to `GET /api/system/metrics`. Both paths reuse the background health collector cache, so browser traffic does not trigger repeated Celery cluster inspections.
-
-Prometheus can scrape the standard endpoint:
-
-```yaml
-scrape_configs:
-  - job_name: tradebuddy
-    scrape_interval: 15s
-    static_configs:
-      - targets: ["dashboard:8080"]
-```
-
-Use `/api/system/metrics` or `/ws/live` in custom frontend code. Use `/metrics` for Prometheus, Grafana, and alerting rather than parsing Prometheus text in the browser.
-
-## License
-
-MIT
+- The default broker is **paper**; Delta defaults to the **demo** account.
+- Becoming real-money (broker Delta + Live account) needs the confirmation
+  phrase typed on the Settings page.
+- Trading is off at every start and after any routing change. "Close all"
+  turns it off and flattens the active broker.
+- One order per strategy × symbol × bar (deterministic `client_order_id`).
+- A symbol with an open position or an order in flight takes no new entry.
+- A timeout is never resent: the order is looked up by its id.
+- SL/TP go out with the entry (Delta bracket; paper watches every tick).
+- No fresh WebSocket price → no trade.
+- API keys are stored in the local database (`data/`, git-ignored) and never
+  returned to the browser. Binding beyond localhost requires `API_TOKEN`.

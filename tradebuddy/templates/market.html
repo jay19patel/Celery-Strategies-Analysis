@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>{% endblock %}
+{% block content %}
+<div id="priceCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="plug-zap"></i>WebSocket connection</div></div>
+    <table class="tbl"><tbody id="feed"></tbody></table>
+  </section>
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="rss"></i>Channels <span class="card-sub">messages received</span></div></div>
+    <table class="tbl"><thead><tr><th>Channel</th><th class="r">Messages</th><th class="r">Per min</th></tr></thead><tbody id="channels"></tbody></table>
+  </section>
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="clock"></i>Candle closes <span class="card-sub">what triggered each bar</span></div></div>
+    <div class="card-body space-y-3">
+      <div id="closedBy" class="grid grid-cols-2 gap-3"></div>
+      <p class="text-[11px] muted">A bar closes when the stream shows the next bar (<b>websocket</b>) or when the clock passes its end first (<b>clock</b>, 3s grace). Each bar is emitted once, whichever comes first.</p>
+    </div>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><div class="card-title"><i data-lucide="candlestick-chart"></i>Recent candle closes</div></div>
+  <div class="scroll max-h-96">
+    <table class="tbl"><thead><tr><th>Closed</th><th>Symbol</th><th>Resolution</th><th>Bar open</th><th>Source</th><th class="r">Open</th><th class="r">High</th><th class="r">Low</th><th class="r">Close</th></tr></thead><tbody id="bars"></tbody></table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const { $, esc, num, price, time, ago } = TB;
+  const charts = {}, series = {}, first = {};
+  let prevMsgs = null, prevAt = 0;
+
+  function ensureCard(sym) {
+    if (charts[sym]) return;
+    $("priceCards").insertAdjacentHTML("beforeend", `
+      <section class="card">
+        <div class="card-head">
+          <div><div class="text-sm font-semibold">${esc(sym)}</div><div id="chg-${esc(sym)}" class="text-[11px] muted">since page open</div></div>
+          <div class="text-right"><div id="last-${esc(sym)}" class="font-mono text-xl font-semibold">—</div><div id="age-${esc(sym)}" class="text-[11px] muted"></div></div>
+        </div>
+        <div class="px-3 py-2 h-32"><canvas id="c-${esc(sym)}"></canvas></div>
+      </section>`);
+    series[sym] = [];
+    charts[sym] = new Chart($(`c-${sym}`), {
+      type: "line",
+      data: { labels: [], datasets: [{ data: [], borderColor: "#1e88e5", borderWidth: 1.5, pointRadius: 0, tension: .2, fill: false }] },
+      options: { maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { ticks: { font: { size: 9 }, maxTicksLimit: 4 }, grid: { color: "#f8fafc" } } } },
+    });
+  }
+
+  function addTick(sym, p, ts) {
+    ensureCard(sym);
+    first[sym] ??= p;
+    const s = series[sym];
+    s.push([ts, p]);
+    if (s.length > 600) s.shift();
+    const c = charts[sym];
+    c.data.labels = s.map(([t]) => t);
+    c.data.datasets[0].data = s.map(([, v]) => v);
+    const up = p >= first[sym];
+    c.data.datasets[0].borderColor = up ? "#00b852" : "#eb5757";
+    c.update("none");
+    $(`last-${sym}`).textContent = price(p);
+    const chg = ((p - first[sym]) / first[sym]) * 100;
+    $(`chg-${sym}`).innerHTML = `<span class="${up ? "up" : "down"}">${chg >= 0 ? "+" : ""}${num(chg, 3)}%</span> since page open`;
+    $(`age-${sym}`).textContent = time(ts);
+  }
+
+  async function loadMetrics() {
+    const m = await TB.get("/api/metrics"), f = m.feed;
+    const row = (k, v, cls = "") => `<tr><td class="muted w-40">${k}</td><td class="font-mono ${cls} wrap">${v}</td></tr>`;
+    $("feed").innerHTML = [
+      row("Status", f.connected ? "connected" : "disconnected", f.connected ? "up" : "down"),
+      row("URL", esc(f.url)),
+      row("Connected since", f.connected_since ? `${time(f.connected_since)} (${ago(f.connected_since)})` : "—"),
+      row("Last message", f.seconds_since_message === null ? "never" : `${f.seconds_since_message}s ago`, f.seconds_since_message > 30 ? "down" : ""),
+      row("Private channels", f.authenticated ? "authenticated" : "off", f.authenticated ? "up" : "muted"),
+      row("Reconnects", f.reconnects),
+      row("Last error", esc(f.last_error || "—"), f.last_error ? "down" : "muted"),
+    ].join("");
+    const now = Date.now() / 1000;
+    TB.rows("channels", Object.entries(f.messages).sort(), ([k, v]) => {
+      const rate = prevMsgs && prevMsgs[k] !== undefined ? ((v - prevMsgs[k]) / (now - prevAt)) * 60 : null;
+      return `<tr><td class="font-mono">${esc(k)}</td><td class="r font-mono">${num(v, 0)}</td><td class="r font-mono muted">${rate === null ? "—" : num(rate, 1)}</td></tr>`;
+    }, "No messages yet", 3);
+    prevMsgs = { ...f.messages }; prevAt = now;
+    const by = f.bars_closed_by || {};
+    $("closedBy").innerHTML = ["websocket", "clock"].map((k) => `<div class="bg-slate-50 rounded-lg p-3"><div class="text-[11px] muted">${k}</div><div class="font-mono text-xl font-semibold">${num(by[k] || 0, 0)}</div></div>`).join("");
+  }
+
+  const barRow = (e) => `<tr><td class="font-mono text-slate-500">${time(e.ts)}</td><td class="font-semibold">${esc(e.symbol)}</td><td><span class="badge">${esc(e.resolution)}</span></td>
+    <td class="font-mono">${time(e.bar_time)}</td><td><span class="badge ${e.source === "websocket" ? "badge-blue" : ""}">${esc(e.source)}</span></td>
+    <td class="r font-mono">${price(e.candle?.open)}</td><td class="r font-mono">${price(e.candle?.high)}</td><td class="r font-mono">${price(e.candle?.low)}</td><td class="r font-mono">${price(e.candle?.close)}</td></tr>`;
+  let bars = [];
+  async function loadBars() { bars = await TB.get("/api/events?type=CandleClosed&limit=100"); TB.rows("bars", bars, barRow, "No candle has closed since start", 9); }
+
+  (async () => {
+    const h = await TB.get("/api/header");
+    for (const [sym, p] of Object.entries(h.prices).sort()) addTick(sym, p.price, Date.now() / 1000);
+    TB.icons();
+  })();
+  TB.on("Tick", (e) => addTick(e.symbol, e.price, e.ts));
+  TB.on("CandleClosed", (e) => { bars.unshift(e); bars = bars.slice(0, 100); TB.rows("bars", bars, barRow, "", 9); });
+  loadMetrics(); loadBars();
+  setInterval(loadMetrics, 3000);
+})();
+</script>
+{% endblock %}

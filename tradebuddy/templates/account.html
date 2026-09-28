@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-wrap items-center justify-between gap-3">
+  {% with all_tab=False %}{% include "_broker_tabs.html" %}{% endwith %}
+  <span id="updated" class="text-xs muted"></span>
+</div>
+
+<div id="error" class="hidden card p-4 text-sm down"></div>
+<div id="kpis" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3"></div>
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="info"></i>Account details</div></div>
+    <table class="tbl"><tbody id="details"></tbody></table>
+  </section>
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="coins"></i>Assets</div></div>
+    <table class="tbl"><thead><tr><th>Asset</th><th class="r">Balance</th><th class="r">Available</th></tr></thead><tbody id="assets"></tbody></table>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/tabs.js"></script>
+<script>
+(() => {
+  const { $, esc, num, money, signed, pnlClass, dateTime } = TB;
+  let broker = null;
+  const kpi = (label, value, cls = "", hint = "") => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}">${value}</div><div class="hint">${hint}</div></div>`;
+
+  async function load() {
+    if (!broker) return;
+    try {
+      const a = await TB.get(`/api/account?broker=${broker}`);
+      $("error").classList.add("hidden");
+      const x = a.extra || {};
+      const ret = x.starting_balance ? ((a.equity - x.starting_balance) / x.starting_balance) * 100 : null;
+      $("kpis").innerHTML = [
+        kpi("Equity", money(a.equity), "", a.currency),
+        kpi("Wallet balance", money(a.balance)),
+        kpi("Available", money(a.available)),
+        kpi("Margin used", money(a.margin_used)),
+        kpi("Unrealized P&L", signed(a.unrealized_pnl, 4), pnlClass(a.unrealized_pnl)),
+        kpi(a.realized_pnl === null ? "Return" : "Realized P&L", a.realized_pnl === null ? "—" : signed(a.realized_pnl, 4), pnlClass(a.realized_pnl), ret === null ? "" : `${ret >= 0 ? "+" : ""}${num(ret, 2)}% since start`),
+      ].join("");
+      const details = [["Broker", broker === "paper" ? "Paper (simulated)" : "Delta Exchange"], ["Currency", a.currency]];
+      if (broker === "paper") details.push(["Starting balance", money(x.starting_balance)], ["Fees paid", money(x.fees_paid, 4)], ["Account opened", dateTime(x.created_at)]);
+      $("details").innerHTML = details.map(([k, v]) => `<tr><td class="muted w-48">${k}</td><td class="font-mono">${esc(v)}</td></tr>`).join("");
+      const assets = x.assets || [{ asset: a.currency, balance: a.balance, available: a.available }];
+      TB.rows("assets", assets, (r) => `<tr><td class="font-semibold">${esc(r.asset)}</td><td class="r font-mono">${num(r.balance, 6)}</td><td class="r font-mono">${num(r.available, 6)}</td></tr>`, "No balances", 3);
+      $("updated").textContent = `Updated ${new Date().toLocaleTimeString("en-GB")}`;
+    } catch (err) {
+      $("error").classList.remove("hidden");
+      $("error").innerHTML = `<b>${esc(broker)}:</b> ${esc(err.message)} ${broker === "delta" ? '· <a class="underline" href="/settings">Configure Delta in Settings</a>' : ""}`;
+      $("kpis").innerHTML = ""; $("details").innerHTML = ""; $("assets").innerHTML = "";
+    }
+  }
+  brokerTabs((b) => { broker = b; load(); });
+  TB.on(["PositionClosed", "OrderPlaced", "SettingsChanged"], () => setTimeout(load, 200));
+  setInterval(load, 5000);
+})();
+</script>
+{% endblock %}

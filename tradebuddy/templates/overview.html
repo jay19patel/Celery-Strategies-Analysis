@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>{% endblock %}
+{% block content %}
+<div id="kpis" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3"></div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+  <section class="card xl:col-span-2">
+    <div class="card-head">
+      <div class="card-title"><i data-lucide="line-chart"></i>Paper equity <span class="card-sub">closed trades</span></div>
+      <a href="/paper" class="btn btn-sm">Details</a>
+    </div>
+    <div class="card-body"><div class="h-64"><canvas id="equityChart"></canvas></div></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div class="card-title"><i data-lucide="radio"></i>Live prices <span class="card-sub">WebSocket ticker</span></div>
+    </div>
+    <div id="prices" class="divide-y divide-slate-100"></div>
+  </section>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
+  <section class="card xl:col-span-3">
+    <div class="card-head">
+      <div class="card-title"><i data-lucide="brain-circuit"></i>Strategies</div>
+      <a href="/strategies" class="btn btn-sm">Manage</a>
+    </div>
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th>Strategy</th><th>Runs on</th><th>Symbols</th><th class="r">Runs</th><th class="r">Signals</th><th class="r">Errors</th><th>Last result</th><th>On</th></tr></thead>
+        <tbody id="strategies"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card xl:col-span-2">
+    <div class="card-head">
+      <div class="card-title"><i data-lucide="activity"></i>Recent activity</div>
+      <a href="/signals" class="btn btn-sm">All signals</a>
+    </div>
+    <div id="activity" class="divide-y divide-slate-100 max-h-[420px] overflow-auto"></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const { $, esc, num, price, money, signed, pnlClass, ago, time, side, eventBadge } = TB;
+  let chart;
+
+  const kpi = (label, icon, value, hint = "", cls = "") =>
+    `<div class="card kpi"><div class="label"><i data-lucide="${icon}"></i>${label}</div><div class="value ${cls}">${value}</div><div class="hint">${hint}</div></div>`;
+
+  function activityLine(e) {
+    const detail = e.reason || e.error || (e.type === "PositionClosed" ? `${e.reason} · ${signed(e.pnl, 4)}` : e.status ? `${e.status} ${e.order_id || ""}` : "");
+    return `<div class="px-4 py-2.5 text-xs flex gap-3 items-start">
+      <span class="font-mono text-slate-400 w-16 shrink-0">${time(e.ts)}</span>
+      <div class="min-w-0 space-y-1">
+        <div class="flex items-center gap-2 flex-wrap">${eventBadge(e.type)}<span class="font-mono">${esc(e.strategy || "")}</span><span>${esc(e.symbol || "")}</span>${e.side ? side(e.side) : ""}</div>
+        <div class="text-slate-500 break-words">${esc(detail)}</div>
+      </div></div>`;
+  }
+
+  async function load() {
+    const o = await TB.get("/api/overview");
+    const a = o.account, c = o.counts_24h, p = o.paper.overall;
+    const open = Object.values(o.header.prices).length;
+    $("kpis").innerHTML = [
+      kpi("Equity", "wallet", a ? money(a.equity) : "—", o.header.broker.toUpperCase() + (o.account_error ? " · unavailable" : "")),
+      kpi("Unrealized P&L", "trending-up", a ? signed(a.unrealized_pnl) : "—", "open positions", a ? pnlClass(a.unrealized_pnl) : ""),
+      kpi("Available", "banknote", a ? money(a.available) : "—", a ? `margin ${money(a.margin_used)}` : ""),
+      kpi("Paper realized", "flask-conical", signed(p.pnl), `${p.trades} trades · ${p.win_rate}% win`, pnlClass(p.pnl)),
+      kpi("Signals 24h", "zap", num(c.SignalGenerated, 0), `${num(c.TradeSkipped, 0)} skipped`),
+      kpi("Orders 24h", "send", num(c.OrderPlaced, 0), `${num(c.OrderFailed, 0)} failed`, c.OrderFailed ? "down" : ""),
+      kpi("Closed 24h", "check-circle-2", num(c.PositionClosed, 0), "positions"),
+      kpi("Markets", "radio", num(open, 0), o.header.feed_connected ? "stream connected" : "stream down", o.header.feed_connected ? "" : "down"),
+    ].join("");
+
+    TB.rows("strategies", o.strategies, (s) => `<tr>
+      <td class="font-mono font-medium">${esc(s.name)} <span class="muted">v${s.version}</span></td>
+      <td><span class="badge">${esc(s.interval)} close</span></td>
+      <td>${s.symbols.map((x) => `<span class="badge ${x.enabled ? "badge-blue" : ""} mr-1">${esc(x.symbol)}</span>`).join("")}</td>
+      <td class="r font-mono">${num(s.stats.runs, 0)}</td><td class="r font-mono">${num(s.stats.signals, 0)}</td>
+      <td class="r font-mono ${s.stats.errors ? "down" : ""}">${num(s.stats.errors, 0)}</td>
+      <td class="wrap text-slate-500">${esc(s.stats.last_result || "waiting for first candle close")} <span class="muted">${s.stats.last_run_at ? "· " + ago(s.stats.last_run_at) : ""}</span></td>
+      <td>${TB.switchHtml("strategy:" + s.name, s.enabled, true)}</td></tr>`, "No strategies found", 8);
+    TB.bindToggles($("strategies"));
+
+    $("activity").innerHTML = o.recent.length ? o.recent.map(activityLine).join("") : `<div class="p-6 text-center text-xs muted">No signals yet. Strategies run when their candle closes.</div>`;
+    renderPrices(o.header.prices);
+    renderChart(o.paper.equity_curve);
+    TB.icons();
+  }
+
+  function renderPrices(prices) {
+    const entries = Object.entries(prices).sort();
+    $("prices").innerHTML = entries.length ? entries.map(([sym, p]) => `
+      <div class="px-4 py-3 flex items-center justify-between">
+        <div><div class="text-sm font-semibold">${esc(sym)}</div><div class="text-[11px] muted">${p.fresh ? "live" : "stale"} · ${p.age_seconds}s</div></div>
+        <div id="px-${esc(sym)}" class="font-mono text-lg font-semibold ${p.fresh ? "" : "down"}">${price(p.price)}</div>
+      </div>`).join("") : `<div class="p-6 text-center text-xs muted">Waiting for ticks…</div>`;
+  }
+
+  function renderChart(curve) {
+    const data = curve.map(([ts, eq]) => ({ x: ts * 1000, y: eq }));
+    const labels = data.map((d) => new Date(d.x).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }));
+    const values = data.map((d) => d.y);
+    if (chart) { chart.data.labels = labels; chart.data.datasets[0].data = values; chart.update("none"); return; }
+    chart = new Chart($("equityChart"), {
+      type: "line",
+      data: { labels, datasets: [{ data: values, borderColor: "#1e88e5", backgroundColor: "rgba(30,136,229,.08)", fill: true, tension: .25, pointRadius: values.length > 40 ? 0 : 2, borderWidth: 2 }] },
+      options: {
+        maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => money(c.parsed.y) } } },
+        scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 6, font: { size: 10 } } }, y: { grid: { color: "#f1f5f9" }, ticks: { font: { size: 10 }, callback: (v) => "$" + num(v, 0) } } },
+      },
+    });
+  }
+
+  TB.on("Tick", (e) => {
+    const el = document.getElementById(`px-${e.symbol}`);
+    if (!el) return;
+    const prev = Number(el.dataset.v || e.price);
+    el.textContent = price(e.price);
+    el.dataset.v = e.price;
+    el.classList.remove("flash-up", "flash-down", "down");
+    void el.offsetWidth;
+    if (e.price !== prev) el.classList.add(e.price > prev ? "flash-up" : "flash-down");
+  });
+  TB.on(["SignalGenerated", "TradeSkipped", "OrderPlaced", "OrderFailed", "PositionClosed", "StrategyError", "ToggleChanged", "SettingsChanged"], () => load());
+  load();
+  setInterval(load, 15000);
+})();
+</script>
+{% endblock %}

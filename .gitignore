@@ -37,3 +37,10 @@ results_*.json
 
 # Misc
 .claude
+# Runtime state — never commit (contains broker credentials + trading state)
+data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+celerybeat-schedule*

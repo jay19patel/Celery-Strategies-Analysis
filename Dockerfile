@@ -6,30 +6,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH" \
-    PYTHONPATH="/app"
+    TZ=UTC
 
 WORKDIR /app
-
-# System deps
-RUN apt-get update -y && apt-get install -y --no-install-recommends \
-    bash \
-    build-essential \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
-# Copy project dependency files
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
 COPY pyproject.toml uv.lock /app/
+RUN uv venv /opt/venv && uv sync --active --frozen --no-cache --no-dev
+COPY tradebuddy /app/tradebuddy
 
-# Install Python dependencies into /opt/venv (outside of /app so volumes don't shadow it)
-RUN uv venv /opt/venv && uv sync --active --frozen --no-cache
-
-# Copy rest of project
-COPY . /app
-
-EXPOSE 8080 8000 5555
-
-# Default command
-CMD ["python", "-c", "print('Image ready')"]
+EXPOSE 8080
+# HOST=0.0.0.0 inside a container needs API_TOKEN; publish the port on 127.0.0.1 only.
+ENV HOST=0.0.0.0
+CMD ["python", "-m", "tradebuddy"]

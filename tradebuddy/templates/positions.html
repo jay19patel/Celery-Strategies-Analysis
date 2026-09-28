@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-wrap items-center justify-between gap-3">
+  {% with all_tab=False %}{% include "_broker_tabs.html" %}{% endwith %}
+  <div id="totals" class="flex flex-wrap gap-5 text-xs"></div>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <div class="card-title"><i data-lucide="layers"></i>Open positions</div>
+    <span id="posError" class="text-xs down"></span>
+  </div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">Unrealized P&amp;L</th><th class="r">Margin</th><th class="r">Stop loss</th><th class="r">Take profit</th><th class="r">Liquidation</th><th>Strategy</th><th>Held</th><th></th></tr></thead>
+      <tbody id="positions"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div class="card-title"><i data-lucide="shield"></i>Protective orders <span class="card-sub">resting SL / TP legs</span></div>
+  </div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Symbol</th><th>Type</th><th>Side</th><th class="r">Size</th><th class="r">Trigger</th><th>State</th><th>Order</th></tr></thead>
+      <tbody id="legs"></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/tabs.js"></script>
+<script>
+(() => {
+  const { $, esc, num, price, money, signed, pnlClass, side, duration } = TB;
+  let broker = null;
+
+  async function load() {
+    if (!broker) return;
+    try {
+      const [positions, legs] = await Promise.all([TB.get(`/api/positions?broker=${broker}`), TB.get(`/api/open-orders?broker=${broker}`)]);
+      $("posError").textContent = "";
+      const upnl = positions.reduce((a, p) => a + p.unrealized_pnl, 0), margin = positions.reduce((a, p) => a + p.margin, 0);
+      $("totals").innerHTML = `<span>Positions <b class="font-mono">${positions.length}</b></span><span>Margin <b class="font-mono">${money(margin)}</b></span><span>Unrealized <b class="font-mono ${pnlClass(upnl)}">${signed(upnl, 4)}</b></span>`;
+      TB.rows("positions", positions, (p) => `<tr>
+        <td class="font-semibold">${esc(p.symbol)}</td><td>${side(p.side)}</td>
+        <td class="r font-mono">${num(p.size, 4)}</td><td class="r font-mono">${price(p.entry_price)}</td><td class="r font-mono">${price(p.mark_price)}</td>
+        <td class="r font-mono ${pnlClass(p.unrealized_pnl)}">${signed(p.unrealized_pnl, 4)}</td>
+        <td class="r font-mono">${money(p.margin)}</td>
+        <td class="r font-mono down">${price(p.stop_loss)}</td><td class="r font-mono up">${price(p.take_profit)}</td>
+        <td class="r font-mono muted">${price(p.liquidation_price)}</td>
+        <td class="font-mono">${esc(p.strategy || "—")}</td>
+        <td class="muted">${p.opened_at ? duration(Date.now() / 1000 - p.opened_at) : "—"}</td>
+        <td class="r space-x-1">
+          ${broker === "paper" ? `<button class="btn btn-sm" data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}"><i data-lucide="pencil"></i>SL/TP</button>` : ""}
+          <button class="btn btn-sm btn-danger" data-close="${esc(p.symbol)}"><i data-lucide="x"></i>Close</button>
+        </td></tr>`, `No open ${broker} positions`, 13);
+      TB.rows("legs", legs, (o) => `<tr>
+        <td class="font-semibold">${esc(o.symbol)}</td><td><span class="badge">${esc(o.type)}</span></td><td>${side(o.side)}</td>
+        <td class="r font-mono">${num(o.size, 4)}</td><td class="r font-mono">${price(o.price)}</td><td>${TB.status(o.state)}</td>
+        <td class="font-mono muted">${esc(o.client_order_id || o.id)}</td></tr>`, "No resting orders", 7);
+    } catch (err) {
+      $("posError").textContent = err.message;
+      TB.rows("positions", [], () => "", `Could not load ${broker} positions`, 13);
+      TB.rows("legs", [], () => "", "—", 7);
+    }
+    bind();
+    TB.icons();
+  }
+
+  function bind() {
+    document.querySelectorAll("[data-close]").forEach((b) => b.onclick = async () => {
+      const symbol = b.dataset.close;
+      if (!await TB.ask({ title: `Close ${symbol}?`, body: `Market-close the ${esc(symbol)} position on <b>${broker}</b>.`, ok: "Close position", danger: true })) return;
+      try { await TB.post(`/api/positions/${broker}/${encodeURIComponent(symbol)}/close`); TB.toast(`${symbol} closed`, "ok"); } catch (err) { TB.toast(err.message, "error"); }
+      load();
+    });
+    document.querySelectorAll("[data-edit]").forEach((b) => b.onclick = async () => {
+      const symbol = b.dataset.edit;
+      const value = await TB.ask({ title: `Protection for ${symbol}`, body: "Stop loss and take profit, separated by a comma.", input: "text", value: `${b.dataset.sl}, ${b.dataset.tp}`, ok: "Save" });
+      if (!value) return;
+      const [sl, tp] = value.split(",").map((x) => Number(x.trim()));
+      try { await TB.post(`/api/paper/positions/${encodeURIComponent(symbol)}/protection`, { stop_loss: sl, take_profit: tp }); TB.toast("Protection updated", "ok"); } catch (err) { TB.toast(err.message, "error"); }
+      load();
+    });
+  }
+
+  brokerTabs((b) => { broker = b; load(); });
+  TB.on(["PositionUpdate", "PositionClosed", "OrderPlaced", "SettingsChanged"], () => setTimeout(load, 200));
+  setInterval(load, 3000);
+})();
+</script>
+{% endblock %}

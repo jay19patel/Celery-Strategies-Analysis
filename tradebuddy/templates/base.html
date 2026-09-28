@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} · TradeBuddy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "sans-serif"],
+            mono: ['"JetBrains Mono"', "ui-monospace", "monospace"],
+          },
+          colors: {
+            brand: { 50: "#eff6ff", 100: "#dbeafe", 500: "#1e88e5", 600: "#1565c0", 700: "#0d47a1" },
+            bull: { DEFAULT: "#00b852", bg: "#e6f4ea", text: "#0e8a16" },
+            bear: { DEFAULT: "#eb5757", bg: "#fce8e6", text: "#cf1322" },
+          },
+        },
+      },
+    };
+  </script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <link rel="stylesheet" href="/static/css/app.css">
+  {% block head %}{% endblock %}
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased" data-page="{{ page }}">
+<div class="flex min-h-screen">
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 w-60 -translate-x-full lg:translate-x-0 transition-transform bg-white border-r border-slate-200 flex flex-col">
+    <div class="h-14 flex items-center gap-2.5 px-5 border-b border-slate-200">
+      <div class="w-7 h-7 rounded-lg bg-brand-500 text-white grid place-items-center"><i data-lucide="candlestick-chart" class="w-4 h-4"></i></div>
+      <div>
+        <div class="text-sm font-semibold leading-tight">TradeBuddy</div>
+        <div class="text-[10px] text-slate-400 leading-tight">Event-driven trading engine</div>
+      </div>
+    </div>
+    <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+      {% set groups = [] %}
+      {% for p in pages %}{% if p[4] not in groups %}{% set _ = groups.append(p[4]) %}{% endif %}{% endfor %}
+      {% for group in groups %}
+      <div>
+        <div class="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{{ group }}</div>
+        {% for pid, path, icon, label, g in pages if g == group %}
+        <a href="{{ path }}" class="nav-link {{ 'active' if pid == page }} flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50">
+          <i data-lucide="{{ icon }}" class="w-4 h-4 flex-shrink-0"></i>
+          <span class="truncate">{{ label }}</span>
+          {% if pid == 'positions' %}<span id="navPositions" class="ml-auto nav-badge hidden"></span>{% endif %}
+          {% if pid == 'signals' %}<span id="navSignals" class="ml-auto nav-badge hidden"></span>{% endif %}
+        </a>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </nav>
+    <div class="p-3 border-t border-slate-200 text-[11px] text-slate-500 space-y-1.5">
+      <div class="flex items-center gap-2"><span id="sbFeed" class="dot"></span><span id="sbFeedText">Market stream</span></div>
+      <div class="flex items-center gap-2"><span id="sbLive" class="dot"></span><span>Dashboard live</span></div>
+      <div class="flex items-center gap-2"><span id="sbPrivate" class="dot"></span><span id="sbPrivateText">Private channels</span></div>
+    </div>
+  </aside>
+  <div id="sidebarShade" class="fixed inset-0 z-30 bg-slate-900/30 hidden lg:hidden"></div>
+
+  <!-- Main -->
+  <div class="flex-1 lg:pl-60 min-w-0">
+    <header class="sticky top-0 z-20 h-14 bg-white/90 backdrop-blur border-b border-slate-200 flex items-center gap-3 px-4 lg:px-6">
+      <button id="menuBtn" class="lg:hidden p-1.5 rounded-md hover:bg-slate-100" aria-label="Menu"><i data-lucide="menu" class="w-5 h-5"></i></button>
+      <h1 class="text-[15px] font-semibold truncate">{{ title }}</h1>
+      <span id="brokerBadge" class="badge">…</span>
+      <span id="brokerWarn" class="hidden text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5 truncate max-w-xs"></span>
+      <div class="flex-1"></div>
+      <div id="tickerStrip" class="hidden md:flex items-center gap-4 font-mono text-xs text-slate-600"></div>
+      <label class="switch" title="Master switch. Off at every start and after any broker change.">
+        <input type="checkbox" id="tradingSwitch"><span class="track"></span>
+        <span id="tradingText" class="text-xs font-semibold text-slate-500 w-20">Trading OFF</span>
+      </label>
+      <button id="closeAllBtn" class="btn btn-danger"><i data-lucide="octagon-x" class="w-4 h-4"></i><span class="hidden sm:inline">Close all</span></button>
+    </header>
+
+    <main class="p-4 lg:p-6 space-y-5 max-w-[1600px]">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+<!-- Modal -->
+<div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 p-4">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-md border border-slate-200">
+    <div class="p-5 space-y-3">
+      <h3 id="modalTitle" class="text-sm font-semibold"></h3>
+      <div id="modalBody" class="text-[13px] text-slate-600"></div>
+      <input id="modalInput" class="input w-full hidden">
+    </div>
+    <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 rounded-b-xl flex justify-end gap-2">
+      <button id="modalCancel" class="btn">Cancel</button>
+      <button id="modalOk" class="btn btn-primary">OK</button>
+    </div>
+  </div>
+</div>
+<div id="toasts" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+
+<script src="/static/js/app.js"></script>
+{% block scripts %}{% endblock %}
+<script>lucide.createIcons();</script>
+</body>
+</html>

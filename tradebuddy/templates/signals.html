@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<div id="summary" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+
+<section class="card">
+  <div class="card-head flex-wrap">
+    <div class="card-title"><i data-lucide="activity"></i>Signals and decisions <span class="card-sub">every signal, and why it did or did not trade</span></div>
+    <div class="flex flex-wrap gap-2">
+      <select id="fStrategy" class="select"><option value="">All strategies</option></select>
+      <select id="fSymbol" class="select"><option value="">All symbols</option></select>
+      <select id="fType" class="select">
+        <option value="">All outcomes</option>
+        <option value="SignalGenerated">Signal generated</option>
+        <option value="TradeSkipped">Skipped</option>
+        <option value="StrategyError">Strategy error</option>
+      </select>
+    </div>
+  </div>
+  <div class="scroll max-h-[70vh]">
+    <table class="tbl">
+      <thead><tr><th>Time</th><th>Outcome</th><th>Strategy</th><th>Symbol</th><th>Side</th><th>Bar</th><th>Detail</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const { $, esc, num, dateTime, side, eventBadge, time } = TB;
+  let all = [];
+  const params = new URLSearchParams(location.search);
+
+  const row = (e) => `<tr>
+    <td class="font-mono text-slate-500">${dateTime(e.ts)}</td>
+    <td>${eventBadge(e.type)}</td>
+    <td class="font-mono">${esc(e.strategy)}</td>
+    <td>${esc(e.symbol)}</td>
+    <td>${e.side ? side(e.side) : "—"}</td>
+    <td class="font-mono text-slate-500">${e.bar_time ? time(e.bar_time) : "—"}</td>
+    <td class="wrap ${e.type === "StrategyError" ? "down" : "text-slate-600"}">${esc(e.reason || e.error || "")}</td></tr>`;
+
+  function render() {
+    const f = { strategy: $("fStrategy").value, symbol: $("fSymbol").value, type: $("fType").value };
+    const list = all.filter((e) => (!f.strategy || e.strategy === f.strategy) && (!f.symbol || e.symbol === f.symbol) && (!f.type || e.type === f.type));
+    TB.rows("rows", list, row, "No signals match. Strategies emit signals when their candle closes.", 7);
+
+    const count = (t, sideName) => all.filter((e) => e.type === t && (!sideName || e.side === sideName)).length;
+    const card = (label, text, cls = "") => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}">${text}</div></div>`;
+    $("summary").innerHTML = [
+      card("Signals", num(count("SignalGenerated"), 0), "text-brand-600"),
+      card("Buy / Sell", `<span class="up">${count("SignalGenerated", "buy")}</span> / <span class="down">${count("SignalGenerated", "sell")}</span>`),
+      card("Skipped", num(count("TradeSkipped"), 0)),
+      card("Strategy errors", num(count("StrategyError"), 0), count("StrategyError") ? "down" : ""),
+    ].join("");
+  }
+
+  function fillFilters() {
+    for (const [id, key] of [["fStrategy", "strategy"], ["fSymbol", "symbol"]]) {
+      const sel = $(id);
+      for (const v of [...new Set(all.map((e) => e[key]).filter(Boolean))].sort()) {
+        if (![...sel.options].some((o) => o.value === v)) sel.add(new Option(v, v));
+      }
+    }
+  }
+
+  async function load() {
+    all = await TB.get("/api/signals?limit=1000");
+    fillFilters();
+    if (params.get("strategy")) { $("fStrategy").value = params.get("strategy"); params.delete("strategy"); }
+    render();
+  }
+  ["fStrategy", "fSymbol", "fType"].forEach((id) => $(id).onchange = render);
+  TB.on(["SignalGenerated", "TradeSkipped", "StrategyError"], (e) => { all.unshift(e); fillFilters(); render(); });
+  load();
+})();
+</script>
+{% endblock %}

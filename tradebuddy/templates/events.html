@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="card-head flex-wrap">
+    <div class="card-title"><i data-lucide="scroll-text"></i>Event log <span class="card-sub">every event on the bus, newest first</span></div>
+    <div class="flex flex-wrap items-center gap-2">
+      <input id="search" class="input w-56" placeholder="Filter text…">
+      <select id="type" class="select"><option value="">All types</option></select>
+      <label class="switch sm text-xs text-slate-600"><input type="checkbox" id="ticks"><span class="track"></span>Ticks</label>
+      <button id="pause" class="btn btn-sm"><i data-lucide="pause"></i><span>Pause</span></button>
+      <span id="count" class="text-xs muted font-mono"></span>
+    </div>
+  </div>
+  <div id="log" class="card-body max-h-[75vh] overflow-auto"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const { $, esc, time, eventBadge } = TB;
+  let events = [], paused = false;
+  const HIDE = new Set(["ts", "type"]);
+
+  const fmt = (v) => (v && typeof v === "object" ? JSON.stringify(v) : v);
+  const line = (e) => `<div class="log-line"><span class="text-slate-400 mr-2">${time(e.ts)}</span>${eventBadge(e.type)}
+    <span class="ml-2 text-slate-600">${Object.entries(e).filter(([k]) => !HIDE.has(k)).map(([k, v]) => `<span class="text-slate-400">${esc(k)}=</span>${esc(fmt(v))}`).join("  ")}</span></div>`;
+
+  function render() {
+    const type = $("type").value, q = $("search").value.trim().toLowerCase(), ticks = $("ticks").checked;
+    const list = events.filter((e) => (ticks || e.type !== "Tick") && (!type || e.type === type) && (!q || JSON.stringify(e).toLowerCase().includes(q)));
+    $("log").innerHTML = list.slice(0, 500).map(line).join("") || `<div class="text-center text-xs muted py-8">No events</div>`;
+    $("count").textContent = `${list.length} shown`;
+    for (const t of new Set(events.map((e) => e.type))) if (![...$("type").options].some((o) => o.value === t)) $("type").add(new Option(t, t));
+  }
+  async function load() { events = await TB.get("/api/events?limit=1000"); render(); }
+
+  TB.on("*", (e) => {
+    if (e.type === "Tick" && !$("ticks").checked) return;
+    events.unshift(e);
+    if (events.length > 2000) events.length = 2000;
+    if (!paused) render();
+  });
+  $("pause").onclick = () => {
+    paused = !paused;
+    $("pause").innerHTML = paused ? '<i data-lucide="play"></i><span>Resume</span>' : '<i data-lucide="pause"></i><span>Pause</span>';
+    TB.icons();
+    if (!paused) render();
+  };
+  ["type", "ticks"].forEach((id) => $(id).onchange = render);
+  $("search").oninput = render;
+  load();
+})();
+</script>
+{% endblock %}

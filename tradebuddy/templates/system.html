@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block content %}
+<div id="kpis" class="grid grid-cols-2 md:grid-cols-5 gap-3"></div>
+
+<section class="card">
+  <div class="card-head"><div class="card-title"><i data-lucide="workflow"></i>Event flow</div></div>
+  <div class="card-body overflow-x-auto">
+    <div id="flow" class="flex items-center gap-2 text-xs min-w-max"></div>
+  </div>
+</section>
+
+<div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
+  <section class="card xl:col-span-3 min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="cpu"></i>Workers <span class="card-sub">one queue per bus subscriber</span></div></div>
+    <div class="scroll">
+      <table class="tbl"><thead><tr><th>Worker</th><th>Listens to</th><th class="r">Queue</th><th class="r">Handled</th><th class="r">Errors</th><th class="r">Avg ms</th><th class="r">Max ms</th><th>Last</th></tr></thead><tbody id="workers"></tbody></table>
+    </div>
+  </section>
+  <section class="card xl:col-span-2">
+    <div class="card-head"><div class="card-title"><i data-lucide="bar-chart-3"></i>Event types</div></div>
+    <div class="scroll">
+      <table class="tbl"><thead><tr><th>Event</th><th class="r">Count</th><th class="r">Per min</th><th>Last seen</th></tr></thead><tbody id="types"></tbody></table>
+    </div>
+  </section>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
+  <section class="card xl:col-span-3">
+    <div class="card-head"><div class="card-title"><i data-lucide="globe"></i>Delta REST <span class="card-sub">market = public data · account = your Delta account</span></div></div>
+    <div class="scroll">
+      <table class="tbl"><thead><tr><th>Endpoint</th><th class="r">Calls</th><th class="r">Errors</th><th class="r">Last ms</th><th>Last</th><th>Last error</th></tr></thead><tbody id="rest"></tbody></table>
+    </div>
+  </section>
+  <section class="card xl:col-span-2">
+    <div class="card-head"><div class="card-title"><i data-lucide="server"></i>Host</div></div>
+    <table class="tbl"><tbody id="host"></tbody></table>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const { $, esc, num, ago, duration } = TB;
+  let prev = null, prevAt = 0;
+  const STEPS = [
+    ["DeltaStream", "Tick · CandleClosed"], ["StrategyRunner.on_candle_closed", "SignalGenerated"], ["Trader.on_signal", "OrderRequested · TradeSkipped"],
+    ["Executor.on_order_requested", "OrderPlaced · OrderFailed · OrderUnknown"], ["PaperBroker.on_tick", "PositionClosed"],
+  ];
+  const kpi = (label, value, hint = "", cls = "") => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}">${value}</div><div class="hint">${hint}</div></div>`;
+
+  async function load() {
+    const m = await TB.get("/api/metrics"), s = m.system, now = Date.now() / 1000;
+    const total = Object.values(m.bus.events).reduce((a, e) => a + e.count, 0);
+    const rate = prev ? (total - Object.values(prev).reduce((a, v) => a + v, 0)) / (now - prevAt) : 0;
+    const queued = m.bus.workers.reduce((a, w) => a + w.queue, 0);
+    $("kpis").innerHTML = [
+      kpi("Uptime", duration(s.uptime_seconds)),
+      kpi("Process CPU", `${num(s.process_cpu_pct, 1)}%`, `${s.threads} threads`),
+      kpi("Memory", `${num(s.process_memory_mb, 1)} MB`, `host ${num(s.system_memory_pct, 0)}% used`),
+      kpi("Event loop lag", `${num(s.loop_lag_ms, 1)} ms`, `max ${num(s.loop_lag_max_ms, 1)} ms`, s.loop_lag_ms > 100 ? "down" : ""),
+      kpi("Events / s", num(rate, 1), `${num(total, 0)} total`),
+      kpi("Workers", m.bus.workers.length, `${queued} queued`, queued > 50 ? "down" : ""),
+      kpi("Asyncio tasks", s.asyncio_tasks),
+      kpi("Host CPU", `${num(s.system_cpu_pct, 0)}%`, `load ${s.load_avg.join(" · ")}`),
+      kpi("Dashboards", m.dashboard_clients, "live connections"),
+      kpi("Orders", num(Object.values(m.orders).reduce((a, v) => a + v, 0), 0), Object.entries(m.orders).map(([k, v]) => `${k} ${v}`).join(" · ") || "none yet"),
+    ].join("");
+
+    const byName = Object.fromEntries(m.bus.workers.map((w) => [w.name, w]));
+    $("flow").innerHTML = STEPS.map(([name, out], i) => {
+      const w = byName[name];
+      const stat = name === "DeltaStream" ? (m.feed.connected ? "connected" : "down") : w ? `${num(w.handled, 0)} handled${w.errors ? ` · ${w.errors} errors` : ""}` : "";
+      return `${i ? '<i data-lucide="chevron-right" class="w-4 h-4 text-slate-300 shrink-0"></i>' : ""}
+        <div class="border border-slate-200 rounded-lg px-3 py-2 bg-white">
+          <div class="font-mono font-semibold text-slate-800">${esc(name.split(".")[0])}</div>
+          <div class="text-[11px] muted">${esc(stat)}</div>
+          <div class="text-[10px] text-brand-600 mt-1">→ ${esc(out)}</div>
+        </div>`;
+    }).join("");
+
+    TB.rows("workers", m.bus.workers, (w) => `<tr>
+      <td class="font-mono">${esc(w.name)}</td><td class="text-slate-500">${esc(w.listens_to.join(", "))}</td>
+      <td class="r font-mono ${w.queue > 10 ? "down" : ""}">${w.queue}</td><td class="r font-mono">${num(w.handled, 0)}</td>
+      <td class="r font-mono ${w.errors ? "down" : ""}" title="${esc(w.last_error)}">${w.errors}</td>
+      <td class="r font-mono">${w.avg_ms}</td><td class="r font-mono">${w.max_ms}</td><td class="muted">${ago(w.last_at)}</td></tr>`, "", 8);
+    TB.rows("types", Object.entries(m.bus.events), ([k, e]) => {
+      const perMin = prev && prev[k] !== undefined ? ((e.count - prev[k]) / (now - prevAt)) * 60 : null;
+      return `<tr><td>${TB.eventBadge(k)}</td><td class="r font-mono">${num(e.count, 0)}</td><td class="r font-mono muted">${perMin === null ? "—" : num(perMin, 1)}</td><td class="muted">${ago(e.last_at)}</td></tr>`;
+    }, "No events yet", 4);
+    prev = Object.fromEntries(Object.entries(m.bus.events).map(([k, e]) => [k, e.count])); prevAt = now;
+
+    TB.rows("rest", Object.entries(m.rest), ([k, r]) => `<tr>
+      <td class="font-mono">${esc(k)}</td><td class="r font-mono">${num(r.count, 0)}</td><td class="r font-mono ${r.errors ? "down" : ""}">${r.errors}</td>
+      <td class="r font-mono">${r.last_ms}</td><td class="muted">${ago(r.last_at)}</td><td class="wrap down">${esc(r.last_error)}</td></tr>`, "No REST calls yet", 6);
+    $("host").innerHTML = [["Process CPU", `${num(s.process_cpu_pct, 1)}%`], ["Process memory", `${num(s.process_memory_mb, 1)} MB`], ["Threads", s.threads], ["Asyncio tasks", s.asyncio_tasks],
+      ["Host CPU", `${num(s.system_cpu_pct, 0)}%`], ["Host memory", `${num(s.system_memory_pct, 0)}%`], ["Load average", s.load_avg.join(" · ")], ["Started", new Date((now - s.uptime_seconds) * 1000).toLocaleString("en-GB")]]
+      .map(([k, v]) => `<tr><td class="muted">${k}</td><td class="r font-mono">${esc(v)}</td></tr>`).join("");
+    TB.icons();
+  }
+  load();
+  setInterval(load, 2000);
+})();
+</script>
+{% endblock %}

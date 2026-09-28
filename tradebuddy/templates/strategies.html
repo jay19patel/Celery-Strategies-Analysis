@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-wrap items-center justify-between gap-3">
+  <p class="text-xs text-slate-500 max-w-3xl">Each strategy runs when its candle closes on the WebSocket (or when the clock passes the bar's end). A strategy only produces signals; whether a signal becomes an order is decided by the trading switch, these toggles, and the broker.</p>
+  <span class="text-xs muted">Add a strategy: drop a file into <span class="font-mono">tradebuddy/strategies/</span> and restart.</span>
+</div>
+<div id="cards" class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const { $, esc, num, ago } = TB;
+
+  function card(s) {
+    const st = s.stats;
+    return `<section class="card ${s.enabled ? "" : "opacity-60"}">
+      <div class="card-head">
+        <div>
+          <div class="font-mono text-sm font-semibold">${esc(s.name)} <span class="badge ml-1">v${s.version}</span></div>
+          <div class="text-[11px] text-slate-500 mt-0.5">${esc(s.doc || "")}</div>
+        </div>
+        ${TB.switchHtml("strategy:" + s.name, s.enabled)}
+      </div>
+      <div class="card-body space-y-4">
+        <div class="grid grid-cols-3 gap-2 text-xs">
+          <div class="bg-slate-50 rounded-lg p-2.5"><div class="muted">Trigger</div><div class="font-mono font-semibold mt-0.5">${esc(s.interval)} close</div></div>
+          <div class="bg-slate-50 rounded-lg p-2.5"><div class="muted">History</div><div class="font-mono font-semibold mt-0.5">${s.lookback ? s.lookback + " bars" : "none"}</div></div>
+          <div class="bg-slate-50 rounded-lg p-2.5"><div class="muted">Size</div><div class="font-mono font-semibold mt-0.5">${s.size} contract</div></div>
+        </div>
+        <div>
+          <div class="field-label mb-2">Symbols</div>
+          <div class="flex flex-wrap gap-2">${s.symbols.map((x) => `
+            <div class="flex items-center gap-2 border border-slate-200 rounded-lg pl-3 pr-2 py-1.5">
+              <span class="font-mono text-xs font-medium">${esc(x.symbol)}</span>${TB.switchHtml(`pair:${s.name}:${x.symbol}`, x.enabled, true)}
+            </div>`).join("")}</div>
+        </div>
+        <div class="grid grid-cols-4 gap-2 text-center">
+          <div><div class="font-mono text-base font-semibold">${num(st.runs, 0)}</div><div class="text-[10px] muted">runs</div></div>
+          <div><div class="font-mono text-base font-semibold text-brand-600">${num(st.signals, 0)}</div><div class="text-[10px] muted">signals</div></div>
+          <div><div class="font-mono text-base font-semibold ${st.errors ? "down" : ""}">${num(st.errors, 0)}</div><div class="text-[10px] muted">errors</div></div>
+          <div><div class="font-mono text-base font-semibold">${st.last_ms}<span class="text-[10px]">ms</span></div><div class="text-[10px] muted">last run</div></div>
+        </div>
+        <div class="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+          <div class="text-[10px] uppercase tracking-wider muted mb-1">Last result · ${ago(st.last_run_at)}</div>
+          <div class="font-mono text-xs break-words ${st.last_result.includes("error") ? "down" : ""}">${esc(st.last_result || "Waiting for the first candle close")}</div>
+        </div>
+        <a href="/signals?strategy=${encodeURIComponent(s.name)}" class="btn btn-sm w-full justify-center"><i data-lucide="activity"></i>Signal history</a>
+      </div>
+    </section>`;
+  }
+
+  async function load() {
+    const list = await TB.get("/api/strategies");
+    $("cards").innerHTML = list.map(card).join("") || `<div class="card p-8 text-center muted">No strategies found.</div>`;
+    TB.bindToggles($("cards"));
+    TB.icons();
+  }
+  TB.on(["SignalGenerated", "StrategyError", "ToggleChanged", "CandleClosed"], () => setTimeout(load, 300));
+  load();
+  setInterval(load, 10000);
+})();
+</script>
+{% endblock %}

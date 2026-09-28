@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-wrap items-center justify-between gap-3">
+  {% with all_tab=True %}{% include "_broker_tabs.html" %}{% endwith %}
+  <div id="counts" class="flex flex-wrap gap-2"></div>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <div class="card-title"><i data-lucide="list-checks"></i>Order history <span class="card-sub">every entry the engine sent, one per strategy × symbol × bar</span></div>
+    <input id="search" class="input w-56" placeholder="Search symbol, strategy, id…">
+  </div>
+  <div class="scroll max-h-[72vh]">
+    <table class="tbl">
+      <thead><tr><th>Time</th><th>Broker</th><th>Strategy</th><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Price</th><th class="r">Stop loss</th><th class="r">Take profit</th><th>Status</th><th>Exchange id</th><th>Client order id</th><th>Error</th></tr></thead>
+      <tbody id="orders"></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/tabs.js"></script>
+<script>
+(() => {
+  const { $, esc, num, price, dateTime, side, status } = TB;
+  let broker = "", orders = [];
+
+  function render() {
+    const q = $("search").value.trim().toLowerCase();
+    const list = orders.filter((o) => !q || [o.symbol, o.strategy, o.client_order_id, o.order_id, o.status].some((v) => String(v || "").toLowerCase().includes(q)));
+    TB.rows("orders", list, (o) => `<tr>
+      <td class="font-mono text-slate-500">${dateTime(o.ts)}</td>
+      <td><span class="badge ${o.broker === "paper" ? "badge-blue" : "badge-amber"}">${esc(o.broker)}</span></td>
+      <td class="font-mono">${esc(o.strategy)}</td><td class="font-semibold">${esc(o.symbol)}</td><td>${side(o.side)}</td>
+      <td class="r font-mono">${o.size}</td><td class="r font-mono">${price(o.price)}</td>
+      <td class="r font-mono down">${price(o.stop_loss)}</td><td class="r font-mono up">${price(o.take_profit)}</td>
+      <td>${status(o.status)}</td><td class="font-mono muted">${esc(o.order_id || "—")}</td>
+      <td class="font-mono muted">${esc(o.client_order_id)}</td><td class="wrap down">${esc(o.error || "")}</td></tr>`, "No orders yet", 13);
+    const counts = {};
+    for (const o of orders) counts[o.status] = (counts[o.status] || 0) + 1;
+    $("counts").innerHTML = Object.entries(counts).map(([k, v]) => `${status(k)}<span class="font-mono text-xs -ml-1 mr-2">${v}</span>`).join("") || "";
+  }
+
+  async function load() {
+    orders = await TB.get(`/api/orders?limit=1000${broker ? `&broker=${broker}` : ""}`);
+    render();
+  }
+  $("search").oninput = render;
+  brokerTabs((b) => { broker = b; load(); }, { allowAll: true });
+  TB.on(["OrderRequested", "OrderPlaced", "OrderFailed", "OrderUnknown", "OrderUpdate"], () => setTimeout(load, 150));
+})();
+</script>
+{% endblock %}
