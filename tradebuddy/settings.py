@@ -43,7 +43,7 @@ class SettingsError(ValueError):
 
 @dataclass(frozen=True)
 class Settings:
-    paper_active: bool = True  # simulated broker; shown and fed signals
+    paper_active: bool = True  # simulated broker; always on
     delta_active: bool = False  # Delta broker; shown and fed signals
     market_data: str = "demo"  # price source when Delta is not active: "demo" | "live" (public data only)
     delta_env: str = "demo"  # Delta account: "demo" (testnet) | "live" (real money)
@@ -109,7 +109,10 @@ def apply_changes(current: Settings, changes: dict[str, Any], confirm: str = "")
         elif name in BOOL_FIELDS:
             if not isinstance(value, bool):
                 raise SettingsError(f"{name} must be true or false")
-            clean[name] = value
+            if name == "paper_active":
+                clean[name] = True
+            else:
+                clean[name] = value
         elif name in CHOICES:
             value = str(value).strip().lower()
             if value not in CHOICES[name]:

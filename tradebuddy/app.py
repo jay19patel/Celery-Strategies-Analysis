@@ -32,7 +32,6 @@ PAGES = [
     ("positions", "/positions", "layers", "Positions", "Portfolio"),
     ("orders", "/orders", "list-checks", "Orders", "Portfolio"),
     ("account", "/account", "wallet", "Account", "Portfolio"),
-    ("paper", "/paper", "flask-conical", "Paper Trading", "Portfolio"),
     ("market", "/market", "candlestick-chart", "Market Data", "Monitoring"),
     ("system", "/system", "gauge", "System", "Monitoring"),
     ("events", "/events", "scroll-text", "Event Log", "Monitoring"),
@@ -100,6 +99,11 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
 
     for page_id, path, _icon, title, _group in PAGES:
         page(page_id, path, title)
+        
+    from fastapi.responses import RedirectResponse
+    @app.get("/paper", include_in_schema=False)
+    async def paper_redirect():
+        return RedirectResponse(url="/account?broker=paper")
 
     # -- read ---------------------------------------------------------------
 

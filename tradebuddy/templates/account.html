@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>{% endblock %}
 {% block content %}
 <div class="flex flex-wrap items-center justify-between gap-3">
   {% with all_tab=False %}{% include "_broker_tabs.html" %}{% endwith %}
@@ -18,14 +19,67 @@
     <table class="tbl"><thead><tr><th>Asset</th><th class="r">Balance</th><th class="r">Available</th></tr></thead><tbody id="assets"></tbody></table>
   </section>
 </div>
+
+<div id="paperStats" class="hidden space-y-5 mt-5">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <p class="text-xs text-slate-500 max-w-3xl">The paper broker fills at the live WebSocket price with slippage and fees, uses Delta's real contract sizes, and exits on stop loss, take profit, liquidation or max hold as ticks arrive. Configure it in <a class="underline" href="/settings">Settings</a>.</p>
+    <button id="resetBtn" class="btn btn-danger"><i data-lucide="rotate-ccw"></i>Reset paper account</button>
+  </div>
+  <div id="paperKpis" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3"></div>
+  <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+    <section class="card xl:col-span-2">
+      <div class="card-head"><div class="card-title"><i data-lucide="line-chart"></i>Equity curve <span class="card-sub">after every closed trade</span></div></div>
+      <div class="card-body"><div class="h-72"><canvas id="equityChart"></canvas></div></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><div class="card-title"><i data-lucide="pie-chart"></i>Exit reasons</div></div>
+      <div class="card-body"><div class="h-72"><canvas id="reasonChart"></canvas></div></div>
+    </section>
+  </div>
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="trophy"></i>Performance by strategy</div></div>
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th>Strategy</th><th class="r">Trades</th><th class="r">Win rate</th><th class="r">Net P&amp;L</th><th class="r">Fees</th><th class="r">Best</th><th class="r">Worst</th><th class="r">Profit factor</th></tr></thead>
+        <tbody id="byStrategy"></tbody>
+      </table>
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="history"></i>Closed trades</div></div>
+    <div class="scroll max-h-[60vh]">
+      <table class="tbl">
+        <thead><tr><th>Closed</th><th>Strategy</th><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Exit</th><th class="r">Leverage</th><th class="r">Gross</th><th class="r">Fees</th><th class="r">Net P&amp;L</th><th class="r">Return</th><th>Held</th><th>Reason</th></tr></thead>
+        <tbody id="trades"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<div id="tradeModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 p-4">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-lg border border-slate-200">
+    <div class="p-5 space-y-4">
+      <h3 class="text-sm font-semibold border-b pb-2">Closed Trade Details</h3>
+      <table class="w-full text-sm">
+        <tbody id="tradeDetailsTbody" class="divide-y divide-slate-100">
+        </tbody>
+      </table>
+    </div>
+    <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 rounded-b-xl flex justify-end gap-2">
+      <button onclick="TB.$('tradeModal').classList.replace('flex', 'hidden')" class="btn">Close</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script src="/static/js/tabs.js"></script>
 <script>
 (() => {
-  const { $, esc, num, money, signed, pnlClass, dateTime } = TB;
+  const { $, esc, num, price, money, signed, pnlClass, dateTime, side, duration } = TB;
   let broker = null;
+  let equityChart, reasonChart;
+  let tradesData = [];
   const kpi = (label, value, cls = "", hint = "") => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}">${value}</div><div class="hint">${hint}</div></div>`;
 
   async function load() {
@@ -54,7 +108,88 @@
       $("error").innerHTML = `<b>${esc(broker)}:</b> ${esc(err.message)} ${broker === "delta" ? '· <a class="underline" href="/settings">Configure Delta in Settings</a>' : ""}`;
       $("kpis").innerHTML = ""; $("details").innerHTML = ""; $("assets").innerHTML = "";
     }
+    
+    if (broker === "paper") {
+      $("paperStats").classList.remove("hidden");
+      try {
+        const [stats, trades] = await Promise.all([TB.get("/api/paper/stats"), TB.get("/api/paper/trades?limit=1000")]);
+        tradesData = trades;
+        const o = stats.overall;
+        $("paperKpis").innerHTML = [
+          kpi("Net realized", signed(o.pnl, 4), pnlClass(o.pnl)),
+          kpi("Trades", num(o.trades, 0), "", `${o.wins} wins`),
+          kpi("Win rate", `${num(o.win_rate, 1)}%`),
+          kpi("Profit factor", o.profit_factor === null ? "—" : num(o.profit_factor, 2)),
+          kpi("Max drawdown", `${num(o.max_drawdown_pct, 2)}%`, o.max_drawdown_pct > 10 ? "down" : "", `fees ${money(o.fees, 2)}`),
+        ].join("");
+        
+        TB.rows("byStrategy", stats.by_strategy, (s) => `<tr>
+          <td class="font-mono font-medium">${esc(s.strategy)}</td><td class="r font-mono">${s.trades}</td><td class="r font-mono">${num(s.win_rate, 1)}%</td>
+          <td class="r font-mono ${pnlClass(s.pnl)}">${signed(s.pnl, 4)}</td><td class="r font-mono muted">${money(s.fees, 4)}</td>
+          <td class="r font-mono up">${signed(s.best, 4)}</td><td class="r font-mono down">${signed(s.worst, 4)}</td>
+          <td class="r font-mono">${s.profit_factor === null ? "—" : num(s.profit_factor, 2)}</td></tr>`, "No closed paper trades yet", 8);
+
+        TB.rows("trades", trades, (t) => `<tr class="cursor-pointer hover:bg-slate-50 transition-colors" onclick="window.showTradeDetails('${t.client_order_id}')">
+          <td class="font-mono text-slate-500">${dateTime(t.closed_at)}</td><td class="font-mono">${esc(t.strategy)}</td><td class="font-semibold text-brand-600">${esc(t.symbol)}</td>
+          <td>${side(t.side)}</td><td class="r font-mono">${num(t.size, 4)}</td><td class="r font-mono">${price(t.entry_price)}</td><td class="r font-mono">${price(t.exit_price)}</td>
+          <td class="r font-mono">${num(t.leverage, 0)}x</td><td class="r font-mono ${pnlClass(t.gross_pnl)}">${signed(t.gross_pnl, 4)}</td>
+          <td class="r font-mono muted">${money(t.fees, 4)}</td><td class="r font-mono font-semibold ${pnlClass(t.pnl)}">${signed(t.pnl, 4)}</td>
+          <td class="r font-mono ${pnlClass(t.pnl)}">${num((t.pnl / t.margin) * 100, 2)}%</td>
+          <td class="muted">${duration(t.closed_at - t.opened_at)}</td><td><span class="badge">${esc(t.reason)}</span></td></tr>`, "No closed paper trades yet", 14);
+
+        const labels = stats.equity_curve.map(([ts]) => new Date(ts * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }));
+        const values = stats.equity_curve.map(([, v]) => v);
+        if (!equityChart) {
+          equityChart = new Chart($("equityChart"), {
+            type: "line",
+            data: { labels, datasets: [{ data: values, borderColor: "#1e88e5", backgroundColor: "rgba(30,136,229,.08)", fill: true, tension: .2, pointRadius: 0, borderWidth: 2 }] },
+            options: { maintainAspectRatio: false, animation: false, plugins: { legend: { display: false } },
+              scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8, font: { size: 10 } } }, y: { grid: { color: "#f1f5f9" }, ticks: { font: { size: 10 }, callback: (v) => "$" + num(v, 0) } } } },
+          });
+        } else { equityChart.data.labels = labels; equityChart.data.datasets[0].data = values; equityChart.update("none"); }
+
+        const reasons = {};
+        for (const t of trades) reasons[t.reason] = (reasons[t.reason] || 0) + 1;
+        const palette = ["#1e88e5", "#00b852", "#eb5757", "#f59e0b", "#8b5cf6", "#64748b"];
+        const rData = { labels: Object.keys(reasons), datasets: [{ data: Object.values(reasons), backgroundColor: palette, borderWidth: 0 }] };
+        if (!reasonChart) reasonChart = new Chart($("reasonChart"), { type: "doughnut", data: rData, options: { maintainAspectRatio: false, cutout: "65%", plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 11 } } } } } });
+        else { reasonChart.data = rData; reasonChart.update("none"); }
+        TB.icons();
+      } catch (err) {}
+    } else {
+      $("paperStats").classList.add("hidden");
+    }
   }
+
+  window.showTradeDetails = (id) => {
+    const t = tradesData.find(x => x.client_order_id === id);
+    if (!t) return;
+    
+    $("tradeDetailsTbody").innerHTML = `
+      <tr><td class="py-2 text-slate-500 w-1/3">Client Order ID</td><td class="py-2 font-mono">${esc(t.client_order_id)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Symbol</td><td class="py-2 font-semibold">${esc(t.symbol)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Strategy</td><td class="py-2 font-mono">${esc(t.strategy)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Side</td><td class="py-2">${side(t.side)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Size</td><td class="py-2 font-mono">${num(t.size, 4)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Entry Price</td><td class="py-2 font-mono">${price(t.entry_price)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Exit Price</td><td class="py-2 font-mono">${price(t.exit_price)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Gross PnL</td><td class="py-2 font-mono ${pnlClass(t.gross_pnl)}">${signed(t.gross_pnl, 4)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Fees</td><td class="py-2 font-mono text-slate-500">${money(t.fees, 4)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Net PnL</td><td class="py-2 font-mono font-semibold ${pnlClass(t.pnl)}">${signed(t.pnl, 4)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Leverage / Margin</td><td class="py-2 font-mono">${num(t.leverage, 0)}x / ${money(t.margin)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Hold Time</td><td class="py-2">${duration(t.closed_at - t.opened_at)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Exit Reason</td><td class="py-2"><span class="badge">${esc(t.reason)}</span></td></tr>
+      <tr><td class="py-2 text-slate-500">Opened At</td><td class="py-2 font-mono">${dateTime(t.opened_at)}</td></tr>
+      <tr><td class="py-2 text-slate-500">Closed At</td><td class="py-2 font-mono">${dateTime(t.closed_at)}</td></tr>
+    `;
+    $("tradeModal").classList.replace("hidden", "flex");
+  };
+
+  $("resetBtn").onclick = async () => {
+    if (!await TB.ask({ title: "Reset the paper account?", body: "Open paper positions and the whole paper trade history are deleted, and the balance goes back to the starting balance from Settings.", ok: "Reset", danger: true })) return;
+    try { await TB.post("/api/paper/reset"); TB.toast("Paper account reset", "ok"); } catch (err) { TB.toast(err.message, "error"); }
+    load();
+  };
   brokerTabs((b) => { broker = b; load(); });
   TB.on(["PositionClosed", "OrderPlaced", "SettingsChanged"], () => setTimeout(load, 200));
   setInterval(load, 5000);

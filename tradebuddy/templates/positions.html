@@ -29,6 +29,38 @@
     </table>
   </div>
 </section>
+
+<div id="sltpModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 p-4">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-md border border-slate-200">
+    <div class="p-5 space-y-4">
+      <h3 id="sltpTitle" class="text-sm font-semibold"></h3>
+      <div class="grid grid-cols-2 gap-4 text-[13px]">
+        <div>
+          <label class="block text-slate-500 mb-1">Stop Loss Price</label>
+          <input id="slPrice" type="number" step="any" class="input w-full font-mono" placeholder="—">
+        </div>
+        <div>
+          <label class="block text-slate-500 mb-1">Stop Loss %</label>
+          <input id="slPct" type="number" step="0.01" class="input w-full font-mono" placeholder="—">
+        </div>
+        <div>
+          <label class="block text-slate-500 mb-1">Take Profit Price</label>
+          <input id="tpPrice" type="number" step="any" class="input w-full font-mono" placeholder="—">
+        </div>
+        <div>
+          <label class="block text-slate-500 mb-1">Take Profit %</label>
+          <input id="tpPct" type="number" step="0.01" class="input w-full font-mono" placeholder="—">
+        </div>
+      </div>
+      <div class="text-xs text-slate-500 mt-2">Entry Price: <span id="sltpEntry" class="font-mono font-medium text-slate-700"></span> (<span id="sltpSide"></span>)</div>
+    </div>
+    <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 rounded-b-xl flex justify-end gap-2">
+      <button id="sltpCancel" class="btn">Cancel</button>
+      <button id="sltpOk" class="btn btn-primary">Save</button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -55,7 +87,7 @@
         <td class="font-mono">${esc(p.strategy || "—")}</td>
         <td class="muted">${p.opened_at ? duration(Date.now() / 1000 - p.opened_at) : "—"}</td>
         <td class="r space-x-1">
-          ${broker === "paper" ? `<button class="btn btn-sm" data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}"><i data-lucide="pencil"></i>SL/TP</button>` : ""}
+          ${broker === "paper" ? `<button class="btn btn-sm" data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}" data-entry="${p.entry_price}" data-side="${esc(p.side)}"><i data-lucide="pencil"></i>SL/TP</button>` : ""}
           <button class="btn btn-sm btn-danger" data-close="${esc(p.symbol)}"><i data-lucide="x"></i>Close</button>
         </td></tr>`, `No open ${broker} positions`, 13);
       TB.rows("legs", legs, (o) => `<tr>
@@ -78,13 +110,62 @@
       try { await TB.post(`/api/positions/${broker}/${encodeURIComponent(symbol)}/close`); TB.toast(`${symbol} closed`, "ok"); } catch (err) { TB.toast(err.message, "error"); }
       load();
     });
-    document.querySelectorAll("[data-edit]").forEach((b) => b.onclick = async () => {
+    document.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
       const symbol = b.dataset.edit;
-      const value = await TB.ask({ title: `Protection for ${symbol}`, body: "Stop loss and take profit, separated by a comma.", input: "text", value: `${b.dataset.sl}, ${b.dataset.tp}`, ok: "Save" });
-      if (!value) return;
-      const [sl, tp] = value.split(",").map((x) => Number(x.trim()));
-      try { await TB.post(`/api/paper/positions/${encodeURIComponent(symbol)}/protection`, { stop_loss: sl, take_profit: tp }); TB.toast("Protection updated", "ok"); } catch (err) { TB.toast(err.message, "error"); }
-      load();
+      const entry = parseFloat(b.dataset.entry);
+      const side = b.dataset.side;
+      let currentSl = b.dataset.sl ? parseFloat(b.dataset.sl) : "";
+      let currentTp = b.dataset.tp ? parseFloat(b.dataset.tp) : "";
+
+      const modal = TB.$("sltpModal");
+      TB.$("sltpTitle").textContent = `Protection for ${symbol}`;
+      TB.$("sltpEntry").textContent = TB.price(entry);
+      TB.$("sltpSide").textContent = side.toUpperCase();
+      
+      const slPrice = TB.$("slPrice"), slPct = TB.$("slPct"), tpPrice = TB.$("tpPrice"), tpPct = TB.$("tpPct");
+      slPrice.value = currentSl;
+      tpPrice.value = currentTp;
+      
+      const updatePcts = () => {
+         if (slPrice.value) {
+            let diff = side === 'buy' ? entry - slPrice.value : slPrice.value - entry;
+            slPct.value = ((diff / entry) * 100).toFixed(2);
+         } else { slPct.value = ""; }
+         if (tpPrice.value) {
+            let diff = side === 'buy' ? tpPrice.value - entry : entry - tpPrice.value;
+            tpPct.value = ((diff / entry) * 100).toFixed(2);
+         } else { tpPct.value = ""; }
+      };
+      
+      const updatePrices = (isSl) => {
+         if (isSl && slPct.value) {
+            let pct = parseFloat(slPct.value) / 100;
+            slPrice.value = side === 'buy' ? entry * (1 - pct) : entry * (1 + pct);
+         }
+         if (!isSl && tpPct.value) {
+            let pct = parseFloat(tpPct.value) / 100;
+            tpPrice.value = side === 'buy' ? entry * (1 + pct) : entry * (1 - pct);
+         }
+      };
+
+      slPrice.oninput = () => updatePcts();
+      tpPrice.oninput = () => updatePcts();
+      slPct.oninput = () => updatePrices(true);
+      tpPct.oninput = () => updatePrices(false);
+
+      updatePcts();
+      modal.classList.remove("hidden");
+      modal.classList.add("flex");
+
+      const close = () => { modal.classList.add("hidden"); modal.classList.remove("flex"); };
+      TB.$("sltpCancel").onclick = close;
+      TB.$("sltpOk").onclick = async () => {
+         close();
+         const sl = slPrice.value ? Number(slPrice.value) : 0;
+         const tp = tpPrice.value ? Number(tpPrice.value) : 0;
+         try { await TB.post(`/api/paper/positions/${encodeURIComponent(symbol)}/protection`, { stop_loss: sl, take_profit: tp }); TB.toast("Protection updated", "ok"); } catch (err) { TB.toast(err.message, "error"); }
+         load();
+      };
     });
   }
 

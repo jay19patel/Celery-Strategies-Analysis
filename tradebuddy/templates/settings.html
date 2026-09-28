@@ -5,13 +5,13 @@
   <section class="card">
     <div class="card-head"><div class="card-title"><i data-lucide="route"></i>Brokers <span class="card-sub">every signal goes to each active broker; switch trading per broker in the top bar</span></div></div>
     <div class="card-body grid grid-cols-1 md:grid-cols-2 gap-4">
-      <label class="broker-card cursor-pointer border-2 rounded-xl p-4 flex gap-3" data-broker="paper">
-        <input type="checkbox" name="paper_active" class="mt-1">
+      <div class="broker-card border-2 rounded-xl p-4 flex gap-3 border-brand-500 bg-brand-50" data-broker="paper">
+        <input type="checkbox" name="paper_active" class="mt-1 hidden" checked disabled>
         <div>
-          <div class="flex items-center gap-2 font-semibold text-sm"><i data-lucide="flask-conical" class="w-4 h-4 text-brand-500"></i>Paper trading</div>
-          <p class="text-xs text-slate-500 mt-1">Simulated fills at the live WebSocket price with fees, slippage and leverage. Nothing leaves this machine. Trading is on by default.</p>
+          <div class="flex items-center gap-2 font-semibold text-sm"><i data-lucide="flask-conical" class="w-4 h-4 text-brand-500"></i>Paper trading (Always On)</div>
+          <p class="text-xs text-slate-500 mt-1">Simulated fills at the live WebSocket price with fees, slippage and leverage. Nothing leaves this machine. This broker is always active.</p>
         </div>
-      </label>
+      </div>
       <label class="broker-card cursor-pointer border-2 rounded-xl p-4 flex gap-3" data-broker="delta">
         <input type="checkbox" name="delta_active" class="mt-1">
         <div>
@@ -20,7 +20,7 @@
         </div>
       </label>
     </div>
-    <p class="px-4 pb-4 -mt-1 text-[11px] muted">Turn a broker off to hide it everywhere. At least one stays active. Run both to compare paper against Delta on the same signals.</p>
+    <p class="px-4 pb-4 -mt-1 text-[11px] muted">Paper trading is always active. Turn Delta off to hide it everywhere. Run both to compare paper against Delta on the same signals.</p>
   </section>
 
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
@@ -123,7 +123,7 @@
   function fill(s) {
     saved = s;
     env = s.delta_env;
-    document.querySelector('input[name="paper_active"]').checked = s.paper_active;
+    document.querySelector('input[name="paper_active"]').checked = true;
     document.querySelector('input[name="delta_active"]').checked = s.delta_active;
     $("market_data").value = s.market_data;
     for (const k of NUMBERS) $(k).value = s[k];
@@ -141,7 +141,7 @@
 
   function current() {
     const out = {
-      paper_active: document.querySelector('input[name="paper_active"]').checked,
+      paper_active: true,
       delta_active: document.querySelector('input[name="delta_active"]').checked,
       delta_env: env, market_data: $("market_data").value,
     };
@@ -184,7 +184,7 @@
     if (!Object.keys(diff).length) { TB.toast("Nothing to save"); return; }
     let confirm = "";
     const next = { ...saved, ...diff };
-    if (!next.paper_active && !next.delta_active) { TB.toast("Keep at least one broker active", "error"); return; }
+    if (!next.delta_active) { /* Paper is always on, so at least one is always active */ }
     if (next.delta_active && next.delta_env === "live" && !saved.is_real_money) {
       confirm = await TB.ask({ title: "Switch to REAL-MONEY trading", body: `Delta orders will go to your <b>live</b> account. Type <span class="font-mono">${esc(PHRASE)}</span> to continue.`, input: "text", placeholder: PHRASE, ok: "Confirm", danger: true });
       if (confirm === null) return;
