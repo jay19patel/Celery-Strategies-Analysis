@@ -83,10 +83,7 @@ class UpdateConfigRequest(BaseModel):
     reward_ratio: float | None = Field(default=None, description="Take-profit reward ratio (0.001 - 0.50)")
 
 
-class ResetPaperRequest(BaseModel):
-    """Payload for resetting paper trading account balances."""
 
-    starting_capital: float = Field(default=100.0, description="Starting capital per strategy account")
 
 
 @router.post("/api/system/config")
@@ -104,16 +101,7 @@ def update_system_config(payload: UpdateConfigRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/api/system/reset-paper")
-def reset_paper_balances(payload: ResetPaperRequest | None = None) -> dict[str, Any]:
-    """Reset virtual paper trading accounts back to starting capital and clear paper positions."""
-    try:
-        service = get_system_service()
-        req = payload or ResetPaperRequest()
-        return service.reset_paper_balances(starting_capital=req.starting_capital)
-    except Exception as exc:
-        logger.exception("Failed to reset paper balances")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
 
 
 class UpdatePipelineSettingsRequest(BaseModel):
@@ -122,6 +110,13 @@ class UpdatePipelineSettingsRequest(BaseModel):
     symbols: str | None = Field(default=None, description="Comma-separated symbols, e.g. BTC-USD,ETH-USD,SOL-USD")
     strategies: str | None = Field(default=None, description="Comma-separated strategy class names or '*' for all")
     schedule_seconds: int | None = Field(default=None, description="Pipeline schedule interval in seconds (min 10s)")
+
+
+@router.get("/api/system/pipeline-settings")
+def get_pipeline_settings() -> dict[str, Any]:
+    """Retrieve runtime pipeline settings."""
+    service = get_system_service()
+    return service.get_config()
 
 
 @router.post("/api/system/pipeline-settings")

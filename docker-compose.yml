@@ -21,13 +21,13 @@ x-common-env: &common-env
   SCHEDULE_SECONDS: 600
   TZ: Asia/Kolkata
   
-  # Execution Mode: "PAPER" or "LIVE"
-  EXECUTION_MODE: PAPER
+  # Execution Mode: "LIVE"
+  EXECUTION_MODE: LIVE
   LIVE_TRADING_ARMED: "false"
   
   # Delta Exchange Broker Integration (Optional live execution)
-  DELTA_BASE_URL: https://api.india.delta.exchange
-  DELTA_WEBSOCKET_URL: wss://socket.india.delta.exchange
+  DELTA_BASE_URL: https://cdn-ind.testnet.deltaex.org
+  DELTA_WEBSOCKET_URL: wss://testnet-socket.delta.exchange
   DELTA_API_KEY: ""
   DELTA_API_SECRET: ""
   DELTA_CLIENT_ID: "0"

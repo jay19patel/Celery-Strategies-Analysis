@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from typing import Any, Optional
 
 from app.broker.delta import DeltaClient
-from app.core.paper_broker import PaperBroker
 from app.database.sqlite_db import get_sqlite_db
 from app.models.strategy_models import SignalType
 
@@ -25,9 +24,8 @@ class ExecutionManager:
     _instance: Optional["ExecutionManager"] = None
 
     def __init__(self) -> None:
-        """Initialize paper broker, delta client, and sqlite state."""
+        """Initialize delta client, and sqlite state."""
         self.db = get_sqlite_db()
-        self.paper_broker = PaperBroker()
         self.delta_client = DeltaClient()
 
     @classmethod
@@ -38,14 +36,13 @@ class ExecutionManager:
         return cls._instance
 
     def get_mode(self) -> str:
-        """Return the only supported execution mode."""
-        return "PAPER"
+        """Return the execution mode."""
+        row = self.db.execute_one("SELECT value FROM system_config WHERE key = 'execution_mode';")
+        return row["value"] if row and row["value"] else "LIVE"
 
     def set_mode(self, mode: str) -> None:
         """Set execution mode in database."""
         clean_mode = mode.strip().upper()
-        if clean_mode != "PAPER":
-            raise ValueError("Delta is monitoring-only; execution mode must remain PAPER.")
 
         now_utc = datetime.now(UTC).isoformat()
         sql = """
@@ -56,24 +53,32 @@ class ExecutionManager:
         logger.info(f"Execution mode set to: {clean_mode}")
 
     def is_armed(self) -> bool:
-        """Live execution is permanently disabled in this paper-first system."""
-        return False
+        """Check if live execution is armed."""
+        row = self.db.execute_one("SELECT value FROM system_config WHERE key = 'live_trading_armed';")
+        return row["value"] == "1" if row and row["value"] else False
 
     def arm_live_trading(self, confirmation: str) -> dict[str, Any]:
-        """Reject real trading; Delta connectivity is read-only monitoring."""
-        raise ValueError("Delta trading is disabled. Use the Paper Broker for all execution.")
+        """Arm live trading."""
+        if confirmation != ARM_CONFIRMATION_PHRASE:
+            raise ValueError("Invalid confirmation phrase.")
+        now_utc = datetime.now(UTC).isoformat()
+        sql = """
+            INSERT INTO system_config (key, value, updated_at) VALUES ('live_trading_armed', '1', ?)
+            ON CONFLICT(key) DO UPDATE SET value = '1', updated_at = excluded.updated_at;
+        """
+        self.db.execute_modify(sql, (now_utc,))
+        return {"armed": True}
 
     def disarm_live_trading(self) -> dict[str, Any]:
-        """Disarm live trading and fall back to PAPER mode."""
+        """Disarm live trading."""
         now_utc = datetime.now(UTC).isoformat()
         sql = """
             INSERT INTO system_config (key, value, updated_at) VALUES ('live_trading_armed', '0', ?)
             ON CONFLICT(key) DO UPDATE SET value = '0', updated_at = excluded.updated_at;
         """
         self.db.execute_modify(sql, (now_utc,))
-        self.set_mode("PAPER")
-        logger.info("live_trading_disarmed mode=PAPER")
-        return {"armed": False, "mode": "PAPER"}
+        logger.info("live_trading_disarmed")
+        return {"armed": False}
 
     def process_signal(
         self,
@@ -106,34 +111,37 @@ class ExecutionManager:
 
         # Check strategy specific execution configuration
         strat_cfg = self.db.execute_one(
-            "SELECT is_paper_enabled, is_real_enabled FROM strategy_configs WHERE strategy_id = ? OR name = ?;",
+            "SELECT is_real_enabled FROM strategy_configs WHERE strategy_id = ? OR name = ?;",
             (strategy_name, strategy_name),
         )
-        is_paper_enabled = bool(strat_cfg["is_paper_enabled"]) if strat_cfg else True
-
-        # 1. Paper Broker Execution (if enabled for this strategy)
-        paper_res = None
-        if is_paper_enabled:
-            paper_res = self.paper_broker.process_signal(
-                strategy_name, symbol, signal_type, price, timestamp, stop_loss=stop_loss, take_profit=take_profit
-            )
+        is_real_enabled = bool(strat_cfg["is_real_enabled"]) if strat_cfg else True
+        # 1. Live Execution (if armed)
+        live_res = None
+        if self.is_armed() and self.get_mode() == "LIVE":
+            if is_real_enabled:
+                try:
+                    if self.delta_client.is_already_in_position_or_order(symbol):
+                        live_res = {"action": "skipped", "reason": "Position already exists for this symbol"}
+                    else:
+                        product_id = self.delta_client.get_product_id(symbol)
+                        live_res = self.delta_client.create_entry(
+                            product_id=product_id,
+                            size=1.0,  # Strategy defined quantity should be passed in the future
+                            side=action,
+                            entry_price=price,
+                            leverage=1
+                        )
+                except Exception as exc:
+                    live_res = {"action": "failed", "reason": f"Delta execution failed: {exc}"}
+            else:
+                live_res = {"action": "live_disabled", "reason": "Strategy real execution disabled"}
         else:
-            paper_res = {"action": "paper_disabled", "reason": "Paper trading disabled for this strategy"}
-
-        if not is_paper_enabled:
-            return {
-                "mode": "LOG_ONLY",
-                "action": "paper_disabled",
-                "paper_result": paper_res,
-                "live_result": None,
-                "strategy": strategy_name,
-            }
+            live_res = {"action": "live_disabled", "reason": "Live trading not armed or not in LIVE mode"}
 
         return {
-            "mode": "PAPER",
-            "action": "paper_executed" if is_paper_enabled else "paper_disabled",
-            "paper_result": paper_res,
-            "live_result": {"action": "monitoring_only"},
+            "mode": self.get_mode(),
+            "action": "live_executed" if self.is_armed() and self.get_mode() == "LIVE" else "live_disabled",
+            "live_result": live_res,
             "strategy": strategy_name,
         }
 

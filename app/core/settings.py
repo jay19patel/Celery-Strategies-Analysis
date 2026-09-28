@@ -28,8 +28,8 @@ class Settings(BaseSettings):
     live_trading_armed: bool = Field(False)  # Explicit confirmation required for real orders
 
     # Delta Exchange Broker Integration (Trade-Buddy-Broker)
-    delta_base_url: str = Field("https://api.india.delta.exchange")
-    delta_websocket_url: str = Field("wss://socket.india.delta.exchange")
+    delta_base_url: str = Field("https://cdn-ind.testnet.deltaex.org")
+    delta_websocket_url: str = Field("wss://testnet-socket.delta.exchange")
     delta_api_key: str = Field("")
     delta_api_secret: str = Field("")
     delta_client_id: int = Field(0)
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     broker_connection_retry_on_startup: bool = Field(True)
 
     # App defaults
-    symbols: str = Field("BTC-USD,ETH-USD,SOL-USD")  # comma-separated
+    symbols: str = Field("BTCUSD,ETHUSD,SOLUSD")  # comma-separated
     strategies: str = Field(
         "*"
     )  # use "*" to auto-load every strategy module in app/strategies

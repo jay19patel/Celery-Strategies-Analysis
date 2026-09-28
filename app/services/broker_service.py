@@ -1,6 +1,6 @@
 """Broker service coordinating trade execution modes, safety controls, and Delta API interactions.
 
-Encapsulates paper/live mode transitions, arming confirmation enforcement,
+Encapsulates live mode transitions, arming confirmation enforcement,
 broker profile management (API keys, authorization verification),
 balance inquiries, open positions, active orders, order cancellation, and
 the Emergency Exit kill-switch.
@@ -168,8 +168,7 @@ class BrokerService:
         base_url = (
             saved_profile.get("base_url")
             or self.delta_client.base_url
-            or settings.delta_base_url
-            or "https://api.india.delta.exchange"
+            or "https://testnet-api.delta.exchange"
         )
         client_id = saved_profile.get("client_id")
         if client_id is None:
@@ -201,7 +200,7 @@ class BrokerService:
         client_id: int = 0,
     ) -> dict[str, Any]:
         """Save and update broker credentials in memory and SQLite."""
-        clean_url = (base_url or "").strip() or "https://api.india.delta.exchange"
+        clean_url = (base_url or "").strip() or "https://testnet-api.delta.exchange"
         clean_key = (api_key or "").strip()
         clean_secret = (api_secret or "").strip()
 
@@ -346,32 +345,32 @@ class BrokerService:
 
     def toggle_live_trading(self, enabled: bool, confirmation: str | None = None) -> dict[str, Any]:
         """Enable or disable live broker order execution with safety gating."""
+        from app.broker.execution_manager import ARM_CONFIRMATION_PHRASE
         if enabled:
-            raise ValueError("Delta is read-only. All trading is executed in the Paper Broker.")
+            if confirmation != ARM_CONFIRMATION_PHRASE:
+                raise ValueError("Invalid confirmation phrase.")
+            return self.mgr.arm_live_trading(confirmation)
         else:
             self.mgr.disarm_live_trading()
-            logger.info("live_trading_disabled execution_mode=PAPER")
+            logger.info("live_trading_disabled execution_mode=LIVE")
             return {
                 "enabled": False,
-                "execution_mode": "PAPER",
+                "execution_mode": "LIVE",
                 "is_armed": False,
-                "message": "Live Trading is DISABLED. System safely reverted to PAPER simulation mode.",
+                "message": "Live Trading is DISABLED.",
             }
 
     def arm_live_trading(self, confirmation: str) -> dict[str, Any]:
         """Arm live trade execution after verifying the explicit confirmation phrase."""
-        raise ValueError("Delta is read-only. Live trading cannot be armed.")
+        return self.mgr.arm_live_trading(confirmation)
 
     def disarm_live_trading(self) -> dict[str, Any]:
-        """Disarm live execution and safely revert execution mode to PAPER."""
+        """Disarm live execution."""
         return self.mgr.disarm_live_trading()
 
     def set_execution_mode(self, mode: str) -> dict[str, Any]:
-        """Switch execution mode between PAPER and LIVE with safety validation."""
+        """Switch execution mode with safety validation."""
         clean_mode = mode.strip().upper()
-        if clean_mode != "PAPER":
-            raise ValueError("Delta is read-only. Execution mode must remain PAPER.")
-
         self.mgr.set_mode(clean_mode)
         return {"execution_mode": self.mgr.get_mode(), "is_armed": self.mgr.is_armed()}
 
@@ -421,129 +420,7 @@ class BrokerService:
                 "available_balance_inr": 0.0,
             }
 
-    def get_paper_positions(self) -> list[dict[str, Any]]:
-        """Fetch active simulated paper positions from broker_accounts table.
 
-        Each position is enriched with the latest live mark price from
-        DeltaLivePriceFeed, enabling real-time unrealized PnL calculation
-        without requiring authenticated API access.
-        """
-        rows = self.db.execute_query("SELECT strategy_name, symbol, capital, open_position FROM broker_accounts;")
-        positions: list[dict[str, Any]] = []
-        for r in rows:
-            raw_pos = r.get("open_position")
-            if not raw_pos:
-                continue
-            try:
-                pos_dict = json.loads(raw_pos) if isinstance(raw_pos, str) else raw_pos
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Could not parse paper position JSON: %s", exc)
-                continue
-            if not pos_dict:
-                continue
-
-            pos_type = (pos_dict.get("type") or "LONG").upper()
-            size = float(pos_dict.get("size", 0.0))
-            entry_price = float(pos_dict.get("entry_price", 0.0))
-            sl = float(pos_dict.get("stop_price", 0.0)) if pos_dict.get("stop_price") else None
-            tp = float(pos_dict.get("target_price", 0.0)) if pos_dict.get("target_price") else None
-
-            # Enrich with live mark price from public WebSocket price feed
-            symbol = r.get("symbol") or ""
-            mark_price = get_live_price(symbol) or entry_price
-            is_long = pos_type == "LONG"
-            pnl = self.mgr.paper_broker._calc_pnl(pos_dict, mark_price) if mark_price else {"net_pnl": 0.0}
-            unrealized_pnl = float(pnl["net_pnl"])
-            margin_used = float(pos_dict.get("margin_used", 0.0))
-
-            positions.append(
-                {
-                    "strategy_name": r.get("strategy_name"),
-                    "symbol": symbol,
-                    "position_id": pos_dict.get("position_id"),
-                    "side": "BUY" if is_long else "SELL",
-                    "position_type": pos_type,
-                    "is_long": is_long,
-                    "size": size,
-                    "entry_price": entry_price,
-                    "mark_price": mark_price,
-                    "stop_loss": sl,
-                    "take_profit": tp,
-                    "entry_time": pos_dict.get("entry_time"),
-                    "capital": float(r.get("capital", 100.0)),
-                    "unrealized_pnl": round(unrealized_pnl, 4),
-                    "unrealized_pnl_pct": round((unrealized_pnl / margin_used) * 100, 2) if margin_used else 0.0,
-                    "margin_used": margin_used,
-                    "leverage": float(pos_dict.get("leverage", 1.0)),
-                    "liquidation_price": pos_dict.get("liquidation_price"),
-                    "has_live_price": mark_price != entry_price,
-                    "is_paper": True,
-                }
-            )
-        return positions
-
-    def get_paper_orders(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Fetch simulated paper trading orders/trades from broker_trades table."""
-        rows = self.db.execute_query(
-            """SELECT id, strategy_name, symbol, type, entry_price, exit_price,
-                      pnl, reason, entry_time, exit_time, position_id
-               FROM broker_trades ORDER BY exit_time DESC LIMIT ?;""",
-            (limit,),
-        )
-        orders: list[dict[str, Any]] = []
-        for r in rows:
-            pos_type = (r.get("type") or "LONG").upper()
-            orders.append(
-                {
-                    "id": f"PAPER-{r['id']}",
-                    "strategy_name": r.get("strategy_name"),
-                    "symbol": r.get("symbol"),
-                    "position_id": r.get("position_id"),
-                    "side": "BUY" if pos_type == "LONG" else "SELL",
-                    "position_type": pos_type,
-                    "order_role": "PAPER_TRADE",
-                    "entry_price": float(r.get("entry_price", 0.0)),
-                    "exit_price": float(r.get("exit_price", 0.0)) if r.get("exit_price") else None,
-                    "pnl": float(r.get("pnl", 0.0)),
-                    "exit_reason": r.get("reason") or "Closed",
-                    "entry_time": r.get("entry_time"),
-                    "exit_time": r.get("exit_time"),
-                    "state": "filled",
-                    "is_paper": True,
-                }
-            )
-        return orders
-
-    def update_paper_protection(
-        self, strategy_name: str, symbol: str, stop_price: float, target_price: float
-    ) -> dict[str, Any]:
-        """Update protective prices for a paper position."""
-        current_price = get_live_price(symbol)
-        if not current_price:
-            positions = self.get_paper_positions()
-            match = next(
-                (p for p in positions if p["strategy_name"] == strategy_name and p["symbol"] == symbol),
-                None,
-            )
-            current_price = match["mark_price"] if match else None
-        position = self.mgr.paper_broker.update_protection(
-            strategy_name, symbol, stop_price, target_price, float(current_price or 0)
-        )
-        return {"success": True, "position": position}
-
-    def close_paper_position(self, strategy_name: str, symbol: str) -> dict[str, Any]:
-        """Manually close a paper position at its latest public price."""
-        current_price = get_live_price(symbol)
-        if not current_price:
-            raise ValueError("Live market price is unavailable; position was not closed.")
-        account = self.mgr.paper_broker.close_manually(strategy_name, symbol, float(current_price))
-        return {"success": True, "capital": account["capital"]}
-
-    def get_paper_position_history(self, position_id: str) -> list[dict[str, Any]]:
-        """Return the SL/TP change and close-reason audit trail for one paper position instance."""
-        if not position_id:
-            raise ValueError("position_id is required.")
-        return position_events_store.get_events_by_position(position_id)
 
     def get_live_positions(self) -> list[dict[str, Any]]:
         """Return positions maintained by the live Delta private stream."""
@@ -554,26 +431,26 @@ class BrokerService:
         return get_delta_websocket_client().get_orders()
 
     def get_positions(self, mode: str | None = None) -> list[dict[str, Any]]:
-        """Fetch active positions based on execution mode ('PAPER' or 'LIVE')."""
-        active_mode = (mode or self.mgr.get_mode()).upper()
-        if active_mode == "PAPER":
-            return self.get_paper_positions()
+        """Fetch active positions."""
         return self.get_live_positions()
 
     def get_orders(self, mode: str | None = None) -> list[dict[str, Any]]:
-        """Fetch active open orders based on execution mode ('PAPER' or 'LIVE')."""
-        active_mode = (mode or self.mgr.get_mode()).upper()
-        if active_mode == "PAPER":
-            return self.get_paper_orders()
+        """Fetch active open orders."""
         return self.get_live_orders()
 
     def cancel_order(self, order_id: str, product_id: int | None = None) -> dict[str, Any]:
-        """Reject mutations because Delta integration is monitoring-only."""
-        raise ValueError("Delta is read-only; order actions are disabled.")
+        """Cancel a specific order using delta client."""
+        if not product_id:
+            raise ValueError("Product ID is required for Delta order cancellation.")
+        try:
+            res = self.delta_client._client.cancel_order(product_id, order_id)
+            return {"success": True, "result": res}
+        except Exception as exc:
+            return {"success": False, "message": str(exc)}
 
     def emergency_exit(self) -> dict[str, Any]:
-        """Reject mutations because Delta integration is monitoring-only."""
-        raise ValueError("Delta is read-only; position actions are disabled.")
+        """Emergency panic switch: cancels all orders and closes all open positions."""
+        return self.delta_client.emergency_exit()
 
 
 _broker_service: BrokerService | None = None

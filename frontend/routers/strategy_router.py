@@ -100,7 +100,7 @@ class TriggerSignalPayload(BaseModel):
 @router.post("/api/strategy/trigger")
 @router.post("/api/strategy/manual-signal")
 def trigger_manual_signal(payload: TriggerSignalPayload) -> dict[str, Any]:
-    """Manually generate a test strategy signal to test Paper or Live execution."""
+    """Manually generate a test strategy signal to test Live execution."""
     try:
         service = get_strategy_service()
         chosen_strategy = payload.strategy_name or payload.strategy or "ManualOverrideStrategy"
@@ -164,7 +164,7 @@ def get_strategy_detailed() -> dict[str, Any]:
 
 @router.post("/api/strategy/toggle")
 def toggle_strategy(payload: ToggleStrategyPayload) -> dict[str, Any]:
-    """Toggle paper or real execution states for a specific strategy."""
+    """Toggle real execution states for a specific strategy."""
     try:
         service = get_strategy_service()
         return service.toggle_strategy_execution(

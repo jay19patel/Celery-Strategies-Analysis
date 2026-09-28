@@ -45,7 +45,11 @@ def handle_api_errors(func):
         except DeltaAPIError:
             raise
         except Exception as exc:
-            logger.exception(f"Error in Delta API method {func.__name__}")
+            exc_str = str(exc)
+            if "401 HTTP Error" in exc_str or "403 HTTP Error" in exc_str or "invalid_api_key" in exc_str:
+                logger.warning(f"Authentication failed in Delta API method {func.__name__}: {exc}")
+            else:
+                logger.exception(f"Error in Delta API method {func.__name__}")
             raise DeltaAPIError(f"{func.__name__} failed: {exc}") from exc
     return wrapper
 
@@ -101,6 +105,10 @@ class DeltaClient:
         if self._client is None:
             self._init_client()
 
+    @staticmethod
+    def _normalize_symbol(symbol: str) -> str:
+        return symbol.replace("-", "").replace("/", "").replace("_", "").upper()
+
     @handle_api_errors
     def get_ticker(self, symbol: str) -> dict[str, Any]:
         """Fetch current ticker, mark price, and contract details for a symbol."""
@@ -108,11 +116,30 @@ class DeltaClient:
         if not symbol:
             raise ValueError("Symbol is required")
 
-        clean_symbol = symbol.replace("-", "").upper()
+        clean_symbol = self._normalize_symbol(symbol)
         response = self._client.get_ticker(clean_symbol)
         if not response:
             raise DeltaAPIError(f"No ticker data received for {clean_symbol}")
         return response
+
+    @handle_api_errors
+    def get_product_id(self, symbol: str) -> int:
+        """Resolve product_id for a given symbol."""
+        clean_symbol = self._normalize_symbol(symbol)
+        try:
+            ticker = self.get_ticker(clean_symbol)
+            if ticker and "product_id" in ticker:
+                return int(ticker["product_id"])
+        except DeltaAPIError:
+            pass
+        
+        # Fallback to products list
+        products = self._client.get_products()
+        if isinstance(products, list):
+            for p in products:
+                if p.get("symbol") == clean_symbol:
+                    return int(p["id"])
+        raise DeltaAPIError(f"Could not resolve product_id for {clean_symbol}")
 
     @handle_api_errors
     def get_balance(self) -> dict[str, Any]:
@@ -177,7 +204,7 @@ class DeltaClient:
     @handle_api_errors
     def get_active_position(self, symbol: str) -> dict[str, Any] | None:
         """Fetch open position for a specific symbol if one exists."""
-        clean_symbol = symbol.replace("-", "").upper()
+        clean_symbol = self._normalize_symbol(symbol)
         positions = self.get_all_open_positions()
         for pos in positions:
             if pos.get("symbol") == clean_symbol:
@@ -226,7 +253,7 @@ class DeltaClient:
     @handle_api_errors
     def is_already_in_position_or_order(self, symbol: str) -> bool:
         """Checks whether the symbol already has an open position or live order."""
-        clean_symbol = symbol.replace("-", "").upper()
+        clean_symbol = self._normalize_symbol(symbol)
         if self.get_active_position(clean_symbol) is not None:
             return True
 
@@ -289,7 +316,7 @@ class DeltaClient:
     ) -> dict[str, Any]:
         """Creates a bracket order (Stop-Loss and Take-Profit) attached to a position."""
         self._ensure_connected()
-        clean_symbol = symbol.replace("-", "").upper()
+        clean_symbol = self._normalize_symbol(symbol)
 
         payload = {
             "product_id": product_id,

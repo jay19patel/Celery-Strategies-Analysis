@@ -36,15 +36,6 @@ class MotherCandleStrategy(BaseStrategy):
              )
 
         # NOTE: strategy_name must stay exactly self.name across every return path below.
-        # PaperBroker keys accounts by the exact strategy_name string (see CLAUDE.md /
-        # app/core/paper_broker.py) - it used to vary here with "(Insufficient Data)" or the
-        # matched timeframe name (e.g. "(15 Minute)"), which silently fragmented the account
-        # on every cycle where a different suffix (or no suffix) was returned. In particular,
-        # check_protective_exit() - which enforces the SL/TP/24h exits - was then called against
-        # whichever fragmented account matched *that* cycle's name, so the account holding the
-        # actual open position only got checked on the rare cycles where the same timeframe
-        # fired again, letting positions sit open far past the 24h limit. Log the sub-detail
-        # instead of folding it into the name.
 
         # Live Price from latest 15m candle
         live_price = df_15m['Close'].iloc[-1]

@@ -276,7 +276,7 @@
         }
     </style>
 </head>
-<body class="h-full text-slate-800 antialiased overflow-x-hidden flex flex-col min-h-screen">
+<body class="text-slate-800 antialiased flex flex-col h-screen overflow-hidden">
 
     <!-- ═══ FULL-WIDTH LIVE TICKER BAR (Across Entire Page Width Above Sidebar & Content) ═══ -->
     <div id="tickerBar" class="hidden w-full shrink-0">
@@ -292,7 +292,7 @@
         <!-- ==================================================== -->
         <!-- 1. DESKTOP COLLAPSIBLE SIDEBAR                       -->
         <!-- ==================================================== -->
-        <aside id="appSidebar" class="hidden md:flex flex-col bg-white border-r border-slate-200 w-60 flex-shrink-0 sticky top-0 h-screen transition-all duration-200 z-30 select-none">
+        <aside id="appSidebar" class="hidden md:flex flex-col bg-white border-r border-slate-200 w-60 flex-shrink-0 h-full transition-all duration-200 z-30 select-none">
             
             <!-- Sidebar Header -->
             <div class="h-14 flex items-center justify-between px-4 border-b border-slate-100">
@@ -339,11 +339,7 @@
                     <span id="sbBrokerStatusPill" class="nav-badge ml-auto text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-semibold">API</span>
                 </a>
 
-                <a href="#papertrading" onclick="switchTab('papertrading')" data-tab="papertrading" class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-50 text-xs font-medium transition">
-                    <i data-lucide="shield-check" class="w-4 h-4 flex-shrink-0"></i>
-                    <span class="nav-text truncate">Paper Sandbox</span>
-                    <span class="nav-badge ml-auto text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded font-mono font-medium">$100</span>
-                </a>
+                
 
                 <div class="pt-2 pb-1">
                     <div class="px-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider sidebar-header-text">System & DevOps</div>
@@ -405,7 +401,7 @@
         <!-- ==================================================== -->
         <!-- 2. MAIN CONTENT AREA & RESPONSIVE HEADER            -->
         <!-- ==================================================== -->
-        <div class="flex-1 flex flex-col min-w-0 pb-16 md:pb-6">
+        <div class="flex-1 flex flex-col min-w-0 pb-16 md:pb-6 overflow-y-auto">
 
             <!-- Sticky Top Header (Kite / Fyers Style) -->
             <header class="sticky top-0 z-20 h-14 bg-white/95 backdrop-blur-sm border-b border-slate-200 px-3 md:px-6 flex items-center justify-between">
@@ -418,7 +414,7 @@
 
                     <div class="flex items-center gap-2">
                         <h1 id="pageBreadcrumb" class="text-sm font-semibold text-slate-900 truncate">System Monitor & Host Metrics</h1>
-                        <span id="headerModeTag" class="pill-badge pill-neutral font-mono text-[10px]">PAPER MODE</span>
+                        <span id="headerModeTag" class="pill-badge pill-neutral font-mono text-[10px]">LIVE MODE</span>
                     </div>
                 </div>
 
@@ -474,7 +470,7 @@
                                 Server outgoing IP <code id="globalBannerServerIp" class="font-mono bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200 text-amber-900 font-bold">127.0.0.1</code> is not whitelisted for your Delta Exchange API key.
                             </div>
                             <div class="text-xs text-amber-600 mt-1">
-                                Go to <a href="https://www.india.delta.exchange" target="_blank" class="underline font-semibold hover:text-amber-800">india.delta.exchange</a> &rarr; <strong>Profile &rarr; API Keys &rarr; Edit &rarr; Add IP to Whitelist</strong>.
+                                Go to <a href="https://demo.delta.exchange" target="_blank" class="underline font-semibold hover:text-amber-800">demo.delta.exchange</a> &rarr; <strong>Profile &rarr; API Keys &rarr; Edit &rarr; Add IP to Whitelist</strong>.
                             </div>
                         </div>
                     </div>
@@ -533,7 +529,7 @@
                         <div class="col-span-2 lg:col-span-1 bg-white p-3.5 rounded-lg border border-slate-200 shadow-2xs flex flex-col justify-between">
                             <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Execution Safety</div>
                             <div class="flex items-center gap-2 mt-1">
-                                <span id="brokerModeTag" class="pill-badge pill-neutral font-mono">PAPER</span>
+                                <span id="brokerModeTag" class="pill-badge pill-neutral font-mono">LIVE</span>
                                 <span id="brokerArmedState" class="text-xs font-semibold text-emerald-600">DISARMED (SAFE)</span>
                             </div>
                             <div class="text-[11px] text-slate-400 mt-0.5">Real orders blocked</div>
@@ -627,7 +623,7 @@
                             <div class="space-y-2 text-xs">
                                 <div class="flex items-center justify-between">
                                     <span class="text-slate-500">Endpoint</span>
-                                    <span class="font-mono text-[11px] text-slate-700 truncate max-w-[200px]">wss://socket.india.delta.exchange</span>
+                                    <span class="font-mono text-[11px] text-slate-700 truncate max-w-[200px]">wss://testnet-socket.delta.exchange</span>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-slate-500">Subscribed Feeds</span>
@@ -920,7 +916,7 @@
                         <div class="flex items-center justify-between border-b border-slate-100 pb-2">
                             <div>
                                 <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide">Algorithmic Strategies Matrix</h3>
-                                <p class="text-[11px] text-slate-400">Configure paper execution for each strategy and symbol</p>
+                                <p class="text-[11px] text-slate-400"></p>
                             </div>
                             <span id="strategyMatrixCountBadge" class="text-xs font-mono text-slate-500">Loading...</span>
                         </div>
@@ -1020,7 +1016,7 @@
                             <div class="text-xs text-amber-600 mt-2 space-y-1">
                                 <div class="font-semibold">How to fix:</div>
                                 <ol class="list-decimal list-inside space-y-0.5 pl-1">
-                                    <li>Login to <a href="https://www.india.delta.exchange" target="_blank" class="underline hover:text-amber-800">Delta Exchange India</a></li>
+                                    <li>Login to <a href="https://demo.delta.exchange" target="_blank" class="underline hover:text-amber-800">Delta Exchange Demo</a></li>
                                     <li>Go to <strong>Profile → API Keys</strong></li>
                                     <li>Click <strong>Edit</strong> on your API key</li>
                                     <li>Add IP <code id="bannerServerIp2" class="font-mono font-bold">...</code> to the whitelist</li>
@@ -1042,16 +1038,15 @@
                         <div class="bg-white p-4 rounded-lg border border-slate-200 shadow-2xs">
                             <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Available Trading Margin</div>
                             <div id="liveBrokerMarginValue" class="text-2xl font-bold text-emerald-600 tabular-num mt-1">$0.00</div>
-                            <div class="text-[11px] text-slate-400 mt-0.5">Isolated / Cross margin ready</div>
+                            <div id="liveBrokerMarginSubtext" class="text-[11px] text-slate-400 mt-0.5">Fetching connection status...</div>
                         </div>
 
                         <div class="bg-white p-4 rounded-lg border border-slate-200 shadow-2xs">
-                            <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wide">API Authority State</div>
-                            <div class="flex items-center gap-2 mt-1">
-                                <span class="pill-badge pill-bull">HMAC-SHA256</span>
-                                <span class="text-xs font-semibold text-slate-700">DELTA INDIA</span>
+                            <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Broker Connection</div>
+                            <div class="flex items-center gap-2 mt-1" id="brokerConnectionState">
+                                <span class="pill-badge pill-neutral">DISCONNECTED</span>
                             </div>
-                            <div class="text-[11px] text-slate-400 mt-1">Direct REST &amp; WSS protocol</div>
+                            <div id="brokerConnectionDetails" class="text-[11px] text-slate-400 mt-1">API Key & Secret required</div>
                         </div>
                     </div>
 
@@ -1109,182 +1104,6 @@
                 </section>
 
                 <!-- ==================================================== -->
-                <!-- TAB 4: PAPER TRADING SANDBOX                        -->
-                <!-- ==================================================== -->
-                <section id="tab-papertrading" class="tab-panel space-y-4">
-                    
-                    <!-- Virtual Margin Overview Bar -->
-                    <div class="bg-white rounded-lg border border-slate-200 p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-                                $
-                            </div>
-                            <div>
-                                <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Paper Sandbox Balance</div>
-                                <div id="paperBalanceValue" class="text-2xl font-bold text-slate-900 tabular-num">$100.00</div>
-                                <div class="text-[11px] text-slate-400 font-medium">Isolated Virtual Account &bull; 20x Leverage &bull; Slippage 0.05%</div>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <button onclick="resetPaperBalancesPrompt()" class="px-3 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700 transition">
-                                Reset Sandbox ($100)
-                            </button>
-                        </div>
-                    </div>
-
-                    <div id="paperStatsGrid" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
-                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Equity</div><div id="paperStatEquity" class="font-bold tabular-num">$100.00</div></div>
-                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Total PnL</div><div class="flex items-baseline gap-2"><div id="paperStatPnl" class="font-bold tabular-num">$0.00</div><div id="paperStatReturn" class="font-bold tabular-num text-[10px]">0.00%</div></div></div>
-                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Win Rate</div><div id="paperStatWinRate" class="font-bold tabular-num">0.00%</div></div>
-                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Trades</div><div id="paperStatTrades" class="font-bold tabular-num">0</div></div>
-                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Open</div><div id="paperStatOpen" class="font-bold tabular-num">0</div></div>
-                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Profit Factor</div><div id="paperStatProfitFactor" class="font-bold tabular-num">0.00</div></div>
-                        <div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">Max Drawdown</div><div id="paperStatDrawdown" class="font-bold tabular-num">0.00%</div></div>
-                    </div>
-
-                    <!-- Paper Sub-tab Navigation Navigation -->
-                    <div class="flex items-center gap-2 border-b border-slate-200 pb-2">
-                        <button onclick="switchPaperSubTab('paper-positions')" class="sub-pill-btn px-3 py-1.5 rounded-md text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition active" data-subtab="paper-positions">
-                            Virtual Positions
-                        </button>
-                        <button onclick="switchPaperSubTab('paper-strategies')" class="sub-pill-btn px-3 py-1.5 rounded-md text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition" data-subtab="paper-strategies">
-                            Strategy Performance
-                        </button>
-                        <button onclick="switchPaperSubTab('paper-analytics')" class="sub-pill-btn px-3 py-1.5 rounded-md text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition" data-subtab="paper-analytics">
-                            Equity Curve & Metrics
-                        </button>
-                        <button onclick="switchPaperSubTab('paper-trades')" class="sub-pill-btn px-3 py-1.5 rounded-md text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition" data-subtab="paper-trades">
-                            Execution Trade History
-                        </button>
-                    </div>
-
-                    <!-- Sub-tab Panel 1: Paper Positions -->
-                    <div id="subtab-paper-positions" class="sub-tab-panel active space-y-3">
-                        <div class="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-2xs p-4">
-                            <div class="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
-                                <div class="flex items-center gap-2">
-                                    <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide">Active Virtual Positions</h3>
-                                    <span id="priceFeedBadge" class="hidden items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-medium">
-                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                                        LIVE PRICES
-                                    </span>
-                                </div>
-                                <span class="text-xs font-mono text-slate-400">Automatic TP/SL Checked on Every Cycle</span>
-                            </div>
-                            <div class="overflow-x-auto border border-slate-100 rounded-md">
-                                <table class="w-full text-left trade-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Symbol</th>
-                                            <th>Side</th>
-                                            <th class="text-right">Virtual Units</th>
-                                            <th class="text-right">Entry Price</th>
-                                            <th class="text-right">Mark Price</th>
-                                            <th class="text-right">Unrealized PnL</th>
-                                            <th class="text-center">Stop Loss / TP</th>
-                                            <th class="text-center">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="paperPositionsTableBody">
-                                        <tr><td colspan="8" class="text-center py-6 text-slate-400 text-xs">No active simulated paper positions.</td></tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Sub-tab Panel 2: Paper Strategies -->
-                    <div id="subtab-paper-strategies" class="sub-tab-panel hidden space-y-3">
-                        <div class="bg-white rounded-lg border border-slate-200 p-4 shadow-2xs">
-                            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide mb-3">Paper Strategy Lifetime Performance</h3>
-                            <div id="paperStrategiesGrid" class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <!-- Populated dynamically -->
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Sub-tab Panel 3: Paper Analytics & Equity Chart -->
-                    <div id="subtab-paper-analytics" class="sub-tab-panel hidden space-y-3">
-                        <div id="paperAdvancedStats" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
-                        <div class="bg-white rounded-lg border border-slate-200 p-4 shadow-2xs">
-                            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide mb-3">Paper Equity Curve</h3>
-                            <div class="w-full h-64">
-                                <canvas id="equityChartCanvas"></canvas>
-                            </div>
-                        </div>
-                        <div class="bg-white rounded-lg border border-slate-200 p-4 shadow-2xs">
-                            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide mb-3">Cumulative PnL</h3>
-                            <div class="w-full h-56"><canvas id="paperPnlChartCanvas"></canvas></div>
-                        </div>
-                    </div>
-
-                    <!-- Sub-tab Panel 4: Paper Trades History -->
-                    <div id="subtab-paper-trades" class="sub-tab-panel hidden space-y-3">
-                        <div class="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-2xs p-4">
-                            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wide mb-2">Paper Positions</h3>
-                            <div class="overflow-x-auto border border-slate-100 rounded-md">
-                                <table class="w-full text-left trade-table">
-                                    <thead>
-                                        <tr>
-                                            <th class="w-48">Timestamp (IST)</th>
-                                            <th>Symbol</th>
-                                            <th>Side</th>
-                                            <th class="text-right">Filled Price</th>
-                                            <th class="text-right">Realized PnL</th>
-                                            <th>Exit Reason</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="paperTradesTableBody">
-                                        <tr><td colspan="6" class="text-center py-6 text-slate-400 text-xs">No simulated trades executed yet.</td></tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <div id="paperProtectionModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 px-4" onclick="if(event.target === this) closePaperProtectionModal()">
-                    <div class="w-full max-w-md rounded-md border border-slate-200 bg-white p-5 shadow-xl">
-                        <div class="flex items-center justify-between mb-4">
-                            <div><h3 class="text-sm font-bold text-slate-900">Update Protection</h3><p id="paperProtectionLabel" class="text-xs text-slate-500 mt-1"></p></div>
-                            <button onclick="closePaperProtectionModal()" class="p-1.5 text-slate-500 hover:text-slate-900" title="Close"><i data-lucide="x" class="w-4 h-4"></i></button>
-                        </div>
-                        <input id="paperProtectionStrategy" type="hidden"><input id="paperProtectionSymbol" type="hidden">
-                        <div class="grid grid-cols-2 gap-3">
-                            <label class="text-xs font-medium text-slate-700">Stop Loss<input id="paperStopInput" type="number" min="0" step="any" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono"></label>
-                            <label class="text-xs font-medium text-slate-700">Target<input id="paperTargetInput" type="number" min="0" step="any" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono"></label>
-                        </div>
-                        <div class="mt-4 flex justify-end gap-2">
-                            <button onclick="closePaperProtectionModal()" class="px-3 py-2 text-xs font-semibold text-slate-600">Cancel</button>
-                            <button onclick="savePaperProtection()" class="px-3 py-2 rounded-md bg-blue-600 text-xs font-semibold text-white hover:bg-blue-700">Save Levels</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Trade Details Modal -->
-                <div id="tradeDetailsModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 px-4" onclick="if(event.target === this) closeTradeDetailsModal()">
-                    <div class="w-full max-w-lg rounded-md border border-slate-200 bg-white p-5 shadow-xl">
-                        <div class="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
-                            <div>
-                                <h3 class="text-sm font-bold text-slate-900">Position Details</h3>
-                                <p id="tdModalSymbol" class="text-xs text-slate-500 mt-0.5 font-mono font-semibold"></p>
-                            </div>
-                            <button onclick="closeTradeDetailsModal()" class="p-1.5 text-slate-500 hover:text-slate-900" title="Close"><i data-lucide="x" class="w-4 h-4"></i></button>
-                        </div>
-                        <div class="grid grid-cols-2 gap-y-3 gap-x-4 text-xs" id="tdModalContent">
-                            <!-- Populated dynamically -->
-                        </div>
-                        <div id="tdModalHistory" class="mt-3 pt-3 border-t border-slate-100 text-xs">
-                            <!-- Populated dynamically -->
-                        </div>
-                        <div class="mt-5 flex justify-end">
-                            <button onclick="closeTradeDetailsModal()" class="px-4 py-2 rounded-md bg-slate-100 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition">Close</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ==================================================== -->
-                <!-- TAB 5: ADMIN CONTROL PANEL & SETTINGS                -->
                 <!-- ==================================================== -->
                 <section id="tab-admin" class="tab-panel space-y-4">
                     
@@ -1349,6 +1168,11 @@
                                     <button onclick="savePipelineSettings()" class="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold shadow-2xs transition">Save Cadence</button>
                                 </div>
                                 <p class="text-[10px] text-slate-400">Celery Beat ticks every 10s and evaluates if interval has elapsed.</p>
+                                <label class="text-[11px] font-semibold text-slate-600 block mt-3">Target Symbols</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="text" id="inputSymbols" placeholder="BTCUSD,ETHUSD" class="w-full text-xs font-mono px-3 py-1.5 rounded-md border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                </div>
+                                <p class="text-[10px] text-slate-400 mb-2">Comma separated symbols for analysis and execution.</p>
                             </div>
                         </div>
 
@@ -1514,9 +1338,9 @@
                                     <i data-lucide="shield-check" class="w-4 h-4"></i>
                                 </div>
                                 <div class="text-[11px] text-slate-600 font-medium">Order Routing Gate</div>
-                                <div class="text-[10px] text-slate-400 leading-relaxed"><strong class="text-slate-600">ExecutionManager</strong> routes signals based on active mode:<br/>• <strong class="text-emerald-700">PAPER</strong> → PaperBroker (virtual $100 sandbox)<br/>• <strong class="text-rose-600">LIVE + ARMED</strong> → Delta Exchange REST API → Real market orders</div>
+                                <div class="text-[10px] text-slate-400 leading-relaxed"><strong class="text-slate-600">ExecutionManager</strong> routes signals based on active mode:<br/>• <strong class="text-emerald-700">LIVE</strong> → Delta Exchange (virtual $100 sandbox)<br/>• <strong class="text-rose-600">LIVE + ARMED</strong> → Delta Exchange REST API → Real market orders</div>
                                 <div class="mt-1 pt-2 border-t border-slate-100 space-y-1">
-                                    <span class="text-[10px] font-mono bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-100 block">PaperBroker (safe)</span>
+                                    <span class="text-[10px] font-mono bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-100 block">Delta Exchange (safe)</span>
                                     <span class="text-[10px] font-mono bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded border border-rose-100 block">DeltaExchange (armed)</span>
                                 </div>
                             </div>
@@ -1618,7 +1442,7 @@
                                 <div class="flex items-start gap-2">
                                     <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
                                     <div>
-                                        <div class="font-semibold text-slate-700">Paper Broker (Default)</div>
+                                        
                                         <div class="text-slate-400">Simulates order execution with virtual $100 balance. Tracks positions, unrealized PnL, stop-loss/take-profit, and trade history. Zero capital risk.</div>
                                     </div>
                                 </div>
@@ -1640,7 +1464,7 @@
                                     <span class="mt-0.5 w-2 h-2 rounded-full bg-blue-400 flex-shrink-0"></span>
                                     <div>
                                         <div class="font-semibold text-slate-700">Delta WebSocket</div>
-                                        <div class="text-slate-400">Persistent WSS connection to wss://socket.india.delta.exchange for real-time mark_price, orders, and positions feed with auto-reconnect.</div>
+                                        <div class="text-slate-400">Persistent WSS connection to wss://testnet-socket.delta.exchange for real-time mark_price, orders, and positions feed with auto-reconnect.</div>
                                     </div>
                                 </div>
                             </div>
@@ -1693,11 +1517,11 @@
                                                                                 │
                        ┌────────────────────────────────────────────────────────┤
                        │                                                        │
-         <span class="text-emerald-400 font-bold">PAPER MODE</span> (default)                                     <span class="text-rose-400 font-bold">LIVE MODE</span> (armed)
+         <span class="text-emerald-400 font-bold">LIVE MODE</span> (default)                                     <span class="text-rose-400 font-bold">LIVE MODE</span> (armed)
                        │                                                        │
                        ▼                                                        ▼
  <span class="text-emerald-400 font-bold">┌──────────────────────────────┐</span>                     <span class="text-rose-400 font-bold">┌──────────────────────────────┐</span>
- <span class="text-emerald-400 font-bold">│</span>  <span class="text-emerald-300 font-bold">PaperBroker</span>                  <span class="text-emerald-400 font-bold">│</span>                     <span class="text-rose-400 font-bold">│</span>  <span class="text-rose-300 font-bold">Delta Exchange API</span>          <span class="text-rose-400 font-bold">│</span>
+ <span class="text-emerald-400 font-bold">│</span>  <span class="text-emerald-300 font-bold">Delta Exchange</span>                  <span class="text-emerald-400 font-bold">│</span>                     <span class="text-rose-400 font-bold">│</span>  <span class="text-rose-300 font-bold">Delta Exchange API</span>          <span class="text-rose-400 font-bold">│</span>
  <span class="text-emerald-400 font-bold">│</span>  Virtual $100 sandbox        <span class="text-emerald-400 font-bold">│</span>                     <span class="text-rose-400 font-bold">│</span>  HMAC-SHA256 signed REST     <span class="text-rose-400 font-bold">│</span>
  <span class="text-emerald-400 font-bold">│</span>  Simulated position tracking  <span class="text-emerald-400 font-bold">│</span>                     <span class="text-rose-400 font-bold">│</span>  Real market orders          <span class="text-rose-400 font-bold">│</span>
  <span class="text-emerald-400 font-bold">│</span>  Stop-loss / Take-profit     <span class="text-emerald-400 font-bold">│</span>                     <span class="text-rose-400 font-bold">│</span>  Margin + Futures positions  <span class="text-rose-400 font-bold">│</span>
@@ -1711,7 +1535,7 @@
  <span class="text-slate-400 font-bold">│</span>  <span class="text-slate-300 font-bold">DASHBOARD</span>: FastAPI + Uvicorn (port 8080)                                                    <span class="text-slate-400 font-bold">│</span>
  <span class="text-slate-400 font-bold">│</span>  /api/system/metrics → Health Monitor (CPU, RAM, Disk, Redis, SQLite, ZMQ, Celery)          <span class="text-slate-400 font-bold">│</span>
  <span class="text-slate-400 font-bold">│</span>  /api/strategy/signals → Paginated SQLite query with IST timestamps                         <span class="text-slate-400 font-bold">│</span>
- <span class="text-slate-400 font-bold">│</span>  /api/broker/status → PaperBroker + Delta Exchange balance + positions                      <span class="text-slate-400 font-bold">│</span>
+ <span class="text-slate-400 font-bold">│</span>  /api/broker/status → Delta Exchange + Delta Exchange balance + positions                      <span class="text-slate-400 font-bold">│</span>
  <span class="text-slate-400 font-bold">│</span>  /ws/live → WebSocket server broadcasting live system metrics every 2s                      <span class="text-slate-400 font-bold">│</span>
  <span class="text-slate-400 font-bold">└─────────────────────────────────────────────────────────────────────────────────────────────┘</span>
 </pre>
@@ -1783,7 +1607,7 @@
                     <!-- Data Source Note -->
                     <div class="mt-6 flex items-center gap-2 text-[11px] text-slate-600">
                         <span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
-                        Data sourced from Delta Exchange India public WebSocket (wss://socket.india.delta.exchange) · No API key required · ZMQ PUB :5557
+                        Data sourced from Delta Exchange public WebSocket (wss://testnet-socket.delta.exchange) · No API key required · ZMQ PUB :5557
                     </div>
                 </section>
 
@@ -1811,10 +1635,7 @@
             <span>Broker</span>
         </a>
 
-        <a href="#papertrading" onclick="switchTab('papertrading')" data-tab="papertrading" class="mobile-nav-link flex flex-col items-center justify-center flex-1 h-full text-slate-500 hover:text-blue-600 text-[10px] font-medium transition min-h-[44px]">
-            <i data-lucide="shield-check" class="w-4 h-4 mb-0.5"></i>
-            <span>Sandbox</span>
-        </a>
+        
 
         <a href="#admin" onclick="switchTab('admin')" data-tab="admin" class="mobile-nav-link flex flex-col items-center justify-center flex-1 h-full text-slate-500 hover:text-blue-600 text-[10px] font-medium transition min-h-[44px]">
             <i data-lucide="sliders" class="w-4 h-4 mb-0.5"></i>
@@ -1850,9 +1671,7 @@
             <a href="#livebroker" onclick="switchTab('livebroker'); toggleMobileDrawer();" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-xs font-medium text-slate-700 hover:bg-slate-50">
                 <i data-lucide="landmark" class="w-4 h-4 text-slate-500"></i> Delta Live Broker
             </a>
-            <a href="#papertrading" onclick="switchTab('papertrading'); toggleMobileDrawer();" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-xs font-medium text-slate-700 hover:bg-slate-50">
-                <i data-lucide="shield-check" class="w-4 h-4 text-slate-500"></i> Paper Sandbox
-            </a>
+            
             <a href="#admin" onclick="switchTab('admin'); toggleMobileDrawer();" class="flex items-center gap-3 px-3 py-2.5 rounded-md text-xs font-medium text-slate-700 hover:bg-slate-50">
                 <i data-lucide="sliders" class="w-4 h-4 text-slate-500"></i> Admin & Settings
             </a>
@@ -1931,7 +1750,7 @@
             <!-- Execution Pipeline Route State Banner -->
             <div id="modalExecutionModeBox" class="p-2.5 rounded bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
                 <span class="text-slate-500 font-medium">Active Execution Pipeline:</span>
-                <span id="modalRoutingModeText" class="font-bold text-emerald-600 font-mono">PAPER SANDBOX (Safe)</span>
+                <span id="modalRoutingModeText" class="font-bold text-emerald-600 font-mono">LIVE SANDBOX (Safe)</span>
             </div>
 
             <div class="space-y-3 text-xs">
@@ -1980,14 +1799,14 @@
     <script>
         // State Management
         let currentTab = 'monitoring';
-        let currentPaperSubTab = 'paper-positions';
+        let currentLiveSubTab = 'live-positions';
         let activeLogFile = 'success.log';
         let activeLogLimit = 250;
         let isLiveEnabled = false;
         let currentPublicIp = '127.0.0.1';
         let wsConnection = null;
         let equityChartInstance = null;
-        let paperPnlChartInstance = null;
+        let livePnlChartInstance = null;
 
         // Signals Stream Pagination & Filter State
         let signalsCurrentPage = 1;
@@ -2164,7 +1983,7 @@
                 signals: 'Algorithmic Strategies, Controls & Signals',
                 marketfeed: 'Live Market Feed — Delta Exchange Real-time Data',
                 livebroker: 'Real Broker (Delta Exchange India)',
-                papertrading: 'Paper Trading Sandbox',
+                livetrading: 'Live Trading Sandbox',
                 admin: 'Admin Control Panel & Settings',
                 logs: 'System Logs & Audit Trail',
                 flow: 'System Architecture & Execution Flow'
@@ -2175,24 +1994,20 @@
             refreshCurrentTab();
         }
 
-        // Sub-tabs in Paper Sandbox
-        function switchPaperSubTab(subTabId) {
-            currentPaperSubTab = subTabId;
-            document.querySelectorAll('.sub-pill-btn').forEach(btn => {
-                const isActive = btn.dataset.subtab === subTabId;
-                btn.classList.toggle('active', isActive);
-                btn.classList.toggle('bg-blue-50', isActive);
-                btn.classList.toggle('text-blue-700', isActive);
+        function switchLiveSubTab(subTabId) {
+            currentLiveSubTab = subTabId;
+            document.querySelectorAll('.sub-tab-link').forEach(link => {
+                link.classList.toggle('active', link.dataset.subtab === subTabId);
             });
             document.querySelectorAll('.sub-tab-panel').forEach(panel => {
                 panel.classList.toggle('hidden', panel.id !== `subtab-${subTabId}`);
                 panel.classList.toggle('active', panel.id === `subtab-${subTabId}`);
             });
 
-            if (subTabId === 'paper-strategies') fetchOverview();
-            else if (subTabId === 'paper-analytics') fetchAnalytics();
-            else if (subTabId === 'paper-trades') fetchTrades();
-            else if (subTabId === 'paper-positions') fetchPaperData();
+            if (subTabId === 'live-strategies') fetchOverview();
+            else if (subTabId === 'live-analytics') fetchAnalytics();
+            else if (subTabId === 'live-trades') fetchTrades();
+            else if (subTabId === 'live-positions') fetchLiveData();
         }
 
         // Data Refresh
@@ -2207,11 +2022,11 @@
                 fetchMarketFeed();
             } else if (currentTab === 'livebroker') {
                 fetchBrokerData();
-            } else if (currentTab === 'papertrading') {
-                fetchPaperData();
-                if (currentPaperSubTab === 'paper-strategies') fetchOverview();
-                else if (currentPaperSubTab === 'paper-analytics') fetchAnalytics();
-                else if (currentPaperSubTab === 'paper-trades') fetchTrades();
+            } else if (currentTab === 'livetrading') {
+                fetchLiveData();
+                if (currentLiveSubTab === 'live-strategies') fetchOverview();
+                else if (currentLiveSubTab === 'live-analytics') fetchAnalytics();
+                else if (currentLiveSubTab === 'live-trades') fetchTrades();
             } else if (currentTab === 'admin') {
                 fetchAdminStrategies();
             } else if (currentTab === 'logs') {
@@ -2281,7 +2096,7 @@
             if (data.status) renderStatus(data.status);
             if (data.positions) renderLivePositions(data.positions);
             if (data.orders) renderLiveOrders(data.orders);
-            if (data.paper_positions) renderPaperPositions(data.paper_positions, data.price_feed_active);
+            if (data.live_positions) renderLivePositions(data.live_positions, data.price_feed_active);
             if (data.signals && signalsLiveSyncEnabled && signalsCurrentPage === 1 && !signalsSearchQuery) {
                 rawSignalsData = data.signals;
                 signalsTotalCount = Math.max(signalsTotalCount, data.signals.length);
@@ -2299,7 +2114,7 @@
             }
         }
 
-        function renderBalance(bal) {
+        function renderBalance(bal, prof = {}) {
             const usd = `$${(bal.available_balance_usd || 0).toFixed(2)}`;
             const inr = `&approx; ₹${(bal.available_balance_inr || 0).toFixed(2)} INR`;
             const dUsd = document.getElementById('deltaUsdValue');
@@ -2307,12 +2122,28 @@
             const lbUsd = document.getElementById('liveBrokerUsdValue');
             const lbInr = document.getElementById('liveBrokerInrValue');
             const lbMarg = document.getElementById('liveBrokerMarginValue');
+            const connState = document.getElementById('brokerConnectionState');
+            const connDetails = document.getElementById('brokerConnectionDetails');
 
             if (dUsd) dUsd.textContent = usd;
             if (dInr) dInr.innerHTML = inr;
             if (lbUsd) lbUsd.textContent = usd;
             if (lbInr) lbInr.innerHTML = inr;
             if (lbMarg) lbMarg.textContent = usd;
+
+            if (connState && connDetails) {
+                if (prof.is_authorized && prof.client_id) {
+                    connState.innerHTML = `<span class="pill-badge pill-bull font-bold">CONNECTED</span> <span class="text-[11px] font-bold text-slate-700 ml-1">Delta Exchange</span>`;
+                    connDetails.innerHTML = `Client ID: <b>${prof.client_id}</b> <span class="text-slate-300 mx-1">|</span> API: <span class="font-mono text-slate-500">${prof.api_key_masked}</span>`;
+                    const subtext = document.getElementById('liveBrokerMarginSubtext');
+                    if (subtext) subtext.innerHTML = `<span class="text-emerald-600 font-semibold">Broker Linked</span> &bull; Trade ready`;
+                } else {
+                    connState.innerHTML = `<span class="pill-badge pill-neutral">DISCONNECTED</span>`;
+                    connDetails.innerHTML = `API Key & Secret required`;
+                    const subtext = document.getElementById('liveBrokerMarginSubtext');
+                    if (subtext) subtext.innerHTML = `Action required`;
+                }
+            }
 
             // IP Whitelist Banners handling (global banner & live broker tab banner)
             const globalBanner = document.getElementById('globalIpWhitelistBanner');
@@ -2348,7 +2179,7 @@
 
         function renderStatus(status) {
             isLiveEnabled = status.execution_mode === 'LIVE' && status.is_armed;
-            const btnPaper = document.getElementById('btnSwitchPaper');
+            const btnLive = document.getElementById('btnSwitchLive');
             const btnReal = document.getElementById('btnSwitchReal');
             const modeTag = document.getElementById('brokerModeTag');
             const headerTag = document.getElementById('headerModeTag');
@@ -2358,12 +2189,12 @@
             const modalRouteText = document.getElementById('modalRoutingModeText');
 
             if (modalRouteText) {
-                modalRouteText.textContent = isLiveEnabled ? 'LIVE DELTA BROKER (Armed)' : 'PAPER SANDBOX (Safe)';
+                modalRouteText.textContent = isLiveEnabled ? 'LIVE DELTA BROKER (Armed)' : 'LIVE SANDBOX (Safe)';
                 modalRouteText.className = isLiveEnabled ? 'font-bold text-rose-600 font-mono' : 'font-bold text-emerald-600 font-mono';
             }
 
             if (isLiveEnabled) {
-                if (btnPaper) btnPaper.className = 'px-3 py-1.5 rounded text-xs font-semibold text-slate-500 hover:text-slate-800 transition';
+                if (btnLive) btnLive.className = 'px-3 py-1.5 rounded text-xs font-semibold text-slate-500 hover:text-slate-800 transition';
                 if (btnReal) btnReal.className = 'px-3 py-1.5 rounded text-xs font-semibold text-white bg-rose-600 shadow-2xs transition';
                 if (modeTag) { modeTag.textContent = 'LIVE'; modeTag.className = 'pill-badge pill-bear'; }
                 if (headerTag) { headerTag.textContent = 'REAL BROKER'; headerTag.className = 'pill-badge pill-bear font-mono text-[10px]'; }
@@ -2371,12 +2202,12 @@
                 if (sigMode) sigMode.textContent = 'ROUTING: REAL DELTA BROKER';
                 if (sigArmed) { sigArmed.textContent = 'ARMED'; sigArmed.className = 'pill-badge pill-bear'; }
             } else {
-                if (btnPaper) btnPaper.className = 'px-3 py-1.5 rounded text-xs font-semibold text-blue-700 bg-white shadow-2xs transition';
+                if (btnLive) btnLive.className = 'px-3 py-1.5 rounded text-xs font-semibold text-blue-700 bg-white shadow-2xs transition';
                 if (btnReal) btnReal.className = 'px-3 py-1.5 rounded text-xs font-semibold text-slate-500 hover:text-slate-800 transition';
-                if (modeTag) { modeTag.textContent = 'PAPER'; modeTag.className = 'pill-badge pill-neutral'; }
-                if (headerTag) { headerTag.textContent = 'PAPER MODE'; headerTag.className = 'pill-badge pill-neutral font-mono text-[10px]'; }
+                if (modeTag) { modeTag.textContent = 'LIVE'; modeTag.className = 'pill-badge pill-neutral'; }
+                if (headerTag) { headerTag.textContent = 'LIVE MODE'; headerTag.className = 'pill-badge pill-neutral font-mono text-[10px]'; }
                 if (armedState) { armedState.textContent = 'DISARMED (SAFE)'; armedState.className = 'text-xs font-semibold text-emerald-600'; }
-                if (sigMode) sigMode.textContent = 'ROUTING: SIMULATED PAPER TRADING';
+                if (sigMode) sigMode.textContent = 'ROUTING: SIMULATED LIVE TRADING';
                 if (sigArmed) { sigArmed.textContent = 'DISARMED'; sigArmed.className = 'pill-badge pill-neutral'; }
             }
         }
@@ -2960,7 +2791,7 @@
                 const actionBadge = isBuy ? 'pill-bull' : (isSell ? 'pill-bear' : 'pill-neutral');
                 const price = sig.price ? `$${Number(sig.price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '-';
                 const stratName = sig.strategy_name || sig.strategy || 'ManualOverride';
-                const mode = (sig.mode || 'PAPER').toUpperCase();
+                const mode = (sig.mode || 'LIVE').toUpperCase();
                 const modeBadge = mode === 'LIVE' ? 'pill-bear' : 'pill-neutral';
                 const execMs = sig.execution_time ? `${(sig.execution_time * 1000).toFixed(1)} ms` : '< 1 ms';
                 const istTime = formatIST(sig.timestamp || sig.created_at);
@@ -3005,7 +2836,7 @@
             if (countBadge) countBadge.textContent = `${symbols.size} Symbol${symbols.size !== 1 ? 's' : ''} × ${strategyIds.size} Strateg${strategyIds.size !== 1 ? 'ies' : 'y'}`;
 
             container.innerHTML = strategies.map(strat => {
-                const isPaper = strat.paper_enabled !== false;
+                const isLive = strat.live_enabled !== false;
 
                 return `
                     <div class="bg-slate-50 rounded-md border border-slate-200 p-3.5 space-y-2.5">
@@ -3035,8 +2866,8 @@
                         <div class="flex items-center justify-between pt-1">
                             <div class="flex items-center gap-2">
                                 <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-                                    <input type="checkbox" onchange="toggleStrategyExecution('${strat.strategy_id || strat.id}', this.checked)" ${isPaper ? 'checked' : ''} class="rounded text-blue-600 focus:ring-blue-500">
-                                    Paper
+                                    <input type="checkbox" onchange="toggleStrategyExecution('${strat.strategy_id || strat.id}', this.checked)" ${isLive ? 'checked' : ''} class="rounded text-blue-600 focus:ring-blue-500">
+                                    Live
                                 </label>
                             </div>
                             <span class="text-[11px] text-slate-400 font-mono">ID: ${escapeHtml(strat.id || `${strat.strategy_id}_${(strat.symbol || '').replaceAll('-', '_')}`)}</span>
@@ -3046,12 +2877,12 @@
             }).join('');
         }
 
-        async function toggleStrategyExecution(stratId, isPaper) {
+        async function toggleStrategyExecution(stratId, isLive) {
             try {
                 const res = await fetch('/api/strategy/toggle', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ strategy_id: stratId, is_paper_enabled: isPaper, is_real_enabled: false })
+                    body: JSON.stringify({ strategy_id: stratId, is_real_enabled: isLive })
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
@@ -3067,21 +2898,23 @@
         // ====================================================
         async function fetchBrokerData() {
             try {
-                const [balRes, posRes, ordRes, stRes] = await Promise.all([
+                const [balRes, posRes, ordRes, stRes, profRes] = await Promise.all([
                     fetch('/api/broker/balance'),
                     fetch('/api/broker/positions?mode=LIVE'),
                     fetch('/api/broker/orders?mode=LIVE'),
                     fetch('/api/broker/status'),
+                    fetch('/api/broker/profile')
                 ]);
                 const bal = await balRes.json();
                 const pos = await posRes.json();
                 const ord = await ordRes.json();
                 const st = await stRes.json();
+                const prof = await profRes.json();
 
-                renderBalance(bal);
+                renderBalance(bal, prof);
                 renderStatus(st);
-                renderLivePositions(pos.positions || []);
-                renderLiveOrders(ord.orders || []);
+                renderLivePositions(Array.isArray(pos) ? pos : (pos.positions || []));
+                renderLiveOrders(Array.isArray(ord) ? ord : (ord.orders || []));
             } catch (e) {
                 console.error("Error fetching broker data:", e);
             }
@@ -3144,361 +2977,6 @@
         }
 
         // ====================================================
-        // PAPER TRADING SANDBOX
-        // ====================================================
-        async function fetchPaperData() {
-            try {
-                const [posRes, dashboardRes] = await Promise.all([
-                    fetch('/api/broker/paper-positions'),
-                    fetch('/api/analytics/paper-dashboard')
-                ]);
-                const pos = await posRes.json();
-                const dashboard = await dashboardRes.json();
-                const positions = Array.isArray(pos) ? pos : (pos.positions || []);
-                const feedActive = positions.some(p => p.has_live_price);
-                renderPaperPositions(positions, feedActive);
-                renderPaperSummary(dashboard.summary || {});
-                renderPaperTrades(dashboard.trades || []);
-            } catch (e) {
-                console.error("Error fetching paper data:", e);
-            }
-        }
-
-        function setPaperMetric(id, value, signed = false) {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.textContent = value;
-            if (signed) el.className = `font-bold tabular-num ${parseFloat(value.replace(/[^0-9.-]/g, '')) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`;
-        }
-
-        function renderPaperSummary(s) {
-            const equity = Number(s.equity || 100);
-            const pnl = Number(s.total_pnl || 0);
-            const balance = document.getElementById('paperBalanceValue');
-            if (balance) balance.textContent = `$${equity.toFixed(2)}`;
-            setPaperMetric('paperStatEquity', `$${equity.toFixed(2)}`);
-            setPaperMetric('paperStatPnl', `${pnl >= 0 ? '+' : '-'}$${Math.abs(pnl).toFixed(2)}`, true);
-            setPaperMetric('paperStatReturn', `${Number(s.pnl_pct || 0).toFixed(2)}%`, true);
-            setPaperMetric('paperStatWinRate', `${Number(s.win_rate || 0).toFixed(2)}%`);
-            setPaperMetric('paperStatTrades', String(s.total_trades || 0));
-            setPaperMetric('paperStatOpen', String(s.open_positions || 0));
-            setPaperMetric('paperStatProfitFactor', s.profit_factor === null ? 'No losses' : Number(s.profit_factor || 0).toFixed(2));
-            setPaperMetric('paperStatDrawdown', `${Number(s.max_drawdown_pct || 0).toFixed(2)}%`);
-        }
-
-        function renderPaperPositions(positions, priceFeedActive) {
-            const tbody = document.getElementById('paperPositionsTableBody');
-            if (!tbody) return;
-
-            // Update LIVE PRICES badge on the virtual positions heading
-            const feedBadge = document.getElementById('priceFeedBadge');
-            if (feedBadge) {
-                if (priceFeedActive) {
-                    feedBadge.classList.remove('hidden');
-                    feedBadge.classList.add('inline-flex');
-                } else {
-                    feedBadge.classList.add('hidden');
-                    feedBadge.classList.remove('inline-flex');
-                }
-            }
-
-            if (!positions || positions.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-slate-400 text-xs">No active paper positions.</td></tr>`;
-                return;
-            }
-
-            tbody.innerHTML = positions.map(pos => {
-                const pnl = pos.unrealized_pnl || 0;
-                const pnlClass = pnl >= 0 ? 'text-emerald-600' : 'text-rose-600';
-                const pnlSign = pnl >= 0 ? '+' : '-';
-                const sideClass = (pos.side || '').toUpperCase() === 'BUY' ? 'pill-bull' : 'pill-bear';
-                const markPrice = pos.mark_price || pos.entry_price || 0;
-                // Show a subtle live-price indicator dot when we have a real live price
-                const liveDot = pos.has_live_price
-                    ? `<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ml-1" title="Live price"></span>`
-                    : '';
-                const strategyArg = encodeURIComponent(pos.strategy_name || '');
-                const symbolArg = encodeURIComponent(pos.symbol || '');
-                const posJson = escapeHtml(JSON.stringify(pos));
-
-                return `
-                    <tr class="cursor-pointer hover:bg-slate-50 transition" onclick="showTradeDetails('${posJson}')">
-                        <td class="font-bold text-slate-900">${escapeHtml(pos.symbol || '')}</td>
-                        <td><span class="pill-badge ${sideClass}">${escapeHtml(pos.side || 'LONG')}</span></td>
-                        <td class="text-right font-mono font-medium">${pos.size || 0}</td>
-                        <td class="text-right font-mono">$${(pos.entry_price || 0).toFixed(2)}</td>
-                        <td class="text-right font-mono">
-                            $${markPrice.toFixed(2)}${liveDot}
-                        </td>
-                        <td class="text-right"><span class="inline-flex min-w-24 flex-col items-end rounded border px-2 py-1 font-mono font-bold ${pnlClass}"><span>${pnlSign}$${Math.abs(pnl).toFixed(4)}</span><span class="text-[10px] font-semibold">${pnlSign}${Number(pos.unrealized_pnl_pct || 0).toFixed(2)}%</span></span></td>
-                        <td class="text-center font-mono text-xs text-slate-500">
-                            SL: $${(pos.stop_loss || 0).toFixed(2)} / TP: $${(pos.take_profit || 0).toFixed(2)}
-                        </td>
-                        <td class="text-center whitespace-nowrap">
-                            <button onclick="event.stopPropagation(); openPaperProtectionModal('${strategyArg}','${symbolArg}',${pos.stop_loss || 0},${pos.take_profit || 0},${markPrice})" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit stop loss and target"><i data-lucide="sliders-horizontal" class="w-4 h-4"></i></button>
-                            <button onclick="event.stopPropagation(); closePaperPosition('${strategyArg}','${symbolArg}')" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded" title="Close paper position"><i data-lucide="circle-x" class="w-4 h-4"></i></button>
-                        </td>
-                    </tr>
-                `;
-            }).join('');
-            if (window.lucide) lucide.createIcons();
-        }
-
-        function openPaperProtectionModal(strategy, symbol, stopPrice, targetPrice, markPrice) {
-            strategy = decodeURIComponent(strategy); symbol = decodeURIComponent(symbol);
-            document.getElementById('paperProtectionStrategy').value = strategy;
-            document.getElementById('paperProtectionSymbol').value = symbol;
-            document.getElementById('paperStopInput').value = stopPrice || '';
-            document.getElementById('paperTargetInput').value = targetPrice || '';
-            document.getElementById('paperProtectionLabel').textContent = `${strategy} · ${symbol} · Mark $${Number(markPrice).toFixed(2)}`;
-            const modal = document.getElementById('paperProtectionModal');
-            modal.classList.remove('hidden'); modal.classList.add('flex');
-            if (window.lucide) lucide.createIcons();
-        }
-
-        function closePaperProtectionModal() {
-            const modal = document.getElementById('paperProtectionModal');
-            modal.classList.add('hidden'); modal.classList.remove('flex');
-        }
-
-        function showTradeDetails(posStr) {
-            try {
-                const pos = typeof posStr === 'string' ? JSON.parse(posStr) : posStr;
-                const modal = document.getElementById('tradeDetailsModal');
-                document.getElementById('tdModalSymbol').textContent = pos.symbol || 'Unknown';
-                
-                let content = '';
-                for (const [key, value] of Object.entries(pos)) {
-                    if (typeof value === 'object' && value !== null) continue;
-                    content += `
-                        <div class="flex flex-col border-b border-slate-50 pb-1">
-                            <span class="text-[10px] uppercase font-semibold text-slate-400">${escapeHtml(key)}</span>
-                            <span class="font-mono text-slate-800">${escapeHtml(String(value))}</span>
-                        </div>
-                    `;
-                }
-                document.getElementById('tdModalContent').innerHTML = content;
-                modal.classList.remove('hidden');
-                modal.classList.add('flex');
-                renderPositionHistory(pos.position_id);
-            } catch (e) { console.error('Error showing trade details:', e); }
-        }
-
-        function closeTradeDetailsModal() {
-            const modal = document.getElementById('tradeDetailsModal');
-            modal.classList.add('hidden'); modal.classList.remove('flex');
-        }
-
-        async function renderPositionHistory(positionId) {
-            const container = document.getElementById('tdModalHistory');
-            if (!container) return;
-            if (!positionId) {
-                container.innerHTML = `<p class="text-slate-400 italic">No history available (opened before audit tracking).</p>`;
-                return;
-            }
-            container.innerHTML = `<p class="text-slate-400">Loading history...</p>`;
-            try {
-                const res = await fetch(`/api/broker/paper-position/history?position_id=${encodeURIComponent(positionId)}`);
-                const events = await res.json();
-                if (!res.ok || !Array.isArray(events) || events.length === 0) {
-                    container.innerHTML = `<p class="text-slate-400 italic">No history recorded yet.</p>`;
-                    return;
-                }
-                const rows = events.map(ev => {
-                    const byClass = ev.changed_by === 'SYSTEM' ? 'pill-bear' : 'pill-bull';
-                    const slChange = (ev.previous_stop_price || ev.new_stop_price)
-                        ? `SL: $${Number(ev.previous_stop_price || 0).toFixed(2)} → $${Number(ev.new_stop_price || 0).toFixed(2)}`
-                        : '';
-                    const tpChange = (ev.previous_target_price || ev.new_target_price)
-                        ? `TP: $${Number(ev.previous_target_price || 0).toFixed(2)} → $${Number(ev.new_target_price || 0).toFixed(2)}`
-                        : '';
-                    const reasonHtml = ev.reason
-                        ? `<span class="font-semibold text-rose-600">${escapeHtml(ev.reason)}</span>`
-                        : '';
-                    return `
-                        <div class="flex items-start justify-between gap-2 border-b border-slate-50 py-1.5">
-                            <div class="flex flex-col gap-0.5">
-                                <div class="flex items-center gap-1.5">
-                                    <span class="pill-badge ${byClass}">${escapeHtml(ev.changed_by || '')}</span>
-                                    <span class="font-semibold text-slate-700">${escapeHtml(ev.event_type || '')}</span>
-                                </div>
-                                <span class="font-mono text-[11px] text-slate-500">${escapeHtml([slChange, tpChange].filter(Boolean).join(' · '))}</span>
-                                ${reasonHtml}
-                            </div>
-                            <span class="text-[10px] text-slate-400 whitespace-nowrap">${formatIST(ev.created_at)}</span>
-                        </div>
-                    `;
-                }).join('');
-                container.innerHTML = `<h4 class="text-[10px] uppercase font-semibold text-slate-400 mb-1">Protection & Exit History</h4>${rows}`;
-            } catch (e) {
-                console.error('Error loading position history:', e);
-                container.innerHTML = `<p class="text-slate-400 italic">Could not load history.</p>`;
-            }
-        }
-
-        async function savePaperProtection() {
-            const payload = {
-                strategy_name: document.getElementById('paperProtectionStrategy').value,
-                symbol: document.getElementById('paperProtectionSymbol').value,
-                stop_price: Number(document.getElementById('paperStopInput').value),
-                target_price: Number(document.getElementById('paperTargetInput').value),
-            };
-            const res = await fetch('/api/broker/paper-position/protection', {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
-            const data = await res.json();
-            if (!res.ok) return showToast(data.detail || 'Could not update protective levels.', 'error');
-            closePaperProtectionModal(); showToast('Stop loss and target updated.'); fetchPaperData();
-        }
-
-        async function closePaperPosition(strategy, symbol) {
-            strategy = decodeURIComponent(strategy); symbol = decodeURIComponent(symbol);
-            if (!confirm(`Close ${symbol} paper position at the current live price?`)) return;
-            const res = await fetch('/api/broker/paper-position/close', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({strategy_name: strategy, symbol})});
-            const data = await res.json();
-            if (!res.ok) return showToast(data.detail || 'Could not close paper position.', 'error');
-            showToast('Paper position closed.'); fetchPaperData();
-        }
-
-        function renderPaperTrades(trades) {
-            const tbody = document.getElementById('paperTradesTableBody');
-            if (!tbody) return;
-
-            if (!trades || trades.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400 text-xs">No closed paper positions yet.</td></tr>`;
-                return;
-            }
-
-            tbody.innerHTML = trades.map(t => {
-                const pnl = t.pnl || 0;
-                const pnlClass = pnl >= 0 ? 'text-emerald-600' : 'text-rose-600';
-                const sideClass = (t.side || '').toUpperCase() === 'BUY' ? 'pill-bull' : 'pill-bear';
-                const istTime = formatIST(t.exit_time || t.timestamp || t.created_at || '');
-                const tJson = escapeHtml(JSON.stringify(t));
-
-                return `
-                    <tr class="cursor-pointer hover:bg-slate-50 transition" onclick="showTradeDetails('${tJson}')">
-                        <td class="font-mono text-slate-600 text-xs whitespace-nowrap">${escapeHtml(istTime)}</td>
-                        <td class="font-bold text-slate-900">${escapeHtml(t.symbol || '')}</td>
-                        <td><span class="pill-badge ${sideClass}">${escapeHtml(t.side || '')}</span></td>
-                        <td class="text-right font-mono">$${Number(t.exit_price || t.price || 0).toFixed(2)}</td>
-                        <td class="text-right font-mono font-bold ${pnlClass}">$${pnl.toFixed(2)}</td>
-                        <td><span class="pill-badge pill-neutral font-mono text-[10px]">${escapeHtml(t.reason || 'Closed')}</span></td>
-                    </tr>
-                `;
-            }).join('');
-        }
-
-        async function fetchOverview() {
-            try {
-                const res = await fetch('/api/analytics/paper-dashboard');
-                const data = await res.json();
-                const container = document.getElementById('paperStrategiesGrid');
-                if (!container) return;
-
-                if (data.strategies) {
-                    container.innerHTML = data.strategies.map(s => `
-                        <div class="bg-slate-50 p-3.5 rounded-md border border-slate-200">
-                            <div class="flex justify-between font-bold text-xs text-slate-900">
-                                <span>${escapeHtml(s.strategy_name)} · ${escapeHtml(s.symbol)}</span>
-                                <span class="${s.total_pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}">$${Number(s.total_pnl || 0).toFixed(2)}</span>
-                            </div>
-                            <div class="text-[11px] text-slate-500 mt-1 flex justify-between">
-                                <span>Trades: ${s.total_trades || 0}</span>
-                                <span>Win Rate: ${(s.win_rate || 0).toFixed(1)}%</span>
-                            </div>
-                        </div>
-                    `).join('');
-                }
-            } catch (e) {
-                console.error("Error fetching overview:", e);
-            }
-        }
-
-        async function fetchAnalytics() {
-            try {
-                const res = await fetch('/api/analytics/paper-dashboard');
-                const data = await res.json();
-                renderPaperSummary(data.summary || {});
-                renderPaperAdvancedStats(data.summary || {});
-                renderEquityCurve(data.equity_curve || []);
-            } catch (e) {
-                console.error("Error fetching analytics:", e);
-            }
-        }
-
-        async function fetchTrades() {
-            try {
-                const res = await fetch('/api/analytics/paper-dashboard');
-                const data = await res.json();
-                renderPaperTrades(data.trades || []);
-            } catch (e) {
-                console.error("Error fetching trades:", e);
-            }
-        }
-
-        function renderEquityCurve(points) {
-            const canvas = document.getElementById('equityChartCanvas');
-            if (!canvas) return;
-
-            if (equityChartInstance) equityChartInstance.destroy();
-
-            const labels = points.map(p => p.date || p.time || '');
-            const values = points.map(p => Number(p.equity || 100));
-
-            equityChartInstance = new Chart(canvas, {
-                type: 'line',
-                data: {
-                    labels: labels.length ? labels.map(formatIST) : ['Start'],
-                    datasets: [{
-                        label: 'Portfolio Equity ($)',
-                        data: values.length ? values : [100],
-                        borderColor: '#1e88e5',
-                        backgroundColor: 'rgba(30, 136, 229, 0.08)',
-                        fill: true,
-                        tension: 0.25,
-                        borderWidth: 2,
-                        pointRadius: 2,
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: { grid: { color: '#f1f5f9' }, ticks: { font: { family: 'Inter', size: 10 } } },
-                        y: { grid: { color: '#f1f5f9' }, ticks: { font: { family: 'JetBrains Mono', size: 10 } } }
-                    },
-                    plugins: {
-                        legend: { display: false }
-                    }
-                }
-            });
-
-            const pnlCanvas = document.getElementById('paperPnlChartCanvas');
-            if (!pnlCanvas) return;
-            if (paperPnlChartInstance) paperPnlChartInstance.destroy();
-            paperPnlChartInstance = new Chart(pnlCanvas, {
-                type: 'line',
-                data: {labels: labels.length ? labels.map(formatIST) : ['Start'], datasets: [{label: 'Cumulative PnL ($)', data: points.length ? points.map(p => Number(p.pnl || 0)) : [0], borderColor: '#059669', backgroundColor: 'rgba(5,150,105,.08)', fill: true, tension: .25, borderWidth: 2, pointRadius: 2}]},
-                options: {responsive: true, maintainAspectRatio: false, scales: {x: {grid: {color: '#f1f5f9'}}, y: {grid: {color: '#f1f5f9'}}}, plugins: {legend: {display: false}}}
-            });
-        }
-
-        function renderPaperAdvancedStats(s) {
-            const container = document.getElementById('paperAdvancedStats');
-            if (!container) return;
-            const items = [
-                ['Realized PnL', `$${Number(s.realized_pnl || 0).toFixed(2)}`],
-                ['Live Unrealized', `$${Number(s.unrealized_pnl || 0).toFixed(2)}`],
-                ['Average Win', `$${Number(s.average_win || 0).toFixed(2)}`],
-                ['Average Loss', `$${Number(s.average_loss || 0).toFixed(2)}`],
-                ['Best Trade', `$${Number(s.best_trade || 0).toFixed(2)}`],
-                ['Worst Trade', `$${Number(s.worst_trade || 0).toFixed(2)}`],
-                ['Winning / Losing', `${s.winning_trades || 0} / ${s.losing_trades || 0}`],
-                ['Trading Fees', `$${Number(s.total_fees || 0).toFixed(2)}`],
-            ];
-            container.innerHTML = items.map(([label, value]) => `<div class="bg-white border border-slate-200 rounded-md p-3"><div class="text-[10px] uppercase text-slate-500">${label}</div><div class="font-bold tabular-num text-slate-900">${value}</div></div>`).join('');
-        }
-
-        // ====================================================
         // ADMIN & SETTINGS
         // ====================================================
         async function fetchBrokerProfile() {
@@ -3516,9 +2994,29 @@
                     const kEl = document.getElementById('profileApiKey');
                     if (kEl) kEl.value = prof.api_key;
                 }
-                if (pipe && pipe.schedule_seconds) {
+                if (pipe && pipe.batch_schedule_seconds) {
                     const sEl = document.getElementById('inputScheduleSeconds');
-                    if (sEl) sEl.value = pipe.schedule_seconds;
+                    if (sEl) sEl.value = pipe.batch_schedule_seconds;
+                }
+                if (pipe && pipe.symbols_raw) {
+                    const symEl = document.getElementById('inputSymbols');
+                    if (symEl) symEl.value = pipe.symbols_raw;
+                }
+                if (pipe && pipe.symbols) {
+                    const symSel = document.getElementById('modalSignalSymbol');
+                    if (symSel) {
+                        const currentVal = symSel.value;
+                        symSel.innerHTML = '';
+                        pipe.symbols.forEach(s => {
+                            const opt = document.createElement('option');
+                            opt.value = s;
+                            opt.textContent = s;
+                            symSel.appendChild(opt);
+                        });
+                        if (pipe.symbols.includes(currentVal)) {
+                            symSel.value = currentVal;
+                        }
+                    }
                 }
                 const resolvedIp = (ip && (ip.ip || ip.public_ip)) || (prof && prof.public_ip);
                 if (resolvedIp && resolvedIp !== '127.0.0.1') {
@@ -3572,12 +3070,7 @@
                                 <input type="checkbox" class="w-3 h-3 text-blue-600 rounded border-slate-300" 
                                     ${s.is_paper_enabled ? 'checked' : ''}
                                     onchange="toggleAdminStrategy('${s.strategy_id}', this.checked, null)">
-                                <span class="text-[11px] font-medium text-slate-700">Paper Mode</span>
-                            </label>
-                            <label class="flex items-center gap-2 cursor-pointer opacity-50 cursor-not-allowed" title="Live mode requires deep risk config">
-                                <input type="checkbox" disabled class="w-3 h-3 text-rose-600 rounded border-slate-300" 
-                                    ${s.is_real_enabled ? 'checked' : ''}>
-                                <span class="text-[11px] font-medium text-slate-700">Live Mode</span>
+                                <span class="text-[11px] font-medium text-slate-700">Engine Active</span>
                             </label>
                         </div>
                     </div>
@@ -3635,16 +3128,16 @@
             }
         }
 
-        async function handleSwitchToPaper() {
+        async function handleSwitchToLive() {
             try {
                 const res = await fetch('/api/broker/mode', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ mode: 'PAPER' })
+                    body: JSON.stringify({ mode: 'LIVE' })
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    showToast("Switched to Paper Sandbox mode.");
+                    showToast("Switched to Live Sandbox mode.");
                     fetchBrokerData();
                 }
             } catch (e) {
@@ -3654,15 +3147,17 @@
 
         async function savePipelineSettings() {
             const sec = parseInt(document.getElementById('inputScheduleSeconds').value, 10) || 60;
+            const symbols = document.getElementById('inputSymbols').value.trim();
             try {
                 const res = await fetch('/api/system/pipeline-settings', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ schedule_seconds: sec })
+                    body: JSON.stringify({ schedule_seconds: sec, symbols: symbols || null })
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
                     showToast(`✅ Schedule interval updated to ${sec}s`);
+                    fetchBrokerData();
                 }
             } catch (e) {
                 showToast("❌ Failed to update schedule.");
@@ -3677,7 +3172,7 @@
 
         async function runBatchPipelineNow() {
             if (!isDeltaAuthorized) {
-                showToast("❌ Delta Exchange authentication required for Paper & Live modes.", "error");
+                showToast("❌ Delta Exchange authentication required for Live & Live modes.", "error");
                 _showAuthGate('unauthorized');
                 return;
             }
@@ -3700,14 +3195,18 @@
             }
         }
 
-        async function resetPaperBalancesPrompt() {
-            if (!confirm("Are you sure you want to reset the paper trading balance to $100.00? All simulated positions will be closed.")) return;
+        async function resetLiveBalancesPrompt() {
+            if (!confirm("Are you sure you want to reset the Live Sandbox balance to $100.00?")) return;
             try {
-                const res = await fetch('/api/broker/reset-paper', { method: 'POST' });
+                const res = await fetch('/api/system/reset', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ confirmation: 'RESET SYSTEM' })
+                });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    showToast("✅ Paper sandbox reset to $100.00");
-                    fetchPaperData();
+                    showToast("✅ Live sandbox reset to $100.00");
+                    fetchLiveData();
                 }
             } catch (e) {
                 showToast("❌ Reset failed.");
@@ -3792,12 +3291,12 @@
             { title: 'System Monitor & Host Metrics', category: 'Tab', action: () => switchTab('monitoring') },
             { title: 'Algorithmic Strategies & Controls', category: 'Tab', action: () => switchTab('signals') },
             { title: 'Delta Live Broker Execution', category: 'Tab', action: () => switchTab('livebroker') },
-            { title: 'Paper Trading Sandbox ($100)', category: 'Tab', action: () => switchTab('papertrading') },
+            { title: 'Live Trading Sandbox ($100)', category: 'Tab', action: () => switchTab('livetrading') },
             { title: 'Admin & Risk Settings', category: 'Tab', action: () => switchTab('admin') },
             { title: 'Engine System Logs', category: 'Tab', action: () => switchTab('logs') },
             { title: 'Run Celery Batch Cycle Now', category: 'Action', action: () => runBatchPipelineNow() },
-            { title: 'Switch to Paper Mode', category: 'Safety', action: () => handleSwitchToPaper() },
-            { title: 'Reset Paper Sandbox to $100', category: 'Action', action: () => resetPaperBalancesPrompt() },
+            { title: 'Switch to Live Mode', category: 'Safety', action: () => handleSwitchToLive() },
+            { title: 'Reset Live Sandbox to $100', category: 'Action', action: () => resetLiveBalancesPrompt() },
             { title: 'Inject Manual Strategy Signal', category: 'Action', action: () => triggerManualSignal() },
             { title: 'Copy Server Host IP', category: 'Action', action: () => copyServerIp() },
         ];
@@ -4197,13 +3696,13 @@
             let overlay = document.getElementById('authGateOverlay');
             const serverIp = (data && data.server_ip) || window._lastKnownServerIp || '127.0.0.1';
             let title = 'Delta Exchange Setup Required';
-            let sub = 'Delta Exchange API credentials are not configured.<br>Historical candles (15m) and indicators require authorized API access (Paper &amp; Live modes).';
+            let sub = 'Delta Exchange API credentials are not configured.<br>Historical candles (15m) and indicators require authorized API access (Live &amp; Live modes).';
             let badgeColor = '#3b82f6';
             let iconSvg = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>`;
             let stepsHtml = `
                 <div style="display:flex;gap:10px;align-items:flex-start;">
                     <span style="width:20px;height:20px;background:#1e3a5f;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#60a5fa;font-weight:700;flex-shrink:0;">1</span>
-                    <span style="font-size:12px;color:#94a3b8;">Log in to <a href="https://www.india.delta.exchange" target="_blank" style="color:#60a5fa;text-decoration:none;">india.delta.exchange</a></span>
+                    <span style="font-size:12px;color:#94a3b8;">Log in to <a href="https://demo.delta.exchange" target="_blank" style="color:#60a5fa;text-decoration:none;">demo.delta.exchange</a></span>
                 </div>
                 <div style="display:flex;gap:10px;align-items:flex-start;">
                     <span style="width:20px;height:20px;background:#1e3a5f;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#60a5fa;font-weight:700;flex-shrink:0;">2</span>
@@ -4223,7 +3722,7 @@
                 stepsHtml = `
                     <div style="display:flex;gap:10px;align-items:flex-start;">
                         <span style="width:20px;height:20px;background:#451a03;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fbbf24;font-weight:700;flex-shrink:0;">1</span>
-                        <span style="font-size:12px;color:#cbd5e1;">Log in to <a href="https://www.india.delta.exchange" target="_blank" style="color:#60a5fa;text-decoration:none;">india.delta.exchange</a></span>
+                        <span style="font-size:12px;color:#cbd5e1;">Log in to <a href="https://demo.delta.exchange" target="_blank" style="color:#60a5fa;text-decoration:none;">demo.delta.exchange</a></span>
                     </div>
                     <div style="display:flex;gap:10px;align-items:flex-start;">
                         <span style="width:20px;height:20px;background:#451a03;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fbbf24;font-weight:700;flex-shrink:0;">2</span>
@@ -4277,7 +3776,7 @@
                             </button>
                         </div>
                     </div>
-                    <p style="font-size:11px;color:#94a3b8;margin-top:16px;">🔒 <strong>Authentication Required (Paper &amp; Live):</strong> Both Paper mode and Live execution rely exclusively on Delta Exchange to download 15m historical candles, indicators, and market data.</p>
+                    <p style="font-size:11px;color:#94a3b8;margin-top:16px;">🔒 <strong>Authentication Required (Live &amp; Live):</strong> Both Live mode and Live execution rely exclusively on Delta Exchange to download 15m historical candles, indicators, and market data.</p>
                 </div>
             `;
             overlay.style.display = 'flex';
@@ -4330,6 +3829,11 @@
                 }
             }, 15000);
         });
+        // Missing functions placeholders to prevent ReferenceErrors
+        async function fetchLiveData() { console.warn("fetchLiveData not implemented."); }
+        async function fetchOverview() { console.warn("fetchOverview not implemented."); }
+        async function fetchAnalytics() { console.warn("fetchAnalytics not implemented."); }
+        async function fetchTrades() { console.warn("fetchTrades not implemented."); }
     </script>
 </body>
 </html>

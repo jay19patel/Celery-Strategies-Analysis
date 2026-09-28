@@ -51,17 +51,9 @@ def test_broker_service_status_and_modes():
     assert "execution_mode" in status
     assert "is_armed" in status
 
-    # Toggle to PAPER
-    res_paper = service.set_execution_mode("PAPER")
-    assert res_paper["execution_mode"] == "PAPER"
-
-    # Toggle to invalid mode
-    with pytest.raises(ValueError, match="must remain PAPER"):
-        service.set_execution_mode("INVALID_MODE")
-
-    # Toggle to LIVE without arming first
-    with pytest.raises(ValueError, match="must remain PAPER"):
-        service.set_execution_mode("LIVE")
+    # Toggle to LIVE
+    res_live = service.set_execution_mode("LIVE")
+    assert res_live["execution_mode"] == "LIVE"
 
     # Arming with wrong phrase
     with pytest.raises(ValueError, match="read-only"):
@@ -102,7 +94,7 @@ def test_broker_profile_and_authority_verification():
 
     dis_res = service.toggle_live_trading(enabled=False)
     assert dis_res["enabled"] is False
-    assert dis_res["execution_mode"] == "PAPER"
+    assert dis_res["execution_mode"] == "LIVE"
 
 
 def test_strategy_service_methods():

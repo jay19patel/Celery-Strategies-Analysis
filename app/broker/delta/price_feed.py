@@ -115,15 +115,16 @@ def get_packets_published() -> int:
 
 
 def _normalize(symbol: str) -> str:
-    """Convert any symbol format to Delta Exchange uppercase format.
+    """Convert any symbol format to Delta Exchange Testnet uppercase format.
 
     Args:
         symbol: e.g. 'BTC-USD', 'btc_usd', 'BTCUSD'
 
     Returns:
-        Normalized form, e.g. 'BTCUSD'
+        Normalized form, e.g. 'BTCUSDT'
     """
-    return symbol.replace("-", "").replace("/", "").replace("_", "").upper()
+    normalized = symbol.replace("-", "").replace("/", "").replace("_", "").upper()
+    return normalized
 
 
 def _build_ticker_dict(symbol: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -200,7 +201,8 @@ class DeltaLivePriceFeed:
         """
         self._symbols = symbols or get_symbols()
         self._delta_symbols = [_normalize(s) for s in self._symbols]
-        self._ws_url = settings.delta_websocket_url
+        # Force mainnet for price feed WebSocket (testnet has no volume/ticks)
+        self._ws_url = "wss://socket.delta.exchange"
         self._running = False
         self._is_connected = False
         self._reconnect_count = 0
@@ -281,8 +283,32 @@ class DeltaLivePriceFeed:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to re-subscribe: %s", exc)
 
+    def _seed_caches_from_rest(self) -> None:
+        """Fetch initial tickers from REST API to populate UI immediately."""
+        try:
+            import requests
+            rest_url = self._ws_url.replace("wss://", "https://").replace("-socket", "").replace("socket.", "") + "/v2/tickers"
+            # Always use mainnet for price feeds (testnet has no volume)
+            rest_url = "https://api.delta.exchange/v2/tickers"
+            res = requests.get(rest_url, timeout=5)
+            if res.status_code == 200:
+                data = res.json().get("result", [])
+                for t in data:
+                    sym = t.get("symbol", "").upper()
+                    if sym in self._delta_symbols:
+                        ticker_dict = _build_ticker_dict(sym, t)
+                        mp = ticker_dict["mark_price"]
+                        if mp:
+                            with _cache_lock:
+                                _live_prices[sym] = mp
+                                _live_tickers[sym] = ticker_dict
+                logger.info("delta_price_feed_seeded_from_rest count=%s", len(data))
+        except Exception as exc:
+            logger.warning("Failed to seed caches from REST: %s", exc)
+
     def _run_loop(self) -> None:
         """Reconnect loop — re-establishes the connection on any disconnect."""
+        self._seed_caches_from_rest()
         while self._running:
             try:
                 self._ws = websocket.WebSocketApp(
@@ -292,7 +318,12 @@ class DeltaLivePriceFeed:
                     on_error=self._on_error,
                     on_close=self._on_close,
                 )
-                self._ws.run_forever(ping_interval=20, ping_timeout=8)
+                import ssl
+                self._ws.run_forever(
+                    ping_interval=20, 
+                    ping_timeout=8,
+                    sslopt={"cert_reqs": ssl.CERT_NONE}
+                )
             except Exception:  # noqa: BLE001
                 logger.exception("Delta price feed WebSocket loop error")
 
@@ -322,6 +353,9 @@ class DeltaLivePriceFeed:
         """Parse full ticker tick and update all caches + publish via ZMQ."""
         global _packets_published
         self._messages_received += 1
+        logger.info(f"WS RAW MESSAGE: {raw_message[:100]}")
+        with open("/tmp/delta_ws_debug.log", "a") as f:
+            f.write(raw_message + "\n")
 
         try:
             data = json.loads(raw_message)

@@ -104,7 +104,7 @@ class StrategyService:
         """Retrieve recent algorithmic strategy signals with execution routing status."""
         rows = self.db.execute_query(
             "SELECT id, strategy_name, symbol, signal_type, price, timestamp, execution_time, "
-            "COALESCE(mode, 'PAPER') AS mode, COALESCE(action, 'paper_executed') AS action, created_at "
+            "COALESCE(mode, 'LIVE') AS mode, COALESCE(action, 'live_executed') AS action, created_at "
             "FROM signals_log ORDER BY id DESC LIMIT ? OFFSET ?;",
             (limit, offset),
         )
@@ -139,7 +139,7 @@ class StrategyService:
         price: float,
         confidence: float = 1.0,
     ) -> dict[str, Any]:
-        """Trigger an algorithmic signal through the live or paper execution pipeline."""
+        """Trigger an algorithmic signal through the live execution pipeline."""
         from datetime import UTC, datetime
         from app.broker.execution_manager import get_execution_manager
         from app.models.strategy_models import SignalType
@@ -200,12 +200,7 @@ class StrategyService:
             )
             total_signals = sig_row["cnt"] if sig_row else 0
 
-            # Count paper orders created (trades in broker_trades)
-            paper_row = self.db.execute_one(
-                "SELECT COUNT(*) as cnt FROM broker_trades WHERE strategy_name = ? OR strategy_name = ?;",
-                (s_id, name),
-            )
-            paper_orders_count = paper_row["cnt"] if paper_row else 0
+
 
             # Live execution attempts are durable audit events in the signal log.
             real_row = self.db.execute_one(
@@ -246,7 +241,6 @@ class StrategyService:
                     "is_paper_enabled": bool(cfg.get("is_paper_enabled", 1)),
                     "is_real_enabled": bool(cfg.get("is_real_enabled", 0)),
                     "total_signals": total_signals,
-                    "paper_orders_count": paper_orders_count,
                     "real_orders_count": real_orders_count,
                     "capital": round(capital, 2),
                     "win_rate": round(win_rate, 2),
@@ -260,11 +254,21 @@ class StrategyService:
 
     def get_strategy_cards(self) -> list[dict[str, Any]]:
         """Expand strategy definitions into one dashboard card per configured symbol."""
+        from app.core.settings import get_symbols
+        global_symbols = get_symbols()
+
         cards: list[dict[str, Any]] = []
-        for strategy in self.get_strategies_detailed():
+        detailed = self.get_strategies_detailed()
+
+        for strategy in detailed:
+            # Skip strategies where Engine Active is disabled
+            if not strategy.get("is_paper_enabled", True):
+                continue
+
             strategy_id = strategy["strategy_id"]
             strategy_name = strategy["name"]
-            for symbol in strategy.get("symbols") or ["BTC-USD"]:
+            
+            for symbol in global_symbols:
                 account = self.db.execute_one(
                     """SELECT capital, total_trades, win_rate, open_position
                        FROM broker_accounts
@@ -287,7 +291,7 @@ class StrategyService:
                         "symbol": symbol,
                         "interval": strategy.get("timeframe", "1m"),
                         "category": "MOMENTUM",
-                        "paper_enabled": strategy.get("is_paper_enabled", True),
+
                         "total_trades": int(account.get("total_trades", 0)) if account else 0,
                         "win_rate": float(account.get("win_rate", 0.0)) if account else 0.0,
                         "pnl": float(pnl_row.get("pnl", 0.0)) if pnl_row else 0.0,
@@ -302,7 +306,7 @@ class StrategyService:
         is_paper_enabled: bool | None = None,
         is_real_enabled: bool | None = None,
     ) -> dict[str, Any]:
-        """Update paper/real execution toggles for a specific strategy."""
+        """Update real and paper execution toggles for a specific strategy."""
         from datetime import UTC, datetime
 
         cfg = self.db.execute_one(
@@ -312,8 +316,8 @@ class StrategyService:
         if not cfg:
             raise ValueError(f"Strategy '{strategy_id}' not found in configuration.")
 
-        paper_val = int(is_paper_enabled) if is_paper_enabled is not None else cfg["is_paper_enabled"]
-        real_val = 0
+        paper_val = int(is_paper_enabled) if is_paper_enabled is not None else cfg.get("is_paper_enabled", 1)
+        real_val = int(is_real_enabled) if is_real_enabled is not None else cfg.get("is_real_enabled", 0)
         now_str = datetime.now(UTC).isoformat()
 
         sql = """

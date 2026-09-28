@@ -11,20 +11,10 @@ from app.core.strategy_manager import StrategyManager
 from app.database.sqlite_adapter import get_collection, save_batch_results
 from app.database.redis_publisher import get_redis_client, publish_batch_complete, publish_message
 from app.core.logger import get_celery_logger, get_signals_logger, get_performance_logger
-from app.core.paper_broker import PaperBroker
 
 logger = get_celery_logger()
 signals_logger = get_signals_logger()
 performance_logger = get_performance_logger()
-
-# Lazily initialized to handle prefork correctly
-_paper_broker = None
-
-def get_paper_broker():
-    global _paper_broker
-    if _paper_broker is None:
-        _paper_broker = PaperBroker()
-    return _paper_broker
 
 
 def _load_strategy_class(dotted_path: str):
@@ -119,18 +109,8 @@ def process_batch_results(self, results: list, batch_metadata: Dict[str, Any] = 
             expected_strategies_count=expected_skills
         )
 
-        # STEP 3.0: Check stop-loss / take-profit on every open position, every cycle -
-        # this must run regardless of this cycle's signal, so a protective exit isn't
-        # missed while the strategy is signaling HOLD (see the early-return below).
-        broker = get_paper_broker()
-        for symbol_res in aggregated_result.get("results", []):
-            symbol = symbol_res.get("symbol")
-            for strat_res in symbol_res.get("strategies", []):
-                price = strat_res.get("price", 0.0)
-                if price and price > 0:
-                    broker.check_protective_exit(
-                        strat_res.get("strategy_name"), symbol, price, datetime.now(timezone.utc)
-                    )
+        # Protective exit check has been removed as paper broker is removed.
+
 
         # Check for actionable signals
         has_signals = _has_actionable_signal(aggregated_result)
@@ -362,8 +342,24 @@ def trigger_batch_execution(self, force: bool = False) -> Dict[str, Any]:
                 schedule_lock = None
 
         symbols = get_symbols()
-        strategies = get_strategies()
+        all_strategies = get_strategies()
         
+        # Filter strategies that are explicitly disabled via "Engine Active" (is_paper_enabled = 0)
+        from app.database.sqlite_db import get_sqlite_db
+        db = get_sqlite_db()
+        configs = db.execute_query("SELECT strategy_id, is_paper_enabled FROM strategy_configs;")
+        enabled_map = {row["strategy_id"]: bool(row["is_paper_enabled"]) for row in configs}
+        
+        strategies = []
+        for s in all_strategies:
+            short_name = s.split(".")[-1]
+            if enabled_map.get(short_name, True):  # Default true if not found
+                strategies.append(s)
+
+        if not strategies:
+            logger.info("batch_dispatch_skipped reason=no_active_strategies")
+            return {"status": "skipped", "reason": "No active strategies"}
+
         logger.info(
             "batch_configuration symbols=%s strategies=%s task_count=%s",
             symbols, [s.split(".")[-1] for s in strategies], len(symbols) * len(strategies),

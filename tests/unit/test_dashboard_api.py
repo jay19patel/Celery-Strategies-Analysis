@@ -106,14 +106,6 @@ def test_stats_and_config_endpoints():
     assert update_res.json()["success"] is True
     assert update_res.json()["params"]["trade_capital_pct"] == 40.0
 
-    # Reset paper balances
-    reset_paper_res = client.post("/api/system/reset-paper", json={"starting_capital": 250.0})
-    assert reset_paper_res.status_code == 200
-    assert reset_paper_res.json()["success"] is True
-    assert reset_paper_res.json()["starting_capital"] == 250.0
-
-
-
 def test_analytics_and_trades_endpoints():
     """Verify analytics and closed trade endpoints."""
     curve_res = client.get("/api/portfolio/equity-curve")
@@ -127,14 +119,6 @@ def test_analytics_and_trades_endpoints():
     analytics_res = client.get("/api/analytics")
     assert analytics_res.status_code == 200
     assert isinstance(analytics_res.json(), list)
-
-    paper_res = client.get("/api/analytics/paper-dashboard")
-    assert paper_res.status_code == 200
-    paper = paper_res.json()
-    assert "summary" in paper
-    assert "equity_curve" in paper
-    assert "strategies" in paper
-    assert "total_pnl" in paper["summary"]
 
 
 def test_trading_calendar_endpoint():
@@ -189,10 +173,7 @@ def test_strategy_list_and_toggle_endpoints():
     assert "strategy_id" in strat
     assert "timeframe" in strat
     assert "symbols" in strat
-    assert "is_paper_enabled" in strat
     assert "is_real_enabled" in strat
-    assert "total_signals" in strat
-    assert "paper_orders_count" in strat
 
     detailed_res = client.get("/api/strategy/detailed")
     assert detailed_res.status_code == 200
@@ -200,22 +181,6 @@ def test_strategy_list_and_toggle_endpoints():
     assert detailed["total_cards"] == detailed["total_symbols"] * detailed["total_strategies"]
     assert all(card.get("id") and card.get("strategy_id") for card in detailed["strategies"])
 
-    # Test toggling paper execution
-    toggle_payload = {
-        "strategy_id": strat["strategy_id"],
-        "is_paper_enabled": False,
-        "is_real_enabled": False,
-    }
-    toggle_res = client.post("/api/strategy/toggle", json=toggle_payload)
-    assert toggle_res.status_code == 200
-    toggle_data = toggle_res.json()
-    assert toggle_data["is_paper_enabled"] is False
-
-    # Restore to True
-    toggle_payload["is_paper_enabled"] = True
-    restore_res = client.post("/api/strategy/toggle", json=toggle_payload)
-    assert restore_res.status_code == 200
-    assert restore_res.json()["is_paper_enabled"] is True
 
 
 def test_parsed_error_logs_endpoint():

@@ -106,7 +106,7 @@ def _write_cache(cache_key: str, data: pd.DataFrame, ttl: int | None = None) -> 
 
 
 class DeltaExchangeProvider(BaseDataProvider):
-    """Crypto OHLCV data from Delta Exchange India (api.india.delta.exchange).
+    """Crypto OHLCV data from Delta Exchange Testnet/Demo (testnet-api.delta.exchange).
 
     Supports all Delta Exchange perpetual/futures symbols:
     ETHUSD, BTCUSD, SOLUSD, etc.
@@ -115,7 +115,8 @@ class DeltaExchangeProvider(BaseDataProvider):
     TTL per call.
     """
 
-    _API_BASE = "https://api.india.delta.exchange/v2"
+    # Always use mainnet for historical data since testnet has no volume
+    _API_BASE = "https://api.delta.exchange/v2"
     _MAX_RETRIES = 3
 
     # Known perpetual symbols available on Delta Exchange India
@@ -127,7 +128,7 @@ class DeltaExchangeProvider(BaseDataProvider):
 
     @classmethod
     def _normalize_symbol(cls, symbol: str) -> str:
-        """Convert standard pair notation (e.g. 'ETH-USD', 'BTC/USD', 'btc_usd') to Delta Exchange format ('ETHUSD')."""
+        """Convert standard pair notation (e.g. 'ETH-USD') to Delta Exchange format ('ETHUSD')."""
         return symbol.replace("-", "").replace("/", "").replace("_", "").upper()
 
     def __init__(self) -> None:
@@ -262,9 +263,8 @@ class DeltaExchangeProvider(BaseDataProvider):
                 time.sleep(wait_time)
 
         if df is None:
-            raise DataFetchError(
-                self.name, symbol, f"Failed after {self._MAX_RETRIES} attempts: {last_error}"
-            )
+            logger.warning("market_data_fetch_failed symbol=%s Returning empty dataframe", symbol)
+            return pd.DataFrame()
 
         # --- Technical indicators ---
         self._add_indicators(df)

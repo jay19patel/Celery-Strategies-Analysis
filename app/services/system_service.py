@@ -152,7 +152,7 @@ class SystemService:
 
         logger.info("Updated pipeline settings in system_config: %s", current)
         return {
-            "success": True,
+            "status": "success",
             "message": "Pipeline settings updated successfully.",
             "settings": {
                 "symbols": get_symbols(),
@@ -240,27 +240,7 @@ class SystemService:
             "params": current,
         }
 
-    def reset_paper_balances(self, starting_capital: float = 100.0) -> dict[str, Any]:
-        """Reset paper trading accounts back to starting capital ($100 default) and clear paper positions."""
-        clean_capital = max(10.0, float(starting_capital))
-        self.db.execute_modify(
-            """
-            UPDATE broker_accounts 
-            SET capital = ?, open_position = NULL, total_trades = 0, winning_trades = 0, win_rate = 0.0;
-            """,
-            (clean_capital,),
-        )
-        cnt_row = self.db.execute_one("SELECT COUNT(*) as c FROM broker_trades;")
-        trades_count = cnt_row["c"] if cnt_row else 0
-        self.db.execute_modify("DELETE FROM broker_trades;")
 
-        logger.info("paper_accounts_reset starting_capital=%.2f cleared_trades=%s", clean_capital, trades_count)
-        return {
-            "success": True,
-            "starting_capital": clean_capital,
-            "cleared_trades": trades_count,
-            "message": f"Paper trading accounts reset to ${clean_capital:.2f} with clean trade history.",
-        }
 
 
 _system_service: SystemService | None = None

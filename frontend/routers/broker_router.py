@@ -38,7 +38,7 @@ class SaveProfileRequest(BaseModel):
     """Payload for saving or updating broker API credentials."""
 
     base_url: str = Field(
-        default="https://api.india.delta.exchange",
+        default="https://cdn-ind.testnet.deltaex.org",
         description="Delta Exchange API Base URL",
     )
     api_key: str = Field(..., description="Delta Exchange API Key")
@@ -62,18 +62,7 @@ class ToggleLiveRequest(BaseModel):
     confirmation: str | None = Field(default=None, description="Confirmation phrase 'ARM LIVE TRADING' if enabling")
 
 
-class PaperPositionRequest(BaseModel):
-    """Identifies one strategy and symbol paper account."""
 
-    strategy_name: str
-    symbol: str
-
-
-class PaperProtectionRequest(PaperPositionRequest):
-    """Updated protective levels for an open paper position."""
-
-    stop_price: float = Field(..., gt=0)
-    target_price: float = Field(..., gt=0)
 
 
 @router.get("/status")
@@ -155,14 +144,14 @@ def arm_live_broker(payload: ArmRequest) -> dict[str, Any]:
 
 @router.post("/disarm")
 def disarm_live_broker() -> dict[str, Any]:
-    """Disarm live trade execution and safely revert the system to PAPER mode."""
+    """Disarm live trade execution."""
     service = get_broker_service()
     return service.disarm_live_trading()
 
 
 @router.post("/mode")
 def set_broker_mode(payload: ModeRequest) -> dict[str, Any]:
-    """Switch execution mode between PAPER and LIVE with safety validation."""
+    """Switch execution mode with safety validation."""
     try:
         service = get_broker_service()
         return service.set_execution_mode(payload.mode)
@@ -187,59 +176,19 @@ def get_server_public_ip() -> dict[str, Any]:
     return {"ip": service.get_server_ip(), "status": "success"}
 
 
-@router.get("/paper-positions")
-def get_paper_positions() -> list[dict[str, Any]]:
-    """Retrieve active simulated paper trading positions from broker_accounts."""
-    service = get_broker_service()
-    return service.get_paper_positions()
 
-
-@router.get("/paper-orders")
-def get_paper_orders() -> list[dict[str, Any]]:
-    """Retrieve simulated paper trading orders and closed trade logs."""
-    service = get_broker_service()
-    return service.get_paper_orders()
-
-
-@router.patch("/paper-position/protection")
-def update_paper_position_protection(payload: PaperProtectionRequest) -> dict[str, Any]:
-    """Update stop-loss and take-profit levels for an open paper position."""
-    try:
-        return get_broker_service().update_paper_protection(
-            payload.strategy_name, payload.symbol, payload.stop_price, payload.target_price
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.post("/paper-position/close")
-def close_paper_position(payload: PaperPositionRequest) -> dict[str, Any]:
-    """Close an open paper position at the latest public market price."""
-    try:
-        return get_broker_service().close_paper_position(payload.strategy_name, payload.symbol)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/paper-position/history")
-def get_paper_position_history(position_id: str) -> list[dict[str, Any]]:
-    """Retrieve the SL/TP change and close-reason audit trail for a paper position instance."""
-    try:
-        return get_broker_service().get_paper_position_history(position_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/positions")
 def get_broker_positions(mode: str | None = None) -> list[dict[str, Any]]:
-    """Retrieve active positions from Delta Exchange (LIVE) or virtual sandbox (PAPER)."""
+    """Retrieve active positions from Delta Exchange."""
     service = get_broker_service()
     return service.get_positions(mode=mode)
 
 
 @router.get("/orders")
 def get_broker_orders(mode: str | None = None) -> list[dict[str, Any]]:
-    """Retrieve open orders from Delta Exchange (LIVE) or virtual sandbox (PAPER)."""
+    """Retrieve open orders from Delta Exchange."""
     service = get_broker_service()
     return service.get_orders(mode=mode)
 

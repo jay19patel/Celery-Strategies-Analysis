@@ -104,7 +104,12 @@ class DeltaWebSocketClient:
                     on_error=self._on_error,
                     on_close=self._on_close,
                 )
-                self.ws.run_forever(ping_interval=30, ping_timeout=10)
+                import ssl
+                self.ws.run_forever(
+                    ping_interval=30, 
+                    ping_timeout=10,
+                    sslopt={"cert_reqs": ssl.CERT_NONE}
+                )
             except Exception:
                 logger.exception("delta_private_stream_loop_failed")
             if self._running:
