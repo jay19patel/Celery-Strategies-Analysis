@@ -105,3 +105,13 @@ class DeltaBroker:
 
     async def close_all(self) -> dict[str, Any]:
         return await self.client.close_all()
+
+    async def size_for_margin(self, symbol: str, price: float, margin: float) -> int:
+        try:
+            product = await self.client.product(symbol)
+            cv = float(product.get("contract_value") or 1.0)
+            leverage = float(product.get("default_leverage") or 10.0)
+            size = (margin * leverage) / (price * cv)
+            return int(max(1, size))
+        except Exception:
+            return 1

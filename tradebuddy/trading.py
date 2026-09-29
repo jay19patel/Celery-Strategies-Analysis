@@ -81,13 +81,18 @@ class Trader:
         sl_pct = e.stop_loss_pct or s.stop_loss_pct
         tp_pct = e.take_profit_pct or s.take_profit_pct
         direction = 1 if e.side == "buy" else -1
+        account = await broker.account()
+        margin_factor = s.trade_margin_pct / 100.0
+        target_margin = account.available * margin_factor
+        size = await broker.size_for_margin(e.symbol, price, target_margin)
+
         order = {
             "client_order_id": client_order_id(broker.name, e.strategy, e.symbol, e.bar_time),
             "broker": broker.name,
             "strategy": e.strategy,
             "symbol": e.symbol,
             "side": e.side,
-            "size": e.size,
+            "size": size,
             "price": price,
             "stop_loss": price * (1 - direction * sl_pct / 100),
             "take_profit": price * (1 + direction * tp_pct / 100),

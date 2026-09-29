@@ -168,6 +168,15 @@ class PaperBroker:
                 errors.append(f"{p['symbol']}: {exc}")
         return {"closed": closed, "errors": errors}
 
+    async def size_for_margin(self, symbol: str, price: float, margin: float) -> int:
+        spec = await self.specs(symbol)
+        contract_value = float(spec.get("contract_value") or 1.0)
+        leverage = self.settings().paper_leverage
+        # margin = size * contract_value * price / leverage
+        # so size = (margin * leverage) / (price * contract_value)
+        size = (margin * leverage) / (price * contract_value)
+        return int(max(1, size))
+
     def _close(self, pos: dict[str, Any], exit_price: float, reason: str) -> None:
         gross = self._upnl(pos, exit_price)
         exit_fee = pos["size"] * pos["contract_value"] * exit_price * self.settings().paper_fee_pct / 100

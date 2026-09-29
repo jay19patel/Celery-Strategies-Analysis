@@ -34,6 +34,7 @@ RANGES = {
     "paper_fee_pct": (0.0, 1.0),
     "paper_slippage_pct": (0.0, 1.0),
     "paper_max_hold_hours": (0.0, 24 * 90),
+    "trade_margin_pct": (1.0, 100.0),
 }
 
 
@@ -56,6 +57,7 @@ class Settings:
     paper_fee_pct: float = 0.05
     paper_slippage_pct: float = 0.02
     paper_max_hold_hours: float = 72.0  # 0 = no time exit
+    trade_margin_pct: float = 20.0  # % of available margin to use per trade
 
     @property
     def active_brokers(self) -> list[str]:
@@ -109,10 +111,7 @@ def apply_changes(current: Settings, changes: dict[str, Any], confirm: str = "")
         elif name in BOOL_FIELDS:
             if not isinstance(value, bool):
                 raise SettingsError(f"{name} must be true or false")
-            if name == "paper_active":
-                clean[name] = True
-            else:
-                clean[name] = value
+            clean[name] = value
         elif name in CHOICES:
             value = str(value).strip().lower()
             if value not in CHOICES[name]:
