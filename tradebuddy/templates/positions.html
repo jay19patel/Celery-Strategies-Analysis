@@ -5,6 +5,42 @@
   <div id="totals" class="flex flex-wrap gap-5 text-xs"></div>
 </div>
 
+<section class="card" id="placeOrderCard" style="display: none;">
+  <div class="card-head">
+    <div class="card-title"><i data-lucide="zap"></i>Place Order</div>
+    <div class="flex bg-slate-100 rounded-md p-0.5" id="poTabs">
+      <button class="px-3 py-1 text-sm rounded-md bg-white shadow-sm font-semibold text-[#00b852]" data-side="buy">Buy / Long</button>
+      <button class="px-3 py-1 text-sm rounded-md text-slate-500 font-semibold" data-side="sell">Sell / Short</button>
+    </div>
+  </div>
+  <div class="card-body p-5">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+      <div>
+        <label class="block text-slate-500 mb-1 text-xs font-semibold">Symbol</label>
+        <select id="poSymbol" class="input w-full font-mono text-sm">
+          <option value="BTCUSD">BTCUSD</option>
+          <option value="ETHUSD">ETHUSD</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-slate-500 mb-1 text-xs font-semibold flex justify-between"><span>Size</span><span id="poMarginCalc" class="text-slate-400 font-normal"></span></label>
+        <input id="poSize" type="number" step="any" class="input w-full font-mono text-sm" placeholder="Size (Contracts)">
+      </div>
+      <div>
+        <label class="block text-slate-500 mb-1 text-xs font-semibold flex justify-between"><span>Stop Loss</span><span id="poSlPctCalc" class="text-slate-400 font-normal"></span></label>
+        <input id="poSl" type="number" step="any" class="input w-full font-mono text-sm" placeholder="Price (Optional)">
+      </div>
+      <div>
+        <label class="block text-slate-500 mb-1 text-xs font-semibold flex justify-between"><span>Take Profit</span><span id="poTpPctCalc" class="text-slate-400 font-normal"></span></label>
+        <input id="poTp" type="number" step="any" class="input w-full font-mono text-sm" placeholder="Price (Optional)">
+      </div>
+    </div>
+    <div class="mt-4">
+      <button id="poSubmit" class="btn bg-[#00b852] hover:bg-[#00a048] text-white border-0 w-full shadow-sm text-sm font-semibold">Place Buy / Long Order</button>
+    </div>
+  </div>
+</section>
+
 <section class="card">
   <div class="card-head">
     <div class="card-title"><i data-lucide="layers"></i>Open positions</div>
@@ -12,7 +48,7 @@
   </div>
   <div class="scroll">
     <table class="tbl">
-      <thead><tr><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">Unrealized P&amp;L</th><th class="r">Margin</th><th class="r">Stop loss</th><th class="r">Take profit</th><th class="r">Liquidation</th><th>Strategy</th><th>Held</th><th></th></tr></thead>
+      <thead><tr><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">Unrealized P&amp;L</th><th class="r">Margin</th><th class="r min-w-[90px]">TP / SL</th><th class="r">Liquidation</th><th>Strategy</th><th>Held</th><th class="r">Close</th></tr></thead>
       <tbody id="positions"></tbody>
     </table>
   </div>
@@ -70,10 +106,107 @@
   const { $, esc, num, price, money, signed, pnlClass, side, duration } = TB;
   let broker = null;
 
+  let activeSide = "buy";
+  let appSettings = null;
+  let accountData = null;
+  let marketPrices = null;
+
+  async function updateOrderDefaults() {
+    if (!appSettings || !accountData || !marketPrices) return;
+    const sym = TB.$("poSymbol").value;
+    const price = marketPrices[sym]?.price;
+    if (!price) return;
+
+    const marginPct = appSettings.trade_margin_pct / 100;
+    const targetMargin = accountData.available * marginPct;
+    const leverage = appSettings.paper_leverage || 1;
+    const size = (targetMargin * leverage) / price;
+    
+    TB.$("poSize").value = parseFloat(size.toFixed(4));
+    TB.$("poMarginCalc").textContent = `Margin: ${TB.money(targetMargin)}`;
+
+    const dir = activeSide === "buy" ? 1 : -1;
+    const slPct = appSettings.stop_loss_pct / 100;
+    const tpPct = appSettings.take_profit_pct / 100;
+
+    if (slPct > 0) TB.$("poSl").value = parseFloat((price * (1 - dir * slPct)).toFixed(2));
+    if (tpPct > 0) TB.$("poTp").value = parseFloat((price * (1 + dir * tpPct)).toFixed(2));
+    
+    updatePctLabels();
+  }
+
+  function updatePctLabels() {
+    const sym = TB.$("poSymbol").value;
+    const price = marketPrices?.[sym]?.price;
+    if (!price) return;
+    
+    const slVal = parseFloat(TB.$("poSl").value);
+    if (slVal) {
+      const pct = Math.abs((slVal - price) / price * 100).toFixed(2);
+      TB.$("poSlPctCalc").textContent = `(${pct}%)`;
+    } else {
+      TB.$("poSlPctCalc").textContent = "";
+    }
+    
+    const tpVal = parseFloat(TB.$("poTp").value);
+    if (tpVal) {
+      const pct = Math.abs((tpVal - price) / price * 100).toFixed(2);
+      TB.$("poTpPctCalc").textContent = `(${pct}%)`;
+    } else {
+      TB.$("poTpPctCalc").textContent = "";
+    }
+  }
+
+  TB.$("poSl").oninput = updatePctLabels;
+  TB.$("poTp").oninput = updatePctLabels;
+
+
+  document.querySelectorAll("#poTabs button").forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll("#poTabs button").forEach(b => {
+        b.className = "px-3 py-1 text-sm rounded-md text-slate-500 font-semibold hover:text-slate-700";
+      });
+      activeSide = btn.dataset.side;
+      if (activeSide === "buy") {
+        btn.className = "px-3 py-1 text-sm rounded-md bg-white shadow-sm font-semibold text-[#00b852]";
+        TB.$("poSubmit").className = "btn bg-[#00b852] hover:bg-[#00a048] text-white border-0 w-full shadow-sm text-sm font-semibold";
+        TB.$("poSubmit").textContent = "Place Buy / Long Order";
+      } else {
+        btn.className = "px-3 py-1 text-sm rounded-md bg-white shadow-sm font-semibold text-[#eb5757]";
+        TB.$("poSubmit").className = "btn bg-[#eb5757] hover:bg-[#d84b4b] text-white border-0 w-full shadow-sm text-sm font-semibold";
+        TB.$("poSubmit").textContent = "Place Sell / Short Order";
+      }
+      updateOrderDefaults();
+    };
+  });
+  
+  TB.$("poSymbol").onchange = updateOrderDefaults;
+
+  let orderFormInitialized = false;
+
   async function load() {
     if (!broker) return;
     try {
-      const [positions, legs] = await Promise.all([TB.get(`/api/positions?broker=${broker}`), TB.get(`/api/open-orders?broker=${broker}`)]);
+      const p1 = TB.get(`/api/positions?broker=${broker}`);
+      const p2 = TB.get(`/api/open-orders?broker=${broker}`);
+      
+      const promises = [p1, p2];
+      if (!orderFormInitialized && broker === "paper") {
+        promises.push(TB.get("/api/settings"));
+        promises.push(TB.get(`/api/account?broker=${broker}`));
+        promises.push(TB.get("/api/header"));
+      }
+      
+      const [positions, legs, settings, account, header] = await Promise.all(promises);
+      
+      if (!orderFormInitialized && settings) {
+        appSettings = settings;
+        accountData = account;
+        marketPrices = header.prices;
+        updateOrderDefaults();
+        orderFormInitialized = true;
+      }
+
       $("posError").textContent = "";
       const upnl = positions.reduce((a, p) => a + p.unrealized_pnl, 0), margin = positions.reduce((a, p) => a + p.margin, 0);
       $("totals").innerHTML = `<span>Positions <b class="font-mono">${positions.length}</b></span><span>Margin <b class="font-mono">${money(margin)}</b></span><span>Unrealized <b class="font-mono ${pnlClass(upnl)}">${signed(upnl, 4)}</b></span>`;
@@ -82,28 +215,35 @@
         <td class="r font-mono">${num(p.size, 4)}</td><td class="r font-mono">${price(p.entry_price)}</td><td class="r font-mono">${price(p.mark_price)}</td>
         <td class="r font-mono ${pnlClass(p.unrealized_pnl)}">${signed(p.unrealized_pnl, 4)}</td>
         <td class="r font-mono">${money(p.margin)}</td>
-        <td class="r font-mono down">${price(p.stop_loss)}</td><td class="r font-mono up">${price(p.take_profit)}</td>
+        <td class="r font-mono text-xs cursor-pointer group" ${broker === "paper" ? `data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}" data-entry="${p.entry_price}" data-side="${esc(p.side)}"` : ""}>
+           <div class="text-[#00b852] group-hover:underline">TP: ${p.take_profit ? price(p.take_profit) + ' <span class="muted text-[10px]">(' + Math.abs((p.take_profit - p.entry_price) / p.entry_price * 100).toFixed(2) + '%)</span>' : "—"}</div>
+           <div class="text-[#eb5757] group-hover:underline mt-1">SL: ${p.stop_loss ? price(p.stop_loss) + ' <span class="muted text-[10px]">(' + Math.abs((p.stop_loss - p.entry_price) / p.entry_price * 100).toFixed(2) + '%)</span>' : "—"}</div>
+        </td>
         <td class="r font-mono muted">${price(p.liquidation_price)}</td>
         <td class="font-mono">${esc(p.strategy || "—")}</td>
         <td class="muted">${p.opened_at ? duration(Date.now() / 1000 - p.opened_at) : "—"}</td>
-        <td class="r space-x-1">
-          ${broker === "paper" ? `<button class="btn btn-sm" data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}" data-entry="${p.entry_price}" data-side="${esc(p.side)}"><i data-lucide="pencil"></i>SL/TP</button>
-          <button class="btn btn-sm btn-danger" data-close="${esc(p.symbol)}"><i data-lucide="x"></i>Close</button>` : ""}
-        </td></tr>`, `No open ${broker} positions`, 13);
+        <td class="r">
+          ${broker === "paper" ? `<button class="btn btn-sm btn-danger px-2" data-close="${esc(p.symbol)}"><i data-lucide="x"></i></button>` : ""}
+        </td></tr>`, `No open ${broker} positions`, 12);
       TB.rows("legs", legs, (o) => `<tr>
         <td class="font-semibold">${esc(o.symbol)}</td><td><span class="badge">${esc(o.type)}</span></td><td>${side(o.side)}</td>
         <td class="r font-mono">${num(o.size, 4)}</td><td class="r font-mono">${price(o.price)}</td><td>${TB.status(o.state)}</td>
         <td class="font-mono muted">${esc(o.client_order_id || o.id)}</td></tr>`, "No resting orders", 7);
     } catch (err) {
       $("posError").textContent = err.message;
-      TB.rows("positions", [], () => "", `Could not load ${broker} positions`, 13);
+      TB.rows("positions", [], () => "", `Could not load ${broker} positions`, 12);
       TB.rows("legs", [], () => "", "—", 7);
     }
+    
+    // Show manual order placement only for paper broker
+    TB.$("placeOrderCard").style.display = broker === "paper" ? "block" : "none";
+
     bind();
     TB.icons();
   }
 
   function bind() {
+
     document.querySelectorAll("[data-close]").forEach((b) => b.onclick = async () => {
       const symbol = b.dataset.close;
       if (!await TB.ask({ title: `Close ${symbol}?`, body: `Market-close the ${esc(symbol)} position on <b>all active brokers</b>.`, ok: "Close position", danger: true })) return;
@@ -170,6 +310,31 @@
       };
     });
   }
+
+  async function submitOrder() {
+    const symbol = TB.$("poSymbol").value;
+    const size = parseFloat(TB.$("poSize").value);
+    const sl = parseFloat(TB.$("poSl").value) || null;
+    const tp = parseFloat(TB.$("poTp").value) || null;
+    
+    if (!size || size <= 0) {
+      TB.toast("Please enter a valid size", "error");
+      return;
+    }
+    
+    try {
+      const payload = { broker, symbol, side: activeSide, size, stop_loss: sl, take_profit: tp };
+      await TB.post("/api/orders", payload);
+      TB.toast(`Order placed: ${activeSide.toUpperCase()} ${symbol}`, "ok");
+      
+      updateOrderDefaults();
+      load();
+    } catch (err) {
+      TB.toast(err.message, "error");
+    }
+  }
+
+  TB.$("poSubmit").onclick = submitOrder;
 
   brokerTabs((b) => { broker = b; load(); });
   TB.on(["PositionUpdate", "PositionClosed", "OrderPlaced", "SettingsChanged"], () => setTimeout(load, 200));

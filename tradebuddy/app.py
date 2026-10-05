@@ -131,6 +131,10 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
     async def orders(broker: str | None = None, limit: int = 300) -> list[dict]:
         return await call("orders", broker=broker, limit=limit)
 
+    @app.post("/api/orders", dependencies=[Depends(protected)])
+    async def place_order(payload: dict) -> dict:
+        return await call("place_order", **payload)
+
     @app.get("/api/open-orders")
     async def open_orders(broker: str | None = None) -> list[dict]:
         return await call("open_orders", broker=broker)

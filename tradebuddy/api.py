@@ -23,7 +23,7 @@ ACTIVITY_EVENTS = [*SIGNAL_EVENTS, "OrderPlaced", "OrderFailed", "OrderUnknown",
 METHODS = (
     "page_context", "header", "overview", "strategies", "signals", "positions", "orders", "open_orders", "account",
     "paper_stats", "paper_trades", "metrics", "events", "settings", "update_settings", "clear_credentials",
-    "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset",
+    "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order",
 )
 
 
@@ -166,6 +166,14 @@ class Api:
                 except BrokerError:
                     pass
         return {"symbol": symbol, "stop_loss": stop_loss, "take_profit": take_profit}
+
+    async def place_order(self, broker: str, symbol: str, side: str, size: float, stop_loss: float | None = None, take_profit: float | None = None) -> dict[str, Any]:
+        import uuid
+        b = self._broker(broker)
+        client_order_id = f"manual_{uuid.uuid4().hex[:8]}"
+        await self._call(b.place_order(symbol, side, size, client_order_id, stop_loss, take_profit, strategy="Manual"))
+        return {"status": "ok"}
+
 
     async def paper_reset(self) -> dict[str, Any]:
         self.system.paper.reset()

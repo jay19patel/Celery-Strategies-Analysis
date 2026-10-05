@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>{% endblock %}
+{% block head %}{% endblock %}
 {% block content %}
 <div id="priceCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
 
@@ -33,39 +33,26 @@
 <script>
 (() => {
   const { $, esc, num, price, time, ago } = TB;
-  const charts = {}, series = {}, first = {};
+  const first = {}, cards = {};
   let prevMsgs = null, prevAt = 0;
 
   function ensureCard(sym) {
-    if (charts[sym]) return;
+    if (cards[sym]) return;
     $("priceCards").insertAdjacentHTML("beforeend", `
-      <section class="card">
-        <div class="card-head">
+      <section class="card pb-2">
+        <div class="card-head flex justify-between items-start">
           <div><div class="text-sm font-semibold">${esc(sym)}</div><div id="chg-${esc(sym)}" class="text-[11px] muted">since page open</div></div>
-          <div class="text-right"><div id="last-${esc(sym)}" class="font-mono text-xl font-semibold">—</div><div id="age-${esc(sym)}" class="text-[11px] muted"></div></div>
+          <div class="text-right"><div id="last-${esc(sym)}" class="font-mono text-2xl font-semibold">—</div><div id="age-${esc(sym)}" class="text-[11px] muted"></div></div>
         </div>
-        <div class="px-3 py-2 h-32"><canvas id="c-${esc(sym)}"></canvas></div>
       </section>`);
-    series[sym] = [];
-    charts[sym] = new Chart($(`c-${sym}`), {
-      type: "line",
-      data: { labels: [], datasets: [{ data: [], borderColor: "#1e88e5", borderWidth: 1.5, pointRadius: 0, tension: .2, fill: false }] },
-      options: { maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { ticks: { font: { size: 9 }, maxTicksLimit: 4 }, grid: { color: "#f8fafc" } } } },
-    });
+    cards[sym] = true;
   }
 
   function addTick(sym, p, ts) {
     ensureCard(sym);
     first[sym] ??= p;
-    const s = series[sym];
-    s.push([ts, p]);
-    if (s.length > 600) s.shift();
-    const c = charts[sym];
-    c.data.labels = s.map(([t]) => t);
-    c.data.datasets[0].data = s.map(([, v]) => v);
     const up = p >= first[sym];
-    c.data.datasets[0].borderColor = up ? "#00b852" : "#eb5757";
-    c.update("none");
+
     $(`last-${sym}`).textContent = price(p);
     const chg = ((p - first[sym]) / first[sym]) * 100;
     $(`chg-${sym}`).innerHTML = `<span class="${up ? "up" : "down"}">${chg >= 0 ? "+" : ""}${num(chg, 3)}%</span> since page open`;
