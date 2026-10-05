@@ -81,6 +81,25 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     opened_at       REAL NOT NULL,
     closed_at       REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS position_controls (
+    broker      TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    position    TEXT NOT NULL,              -- side:entry, so a new position on the symbol starts fresh
+    trailing    INTEGER NOT NULL,
+    max_steps   INTEGER NOT NULL,
+    steps       INTEGER NOT NULL DEFAULT 0,
+    base_target REAL NOT NULL DEFAULT 0,    -- entry -> first target distance; each trail extends by a share of it
+    updated_at  REAL NOT NULL,
+    PRIMARY KEY (broker, symbol)
+);
+CREATE TABLE IF NOT EXISTS daily_risk (
+    broker        TEXT NOT NULL,
+    day           TEXT NOT NULL,
+    start_equity  REAL NOT NULL,
+    halted_at     REAL,
+    halt_reason   TEXT,
+    PRIMARY KEY (broker, day)
+);
 CREATE INDEX IF NOT EXISTS events_type ON events(type, id);
 """
 
@@ -161,6 +180,13 @@ class Store:
         ).fetchone()
         return dict(row) if row else None
 
+    def orders_in(self, statuses: tuple[str, ...], before: float) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            f"SELECT * FROM orders WHERE status IN ({','.join('?' * len(statuses))}) AND ts < ? ORDER BY ts",  # noqa: S608 - placeholders only
+            (*statuses, before),
+        )
+        return [dict(r) for r in rows]
+
     def recent_orders(self, limit: int = 100, broker: str | None = None) -> list[dict[str, Any]]:
         if broker:
             rows = self.db.execute("SELECT * FROM orders WHERE broker = ? ORDER BY ts DESC LIMIT ?", (broker, limit))
@@ -191,3 +217,51 @@ class Store:
 
     def count_events_since(self, event_type: str, since: float) -> int:
         return self.db.execute("SELECT COUNT(*) FROM events WHERE type = ? AND ts >= ?", (event_type, since)).fetchone()[0]
+
+    # -- position controls (trailing) ------------------------------------------
+
+    def controls(self, broker: str) -> dict[str, dict[str, Any]]:
+        return {r["symbol"]: dict(r) for r in self.db.execute("SELECT * FROM position_controls WHERE broker = ?", (broker,))}
+
+    def start_control(self, broker: str, symbol: str, position: str, trailing: bool, max_steps: int, base_target: float) -> None:
+        self.db.execute(
+            "INSERT INTO position_controls (broker, symbol, position, trailing, max_steps, steps, base_target, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, 0, ?, ?) ON CONFLICT(broker, symbol) DO UPDATE SET position = excluded.position,"
+            " trailing = excluded.trailing, max_steps = excluded.max_steps, steps = 0, base_target = excluded.base_target,"
+            " updated_at = excluded.updated_at",
+            (broker, symbol, position, int(trailing), max_steps, base_target, time.time()),
+        )
+
+    def update_control(self, broker: str, symbol: str, **fields: Any) -> bool:
+        allowed = {"trailing", "max_steps", "steps"}
+        if not fields or set(fields) - allowed:
+            raise ValueError(f"only {sorted(allowed)} can change")
+        sets = ", ".join(f"{k} = ?" for k in fields)  # names checked against `allowed` above
+        cur = self.db.execute(
+            f"UPDATE position_controls SET {sets}, updated_at = ? WHERE broker = ? AND symbol = ?",  # noqa: S608
+            (*[int(v) for v in fields.values()], time.time(), broker, symbol),
+        )
+        return cur.rowcount > 0
+
+    def drop_controls(self, broker: str, keep: set[str]) -> None:
+        for symbol in set(self.controls(broker)) - keep:
+            self.db.execute("DELETE FROM position_controls WHERE broker = ? AND symbol = ?", (broker, symbol))
+
+    # -- daily risk ---------------------------------------------------------------
+
+    def day_risk(self, broker: str, day: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM daily_risk WHERE broker = ? AND day = ?", (broker, day)).fetchone()
+        return dict(row) if row else None
+
+    def start_day(self, broker: str, day: str, equity: float) -> dict[str, Any]:
+        self.db.execute("INSERT OR IGNORE INTO daily_risk (broker, day, start_equity) VALUES (?, ?, ?)", (broker, day, equity))
+        return self.day_risk(broker, day) or {}
+
+    def halt_day(self, broker: str, day: str, reason: str) -> None:
+        self.db.execute("UPDATE daily_risk SET halted_at = ?, halt_reason = ? WHERE broker = ? AND day = ?", (time.time(), reason, broker, day))
+
+    def resume_day(self, broker: str, day: str, equity: float) -> None:
+        """Lift today's halt. The day restarts from the current equity, so the limit applies afresh."""
+        self.db.execute(
+            "UPDATE daily_risk SET halted_at = NULL, halt_reason = NULL, start_equity = ? WHERE broker = ? AND day = ?", (equity, broker, day)
+        )

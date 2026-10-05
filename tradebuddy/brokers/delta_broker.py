@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from tradebuddy.brokers.base import Account, Position
+from tradebuddy.brokers.base import Account, Position, protection_error
 from tradebuddy.delta import DeltaClient
 from tradebuddy.errors import BrokerError
 
@@ -34,7 +34,14 @@ class DeltaBroker:
 
     async def positions(self) -> list[Position]:
         out = []
-        for p in await self.client.positions():
+        rows = await self.client.positions()
+        legs: dict[str, dict[str, float]] = {}
+        if rows:  # SL/TP live on the exchange as reduce-only stop orders
+            for o in await self.client.open_orders():
+                kind = {"stop_loss_order": "stop_loss", "take_profit_order": "take_profit"}.get(o.get("stop_order_type") or "")
+                if kind and o.get("product_symbol"):
+                    legs.setdefault(o["product_symbol"], {})[kind] = _num(o.get("stop_price")) or None
+        for p in rows:
             symbol = p.get("product_symbol") or (p.get("product") or {}).get("symbol") or ""
             size = _num(p.get("size"))
             entry, mark = _num(p.get("entry_price")), _num(p.get("mark_price"))
@@ -53,6 +60,8 @@ class DeltaBroker:
                     unrealized_pnl=_num(upnl) if upnl is not None else (mark - entry) * size * contract_value,
                     margin=_num(p.get("margin")),
                     liquidation_price=_num(p.get("liquidation_price")) or None,
+                    stop_loss=legs.get(symbol, {}).get("stop_loss"),
+                    take_profit=legs.get(symbol, {}).get("take_profit"),
                 )
             )
         return out
@@ -92,8 +101,15 @@ class DeltaBroker:
             for o in await self.client.open_orders()
         ]
 
-    async def update_protection(self, symbol: str, stop_loss: float, take_profit: float) -> None:
-        await self.client.update_position_protection(symbol, stop_loss=stop_loss or None, take_profit=take_profit or None)
+    async def update_protection(self, symbol: str, stop_loss: float, take_profit: float | None) -> None:
+        position = next((p for p in await self.positions() if p.symbol == symbol), None)
+        if position is None:
+            raise BrokerError(f"no open {symbol} position")
+        if reason := protection_error(position.side, position.mark_price, stop_loss, take_profit):
+            raise BrokerError(f"delta: {reason}")
+        result = await self.client.update_position_protection(symbol, stop_loss=stop_loss, take_profit=take_profit)
+        if result.get("errors"):
+            raise BrokerError("delta: new SL/TP placed, but " + "; ".join(result["errors"]))
 
     async def close_position(self, symbol: str) -> dict[str, Any]:
         position = next((p for p in await self.positions() if p.symbol == symbol), None)
@@ -107,11 +123,9 @@ class DeltaBroker:
         return await self.client.close_all()
 
     async def size_for_margin(self, symbol: str, price: float, margin: float) -> int:
-        try:
-            product = await self.client.product(symbol)
-            cv = float(product.get("contract_value") or 1.0)
-            leverage = float(product.get("default_leverage") or 10.0)
-            size = (margin * leverage) / (price * cv)
-            return int(max(1, size))
-        except Exception:
-            return 1
+        product = await self.client.product(symbol)
+        cv = float(product.get("contract_value") or 0)
+        if cv <= 0 or price <= 0:
+            raise BrokerError(f"delta: no contract value for {symbol}")
+        leverage = await self.client.order_leverage(product["id"])
+        return max(0, int((margin * leverage) / (price * cv)))

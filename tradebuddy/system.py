@@ -23,6 +23,7 @@ from tradebuddy.events import (
     Event,
     EventBus,
     FeedHeartbeat,
+    MarketStats,
     OrderRequested,
     OrderUpdate,
     SettingsChanged,
@@ -31,6 +32,7 @@ from tradebuddy.events import (
     Tick,
     ToggleChanged,
 )
+from tradebuddy.guard import PositionGuard
 from tradebuddy.runner import Evaluator, InlineEvaluator, MarketData, StrategyRunner, pair_key, strategy_key
 from tradebuddy.settings import (
     BROKERS,
@@ -74,11 +76,11 @@ class Broadcaster:
     async def send(self, message: dict[str, Any]) -> None:
         if not self.clients:
             return
-        if message.get("type") == "Tick":
-            symbol, ts = message.get("symbol", ""), message.get("ts", 0)
-            if ts - self._last_tick.get(symbol, 0) < 1:
+        if message.get("type") in ("Tick", "MarketStats"):
+            key, ts = f"{message['type']}:{message.get('symbol', '')}", message.get("ts", 0)
+            if ts - self._last_tick.get(key, 0) < 1:
                 return
-            self._last_tick[symbol] = ts
+            self._last_tick[key] = ts
         for ws in list(self.clients):
             try:
                 await ws.send_json(message)
@@ -204,10 +206,13 @@ class System:
             prices=lambda: {sym: p["price"] for sym, p in self.prices.snapshot().items() if p["fresh"]},
             data_env=lambda: self.settings.data_env,
         )
-        self.trader = Trader(self.bus, self.store, self.brokers, self.prices, lambda: self.settings)
+        self.protection_lock = asyncio.Lock()  # one SL/TP change at a time: guard trails and manual edits
+        self.guard = PositionGuard(self.bus, self.store, self.brokers, lambda: self.settings, self.tick_size, self.protection_lock)
+        self.trader = Trader(self.bus, self.store, self.brokers, self.prices, lambda: self.settings, self.guard.halt_reason)
         self.executor = Executor(self.bus, self.store, self.brokers)
 
         self.bus.subscribe(self.prices.on_tick, Tick)
+        self.bus.subscribe(self.prices.on_stats, MarketStats)
         self.bus.subscribe(self.paper.on_tick, Tick)
         self.bus.subscribe(self.runner.on_candle_closed, CandleClosed)
         self.bus.subscribe(self.runner.on_evaluated, StrategyEvaluated)
@@ -233,6 +238,9 @@ class System:
     def trading_on(self, broker: str) -> bool:
         return self.store.enabled(trading_key(broker), default=TRADING_DEFAULT[broker])
 
+    async def tick_size(self, symbol: str) -> float:
+        return float((await self.market_client.product(symbol)).get("tick_size") or 0.5)
+
     def _make_clients(self) -> tuple[DeltaClient, DeltaClient]:
         s = self.settings
         market = self._client_factory(ENVIRONMENTS[s.data_env][0])
@@ -248,7 +256,7 @@ class System:
         )
 
     async def record(self, event: Event) -> None:
-        if not isinstance(event, Tick | FeedHeartbeat):
+        if not isinstance(event, Tick | MarketStats | FeedHeartbeat):
             self.store.record_event(event.to_dict())
 
     # -- lifecycle ----------------------------------------------------------
@@ -256,7 +264,11 @@ class System:
     async def start(self) -> None:
         self.bus.start()
         self._started = True
-        self._tasks = [asyncio.create_task(self.monitor.run(), name="monitor")]
+        self._tasks = [
+            asyncio.create_task(self.monitor.run(), name="monitor"),
+            asyncio.create_task(self.executor.reconcile(before=time.time()), name="reconcile"),
+            asyncio.create_task(self.guard.run(), name="guard"),
+        ]
         if self.local_feed:
             self._stream_task = asyncio.create_task(self.stream.run(), name="stream")
             self._tasks.append(asyncio.create_task(self.closer.run(), name="bar-clock"))
@@ -356,11 +368,13 @@ class System:
         self.bus.publish(ToggleChanged(key=key, enabled=enabled))
 
     async def close_all(self) -> dict[str, Any]:
-        """Kill switch: every broker's trading off first, then flatten every active broker."""
+        """Kill switch: every broker's trading off first, then flatten every broker that is active
+        or could still hold positions (a deactivated Delta account with keys)."""
         for name in BROKERS:
             self.set_toggle(trading_key(name), False)
+        targets = {n: b for n, b in self.brokers.items() if n in self.settings.active_brokers or not b.not_ready()}
         closed, errors = [], []
-        for name, broker in self.active.items():
+        for name, broker in targets.items():
             try:
                 result = await broker.close_all()
             except BrokerError as exc:

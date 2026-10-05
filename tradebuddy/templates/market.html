@@ -32,32 +32,36 @@
 {% block scripts %}
 <script>
 (() => {
-  const { $, esc, num, price, time, ago } = TB;
-  const first = {}, cards = {};
+  const { $, esc, num, price, time, ago, pct, compact, pnlClass } = TB;
+  const cards = {}, seenAt = {};
   let prevMsgs = null, prevAt = 0;
 
-  function ensureCard(sym) {
-    if (cards[sym]) return;
-    $("priceCards").insertAdjacentHTML("beforeend", `
-      <section class="card pb-2">
-        <div class="card-head flex justify-between items-start">
-          <div><div class="text-sm font-semibold">${esc(sym)}</div><div id="chg-${esc(sym)}" class="text-[11px] muted">since page open</div></div>
-          <div class="text-right"><div id="last-${esc(sym)}" class="font-mono text-2xl font-semibold">—</div><div id="age-${esc(sym)}" class="text-[11px] muted"></div></div>
-        </div>
-      </section>`);
-    cards[sym] = true;
+  // One card per symbol, from the exchange's own rolling 24h numbers.
+  function paintCard(sym) {
+    const p = TB.header?.prices?.[sym];
+    if (!p) return;
+    if (!cards[sym]) {
+      $("priceCards").insertAdjacentHTML("beforeend", `<section class="card p-4" id="card-${esc(sym)}"></section>`);
+      cards[sym] = true;
+    }
+    const s = p.stats || {}, last = s.last ?? p.price, chg = s.change_24h_pct;
+    const stale = !seenAt[sym] || Date.now() - seenAt[sym] > 30000;
+    $(`card-${sym}`).innerHTML = `
+      <div class="flex justify-between items-start">
+        <div><div class="text-sm font-semibold">${esc(sym)}</div><div class="text-[11px] muted">${stale ? '<span class="badge badge-amber">STALE</span>' : `updated ${time(seenAt[sym] / 1000)}`}</div></div>
+        <span class="pill ${chg > 0 ? "up" : chg < 0 ? "down" : "flat"}">${chg == null ? "—" : pct(chg)} 24h</span>
+      </div>
+      <div class="font-mono text-2xl font-semibold mt-2 ${stale ? "muted" : ""}">${price(last)}</div>
+      <div class="grid grid-cols-3 gap-2 mt-3">
+        <div><div class="stat-label">24h high</div><div class="stat-value">${price(s.high_24h)}</div></div>
+        <div><div class="stat-label">24h low</div><div class="stat-value">${price(s.low_24h)}</div></div>
+        <div><div class="stat-label">24h open</div><div class="stat-value">${price(s.open_24h)}</div></div>
+        <div><div class="stat-label">Mark</div><div class="stat-value">${price(s.mark ?? p.price)}</div></div>
+        <div><div class="stat-label">Volume</div><div class="stat-value">$${compact(s.turnover_24h_usd)}</div></div>
+        <div><div class="stat-label">Funding</div><div class="stat-value ${pnlClass(-(s.funding_rate_pct || 0))}">${s.funding_rate_pct == null ? "—" : pct(s.funding_rate_pct, 4)}</div></div>
+      </div>`;
   }
-
-  function addTick(sym, p, ts) {
-    ensureCard(sym);
-    first[sym] ??= p;
-    const up = p >= first[sym];
-
-    $(`last-${sym}`).textContent = price(p);
-    const chg = ((p - first[sym]) / first[sym]) * 100;
-    $(`chg-${sym}`).innerHTML = `<span class="${up ? "up" : "down"}">${chg >= 0 ? "+" : ""}${num(chg, 3)}%</span> since page open`;
-    $(`age-${sym}`).textContent = time(ts);
-  }
+  const paintAll = () => Object.keys(TB.header?.prices || {}).sort().forEach(paintCard);
 
   async function loadMetrics() {
     const m = await TB.get("/api/metrics"), f = m.feed;
@@ -89,10 +93,13 @@
 
   (async () => {
     const h = await TB.get("/api/header");
-    for (const [sym, p] of Object.entries(h.prices).sort()) addTick(sym, p.price, Date.now() / 1000);
+    for (const [sym, p] of Object.entries(h.prices)) if (p.fresh) seenAt[sym] = Date.now() - p.age_seconds * 1000;
+    if (!TB.header) await TB.loadHeader();
+    paintAll();
     TB.icons();
   })();
-  TB.on("Tick", (e) => addTick(e.symbol, e.price, e.ts));
+  TB.on(["Tick", "MarketStats"], (e) => { seenAt[e.symbol] = Date.now(); setTimeout(() => paintCard(e.symbol), 0); });
+  setInterval(paintAll, 5000);
   TB.on("CandleClosed", (e) => { bars.unshift(e); bars = bars.slice(0, 100); TB.rows("bars", bars, barRow, "", 9); });
   loadMetrics(); loadBars();
   setInterval(loadMetrics, 3000);

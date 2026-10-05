@@ -8,7 +8,7 @@ from typing import ClassVar
 import pytest
 
 from tradebuddy.delta import DeltaError, DeltaTimeout
-from tradebuddy.events import CandleClosed, SignalGenerated, Tick
+from tradebuddy.events import CandleClosed, OrderRequested, SignalGenerated, Tick
 from tradebuddy.strategies import Context, Signal, Strategy
 from tradebuddy.system import System
 from tradebuddy.trading import client_order_id
@@ -146,12 +146,23 @@ async def test_open_paper_position_blocks_the_next_signal(paper):
     assert skipped(paper) == ["a BTCUSD position is already open"]
 
 
-async def test_paper_rejection_is_an_order_failure(paper):
+async def test_empty_account_is_refused_at_sizing(paper):
     await paper.update_settings({"paper_starting_balance": 1})
     paper.paper.reset()
     paper.store.db.execute("UPDATE paper_account SET balance = 0")
     await close_bar(paper)
+    assert "buys no whole contract" in skipped(paper)[0]
+    assert events(paper, "OrderRequested") == [] and await paper.paper.positions() == []
+
+
+async def test_paper_rejection_is_an_order_failure(paper):
+    paper.bus.publish(OrderRequested(client_order_id="c1", broker="paper", strategy="s", symbol="BTCUSD", side="buy",
+                                     size=10**9, price=100.0, stop_loss=99.0, take_profit=None))
+    paper.store.reserve_order(client_order_id="c1", broker="paper", strategy="s", symbol="BTCUSD", side="buy",
+                              size=10**9, price=100.0, stop_loss=99.0, take_profit=None)
+    await paper.drain()
     assert "insufficient margin" in events(paper, "OrderFailed")[0]["error"]
+    assert paper.store.order("c1")["status"] == "rejected"
 
 
 # -- delta ----------------------------------------------------------------------

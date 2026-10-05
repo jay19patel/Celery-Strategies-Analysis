@@ -98,8 +98,8 @@ async def test_max_hold_closes_at_market(system):
 async def test_protection_must_bracket_the_price(system):
     await system.paper.place_order("BTCUSD", "buy", 1, "c1")
     with pytest.raises(BrokerError):
-        system.paper.update_protection("BTCUSD", 101_000, 102_000)
-    system.paper.update_protection("BTCUSD", 95_000, 105_000)
+        await system.paper.update_protection("BTCUSD", 101_000, 102_000)
+    await system.paper.update_protection("BTCUSD", 95_000, 105_000)
     [pos] = await system.paper.positions()
     assert (pos.stop_loss, pos.take_profit) == (95_000, 105_000)
 

@@ -1,55 +1,74 @@
 {% extends "base.html" %}
 {% block content %}
+<!-- Today on the selected broker -->
 <div class="flex flex-wrap items-center justify-between gap-3">
   {% with all_tab=False %}{% include "_broker_tabs.html" %}{% endwith %}
-  <div id="totals" class="flex flex-wrap gap-5 text-xs"></div>
+  <div id="halted" class="hidden"></div>
 </div>
+<div id="kpis" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3"></div>
 
-<section class="card" id="placeOrderCard" style="display: none;">
-  <div class="card-head">
-    <div class="card-title"><i data-lucide="zap"></i>Place Order</div>
-    <div class="flex bg-slate-100 rounded-md p-0.5" id="poTabs">
-      <button class="px-3 py-1 text-sm rounded-md bg-white shadow-sm font-semibold text-[#00b852]" data-side="buy">Buy / Long</button>
-      <button class="px-3 py-1 text-sm rounded-md text-slate-500 font-semibold" data-side="sell">Sell / Short</button>
+<section class="card" id="placeOrderCard">
+  <div class="card-head flex-wrap">
+    <div class="card-title"><i data-lucide="zap"></i>Order ticket <span class="card-sub">market entry with SL / TP</span></div>
+    <div class="flex shrink-0 bg-slate-100 rounded-md p-0.5" id="poTabs">
+      <button class="px-3 py-1 text-sm rounded-md font-semibold" data-side="buy">Buy / Long</button>
+      <button class="px-3 py-1 text-sm rounded-md font-semibold" data-side="sell">Sell / Short</button>
     </div>
   </div>
-  <div class="card-body p-5">
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-      <div>
-        <label class="block text-slate-500 mb-1 text-xs font-semibold">Symbol</label>
-        <select id="poSymbol" class="input w-full font-mono text-sm">
-          <option value="BTCUSD">BTCUSD</option>
-          <option value="ETHUSD">ETHUSD</option>
-        </select>
+  <div class="card-body grid grid-cols-1 xl:grid-cols-5 gap-5">
+    <div class="xl:col-span-3 space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-slate-500 mb-1 text-xs font-semibold">Symbol</label>
+          <select id="poSymbol" class="input w-full font-mono text-sm"></select>
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-slate-500 mb-1 text-xs font-semibold">Place on</label>
+          <div id="poBrokers" class="flex flex-wrap gap-2"></div>
+        </div>
       </div>
       <div>
-        <label class="block text-slate-500 mb-1 text-xs font-semibold flex justify-between"><span>Size</span><span id="poMarginCalc" class="text-slate-400 font-normal"></span></label>
-        <input id="poSize" type="number" step="any" class="input w-full font-mono text-sm" placeholder="Size (Contracts)">
+        <div class="flex items-center justify-between mb-1">
+          <div class="tabs" id="sizeMode"><button type="button" data-mode="pct" class="on">% of margin</button><button type="button" data-mode="contracts">Contracts</button></div>
+          <div id="pctChips" class="flex gap-1.5"></div>
+        </div>
+        <input id="poSize" type="number" step="any" min="0" class="input w-full font-mono text-sm">
+        <div id="sizeHelp" class="field-help"></div>
       </div>
-      <div>
-        <label class="block text-slate-500 mb-1 text-xs font-semibold flex justify-between"><span>Stop Loss</span><span id="poSlPctCalc" class="text-slate-400 font-normal"></span></label>
-        <input id="poSl" type="number" step="any" class="input w-full font-mono text-sm" placeholder="Price (Optional)">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-slate-500 mb-1 text-xs font-semibold flex justify-between"><span>Stop loss (required)</span><span id="poSlPctCalc" class="text-slate-400 font-normal"></span></label>
+          <input id="poSl" type="number" step="any" class="input w-full font-mono text-sm" placeholder="Price">
+        </div>
+        <div>
+          <label class="block text-slate-500 mb-1 text-xs font-semibold flex justify-between"><span>Take profit</span><span id="poTpPctCalc" class="text-slate-400 font-normal"></span></label>
+          <input id="poTp" type="number" step="any" class="input w-full font-mono text-sm" placeholder="Price (optional)">
+        </div>
       </div>
-      <div>
-        <label class="block text-slate-500 mb-1 text-xs font-semibold flex justify-between"><span>Take Profit</span><span id="poTpPctCalc" class="text-slate-400 font-normal"></span></label>
-        <input id="poTp" type="number" step="any" class="input w-full font-mono text-sm" placeholder="Price (Optional)">
+      <div class="flex items-center justify-between gap-2">
+        <span id="poMarket" class="text-[11.5px] text-slate-500"></span>
+        <button id="poReset" class="btn btn-sm" type="button"><i data-lucide="rotate-ccw"></i>Reset to defaults</button>
       </div>
     </div>
-    <div class="mt-4">
-      <button id="poSubmit" class="btn bg-[#00b852] hover:bg-[#00a048] text-white border-0 w-full shadow-sm text-sm font-semibold">Place Buy / Long Order</button>
+    <div class="xl:col-span-2 flex flex-col gap-3">
+      <div class="rounded-xl border border-slate-200 overflow-hidden">
+        <div class="px-3 py-2 bg-slate-50 text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Preview</div>
+        <div id="preview" class="divide-y divide-slate-100 text-[12px]"></div>
+      </div>
+      <button id="poSubmit" class="btn w-full justify-center text-white border-0 shadow-sm text-sm font-semibold py-2.5 mt-auto"></button>
     </div>
   </div>
 </section>
 
 <section class="card">
   <div class="card-head">
-    <div class="card-title"><i data-lucide="layers"></i>Open positions</div>
+    <div class="card-title"><i data-lucide="layers"></i>Open positions <span id="posBroker" class="card-sub"></span></div>
     <span id="posError" class="text-xs down"></span>
   </div>
   <div class="scroll">
     <table class="tbl">
-      <thead><tr><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">Unrealized P&amp;L</th><th class="r">Margin</th><th class="r min-w-[90px]">TP / SL</th><th class="r">Liquidation</th><th>Strategy</th><th>Held</th><th class="r">Close</th></tr></thead>
-      <tbody id="positions"></tbody>
+      <thead><tr><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Mark · liq.</th><th class="r">P&amp;L · ROE</th><th>SL · entry · TP</th><th class="r">TP / SL</th><th>Auto trail</th><th>By · held</th><th class="r">Close</th></tr></thead>
+      <tbody id="positions"><tr><td colspan="11"><div class="skeleton h-6"></div></td></tr></tbody>
     </table>
   </div>
 </section>
@@ -100,245 +119,303 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/tabs.js"></script>
+<script src="/static/js/tabs.js?v={{ v }}"></script>
 <script>
 (() => {
-  const { $, esc, num, price, money, signed, pnlClass, side, duration } = TB;
-  let broker = null;
+  const { $, esc, num, price, money, signed, pnlClass, pct, levelsBar, side, duration } = TB;
+  const BUY = "#00b852", SELL = "#eb5757";
+  const ACTIVE = {{ active_brokers | tojson }};
+  let broker = null, activeSide = "buy", ticket = null, sending = false, sizeMode = "pct";
+  const chosen = new Set([ACTIVE.includes("paper") ? "paper" : ACTIVE[0]]);  // tick Delta too to mirror the ticket
+  let requestId = newRequestId();
 
-  let activeSide = "buy";
-  let appSettings = null;
-  let accountData = null;
-  let marketPrices = null;
-
-  async function updateOrderDefaults() {
-    if (!appSettings || !accountData || !marketPrices) return;
-    const sym = TB.$("poSymbol").value;
-    const price = marketPrices[sym]?.price;
-    if (!price) return;
-
-    const marginPct = appSettings.trade_margin_pct / 100;
-    const targetMargin = accountData.available * marginPct;
-    const leverage = appSettings.paper_leverage || 1;
-    const size = (targetMargin * leverage) / price;
-    
-    TB.$("poSize").value = parseFloat(size.toFixed(4));
-    TB.$("poMarginCalc").textContent = `Margin: ${TB.money(targetMargin)}`;
-
-    const dir = activeSide === "buy" ? 1 : -1;
-    const slPct = appSettings.stop_loss_pct / 100;
-    const tpPct = appSettings.take_profit_pct / 100;
-
-    if (slPct > 0) TB.$("poSl").value = parseFloat((price * (1 - dir * slPct)).toFixed(2));
-    if (tpPct > 0) TB.$("poTp").value = parseFloat((price * (1 + dir * tpPct)).toFixed(2));
-    
-    updatePctLabels();
+  // One id per order ticket: a retried or double-clicked submit is the same order on the server.
+  function newRequestId() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    return [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
+  const realMoney = (b) => b === "delta" && TB.header?.is_real_money;
 
-  function updatePctLabels() {
-    const sym = TB.$("poSymbol").value;
-    const price = marketPrices?.[sym]?.price;
-    if (!price) return;
-    
-    const slVal = parseFloat(TB.$("poSl").value);
-    if (slVal) {
-      const pct = Math.abs((slVal - price) / price * 100).toFixed(2);
-      TB.$("poSlPctCalc").textContent = `(${pct}%)`;
-    } else {
-      TB.$("poSlPctCalc").textContent = "";
-    }
-    
-    const tpVal = parseFloat(TB.$("poTp").value);
-    if (tpVal) {
-      const pct = Math.abs((tpVal - price) / price * 100).toFixed(2);
-      TB.$("poTpPctCalc").textContent = `(${pct}%)`;
-    } else {
-      TB.$("poTpPctCalc").textContent = "";
-    }
-  }
-
-  TB.$("poSl").oninput = updatePctLabels;
-  TB.$("poTp").oninput = updatePctLabels;
-
-
-  document.querySelectorAll("#poTabs button").forEach(btn => {
-    btn.onclick = () => {
-      document.querySelectorAll("#poTabs button").forEach(b => {
-        b.className = "px-3 py-1 text-sm rounded-md text-slate-500 font-semibold hover:text-slate-700";
-      });
-      activeSide = btn.dataset.side;
-      if (activeSide === "buy") {
-        btn.className = "px-3 py-1 text-sm rounded-md bg-white shadow-sm font-semibold text-[#00b852]";
-        TB.$("poSubmit").className = "btn bg-[#00b852] hover:bg-[#00a048] text-white border-0 w-full shadow-sm text-sm font-semibold";
-        TB.$("poSubmit").textContent = "Place Buy / Long Order";
-      } else {
-        btn.className = "px-3 py-1 text-sm rounded-md bg-white shadow-sm font-semibold text-[#eb5757]";
-        TB.$("poSubmit").className = "btn bg-[#eb5757] hover:bg-[#d84b4b] text-white border-0 w-full shadow-sm text-sm font-semibold";
-        TB.$("poSubmit").textContent = "Place Sell / Short Order";
-      }
-      updateOrderDefaults();
-    };
-  });
-  
-  TB.$("poSymbol").onchange = updateOrderDefaults;
-
-  let orderFormInitialized = false;
-
-  async function load() {
-    if (!broker) return;
+  // ── today on this broker ──────────────────────────────────────────────────
+  async function loadKpis() {
     try {
-      const p1 = TB.get(`/api/positions?broker=${broker}`);
-      const p2 = TB.get(`/api/open-orders?broker=${broker}`);
-      
-      const promises = [p1, p2];
-      if (!orderFormInitialized && broker === "paper") {
-        promises.push(TB.get("/api/settings"));
-        promises.push(TB.get(`/api/account?broker=${broker}`));
-        promises.push(TB.get("/api/header"));
-      }
-      
-      const [positions, legs, settings, account, header] = await Promise.all(promises);
-      
-      if (!orderFormInitialized && settings) {
-        appSettings = settings;
-        accountData = account;
-        marketPrices = header.prices;
-        updateOrderDefaults();
-        orderFormInitialized = true;
-      }
+      const [a, risk] = await Promise.all([TB.get(`/api/account?broker=${broker}`), TB.get("/api/risk")]);
+      const r = risk.brokers.find((x) => x.broker === broker) || {};
+      const used = Math.min(100, r.used_pct || 0);
+      const tile = (label, value, sub = "", cls = "") => `<div class="card kpi"><div class="label">${label}</div><div class="value ${cls}">${value}</div><div class="hint">${sub}</div></div>`;
+      $("kpis").innerHTML = [
+        tile("Equity", money(a.equity), `${esc(a.currency)} · balance ${money(a.balance)}`),
+        tile("Today", r.pnl === undefined ? "—" : signed(r.pnl), r.pnl_pct === undefined ? "" : `${pct(r.pnl_pct)} since day start`, pnlClass(r.pnl)),
+        tile("Unrealized", signed(a.unrealized_pnl), "open positions", pnlClass(a.unrealized_pnl)),
+        tile("Margin used", money(a.margin_used), `available ${money(a.available)}`),
+        `<div class="card kpi"><div class="label">Daily loss limit</div><div class="value ${used >= 80 ? "down" : ""}">${r.limit_pct ? `${num(used, 0)}%` : "off"}</div>
+          <div class="meter mt-1.5"><div style="width:${r.limit_pct ? used : 0}%;background:${used >= 80 ? "#dc2626" : used >= 50 ? "#f59e0b" : "#00b852"}"></div></div>
+          <div class="hint">${r.limit_pct ? `of ${num(r.limit_pct, 2)}% (${money((r.start_equity || 0) * r.limit_pct / 100)})` : "set it in Settings"}</div></div>`,
+        tile("Auto trailing", risk.trailing.trailing_enabled ? "On" : "Off", `${num(risk.trailing.trailing_trigger_pct, 0)}% trigger · max ${risk.trailing.trailing_max_steps}×`, risk.trailing.trailing_enabled ? "up" : "muted"),
+      ].join("");
+      $("halted").className = r.halted ? "flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-3 py-1.5 text-[12px] text-red-700" : "hidden";
+      $("halted").innerHTML = r.halted ? `<i data-lucide="octagon-x" class="w-4 h-4"></i><b>${esc(broker)} halted for today</b> — daily loss limit hit` : "";
+    } catch (err) {
+      $("kpis").innerHTML = `<div class="card kpi col-span-full text-xs down">${esc(err.message)}</div>`;
+    }
+  }
 
+  // ── order ticket ──────────────────────────────────────────────────────────
+  function paintSide() {
+    document.querySelectorAll("#poTabs button").forEach((b) => {
+      const on = b.dataset.side === activeSide;
+      b.className = `px-3 py-1 text-sm rounded-md font-semibold whitespace-nowrap ${on ? "bg-white shadow-sm" : "text-slate-500 hover:text-slate-700"}`;
+      b.style.color = on ? (activeSide === "buy" ? BUY : SELL) : "";
+    });
+    const btn = $("poSubmit");
+    btn.style.background = activeSide === "buy" ? BUY : SELL;
+    btn.textContent = `${activeSide === "buy" ? "Buy / Long" : "Sell / Short"} ${$("poSymbol").value || ""} on ${[...chosen].join(" + ") || "—"}`;
+  }
+
+  function paintBrokers() {
+    $("poBrokers").innerHTML = ACTIVE.map((b) => {
+      const row = ticket?.brokers.find((x) => x.broker === b);
+      const off = row && (!row.trading || row.blocked);
+      return `<label class="chip ${chosen.has(b) ? "on" : ""} flex items-center gap-1.5 cursor-pointer" title="${esc(off ? (row.blocked || "trading is switched off") : "")}">
+        <input type="checkbox" class="accent-blue-600" data-broker="${esc(b)}" ${chosen.has(b) ? "checked" : ""}>${esc(b)}
+        ${realMoney(b) ? '<span class="badge badge-solid-red">LIVE</span>' : ""}${off ? '<i data-lucide="triangle-alert" class="w-3.5 h-3.5 text-amber-500"></i>' : ""}</label>`;
+    }).join("");
+    $("poBrokers").querySelectorAll("input").forEach((el) => (el.onchange = () => {
+      el.checked ? chosen.add(el.dataset.broker) : chosen.delete(el.dataset.broker);
+      if (chosen.size > 1 && sizeMode === "contracts") setMode("pct");
+      paintBrokers(); paintSide(); preview();
+    }));
+    TB.icons();
+  }
+
+  function setMode(mode) {
+    if (mode === "contracts" && chosen.size > 1) { TB.toast("Contracts mean different exposure on each broker — size several brokers by % of margin", "error"); return; }
+    sizeMode = mode;
+    document.querySelectorAll("#sizeMode button").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
+    const only = [...chosen][0], row = ticket?.brokers.find((x) => x.broker === only);
+    $("poSize").value = mode === "pct" ? (ticket?.margin_pct ?? "") : (row?.size || "");
+    $("poSize").step = mode === "pct" ? "any" : "1";
+    $("pctChips").classList.toggle("hidden", mode !== "pct");
+    preview();
+  }
+  $("pctChips").innerHTML = [5, 10, 25, 50, 100].map((v) => `<button type="button" class="chip" data-pct="${v}">${v}%</button>`).join("");
+  $("pctChips").querySelectorAll("[data-pct]").forEach((b) => (b.onclick = () => { $("poSize").value = b.dataset.pct; refreshTicket(false); }));
+  document.querySelectorAll("#sizeMode button").forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
+
+  function fillSymbols() {
+    const sel = $("poSymbol"), current = sel.value;
+    const list = Object.keys(TB.header?.prices || {}).sort();
+    const syms = list.length ? list : ["BTCUSD", "ETHUSD"];
+    if (syms.join() === [...sel.options].map((o) => o.value).join()) return;
+    sel.innerHTML = syms.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+    if (syms.includes(current)) sel.value = current;
+  }
+
+  // resetLevels: also put SL/TP back to the defaults for the current price.
+  async function refreshTicket(resetLevels = true) {
+    fillSymbols();
+    const marginPct = sizeMode === "pct" && Number($("poSize").value) > 0 ? `&margin_pct=${Number($("poSize").value)}` : "";
+    try {
+      ticket = await TB.get(`/api/order-ticket?symbol=${encodeURIComponent($("poSymbol").value)}&side=${activeSide}${marginPct}`);
+      if (resetLevels) {
+        $("poSl").value = ticket.stop_loss; $("poTp").value = ticket.take_profit;
+        if (sizeMode === "pct" && !marginPct) $("poSize").value = ticket.margin_pct;
+      }
+      const s = ticket.stats || {};
+      $("poMarket").innerHTML = `Last <b class="font-mono">${price(s.last ?? ticket.price)}</b> <span class="${pnlClass(s.change_24h_pct)}">${s.change_24h_pct == null ? "" : `${pct(s.change_24h_pct)} 24h`}</span> · H ${price(s.high_24h)} · L ${price(s.low_24h)} · funding ${s.funding_rate_pct == null ? "—" : pct(s.funding_rate_pct, 4)}`;
+    } catch (err) {
+      ticket = null;
+      $("preview").innerHTML = `<div class="p-3 down">${esc(err.message)}</div>`;
+    }
+    paintBrokers(); paintSide(); preview();
+  }
+
+  // Contracts per broker, and what SL and TP would mean in money on each.
+  function preview() {
+    const sl = Number($("poSl").value), tp = Number($("poTp").value), v = Number($("poSize").value);
+    const rel = (x) => (ticket && x ? `(${num(Math.abs((x - ticket.price) / ticket.price) * 100, 2)}%)` : "");
+    $("poSlPctCalc").textContent = rel(sl); $("poTpPctCalc").textContent = rel(tp);
+    $("sizeHelp").textContent = sizeMode === "pct" ? "Each broker uses this share of its own available margin, so paper and Delta take the same risk relative to their capital." : "Whole contracts on one broker.";
+    if (!ticket) return;
+    const d = activeSide === "buy" ? 1 : -1;
+    const rows = [...chosen].map((b) => {
+      const r = ticket.brokers.find((x) => x.broker === b);
+      if (!r) return `<div class="p-3"><b>${esc(b)}</b> <span class="muted">not active</span></div>`;
+      const size = sizeMode === "pct" ? r.size : Math.floor(v || 0);
+      const per = ticket.contract_value * size;
+      const risk = sl ? (sl - ticket.price) * d * per : null, reward = tp ? (tp - ticket.price) * d * per : null;
+      const warn = r.error || r.blocked || (!r.trading ? "trading is switched off" : "") || (size < 1 ? "buys no whole contract" : "");
+      return `<div class="p-3 space-y-1">
+        <div class="flex items-center justify-between"><b>${esc(b)}</b>${realMoney(b) ? '<span class="badge badge-solid-red">REAL MONEY</span>' : ""}</div>
+        <div class="flex justify-between"><span class="muted">Size</span><span class="font-mono">${num(size, 0)} contracts · ${money(per * ticket.price)}</span></div>
+        <div class="flex justify-between"><span class="muted">Margin</span><span class="font-mono">${sizeMode === "pct" ? `${money(r.margin)} of ${money(r.available)}` : "—"}</span></div>
+        <div class="flex justify-between"><span class="muted">At SL / TP</span><span class="font-mono"><span class="down">${risk == null ? "—" : signed(risk)}</span> / <span class="up">${reward == null ? "—" : signed(reward)}</span></span></div>
+        ${risk && reward ? `<div class="flex justify-between"><span class="muted">Reward : risk</span><span class="font-mono">${num(Math.abs(reward / risk), 2)} : 1</span></div>` : ""}
+        ${warn ? `<div class="text-[11px] text-amber-700">⚠ ${esc(warn)}</div>` : ""}
+      </div>`;
+    });
+    $("preview").innerHTML = rows.join("") || '<div class="p-3 muted">Choose a broker</div>';
+  }
+
+  async function submitOrder() {
+    if (sending) return;
+    const symbol = $("poSymbol").value, brokers = [...chosen];
+    const v = Number($("poSize").value), sl = Number($("poSl").value), tp = $("poTp").value ? Number($("poTp").value) : null;
+    if (!brokers.length) return TB.toast("Choose at least one broker", "error");
+    if (sizeMode === "pct" && !(v > 0 && v <= 100)) return TB.toast("Margin % must be above 0 and at most 100", "error");
+    if (sizeMode === "contracts" && (!Number.isInteger(v) || v < 1)) return TB.toast("Size must be a whole number of contracts", "error");
+    if (!sl) return TB.toast("A stop loss is required", "error");
+    const live = brokers.some(realMoney);
+    const ok = await TB.ask({
+      title: `${activeSide === "buy" ? "Buy / Long" : "Sell / Short"} ${esc(symbol)} on ${esc(brokers.join(" + "))}?`,
+      body: `<div class="font-mono text-[12px] space-y-1"><div>${sizeMode === "pct" ? `${num(v, 2)}% of each broker's available margin` : `${num(v, 0)} contracts`} at market</div>
+             <div>Stop loss ${price(sl)} · Take profit ${tp ? price(tp) : "—"}</div></div>${$("preview").innerHTML ? `<div class="mt-3 rounded-lg border border-slate-200 text-[12px]">${$("preview").innerHTML}</div>` : ""}
+             ${live ? '<p class="mt-3 font-semibold text-red-600">Includes your LIVE Delta account: real money.</p>' : ""}`,
+      ok: "Place order", danger: live,
+    });
+    if (!ok) return;
+    sending = true; $("poSubmit").disabled = true;
+    try {
+      const body = { brokers, symbol, side: activeSide, stop_loss: sl, take_profit: tp, request_id: requestId };
+      body[sizeMode === "pct" ? "margin_pct" : "size"] = v;
+      const res = await TB.post("/api/orders", body);
+      for (const o of res.orders) TB.toast(`${o.broker}: ${activeSide.toUpperCase()} ${num(o.size, 0)} ${symbol} — ${o.status}`, "ok");
+      for (const [b, e] of Object.entries(res.errors)) TB.toast(`${b}: ${e}`, "error");
+      setTimeout(() => { load(); refreshTicket(false); }, 300);
+    } catch (err) {
+      TB.toast(err.message, "error");
+    } finally {
+      requestId = newRequestId();
+      sending = false; $("poSubmit").disabled = false;
+    }
+  }
+
+  document.querySelectorAll("#poTabs button").forEach((b) => (b.onclick = () => { activeSide = b.dataset.side; paintSide(); refreshTicket(); }));
+  $("poSymbol").onchange = () => refreshTicket();
+  $("poReset").onclick = () => refreshTicket();
+  $("poSize").oninput = () => (sizeMode === "pct" ? debounceTicket() : preview());
+  $("poSl").oninput = $("poTp").oninput = preview;
+  $("poSubmit").onclick = submitOrder;
+  let ticketTimer = null;
+  function debounceTicket() { clearTimeout(ticketTimer); ticketTimer = setTimeout(() => refreshTicket(false), 350); }
+
+  // ── positions ─────────────────────────────────────────────────────────────
+  let loading = false;
+  async function load() {
+    if (!broker || loading) return;
+    loading = true;
+    fillSymbols();
+    loadKpis();
+    try {
+      const [positions, legs] = await Promise.all([TB.get(`/api/positions?broker=${broker}`), TB.get(`/api/open-orders?broker=${broker}`)]);
       $("posError").textContent = "";
-      const upnl = positions.reduce((a, p) => a + p.unrealized_pnl, 0), margin = positions.reduce((a, p) => a + p.margin, 0);
-      $("totals").innerHTML = `<span>Positions <b class="font-mono">${positions.length}</b></span><span>Margin <b class="font-mono">${money(margin)}</b></span><span>Unrealized <b class="font-mono ${pnlClass(upnl)}">${signed(upnl, 4)}</b></span>`;
-      TB.rows("positions", positions, (p) => `<tr>
-        <td class="font-semibold">${esc(p.symbol)}</td><td>${side(p.side)}</td>
-        <td class="r font-mono">${num(p.size, 4)}</td><td class="r font-mono">${price(p.entry_price)}</td><td class="r font-mono">${price(p.mark_price)}</td>
-        <td class="r font-mono ${pnlClass(p.unrealized_pnl)}">${signed(p.unrealized_pnl, 4)}</td>
-        <td class="r font-mono">${money(p.margin)}</td>
-        <td class="r font-mono text-xs cursor-pointer group" ${broker === "paper" ? `data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}" data-entry="${p.entry_price}" data-side="${esc(p.side)}"` : ""}>
-           <div class="text-[#00b852] group-hover:underline">TP: ${p.take_profit ? price(p.take_profit) + ' <span class="muted text-[10px]">(' + Math.abs((p.take_profit - p.entry_price) / p.entry_price * 100).toFixed(2) + '%)</span>' : "—"}</div>
-           <div class="text-[#eb5757] group-hover:underline mt-1">SL: ${p.stop_loss ? price(p.stop_loss) + ' <span class="muted text-[10px]">(' + Math.abs((p.stop_loss - p.entry_price) / p.entry_price * 100).toFixed(2) + '%)</span>' : "—"}</div>
-        </td>
-        <td class="r font-mono muted">${price(p.liquidation_price)}</td>
-        <td class="font-mono">${esc(p.strategy || "—")}</td>
-        <td class="muted">${p.opened_at ? duration(Date.now() / 1000 - p.opened_at) : "—"}</td>
-        <td class="r">
-          ${broker === "paper" ? `<button class="btn btn-sm btn-danger px-2" data-close="${esc(p.symbol)}"><i data-lucide="x"></i></button>` : ""}
-        </td></tr>`, `No open ${broker} positions`, 12);
+      const rel = (level, entry) => `<span class="muted text-[10px]">(${num(Math.abs((level - entry) / entry) * 100, 2)}%)</span>`;
+      TB.rows("positions", positions, (p) => {
+        const c = p.control;
+        const trail = c ? `<div class="flex items-center gap-2">
+            <label class="switch sm" title="Auto trailing for this position"><input type="checkbox" data-trail="${esc(p.symbol)}" ${c.trailing ? "checked" : ""}><span class="track"></span></label>
+            <span class="font-mono text-[11px] ${c.steps >= c.max_steps ? "muted" : ""}" title="trails done / max">${c.steps}/</span>
+            <input type="number" min="0" max="50" step="1" value="${c.max_steps}" data-max="${esc(p.symbol)}" class="input font-mono !py-0.5 !px-1.5 w-12 text-[11px]" title="Max trails for this position">
+          </div>` : '<span class="muted text-[11px]">starting…</span>';
+        return `<tr>
+          <td class="font-semibold">${esc(p.symbol)}</td><td>${side(p.side)}</td>
+          <td class="r font-mono">${num(p.size, 0)}</td><td class="r font-mono">${price(p.entry_price)}</td><td class="r font-mono">${price(p.mark_price)}<div class="text-[10px] muted" title="liquidation price">liq ${price(p.liquidation_price)}</div></td>
+          <td class="r font-mono ${pnlClass(p.unrealized_pnl)}" title="margin ${money(p.margin)}">${signed(p.unrealized_pnl)}<div class="text-[10px]">${pct(p.roe_pct)} on ${money(p.margin)}</div></td>
+          <td class="min-w-[140px]">${levelsBar(p)}</td>
+          <td class="r font-mono text-xs cursor-pointer group" title="Edit SL / TP" data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}" data-entry="${p.entry_price}" data-side="${esc(p.side)}">
+             <div class="up group-hover:underline">TP ${p.take_profit ? `${price(p.take_profit)} ${rel(p.take_profit, p.entry_price)}` : "—"}</div>
+             <div class="down group-hover:underline mt-1">SL ${p.stop_loss ? `${price(p.stop_loss)} ${rel(p.stop_loss, p.entry_price)}` : "—"}</div>
+          </td>
+          <td>${trail}</td>
+          <td class="font-mono text-[11px]">${p.strategy === "manual" ? '<span class="badge badge-blue">MANUAL</span>' : p.strategy ? `<span class="badge">AUTO</span> ${esc(p.strategy)}` : "—"}
+            <div class="muted mt-0.5">${p.opened_at ? duration(Date.now() / 1000 - p.opened_at) : ""}</div></td>
+          <td class="r"><button class="btn btn-sm btn-danger px-2" title="Market close on ${esc(broker)}" data-close="${esc(p.symbol)}"><i data-lucide="x"></i></button></td></tr>`;
+      }, `No open ${broker} positions`, 11);
       TB.rows("legs", legs, (o) => `<tr>
         <td class="font-semibold">${esc(o.symbol)}</td><td><span class="badge">${esc(o.type)}</span></td><td>${side(o.side)}</td>
         <td class="r font-mono">${num(o.size, 4)}</td><td class="r font-mono">${price(o.price)}</td><td>${TB.status(o.state)}</td>
         <td class="font-mono muted">${esc(o.client_order_id || o.id)}</td></tr>`, "No resting orders", 7);
     } catch (err) {
       $("posError").textContent = err.message;
-      TB.rows("positions", [], () => "", `Could not load ${broker} positions`, 12);
+      TB.rows("positions", [], () => "", `Could not load ${broker} positions`, 11);
       TB.rows("legs", [], () => "", "—", 7);
+    } finally {
+      loading = false;
     }
-    
-    // Show manual order placement only for paper broker
-    TB.$("placeOrderCard").style.display = broker === "paper" ? "block" : "none";
-
     bind();
     TB.icons();
   }
 
+  async function control(symbol, body) {
+    try { await TB.post(`/api/positions/${broker}/${encodeURIComponent(symbol)}/control`, body); TB.toast(`${symbol}: trailing updated`, "ok"); }
+    catch (err) { TB.toast(err.message, "error"); }
+    load();
+  }
+
   function bind() {
-
-    document.querySelectorAll("[data-close]").forEach((b) => b.onclick = async () => {
+    document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = async () => {
       const symbol = b.dataset.close;
-      if (!await TB.ask({ title: `Close ${symbol}?`, body: `Market-close the ${esc(symbol)} position on <b>all active brokers</b>.`, ok: "Close position", danger: true })) return;
-      try { await TB.post(`/api/positions/all/${encodeURIComponent(symbol)}/close`); TB.toast(`${symbol} closed`, "ok"); } catch (err) { TB.toast(err.message, "error"); }
+      const ok = await TB.ask({
+        title: `Close ${symbol} on ${broker}?`,
+        body: `Market-close the ${esc(symbol)} position on <b>${esc(broker)}</b> only.${realMoney(broker) ? ' <b class="text-red-600">Live account: real money.</b>' : ""}`,
+        ok: "Close position", danger: true,
+      });
+      if (!ok) return;
+      try { await TB.post(`/api/positions/${broker}/${encodeURIComponent(symbol)}/close`); TB.toast(`${symbol} closed on ${broker}`, "ok"); }
+      catch (err) { TB.toast(err.message, "error"); }
       load();
-    });
-    document.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
-      const symbol = b.dataset.edit;
-      const entry = parseFloat(b.dataset.entry);
-      const side = b.dataset.side;
-      let currentSl = b.dataset.sl ? parseFloat(b.dataset.sl) : "";
-      let currentTp = b.dataset.tp ? parseFloat(b.dataset.tp) : "";
-
-      const modal = TB.$("sltpModal");
-      TB.$("sltpTitle").textContent = `Protection for ${symbol}`;
-      TB.$("sltpEntry").textContent = TB.price(entry);
-      TB.$("sltpSide").textContent = side.toUpperCase();
-      
-      const slPrice = TB.$("slPrice"), slPct = TB.$("slPct"), tpPrice = TB.$("tpPrice"), tpPct = TB.$("tpPct");
-      slPrice.value = currentSl;
-      tpPrice.value = currentTp;
-      
-      const isLong = side === 'buy' || side === 'long';
-
-      const updatePcts = () => {
-         if (slPrice.value) {
-            let diff = isLong ? entry - slPrice.value : slPrice.value - entry;
-            slPct.value = ((diff / entry) * 100).toFixed(2);
-         } else { slPct.value = ""; }
-         if (tpPrice.value) {
-            let diff = isLong ? tpPrice.value - entry : entry - tpPrice.value;
-            tpPct.value = ((diff / entry) * 100).toFixed(2);
-         } else { tpPct.value = ""; }
-      };
-      
-      const updatePrices = (isSl) => {
-         if (isSl && slPct.value) {
-            let pct = Math.abs(parseFloat(slPct.value)) / 100;
-            slPrice.value = isLong ? entry * (1 - pct) : entry * (1 + pct);
-         }
-         if (!isSl && tpPct.value) {
-            let pct = Math.abs(parseFloat(tpPct.value)) / 100;
-            tpPrice.value = isLong ? entry * (1 + pct) : entry * (1 - pct);
-         }
-      };
-
-      slPrice.oninput = () => updatePcts();
-      tpPrice.oninput = () => updatePcts();
-      slPct.oninput = () => updatePrices(true);
-      tpPct.oninput = () => updatePrices(false);
-
-      updatePcts();
-      modal.classList.remove("hidden");
-      modal.classList.add("flex");
-
-      const close = () => { modal.classList.add("hidden"); modal.classList.remove("flex"); };
-      TB.$("sltpCancel").onclick = close;
-      TB.$("sltpOk").onclick = async () => {
-         close();
-         const sl = slPrice.value ? Number(slPrice.value) : 0;
-         const tp = tpPrice.value ? Number(tpPrice.value) : 0;
-         try { await TB.post(`/api/positions/all/${encodeURIComponent(symbol)}/protection`, { stop_loss: sl, take_profit: tp }); TB.toast("Protection updated on all accounts", "ok"); } catch (err) { TB.toast(err.message, "error"); }
-         load();
-      };
-    });
+    }));
+    document.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => editProtection(b.dataset)));
+    document.querySelectorAll("[data-trail]").forEach((el) => (el.onchange = () => control(el.dataset.trail, { trailing: el.checked })));
+    document.querySelectorAll("[data-max]").forEach((el) => (el.onchange = () => {
+      const v = Number(el.value);
+      if (!Number.isInteger(v) || v < 0 || v > 50) { TB.toast("Max trails: a whole number from 0 to 50", "error"); return load(); }
+      control(el.dataset.max, { max_steps: v });
+    }));
   }
 
-  async function submitOrder() {
-    const symbol = TB.$("poSymbol").value;
-    const size = parseFloat(TB.$("poSize").value);
-    const sl = parseFloat(TB.$("poSl").value) || null;
-    const tp = parseFloat(TB.$("poTp").value) || null;
-    
-    if (!size || size <= 0) {
-      TB.toast("Please enter a valid size", "error");
-      return;
-    }
-    
-    try {
-      const payload = { broker, symbol, side: activeSide, size, stop_loss: sl, take_profit: tp };
-      await TB.post("/api/orders", payload);
-      TB.toast(`Order placed: ${activeSide.toUpperCase()} ${symbol}`, "ok");
-      
-      updateOrderDefaults();
+  function editProtection(d) {
+    const symbol = d.edit, entry = parseFloat(d.entry), isLong = d.side === "long" || d.side === "buy";
+    const slPrice = $("slPrice"), slPct = $("slPct"), tpPrice = $("tpPrice"), tpPct = $("tpPct"), modal = $("sltpModal");
+    $("sltpTitle").textContent = `Protection for ${symbol} on ${broker}`;
+    $("sltpEntry").textContent = price(entry);
+    $("sltpSide").textContent = d.side.toUpperCase();
+    slPrice.value = d.sl; tpPrice.value = d.tp;
+
+    const toPct = () => {
+      slPct.value = slPrice.value ? (((isLong ? entry - slPrice.value : slPrice.value - entry) / entry) * 100).toFixed(2) : "";
+      tpPct.value = tpPrice.value ? (((isLong ? tpPrice.value - entry : entry - tpPrice.value) / entry) * 100).toFixed(2) : "";
+    };
+    const toPrice = (input, out, sign) => {
+      if (!input.value) return;
+      const p = Math.abs(parseFloat(input.value)) / 100;
+      out.value = +(entry * (1 + sign * (isLong ? 1 : -1) * p)).toFixed(2);
+    };
+    slPrice.oninput = tpPrice.oninput = toPct;
+    slPct.oninput = () => toPrice(slPct, slPrice, -1);
+    tpPct.oninput = () => toPrice(tpPct, tpPrice, 1);
+    toPct();
+
+    modal.classList.remove("hidden"); modal.classList.add("flex");
+    const close = () => { modal.classList.add("hidden"); modal.classList.remove("flex"); };
+    $("sltpCancel").onclick = close;
+    $("sltpOk").onclick = async () => {
+      const sl = Number(slPrice.value), tp = tpPrice.value ? Number(tpPrice.value) : null;
+      if (!sl) return TB.toast("A stop loss is required", "error");
+      if (realMoney(broker) && !await TB.ask({ title: "Change protection on your LIVE account?", body: "New SL/TP orders are placed first; the old ones are cancelled only after they are in.", ok: "Update", danger: true })) return;
+      close();
+      try { await TB.post(`/api/positions/${broker}/${encodeURIComponent(symbol)}/protection`, { stop_loss: sl, take_profit: tp }); TB.toast(`Protection updated on ${broker}`, "ok"); }
+      catch (err) { TB.toast(err.message, "error"); }
       load();
-    } catch (err) {
-      TB.toast(err.message, "error");
-    }
+    };
   }
 
-  TB.$("poSubmit").onclick = submitOrder;
-
-  brokerTabs((b) => { broker = b; load(); });
-  TB.on(["PositionUpdate", "PositionClosed", "OrderPlaced", "SettingsChanged"], () => setTimeout(load, 200));
+  brokerTabs((b) => { broker = b; $("posBroker").textContent = `on ${b}`; load(); });
+  paintSide(); paintBrokers(); setMode("pct");
+  setTimeout(() => refreshTicket(), 300);  // after the header has the symbol list
+  TB.on(["PositionUpdate", "PositionClosed", "OrderPlaced", "OrderFailed", "ProtectionTrailed", "DailyLossHalt", "SettingsChanged"], () => setTimeout(load, 200));
   setInterval(load, 3000);
+  setInterval(() => { if (!document.hidden && !sending) refreshTicket(false); }, 15000);
 })();
 </script>
 {% endblock %}

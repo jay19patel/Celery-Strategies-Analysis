@@ -20,6 +20,10 @@ class FakeExchange:
         self.history: list[Candle] = []
         self.chain: list[OptionQuote] = []
         self.spec: dict[str, Any] = {"id": 27, "contract_value": 0.001, "tick_size": 0.5}
+        self.leverage: Any = 10.0  # an Exception raises
+        self.protection: list[dict[str, Any]] = []  # update_position_protection calls
+        self.protection_result: Any = {"placed": ["1", "2"], "errors": []}  # an Exception raises
+        self.close_all_calls = 0
         self.clients: list[FakeClient] = []
 
     def client(self, base_url: str, api_key: str = "", api_secret: str = "") -> FakeClient:
@@ -76,11 +80,25 @@ class FakeClient:
         self._auth()
         return [{"asset_symbol": "USD", "balance": "100", "available_balance": "90", "position_margin": "10", "order_margin": "0"}]
 
-    async def open_orders(self):
+    async def open_orders(self, product_id=None):
         return []
 
+    async def order_leverage(self, product_id):
+        self._auth()
+        if isinstance(self.x.leverage, Exception):
+            raise self.x.leverage
+        return self.x.leverage
+
+    async def update_position_protection(self, symbol, stop_loss, take_profit=None):
+        self.x.protection.append({"symbol": symbol, "stop_loss": stop_loss, "take_profit": take_profit})
+        if isinstance(self.x.protection_result, Exception):
+            raise self.x.protection_result
+        return self.x.protection_result
+
     async def close_all(self):
-        return {"closed": [], "errors": []}
+        self._auth()
+        self.x.close_all_calls += 1
+        return {"closed": [p["product_symbol"] for p in self.x.open_positions], "errors": []}
 
     async def aclose(self):
         self.closed = True

@@ -6,17 +6,18 @@ single-process mode, or the engine over ZeroMQ RPC in distributed mode.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from tradebuddy.api import Api, ApiError, RemoteApi
 from tradebuddy.settings import LIVE_CONFIRM_PHRASE
@@ -57,7 +58,31 @@ class DeltaTest(BaseModel):
 
 class Protection(BaseModel):
     stop_loss: float
-    take_profit: float
+    take_profit: float | None = None
+
+
+class ManualOrder(BaseModel):
+    brokers: list[str] = Field(min_length=1, max_length=4)
+    symbol: str
+    side: Literal["buy", "sell"]
+    size: int | None = Field(default=None, ge=1)  # contracts, one broker only
+    margin_pct: float | None = Field(default=None, gt=0, le=100)  # or a share of each broker's available margin
+    request_id: str = Field(min_length=8, max_length=64)
+    stop_loss: float = Field(gt=0)
+    take_profit: float | None = Field(default=None, gt=0)
+
+
+class PositionControl(BaseModel):
+    trailing: bool | None = None
+    max_steps: int | None = Field(default=None, ge=0, le=50)
+
+
+def asset_version() -> str:
+    digest = hashlib.sha256()
+    for path in sorted((HERE / "static").rglob("*")):
+        if path.is_file():
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
@@ -67,6 +92,8 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
     app = FastAPI(title="TradeBuddy", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
+    # Static URLs carry a hash of the files, so a browser never runs an old app.js against new pages.
+    templates.env.globals["v"] = asset_version()
 
     def protected(x_api_token: str = Header(default="")) -> None:
         if api_token and not hmac.compare_digest(x_api_token, api_token):
@@ -99,10 +126,9 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
 
     for page_id, path, _icon, title, _group in PAGES:
         page(page_id, path, title)
-        
-    from fastapi.responses import RedirectResponse
+
     @app.get("/paper", include_in_schema=False)
-    async def paper_redirect():
+    async def paper_redirect() -> RedirectResponse:
         return RedirectResponse(url="/account?broker=paper")
 
     # -- read ---------------------------------------------------------------
@@ -132,8 +158,24 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
         return await call("orders", broker=broker, limit=limit)
 
     @app.post("/api/orders", dependencies=[Depends(protected)])
-    async def place_order(payload: dict) -> dict:
-        return await call("place_order", **payload)
+    async def place_order(body: ManualOrder) -> dict:
+        return await call("place_order", **body.model_dump())
+
+    @app.get("/api/order-ticket")
+    async def order_ticket(symbol: str, side: Literal["buy", "sell"] = "buy", margin_pct: float | None = None) -> dict:
+        return await call("order_ticket", symbol=symbol, side=side, margin_pct=margin_pct)
+
+    @app.get("/api/risk")
+    async def risk() -> dict:
+        return await call("risk")
+
+    @app.post("/api/risk/{broker}/resume", dependencies=[Depends(protected)])
+    async def risk_resume(broker: str) -> dict:
+        return await call("risk_resume", broker=broker)
+
+    @app.post("/api/positions/{broker}/{symbol}/control", dependencies=[Depends(protected)])
+    async def position_control(broker: str, symbol: str, body: PositionControl) -> dict:
+        return await call("set_position_control", broker=broker, symbol=symbol, trailing=body.trailing, max_steps=body.max_steps)
 
     @app.get("/api/open-orders")
     async def open_orders(broker: str | None = None) -> list[dict]:
@@ -189,9 +231,9 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
     async def close_position(broker: str, symbol: str) -> dict:
         return await call("close_position", broker=broker, symbol=symbol)
 
-    @app.post("/api/positions/all/{symbol}/protection", dependencies=[Depends(protected)])
-    async def protection(symbol: str, body: Protection) -> dict:
-        return await call("protection", symbol=symbol, stop_loss=body.stop_loss, take_profit=body.take_profit)
+    @app.post("/api/positions/{broker}/{symbol}/protection", dependencies=[Depends(protected)])
+    async def protection(broker: str, symbol: str, body: Protection) -> dict:
+        return await call("protection", broker=broker, symbol=symbol, stop_loss=body.stop_loss, take_profit=body.take_profit)
 
     @app.post("/api/paper/reset", dependencies=[Depends(protected)])
     async def paper_reset() -> dict:

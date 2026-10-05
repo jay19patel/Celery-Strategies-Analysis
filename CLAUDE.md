@@ -27,6 +27,7 @@ engine  PriceBook · StrategyRunner · Trader · Executor · brokers · SQLite
               inline: evaluate() on the loop      celery: send_task ─► worker ─► PUSH
           StrategyEvaluated ─► StrategyRunner ─► SignalGenerated ─► Trader
           Trader ─► OrderRequested (one per active broker) ─► Executor ─► broker
+          dashboard order ─► Trader.manual (same gate) ─► OrderRequested ─► Executor
         ── PUB every event ──► web (dashboard /ws), feed (SettingsChanged)
         ◄─ RPC (api.METHODS) ── web
 worker  Celery task: evaluate() one strategy on one bar, PUSH the result
@@ -41,7 +42,13 @@ worker  Celery task: evaluate() one strategy on one bar, PUSH the result
 - `brokers/base.py` — the `Broker` protocol. `PaperBroker` and `DeltaBroker` implement it.
 - `delta.py` — the only code that talks to Delta REST.
 - `stream.py` — the only code that talks to the Delta WebSocket.
-- `trading.py` — the only code that decides to trade (`Trader`) and sends orders (`Executor`).
+- `trading.py` — the only code that decides to trade (`Trader`, signals and manual
+  orders alike) and sends orders (`Executor`). Dashboard actions name one broker;
+  nothing acts on "all brokers" except the kill switch.
+- `guard.py` — `PositionGuard`, an engine loop over every active broker: the daily loss
+  limit (closes that broker's positions, blocks its entries until the next day) and
+  auto trailing (per-position switch and max trails in `position_controls`). It moves
+  SL/TP only through `Broker.update_protection`, under `System.protection_lock`.
 - `settings.py` — validation for every runtime setting; `System._apply` applies them.
 - `strategies/` — signal logic only.
 
@@ -53,7 +60,8 @@ Enforced by tests. Breaking one should fail the build.
    real-money needs `LIVE_CONFIRM_PHRASE`. `trading:delta` resets to off on
    every start and on any change to the Delta account or keys.
 2. **One order per broker × strategy × symbol × bar.** `client_order_id` is derived from
-   them and is the orders table primary key. Paper is idempotent on it too.
+   them and is the orders table primary key. Paper is idempotent on it too. A manual
+   order's id is derived from the broker and the dashboard's per-ticket `request_id`.
 3. **Timeout is not rejection.** `BrokerTimeout` is looked up by
    `client_order_id`, never resent. Unresolved, the symbol stays blocked on
    that broker.
@@ -63,12 +71,14 @@ Enforced by tests. Breaking one should fail the build.
    `lookback` must see the bar that closed.
 6. **The broker decides.** Before an entry, open positions are read from the
    broker; if that fails, no trade.
-7. **Protected entries.** SL/TP go with the entry (Delta bracket; paper
+7. **Protected entries.** SL/TP go with the entry (a manual order needs an SL; an SL
+   edit places the new legs before cancelling the old) (Delta bracket; paper
    checks every tick, plus liquidation and max hold).
 8. **Absence over staleness.** A WebSocket price older than 30s is no price.
 9. **Secrets stay in the process.** No endpoint returns an API key or secret;
    `Settings.public()` masks them and `SettingsChanged` carries field names only.
-10. Every refusal to trade is a `TradeSkipped` event with its reason.
+10. Every refusal to trade is a `TradeSkipped` event with its reason, including a
+    broker halted by its daily loss limit.
 11. **Late is stale.** A strategy result that finishes more than a bar after
     its bar closed is dropped; Celery tasks expire after one bar.
 12. **ZeroMQ is not durable.** Nothing that must survive a restart travels

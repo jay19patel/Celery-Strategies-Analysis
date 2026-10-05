@@ -11,9 +11,11 @@ import time
 from typing import Any
 
 from tradebuddy.brokers import Broker
+from tradebuddy.delta import round_to_tick
 from tradebuddy.errors import BrokerError
 from tradebuddy.settings import SettingsError
 from tradebuddy.system import System
+from tradebuddy.trading import TradeRefused
 from tradebuddy.transport import RpcClient, RpcError
 
 SIGNAL_EVENTS = ["SignalGenerated", "TradeSkipped", "StrategyError"]
@@ -23,7 +25,8 @@ ACTIVITY_EVENTS = [*SIGNAL_EVENTS, "OrderPlaced", "OrderFailed", "OrderUnknown",
 METHODS = (
     "page_context", "header", "overview", "strategies", "signals", "positions", "orders", "open_orders", "account",
     "paper_stats", "paper_trades", "metrics", "events", "settings", "update_settings", "clear_credentials",
-    "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order",
+    "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order", "order_ticket",
+    "set_position_control", "risk", "risk_resume",
 )
 
 
@@ -79,6 +82,7 @@ class Api:
             "strategies": self.system.strategies_view(),
             "recent": store.recent_events(15, types=ACTIVITY_EVENTS),
             "paper": self.system.paper.stats(),
+            "risk": await self.risk(),
         }
 
     async def strategies(self) -> list[dict[str, Any]]:
@@ -89,7 +93,16 @@ class Api:
         return [r for r in rows if (not strategy or r.get("strategy") == strategy) and (not symbol or r.get("symbol") == symbol)]
 
     async def positions(self, broker: str | None = None) -> list[dict[str, Any]]:
-        return [p.to_dict() for p in await self._call(self._broker(broker).positions())]
+        b = self._broker(broker)
+        controls = self.system.store.controls(b.name)
+        out = []
+        for p in await self._call(b.positions()):
+            row = p.to_dict()
+            c = controls.get(p.symbol)
+            row["control"] = {k: c[k] for k in ("trailing", "max_steps", "steps")} | {"trailing": bool(c["trailing"])} if c else None
+            row["roe_pct"] = p.unrealized_pnl / p.margin * 100 if p.margin else None
+            out.append(row)
+        return out
 
     async def orders(self, broker: str | None = None, limit: int = 300) -> list[dict[str, Any]]:
         return self.system.store.recent_orders(min(limit, 2000), broker=broker)
@@ -142,38 +155,106 @@ class Api:
         return await self.system.close_all()
 
     async def close_position(self, broker: str, symbol: str) -> dict[str, Any]:
-        if broker == "all":
-            closed = []
-            for name, b in self.system.active.items():
-                try:
-                    await self._call(b.close_position(symbol))
-                    closed.append(name)
-                except BrokerError:
-                    pass
-            return {"closed": closed}
+        """Closes on the named broker only: a click on one account never touches another."""
         return await self._call(self._broker(broker).close_position(symbol))
 
-    async def protection(self, symbol: str, stop_loss: float, take_profit: float) -> dict[str, Any]:
-        for name, broker in self.system.active.items():
-            if name == "paper":
-                try:
-                    self.system.paper.update_protection(symbol, stop_loss, take_profit)
-                except BrokerError:
-                    pass
-            elif hasattr(broker, "update_protection"):
-                try:
-                    await self._call(broker.update_protection(symbol, stop_loss, take_profit))
-                except BrokerError:
-                    pass
-        return {"symbol": symbol, "stop_loss": stop_loss, "take_profit": take_profit}
+    async def protection(self, broker: str, symbol: str, stop_loss: float, take_profit: float | None = None) -> dict[str, Any]:
+        if not stop_loss or stop_loss <= 0:
+            raise ApiError(400, "a stop loss is required: a position is never left without one")
+        async with self.system.protection_lock:
+            await self._call(self._broker(broker).update_protection(symbol, stop_loss, take_profit or None))
+        return {"broker": broker, "symbol": symbol, "stop_loss": stop_loss, "take_profit": take_profit or None}
 
-    async def place_order(self, broker: str, symbol: str, side: str, size: float, stop_loss: float | None = None, take_profit: float | None = None) -> dict[str, Any]:
-        import uuid
+    async def place_order(
+        self, brokers: list[str], symbol: str, side: str, request_id: str, stop_loss: float | None = None,
+        take_profit: float | None = None, size: int | None = None, margin_pct: float | None = None,
+    ) -> dict[str, Any]:
+        """One ticket, one or more brokers. With margin_pct each broker sizes from its own available
+        margin, so paper and Delta open the same position as a share of their capital. Each broker is
+        gated and recorded on its own; one refusing never stops another. The outcomes arrive as
+        OrderPlaced / OrderFailed / OrderUnknown."""
+        if not brokers:
+            raise ApiError(400, "choose at least one broker")
+        if size is not None and len(brokers) > 1:
+            raise ApiError(400, "contracts mean different exposure on each broker: size several brokers by margin_pct")
+        for name in brokers:
+            self._broker(name)
+        orders, errors = [], {}
+        for name in dict.fromkeys(brokers):
+            try:
+                orders.append(await self.system.trader.manual(name, symbol, side, size, stop_loss, take_profit, request_id, margin_pct))
+            except TradeRefused as exc:
+                errors[name] = str(exc)
+        if not orders:
+            raise ApiError(409, "; ".join(f"{b}: {e}" for b, e in errors.items()))
+        return {"orders": orders, "errors": errors}
+
+    async def order_ticket(self, symbol: str, side: str = "buy", margin_pct: float | None = None) -> dict[str, Any]:
+        """Defaults for the order form, and what the ticket would open on each active broker."""
+        s = self.system.settings
+        price = self.system.prices.price(symbol)
+        if price is None:
+            raise ApiError(409, f"no fresh live price for {symbol}")
+        spec = await self._call(self.system.market_client.product(symbol))
+        tick = float(spec.get("tick_size") or 0.5)
+        cv = float(spec.get("contract_value") or 1.0)
+        pct = s.trade_margin_pct if margin_pct is None else margin_pct
+        d = 1 if side == "buy" else -1
+        brokers = []
+        for name, b in self.system.active.items():
+            row: dict[str, Any] = {"broker": name, "real_money": name == "delta" and s.is_real_money,
+                                   "trading": self.system.trading_on(name), "blocked": self.system.guard.halt_reason(name) or b.not_ready()}
+            try:
+                account = await b.account()
+                size = await b.size_for_margin(symbol, price, account.available * pct / 100)
+                row |= {"available": account.available, "currency": account.currency, "size": size, "notional": size * cv * price,
+                        "margin": account.available * pct / 100, "error": ""}
+            except BrokerError as exc:
+                row |= {"available": None, "size": 0, "notional": 0, "margin": 0, "error": str(exc)}
+            brokers.append(row)
+        return {
+            "symbol": symbol, "side": side, "price": price, "tick_size": tick, "contract_value": cv, "margin_pct": pct,
+            "stop_loss": float(round_to_tick(price * (1 - d * s.stop_loss_pct / 100), tick)),
+            "take_profit": float(round_to_tick(price * (1 + d * s.take_profit_pct / 100), tick)),
+            "stats": (self.system.prices.snapshot().get(symbol) or {}).get("stats"), "brokers": brokers,
+        }
+
+    async def set_position_control(self, broker: str, symbol: str, trailing: bool | None = None, max_steps: int | None = None) -> dict[str, Any]:
+        """Per-position trailing: switch it on or off, or change how many times it may trail."""
+        self._broker(broker)
+        changes: dict[str, Any] = {}
+        if trailing is not None:
+            changes["trailing"] = bool(trailing)
+        if max_steps is not None:
+            if isinstance(max_steps, bool) or int(max_steps) != max_steps or not 0 <= max_steps <= 50:
+                raise ApiError(400, "max trails must be a whole number from 0 to 50")
+            changes["max_steps"] = int(max_steps)
+        if not changes:
+            raise ApiError(400, "nothing to change")
+        if not self.system.store.update_control(broker, symbol, **changes):
+            raise ApiError(404, f"no tracked {symbol} position on {broker} yet — the guard picks new positions up within seconds")
+        return self.system.store.controls(broker)[symbol]
+
+    async def risk(self) -> dict[str, Any]:
+        s = self.system.settings
+        return {
+            "brokers": [self.system.guard.status.get(name, {"broker": name}) for name in s.active_brokers],
+            "trailing": {k: getattr(s, k) for k in ("trailing_enabled", "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps")},
+            "daily_loss_limit_pct": s.daily_loss_limit_pct, "day_timezone": s.day_timezone,
+        }
+
+    async def risk_resume(self, broker: str) -> dict[str, Any]:
+        """Lift today's daily-loss halt on one broker. Its day restarts from the current equity."""
+        from tradebuddy.guard import trading_day
+
         b = self._broker(broker)
-        client_order_id = f"manual_{uuid.uuid4().hex[:8]}"
-        await self._call(b.place_order(symbol, side, size, client_order_id, stop_loss, take_profit, strategy="Manual"))
-        return {"status": "ok"}
-
+        day = trading_day(self.system.settings.day_timezone)
+        if not self.system.store.day_risk(broker, day):
+            raise ApiError(404, f"{broker} has no risk record for {day}")
+        account = await self._call(b.account())
+        self.system.store.resume_day(broker, day, account.equity)
+        await self.system.guard.check()
+        return await self.risk()
 
     async def paper_reset(self) -> dict[str, Any]:
         self.system.paper.reset()

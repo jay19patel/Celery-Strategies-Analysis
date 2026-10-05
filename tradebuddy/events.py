@@ -37,6 +37,27 @@ class Tick(Event):
 
 
 @dataclass(frozen=True, kw_only=True)
+class MarketStats(Event):
+    """The exchange's rolling 24h view of a symbol, from the same ticker message as Tick."""
+
+    symbol: str
+    last: float | None = None  # last traded price
+    mark: float | None = None
+    index: float | None = None  # spot / index price
+    open_24h: float | None = None
+    high_24h: float | None = None
+    low_24h: float | None = None
+    change_24h_pct: float | None = None  # last price vs 24h ago, as the exchange reports it
+    mark_change_24h_pct: float | None = None
+    volume_24h: float | None = None  # in the underlying (BTC for BTCUSD)
+    turnover_24h_usd: float | None = None
+    oi_usd: float | None = None
+    funding_rate_pct: float | None = None
+    bid: float | None = None
+    ask: float | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
 class CandleClosed(Event):
     symbol: str
     resolution: str
@@ -123,8 +144,8 @@ class OrderRequested(Event):
     side: str
     size: int
     price: float
-    stop_loss: float
-    take_profit: float
+    stop_loss: float | None
+    take_profit: float | None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -176,6 +197,44 @@ class PositionClosed(Event):
     exit_price: float
     pnl: float
     reason: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class ProtectionTrailed(Event):
+    """The guard moved a position's SL/TP after price covered most of the way to the target."""
+
+    broker: str
+    symbol: str
+    step: int
+    max_steps: int
+    price: float
+    old_stop_loss: float | None
+    stop_loss: float
+    old_take_profit: float | None
+    take_profit: float
+
+
+@dataclass(frozen=True, kw_only=True)
+class DailyLossHalt(Event):
+    """A broker lost its daily limit: its positions are closed and it opens nothing more today."""
+
+    broker: str
+    day: str
+    loss_pct: float
+    limit_pct: float
+    start_equity: float
+    equity: float
+    closed: list[str]
+    errors: list[str]
+
+
+@dataclass(frozen=True, kw_only=True)
+class GuardAlert(Event):
+    """The position guard could not do something it should have (e.g. trail a stop)."""
+
+    broker: str
+    symbol: str
+    message: str
 
 
 # -- control ------------------------------------------------------------------

@@ -17,6 +17,7 @@ import httpx
 
 from tradebuddy.errors import BrokerError, BrokerTimeout
 
+PROTECTIVE_TYPES = ("stop_loss_order", "take_profit_order")
 RESOLUTION_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
 
 
@@ -162,12 +163,17 @@ class DeltaClient:
         rows = await self.request("GET", "/v2/positions/margined", auth=True) or []
         return [p for p in rows if float(p.get("size") or 0)]
 
+    async def position(self, symbol: str) -> dict[str, Any] | None:
+        return next((p for p in await self.positions() if (p.get("product_symbol") or (p.get("product") or {}).get("symbol")) == symbol), None)
+
     async def balances(self) -> list[dict[str, Any]]:
         return await self.request("GET", "/v2/wallet/balances", auth=True) or []
 
-    async def open_orders(self) -> list[dict[str, Any]]:
+    async def open_orders(self, product_id: Any = None) -> list[dict[str, Any]]:
         """Resting orders, including the SL/TP legs of brackets."""
-        return await self.request("GET", "/v2/orders", params={"states": "open,pending"}, auth=True) or []
+        params = {"states": "open,pending"} | ({"product_ids": str(product_id)} if product_id is not None else {})
+        rows = await self.request("GET", "/v2/orders", params=params, auth=True) or []
+        return [o for o in rows if product_id is None or o.get("product_id") in (None, product_id)]
 
     # -- orders -------------------------------------------------------------
 
@@ -200,57 +206,62 @@ class DeltaClient:
             body["bracket_stop_trigger_method"] = "mark_price"
         return await self.request("POST", "/v2/orders", body=body, auth=True)
 
-    async def update_position_protection(
-        self,
-        symbol: str,
-        stop_loss: float | None = None,
-        take_profit: float | None = None,
-    ) -> dict[str, Any]:
-        """Update Stop Loss and Take Profit by placing new reduce-only orders."""
-        position = next((p for p in await self.positions() if p.get("product_symbol") == symbol or (p.get("product") or {}).get("symbol") == symbol), None)
-        if not position:
-            return {}
-            
-        size = float(position.get("size", 0))
-        if not size:
-            return {}
-            
-        side = "sell" if size > 0 else "buy"
+    async def update_position_protection(self, symbol: str, stop_loss: float, take_profit: float | None = None) -> dict[str, Any]:
+        """Replace the position's SL/TP without ever leaving it unprotected: the new legs are placed
+        first, the old ones cancelled after. If a new leg fails, the legs already placed are withdrawn
+        and the old protection is left as it was."""
+        position = await self.position(symbol)
+        if position is None:
+            raise DeltaError(f"no open {symbol} position")
+        size = float(position["size"])
         product = await self.product(symbol)
         tick = float(product.get("tick_size") or 0.5)
-        
-        # 1. Cancel existing stop/TP orders for this product
-        await self.request("DELETE", "/v2/orders/all", body={"product_id": product["id"], "cancel_stop_orders": True}, auth=True)
-        
-        # 2. Place new stop loss order
-        if stop_loss:
-            body = {
-                "product_id": product["id"],
-                "size": int(abs(size)),
-                "side": side,
-                "order_type": "market_order",
-                "stop_order_type": "stop_loss_order",
-                "stop_price": round_to_tick(stop_loss, tick),
-                "stop_trigger_method": "mark_price",
-                "reduce_only": "true"
-            }
-            await self.request("POST", "/v2/orders", body=body, auth=True)
-            
-        # 3. Place new take profit order
-        if take_profit:
-            body = {
-                "product_id": product["id"],
-                "size": int(abs(size)),
-                "side": side,
-                "order_type": "market_order",
-                "stop_order_type": "take_profit_order",
-                "stop_price": round_to_tick(take_profit, tick),
-                "stop_trigger_method": "mark_price",
-                "reduce_only": "true"
-            }
-            await self.request("POST", "/v2/orders", body=body, auth=True)
-            
-        return {"updated": True}
+        old = [o for o in await self.open_orders(product["id"]) if o.get("stop_order_type") in PROTECTIVE_TYPES]
+
+        placed: list[dict[str, Any]] = []
+        legs = [("stop_loss_order", stop_loss), ("take_profit_order", take_profit)]
+        try:
+            for kind, level in legs:
+                if level:
+                    placed.append(await self.request("POST", "/v2/orders", body={
+                        "product_id": product["id"],
+                        "size": int(abs(size)),
+                        "side": "sell" if size > 0 else "buy",
+                        "order_type": "market_order",
+                        "stop_order_type": kind,
+                        "stop_price": round_to_tick(level, tick),
+                        "stop_trigger_method": "mark_price",
+                        "reduce_only": "true",
+                        "client_order_id": f"tbp{uuid.uuid4().hex[:29]}",
+                    }, auth=True))
+        except DeltaError as exc:
+            leftover = []
+            for leg in placed:
+                try:
+                    await self.cancel_order(leg["id"], product["id"])
+                except DeltaError:
+                    leftover.append(str(leg["id"]))
+            note = f"; new leg(s) {', '.join(leftover)} could not be withdrawn" if leftover else ""
+            raise DeltaError(f"protection unchanged — {exc}{note}") from exc
+
+        errors = []
+        for o in old:
+            try:
+                await self.cancel_order(o["id"], product["id"])
+            except DeltaError as exc:
+                errors.append(f"old {o.get('stop_order_type')} {o['id']} still open: {exc}")
+        return {"placed": [str(leg.get("id")) for leg in placed], "errors": errors}
+
+    async def cancel_order(self, order_id: Any, product_id: Any) -> dict[str, Any]:
+        return await self.request("DELETE", "/v2/orders", body={"id": order_id, "product_id": product_id}, auth=True)
+
+    async def order_leverage(self, product_id: Any) -> float:
+        """The leverage this account trades the product at (set per product on Delta)."""
+        result = await self.request("GET", f"/v2/products/{product_id}/orders/leverage", auth=True) or {}
+        leverage = float(result.get("leverage") or 0)
+        if leverage <= 0:
+            raise DeltaError(f"no leverage set for product {product_id}")
+        return leverage
 
     async def order_by_client_id(self, client_order_id: str) -> dict[str, Any] | None:
         """The order, or None when the exchange has never seen this id."""
@@ -264,10 +275,11 @@ class DeltaClient:
             raise
 
     async def close_all(self) -> dict[str, Any]:
-        """Cancel every open order, then flatten every position with reduce-only market orders."""
-        await self.request("DELETE", "/v2/orders/all", body={"cancel_limit_orders": True, "cancel_stop_orders": True}, auth=True)
+        """Flatten every position with reduce-only market orders, then cancel every open order.
+        Positions are read first: if that fails nothing has been touched and every stop is still in place."""
+        positions = await self.positions()
         closed, errors = [], []
-        for p in await self.positions():
+        for p in positions:
             size = int(float(p["size"]))
             symbol = p.get("product_symbol") or (p.get("product") or {}).get("symbol")
             try:
@@ -275,6 +287,10 @@ class DeltaClient:
                 closed.append(symbol)
             except DeltaError as exc:
                 errors.append(f"{symbol}: {exc}")
+        try:
+            await self.request("DELETE", "/v2/orders/all", body={"cancel_limit_orders": True, "cancel_stop_orders": True}, auth=True)
+        except DeltaError as exc:
+            errors.append(f"cancel open orders: {exc}")
         return {"closed": closed, "errors": errors}
 
     async def aclose(self) -> None:

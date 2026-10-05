@@ -95,6 +95,39 @@
     </section>
   </div>
 
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+    <section class="card">
+      <div class="card-head">
+        <div class="card-title"><i data-lucide="trending-up"></i>Auto trailing <span class="card-sub">default for every new position</span></div>
+        <label class="switch"><input type="checkbox" id="trailing_enabled" name="trailing_enabled"><span class="track"></span><span class="text-xs">On</span></label>
+      </div>
+      <div class="card-body space-y-4">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div><label class="field-label" for="trailing_trigger_pct">Trigger %</label><input id="trailing_trigger_pct" name="trailing_trigger_pct" type="number" step="1" class="input w-full mt-1 font-mono"><div class="field-help">Of the way to target (50–99).</div></div>
+          <div><label class="field-label" for="trailing_extend_pct">Extend target %</label><input id="trailing_extend_pct" name="trailing_extend_pct" type="number" step="5" class="input w-full mt-1 font-mono"><div class="field-help">Of the first target distance.</div></div>
+          <div><label class="field-label" for="trailing_lock_pct">Lock profit %</label><input id="trailing_lock_pct" name="trailing_lock_pct" type="number" step="5" class="input w-full mt-1 font-mono"><div class="field-help">Stop moves to keep this share.</div></div>
+          <div><label class="field-label" for="trailing_max_steps">Max trails</label><input id="trailing_max_steps" name="trailing_max_steps" type="number" step="1" class="input w-full mt-1 font-mono"><div class="field-help">Per position (0–50).</div></div>
+        </div>
+        <div id="trailExample" class="rounded-lg bg-slate-50 border border-slate-100 p-3 text-[11.5px] text-slate-600 leading-relaxed"></div>
+        <p class="text-[11px] muted">A stop only ever tightens. Each position can switch trailing off, or change its own max trails, on the Positions page.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div class="card-title"><i data-lucide="octagon-x"></i>Daily loss limit <span class="card-sub">per broker</span></div></div>
+      <div class="card-body space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="field-label" for="daily_loss_limit_pct">Max loss per day %</label><input id="daily_loss_limit_pct" name="daily_loss_limit_pct" type="number" step="0.5" class="input w-full mt-1 font-mono"><div class="field-help">Of equity at the start of the day. 0 = off.</div></div>
+          <div><label class="field-label" for="day_timezone">Trading day starts</label>
+            <select id="day_timezone" name="day_timezone" class="select w-full mt-1"><option value="Asia/Kolkata">00:00 IST (Asia/Kolkata)</option><option value="UTC">00:00 UTC</option></select></div>
+        </div>
+        <div class="rounded-lg bg-red-50 border border-red-100 p-3 text-[11.5px] text-red-800 leading-relaxed">
+          When a broker's equity falls this far below where it started the day, <b>every position on that broker is closed at market</b> and it opens nothing more — signals or manual — until the next day. Other brokers carry on. You can resume early from the Overview page.
+        </div>
+      </div>
+    </section>
+  </div>
+
   <section class="card">
     <div class="card-head"><div class="card-title"><i data-lucide="lock"></i>Safety</div></div>
     <div class="card-body grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-600">
@@ -117,7 +150,8 @@
 (() => {
   const { $, esc, money } = TB;
   const PHRASE = {{ live_phrase | tojson }};
-  const NUMBERS = ["stop_loss_pct", "take_profit_pct", "trade_margin_pct", "paper_starting_balance", "paper_leverage", "paper_fee_pct", "paper_slippage_pct", "paper_max_hold_hours"];
+  const NUMBERS = ["stop_loss_pct", "take_profit_pct", "trade_margin_pct", "paper_starting_balance", "paper_leverage", "paper_fee_pct", "paper_slippage_pct", "paper_max_hold_hours",
+    "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct"];
   const HOSTS = { demo: "demo.delta.exchange", live: "www.delta.exchange" };
   let saved = null, env = "demo";
 
@@ -127,6 +161,8 @@
     document.querySelector('input[name="paper_active"]').checked = true;
     document.querySelector('input[name="delta_active"]').checked = s.delta_active;
     $("market_data").value = s.market_data;
+    $("trailing_enabled").checked = s.trailing_enabled;
+    $("day_timezone").value = s.day_timezone;
     for (const k of NUMBERS) $(k).value = s[k];
     $("delta_api_key").value = ""; $("delta_api_secret").value = "";
     $("delta_api_key").placeholder = s.delta_api_key ? `stored: ${s.delta_api_key}` : "not set";
@@ -145,6 +181,7 @@
       paper_active: true,
       delta_active: document.querySelector('input[name="delta_active"]').checked,
       delta_env: env, market_data: $("market_data").value,
+      trailing_enabled: $("trailing_enabled").checked, day_timezone: $("day_timezone").value,
     };
     for (const k of NUMBERS) out[k] = Number($(k).value);
     const key = $("delta_api_key").value.trim(), secret = $("delta_api_secret").value.trim();
@@ -172,6 +209,12 @@
     $("envHelp").innerHTML = env === "live" ? '<span class="down font-medium">Live account: Delta orders use real money.</span>' : "Demo account: Delta orders go to the testnet.";
     $("keyHost").textContent = HOSTS[env];
     $("dirty").classList.toggle("hidden", !Object.keys(changes()).length);
+    // A worked example of the trailing rule, from the numbers on the form.
+    const t = c.trailing_trigger_pct / 100, ext = c.trailing_extend_pct / 100, lock = c.trailing_lock_pct / 100, tp = 100 * (1 + c.take_profit_pct / 100);
+    const at = 100 + (tp - 100) * t, nextTp = tp + (tp - 100) * ext, nextSl = 100 + (at - 100) * lock;
+    $("trailExample").innerHTML = c.trailing_enabled
+      ? `Long at <b>100</b>, target <b>${tp.toFixed(2)}</b> (take profit ${c.take_profit_pct}%). At <b>${at.toFixed(2)}</b> (${c.trailing_trigger_pct}% of the way) the target moves to <b>${nextTp.toFixed(2)}</b> and the stop to <b>${nextSl.toFixed(2)}</b>, locking ${c.trailing_lock_pct}% of the profit. Repeats up to <b>${c.trailing_max_steps}×</b>.`
+      : "Off: new positions keep the SL / TP they were opened with. You can still switch trailing on for one position.";
   }
 
   document.querySelectorAll("#envTabs button").forEach((b) => (b.onclick = () => { env = b.dataset.env; paint(); }));

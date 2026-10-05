@@ -12,6 +12,21 @@
   const money = (v, d = 2) => (v === null || v === undefined ? "—" : `${v < 0 ? "-" : ""}$${num(Math.abs(v), d)}`);
   const signed = (v, d = 2) => (v === null || v === undefined ? "—" : `${v > 0 ? "+" : v < 0 ? "-" : ""}$${num(Math.abs(v), d)}`);
   const pnlClass = (v) => (v > 0 ? "up" : v < 0 ? "down" : "muted");
+  const pct = (v, d = 2) => (v === null || v === undefined || Number.isNaN(Number(v)) ? "—" : `${v > 0 ? "+" : ""}${Number(v).toFixed(d)}%`);
+  const compact = (v) => (v === null || v === undefined ? "—" : Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(v));
+  // A gauge from SL (0%) through entry to TP (100%), with the mark as a needle.
+  function levelsBar(p) {
+    if (!p.stop_loss || !p.take_profit) return '<span class="muted text-[11px]">no SL/TP</span>';
+    const lo = Math.min(p.stop_loss, p.take_profit), hi = Math.max(p.stop_loss, p.take_profit), span = hi - lo || 1;
+    const at = (v) => Math.max(0, Math.min(100, ((v - lo) / span) * 100));
+    const long = p.side === "long", moved = p.mark_price - p.entry_price;
+    const toTp = (moved / (p.take_profit - p.entry_price)) * 100, toSl = (moved / (p.stop_loss - p.entry_price)) * 100;
+    return `<div class="lv" title="SL ${price(p.stop_loss)} · entry ${price(p.entry_price)} · TP ${price(p.take_profit)}">
+      <div class="lv-track ${long ? "" : "rev"}"></div>
+      <span class="lv-entry" style="left:${at(p.entry_price)}%"></span>
+      <span class="lv-mark ${toTp >= 0 ? "pos" : "neg"}" style="left:${at(p.mark_price)}%"></span>
+    </div><div class="text-[10px] muted mt-0.5">${toTp >= 0 ? `${num(toTp, 0)}% of the way to target` : `${num(toSl, 0)}% of the way to stop`}</div>`;
+  }
   const time = (ts) => (ts ? new Date(ts * 1000).toLocaleTimeString("en-GB") : "—");
   const dateTime = (ts) => (ts ? new Date(ts * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—");
   const ago = (ts) => {
@@ -34,6 +49,7 @@
   const EVENT_BADGE = {
     SignalGenerated: "badge-blue", OrderPlaced: "badge-green", PositionClosed: "badge-green", TradeSkipped: "badge-amber",
     OrderUnknown: "badge-amber", OrderFailed: "badge-red", StrategyError: "badge-red", SettingsChanged: "badge-blue", ToggleChanged: "",
+    ProtectionTrailed: "badge-green", DailyLossHalt: "badge-solid-red", GuardAlert: "badge-red",
   };
   const eventBadge = (t) => `<span class="badge ${EVENT_BADGE[t] ?? ""}">${esc(t)}</span>`;
 
@@ -154,7 +170,9 @@
     setDot("sbPrivate", h.feed_authenticated);
     if (!delta) $("sbPrivate").className = "dot";
     $("sbPrivateText").textContent = delta ? (h.feed_authenticated ? "Delta private channels" : "Delta private channels off") : "Delta not active";
-    renderTicker(h.prices);
+    const now = Date.now();
+    for (const [sym, p] of Object.entries(h.prices)) if (p.fresh) lastTickAt[sym] ??= now - p.age_seconds * 1000;
+    renderMarquee(h.prices);
     icons();
   }
   async function switchBroker(el) {
@@ -167,16 +185,54 @@
     try { await post("/api/toggles", { key: `trading:${name}`, enabled }); } catch (err) { el.checked = !enabled; toast(err.message, "error"); }
     loadHeader();
   }
-  const lastPrice = {};
-  function renderTicker(prices) {
-    $("tickerStrip").innerHTML = Object.entries(prices).sort().map(([sym, p]) => {
-      const cls = lastPrice[sym] === undefined ? "" : p.price > lastPrice[sym] ? "up" : p.price < lastPrice[sym] ? "down" : "";
-      lastPrice[sym] = p.price;
-      return `<span>${esc(sym)} <b class="${p.fresh ? cls : "down"}">${price(p.price)}</b></span>`;
-    }).join("");
-    $("tickerStrip").classList.toggle("hidden", !Object.keys(prices).length);
-    $("tickerStrip").classList.toggle("md:flex", !!Object.keys(prices).length);
+  // ── price marquee ───────────────────────────────────────────────────────
+  // Scrolls like a news ticker. The track holds the list twice and slides by half its width, so the
+  // loop is seamless. A price with no tick for 30s is shown as STALE, never as current (invariant 8).
+  const STALE_MS = 30000;
+  const lastPrice = {}, lastTickAt = {}, stats = {};
+  let marqueeSymbols = "";
+  function renderMarquee(prices) {
+    const box = $("marquee"), track = $("marqueeTrack");
+    if (!box) return;
+    const syms = Object.keys(prices).sort();
+    box.classList.toggle("hidden", !syms.length);
+    if (!syms.length) return;
+    if (syms.join(",") !== marqueeSymbols) {
+      marqueeSymbols = syms.join(",");
+      const repeat = Math.max(1, Math.ceil(8 / syms.length));  // enough items to fill a wide screen
+      const items = Array.from({ length: repeat }, () => syms).flat().map((s) =>
+        `<span class="marquee-item" data-sym="${esc(s)}"><span class="sym">${esc(s)}</span><span class="px">—</span><span class="chg"></span></span>`).join("");
+      track.innerHTML = items + items;
+      track.style.setProperty("--marquee-duration", `${Math.max(25, repeat * syms.length * 5)}s`);
+    }
+    for (const s of syms) {
+      if (prices[s].stats) stats[s] = prices[s].stats;
+      paintMarquee(s, prices[s].stats?.last ?? prices[s].price);
+    }
   }
+  function paintMarquee(sym, p) {
+    const prev = lastPrice[sym];
+    lastPrice[sym] = p;
+    const stale = !lastTickAt[sym] || Date.now() - lastTickAt[sym] > STALE_MS;
+    const dir = prev === undefined || p === prev ? "" : p > prev ? "up" : "down";
+    const raw = stats[sym]?.change_24h_pct;  // the exchange's own 24h change on the last price
+    const chg = raw === null || raw === undefined ? null : Math.abs(raw) < 0.005 ? 0 : raw;  // never "-0.00%"
+    $("marqueeTrack").querySelectorAll(`[data-sym="${CSS.escape(sym)}"]`).forEach((item) => {
+      item.classList.toggle("stale", stale);
+      const px = item.querySelector(".px");
+      px.textContent = price(p);
+      if (dir) {
+        px.classList.remove("up", "down", "flash-up", "flash-down");
+        void px.offsetWidth;  // restart the flash animation
+        px.classList.add(dir, `flash-${dir}`);
+      }
+      const c = item.querySelector(".chg");
+      c.className = `chg ${stale || chg === null ? "" : chg > 0 ? "up" : chg < 0 ? "down" : ""}`;
+      c.textContent = stale ? "STALE" : chg === null ? "" : `${chg > 0 ? "▲ +" : chg < 0 ? "▼ " : ""}${chg.toFixed(2)}% 24h`;
+      c.title = stale ? "No price for 30s+ — not current" : "24h change of the last traded price, as Delta reports it";
+    });
+  }
+  setInterval(() => { for (const s of Object.keys(lastPrice)) paintMarquee(s, lastPrice[s]); }, 5000);
   async function loadHeader() {
     try { renderHeader(await get("/api/header")); } catch (err) { console.error(err); }
   }
@@ -197,16 +253,29 @@
     on(["ToggleChanged", "SettingsChanged", "FeedStatus"], loadHeader);
     on("Tick", (e) => {
       if (!header) return;
+      const isNew = !(e.symbol in header.prices);
       header.prices[e.symbol] = { price: e.price, age_seconds: 0, fresh: true };
-      renderTicker(header.prices);
+      lastTickAt[e.symbol] = Date.now();
+      if (isNew) renderMarquee(header.prices); else if (!stats[e.symbol]) paintMarquee(e.symbol, e.price);
+    });
+    on("MarketStats", (e) => {
+      stats[e.symbol] = e;
+      if (header?.prices[e.symbol]) header.prices[e.symbol].stats = e;
+      lastTickAt[e.symbol] = Date.now();
+      if (e.last != null && $("marqueeTrack")?.querySelector(`[data-sym="${CSS.escape(e.symbol)}"]`)) paintMarquee(e.symbol, e.last);
     });
     on("SettingsChanged", (e) => { if (e.trading_stopped) toast("Delta settings changed — Delta trading switched off"); });
     on("OrderFailed", (e) => toast(`Order failed: ${e.error}`, "error"));
+    on("OrderUnknown", (e) => toast(`Order outcome unknown — looking it up: ${e.error}`, "error"));
+    on("OrderPlaced", (e) => toast(`Order ${e.status}: ${e.client_order_id}`, "ok"));
+    on("ProtectionTrailed", (e) => toast(`${e.symbol} on ${e.broker} trailed (${e.step}/${e.max_steps}): SL ${price(e.stop_loss)} · TP ${price(e.take_profit)}`, "ok"));
+    on("DailyLossHalt", (e) => toast(`${e.broker}: daily loss limit hit (${num(e.loss_pct, 2)}%). Positions closed; no new entries today.`, "error"));
+    on("GuardAlert", (e) => toast(`${e.broker} ${e.symbol}: ${e.message}`, "error"));
     on("PositionClosed", (e) => toast(`${e.symbol} closed (${e.reason}) ${signed(e.pnl, 4)}`, e.pnl >= 0 ? "ok" : "error"));
   }
 
   window.TB = {
-    $, esc, num, price, money, signed, pnlClass, time, dateTime, ago, duration, side, status, eventBadge,
+    $, esc, num, price, money, signed, pnlClass, pct, compact, levelsBar, stats, time, dateTime, ago, duration, side, status, eventBadge,
     api, get, post, put, on, toast, ask, rows, switchHtml, bindToggles, icons, loadHeader,
     get header() { return header; },
   };

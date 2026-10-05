@@ -9,7 +9,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from tradebuddy.brokers.base import Account, Position
+from tradebuddy.brokers.base import Account, Position, protection_error
 from tradebuddy.errors import BrokerError
 from tradebuddy.events import EventBus, PositionClosed, PositionUpdate, Tick
 from tradebuddy.settings import Settings
@@ -80,6 +80,10 @@ class PaperBroker:
     async def place_order(self, symbol, side, size, client_order_id, stop_loss=None, take_profit=None, strategy=""):
         if existing := await self.order_by_client_id(client_order_id):
             return existing  # idempotent on client_order_id
+        if side not in ("buy", "sell"):
+            raise BrokerError(f"paper: side must be buy or sell, not {side!r}")
+        if size != int(size) or size < 1:
+            raise BrokerError(f"paper: size must be a whole number of contracts, not {size!r}")
         spec = await self.specs(symbol)  # the only await: everything below is atomic on the event loop
         contract_value = float(spec.get("contract_value") or 1.0)
 
@@ -88,6 +92,8 @@ class PaperBroker:
             raise BrokerError(f"paper: no fresh price for {symbol}")
         if self._row(symbol):
             raise BrokerError(f"paper: a {symbol} position is already open")
+        if reason := protection_error(side, price, stop_loss, take_profit):
+            raise BrokerError(f"paper: {reason}")
 
         s = self.settings()
         pos_side = "long" if side == "buy" else "short"
@@ -175,7 +181,7 @@ class PaperBroker:
         # margin = size * contract_value * price / leverage
         # so size = (margin * leverage) / (price * contract_value)
         size = (margin * leverage) / (price * contract_value)
-        return int(max(1, size))
+        return max(0, int(size))  # a budget that buys no whole contract buys nothing
 
     def _close(self, pos: dict[str, Any], exit_price: float, reason: str) -> None:
         gross = self._upnl(pos, exit_price)
@@ -224,14 +230,15 @@ class PaperBroker:
 
     # -- paper-only controls -------------------------------------------------
 
-    def update_protection(self, symbol: str, stop_loss: float, take_profit: float) -> None:
+    async def update_protection(self, symbol: str, stop_loss: float, take_profit: float | None) -> None:
         pos = self._row(symbol)
         if pos is None:
             raise BrokerError(f"no open {symbol} paper position")
-        price = self.prices.price(symbol) or pos["entry_price"]
-        ok = stop_loss < price < take_profit if pos["side"] == "long" else take_profit < price < stop_loss
-        if not ok:
-            raise BrokerError("long: stop < price < target; short: target < price < stop")
+        price = self.prices.price(symbol)
+        if price is None:
+            raise BrokerError(f"paper: no fresh price for {symbol}")
+        if reason := protection_error(pos["side"], price, stop_loss, take_profit):
+            raise BrokerError(f"paper: {reason}")
         self.db.execute("UPDATE paper_positions SET stop_loss = ?, take_profit = ? WHERE symbol = ?", (stop_loss, take_profit, symbol))
 
     def reset(self) -> None:

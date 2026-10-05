@@ -23,7 +23,7 @@ from typing import Any
 from websockets.asyncio.client import connect
 
 from tradebuddy.delta import RESOLUTION_SECONDS, Candle, sign
-from tradebuddy.events import CandleClosed, EventBus, FeedStatus, OrderUpdate, PositionUpdate, Tick
+from tradebuddy.events import CandleClosed, EventBus, FeedStatus, MarketStats, OrderUpdate, PositionUpdate, Tick
 
 log = logging.getLogger(__name__)
 
@@ -34,9 +34,13 @@ class PriceBook:
     def __init__(self, ttl: float = 30.0) -> None:
         self.ttl = ttl
         self._prices: dict[str, tuple[float, float]] = {}
+        self._stats: dict[str, dict[str, Any]] = {}
 
     async def on_tick(self, event: Tick) -> None:
         self._prices[event.symbol] = (event.price, time.monotonic())
+
+    async def on_stats(self, event: MarketStats) -> None:
+        self._stats[event.symbol] = {k: v for k, v in event.to_dict().items() if k not in ("type", "symbol")}
 
     def price(self, symbol: str) -> float | None:
         entry = self._prices.get(symbol)
@@ -46,10 +50,14 @@ class PriceBook:
 
     def clear(self) -> None:
         self._prices.clear()
+        self._stats.clear()
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
         now = time.monotonic()
-        return {s: {"price": p, "age_seconds": round(now - t, 1), "fresh": now - t <= self.ttl} for s, (p, t) in self._prices.items()}
+        return {
+            s: {"price": p, "age_seconds": round(now - t, 1), "fresh": now - t <= self.ttl, "stats": self._stats.get(s)}
+            for s, (p, t) in self._prices.items()
+        }
 
 
 class BarCloser:
@@ -97,6 +105,24 @@ class BarCloser:
         self._last_closed[key] = bar_time
         self.closed_by[source] += 1
         self.bus.publish(CandleClosed(symbol=key[0], resolution=key[1], bar_time=bar_time, source=source, candle=candle))
+
+
+def _f(value: Any) -> float | None:
+    try:
+        return None if value is None or value == "" else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_stats(msg: dict[str, Any]) -> MarketStats:
+    quotes = msg.get("quotes") or {}
+    return MarketStats(
+        symbol=msg["symbol"], last=_f(msg.get("close")), mark=_f(msg.get("mark_price")), index=_f(msg.get("spot_price")),
+        open_24h=_f(msg.get("open")), high_24h=_f(msg.get("high")), low_24h=_f(msg.get("low")),
+        change_24h_pct=_f(msg.get("ltp_change_24h")), mark_change_24h_pct=_f(msg.get("mark_change_24h")),
+        volume_24h=_f(msg.get("volume")), turnover_24h_usd=_f(msg.get("turnover_usd")), oi_usd=_f(msg.get("oi_value_usd")),
+        funding_rate_pct=_f(msg.get("funding_rate")), bid=_f(quotes.get("best_bid")), ask=_f(quotes.get("best_ask")),
+    )
 
 
 def parse_candle(msg: dict[str, Any]) -> Candle | None:
@@ -207,6 +233,7 @@ class DeltaStream:
             price = msg.get("mark_price") or msg.get("close")
             if msg.get("symbol") and price:
                 self.bus.publish(Tick(symbol=msg["symbol"], price=float(price)))
+                self.bus.publish(parse_stats(msg))
         elif kind.startswith("candlestick_"):
             candle = parse_candle(msg)
             if candle and msg.get("symbol"):

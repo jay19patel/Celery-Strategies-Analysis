@@ -1,68 +1,241 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="max-w-4xl mx-auto space-y-8 mt-6 pb-12">
-  <div class="text-center space-y-4 mb-10">
-    <div class="w-16 h-16 bg-brand-500 text-white rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-brand-500/30">
-      <i data-lucide="candlestick-chart" class="w-8 h-8"></i>
+<!-- Accounts today: equity, today's P&L and how much of the daily loss limit is used -->
+<div id="accounts" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+  <section class="card p-5"><div class="skeleton h-24"></div></section>
+</div>
+
+<!-- Markets: the exchange's real 24h numbers -->
+<div id="markets" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+  <section class="card xl:col-span-2">
+    <div class="card-head">
+      <div class="card-title"><i data-lucide="layers"></i>Open positions <span class="card-sub">every active broker</span></div>
+      <a href="/positions" class="btn btn-sm">Manage<i data-lucide="arrow-right"></i></a>
     </div>
-    <h1 class="text-3xl font-bold text-slate-800 tracking-tight">Welcome to TradeBuddy</h1>
-    <p class="text-[15px] text-slate-500 max-w-2xl mx-auto leading-relaxed">
-      Your automated, event-driven crypto trading engine. Connect your strategies, monitor live markets, and execute trades with precision across Paper and Delta Exchange environments.
-    </p>
-  </div>
-
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-    <a href="/strategies" class="card p-5 hover:border-brand-500 transition-colors group block cursor-pointer">
-      <div class="flex items-center gap-3 mb-2">
-        <div class="p-2 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition-colors"><i data-lucide="brain-circuit" class="w-5 h-5"></i></div>
-        <h3 class="font-semibold text-[15px]">Strategies</h3>
-      </div>
-      <p class="text-slate-500 text-[13px] leading-relaxed">
-        Upload and manage your custom trading algorithms. Strategies listen to live candlestick closes and generate buy/sell signals instantly.
-      </p>
-    </a>
-
-    <a href="/account?broker=paper" class="card p-5 hover:border-brand-500 transition-colors group block cursor-pointer">
-      <div class="flex items-center gap-3 mb-2">
-        <div class="p-2 bg-emerald-50 text-emerald-600 rounded-lg group-hover:bg-emerald-600 group-hover:text-white transition-colors"><i data-lucide="flask-conical" class="w-5 h-5"></i></div>
-        <h3 class="font-semibold text-[15px]">Paper Trading</h3>
-      </div>
-      <p class="text-slate-500 text-[13px] leading-relaxed">
-        Test your strategies with zero risk. Our paper trading engine simulates live fills, slippage, and fees based on real WebSocket data.
-      </p>
-    </a>
-
-    <a href="/positions" class="card p-5 hover:border-brand-500 transition-colors group block cursor-pointer">
-      <div class="flex items-center gap-3 mb-2">
-        <div class="p-2 bg-amber-50 text-amber-600 rounded-lg group-hover:bg-amber-600 group-hover:text-white transition-colors"><i data-lucide="layers" class="w-5 h-5"></i></div>
-        <h3 class="font-semibold text-[15px]">Positions & Protection</h3>
-      </div>
-      <p class="text-slate-500 text-[13px] leading-relaxed">
-        Monitor your active trades in real-time. Automatically set and adjust Take Profit and Stop Loss levels with custom percentage tracking.
-      </p>
-    </a>
-
-    <a href="/settings" class="card p-5 hover:border-brand-500 transition-colors group block cursor-pointer">
-      <div class="flex items-center gap-3 mb-2">
-        <div class="p-2 bg-slate-100 text-slate-600 rounded-lg group-hover:bg-slate-600 group-hover:text-white transition-colors"><i data-lucide="settings" class="w-5 h-5"></i></div>
-        <h3 class="font-semibold text-[15px]">System Configuration</h3>
-      </div>
-      <p class="text-slate-500 text-[13px] leading-relaxed">
-        Link your Delta Exchange API keys, toggle live trading, and configure global risk management rules.
-      </p>
-    </a>
-  </div>
-
-  <div class="bg-blue-50 border border-blue-100 rounded-xl p-5 text-blue-800 text-[13px] leading-relaxed mt-6">
-    <div class="flex items-start gap-3">
-      <i data-lucide="info" class="w-5 h-5 shrink-0 mt-0.5 text-blue-600"></i>
-      <div>
-        <strong class="block mb-1 text-sm text-blue-900">System Architecture</strong>
-        TradeBuddy runs as a lightweight background service. It consumes a live market stream from Delta Exchange and routes it to your Python-based strategies. The system automatically manages your order lifecycle, handles network disconnects gracefully, and logs every event securely in a local database.
-      </div>
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th>Broker</th><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">P&amp;L</th><th class="r">ROE</th><th>SL · entry · TP</th><th>Trailing</th></tr></thead>
+        <tbody id="positions"><tr><td colspan="10"><div class="skeleton h-6"></div></td></tr></tbody>
+      </table>
     </div>
-  </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="shield-check"></i>Protection rules</div><a href="/settings" class="btn btn-sm">Edit</a></div>
+    <div id="rules" class="card-body space-y-3 text-[12.5px]"></div>
+  </section>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="flask-conical"></i>Paper performance <span class="card-sub">all closed trades</span></div></div>
+    <div class="card-body space-y-4">
+      <svg id="equity" class="w-full h-20" viewBox="0 0 300 80" preserveAspectRatio="none"></svg>
+      <div id="perf" class="grid grid-cols-3 gap-3"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="brain-circuit"></i>Strategies</div><a href="/strategies" class="btn btn-sm">All</a></div>
+    <div class="scroll">
+      <table class="tbl"><thead><tr><th>Strategy</th><th>TF</th><th class="r">Runs</th><th class="r">Signals</th><th class="r">Errors</th><th>On</th></tr></thead><tbody id="strategies"></tbody></table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="activity"></i>Activity <span class="card-sub">last 24h</span></div></div>
+    <div id="counts" class="grid grid-cols-5 gap-1 px-4 pt-3 text-center"></div>
+    <div id="recent" class="card-body pt-2 max-h-80 overflow-auto"></div>
+  </section>
 </div>
 {% endblock %}
+
 {% block scripts %}
+<script>
+(() => {
+  const { $, esc, num, price, money, signed, pnlClass, pct, compact, levelsBar, side, time, ago, eventBadge } = TB;
+  let data = null;
+
+  // ── accounts ──────────────────────────────────────────────────────────────
+  function brokerTag(name) {
+    const h = TB.header;
+    if (name === "paper") return `<span class="badge badge-blue">PAPER</span>`;
+    return h?.is_real_money ? `<span class="badge badge-solid-red">DELTA · LIVE</span>` : `<span class="badge badge-amber">DELTA · DEMO</span>`;
+  }
+  function meterColor(used) { return used >= 80 ? "#dc2626" : used >= 50 ? "#f59e0b" : "#00b852"; }
+
+  function renderAccounts() {
+    const risk = Object.fromEntries((data.risk?.brokers || []).map((r) => [r.broker, r]));
+    $("accounts").innerHTML = data.accounts.map(({ broker, account: a, error }) => {
+      const r = risk[broker] || {};
+      if (error || !a) return `<section class="card p-5"><div class="flex items-center gap-2 mb-2">${brokerTag(broker)}</div><div class="text-sm down">${esc(error || "no account data")}</div></section>`;
+      const limit = r.limit_pct, used = Math.min(100, r.used_pct || 0);
+      const pnlToday = r.pnl ?? null;
+      return `<section class="card p-5 ${r.halted ? "ring-2 ring-red-400" : ""}">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="flex items-center gap-2">${brokerTag(broker)}<span class="text-[11px] muted">${esc(a.currency)}</span></div>
+            <div class="font-mono text-[26px] font-semibold mt-2 leading-none">${money(a.equity)}</div>
+            <div class="text-[11px] muted mt-1">equity · balance ${money(a.balance)}</div>
+          </div>
+          <div class="text-right">
+            <div class="stat-label">Today</div>
+            <div class="font-mono text-lg font-semibold ${pnlClass(pnlToday)}">${pnlToday === null ? "—" : signed(pnlToday)}</div>
+            <div class="text-[11px] ${pnlClass(r.pnl_pct)}">${r.pnl_pct === undefined ? "" : pct(r.pnl_pct)}</div>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3 mt-4">
+          <div><div class="stat-label">Unrealized</div><div class="stat-value ${pnlClass(a.unrealized_pnl)}">${signed(a.unrealized_pnl)}</div></div>
+          <div><div class="stat-label">Margin used</div><div class="stat-value">${money(a.margin_used)}</div></div>
+          <div><div class="stat-label">Available</div><div class="stat-value">${money(a.available)}</div></div>
+        </div>
+        <div class="mt-4">
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="muted">Daily loss limit ${limit ? `${num(limit, 2)}% · ${money((r.start_equity || 0) * limit / 100)}` : "off"}</span>
+            <span class="font-mono ${used >= 80 ? "down" : "muted"}">${limit ? `${num(used, 0)}% used` : ""}</span>
+          </div>
+          <div class="meter"><div style="width:${limit ? used : 0}%;background:${meterColor(used)}"></div></div>
+          ${r.halted ? `<div class="mt-3 flex items-center justify-between gap-2 rounded-lg bg-red-50 border border-red-100 p-2.5">
+              <span class="text-[11.5px] text-red-700"><b>Halted for today.</b> ${esc(r.halt_reason)}</span>
+              <button class="btn btn-sm btn-danger" data-resume="${esc(broker)}">Resume</button></div>` : ""}
+          ${r.error ? `<div class="mt-2 text-[11px] down">${esc(r.error)}</div>` : ""}
+        </div>
+      </section>`;
+    }).join("");
+    document.querySelectorAll("[data-resume]").forEach((b) => (b.onclick = async () => {
+      const name = b.dataset.resume;
+      if (!await TB.ask({ title: `Resume ${name} today?`, body: "New entries are allowed again. Today's limit restarts from the current equity.", ok: "Resume trading", danger: true })) return;
+      try { await TB.post(`/api/risk/${name}/resume`); TB.toast(`${name} resumed`, "ok"); } catch (err) { TB.toast(err.message, "error"); }
+      load();
+    }));
+  }
+
+  // ── markets ───────────────────────────────────────────────────────────────
+  const marketCard = (sym, p) => {
+    const s = p.stats || {};
+    const last = s.last ?? p.price, chg = s.change_24h_pct;
+    const pos = s.high_24h > s.low_24h ? ((last - s.low_24h) / (s.high_24h - s.low_24h)) * 100 : 50;
+    const spread = s.ask && s.bid ? s.ask - s.bid : null;
+    const basis = s.mark && s.index ? ((s.mark - s.index) / s.index) * 100 : null;
+    return `<section class="card p-5" data-market="${esc(sym)}">
+      <div class="flex items-start justify-between">
+        <div><div class="text-sm font-semibold">${esc(sym)}</div><div class="text-[11px] muted">perpetual · last traded</div></div>
+        <span class="pill ${chg > 0 ? "up" : chg < 0 ? "down" : "flat"}">${chg == null ? "—" : `${chg > 0 ? "▲" : chg < 0 ? "▼" : ""} ${pct(chg)}`} <span class="font-normal opacity-70">24h</span></span>
+      </div>
+      <div class="font-mono text-[28px] font-semibold mt-2 leading-none ${p.fresh ? "" : "muted"}">${price(last)}${p.fresh ? "" : ' <span class="badge badge-amber align-middle">STALE</span>'}</div>
+      <div class="mt-4">
+        <div class="flex justify-between text-[11px] muted mb-1.5"><span>24h low <b class="font-mono text-slate-700">${price(s.low_24h)}</b></span><span>high <b class="font-mono text-slate-700">${price(s.high_24h)}</b></span></div>
+        <div class="range"><span style="left:${Math.max(0, Math.min(100, pos))}%"></span></div>
+      </div>
+      <div class="grid grid-cols-3 gap-3 mt-4">
+        <div><div class="stat-label">Mark</div><div class="stat-value">${price(s.mark)}</div></div>
+        <div><div class="stat-label">Index</div><div class="stat-value">${price(s.index)}</div></div>
+        <div><div class="stat-label">Basis</div><div class="stat-value ${pnlClass(basis)}">${basis == null ? "—" : pct(basis, 3)}</div></div>
+        <div><div class="stat-label">Funding</div><div class="stat-value ${s.funding_rate_pct > 0 ? "down" : s.funding_rate_pct < 0 ? "up" : ""}">${s.funding_rate_pct == null ? "—" : pct(s.funding_rate_pct, 4)}</div></div>
+        <div><div class="stat-label">24h volume</div><div class="stat-value">$${compact(s.turnover_24h_usd)}</div></div>
+        <div><div class="stat-label">Open interest</div><div class="stat-value">$${compact(s.oi_usd)}</div></div>
+        <div><div class="stat-label">Bid</div><div class="stat-value up">${price(s.bid)}</div></div>
+        <div><div class="stat-label">Ask</div><div class="stat-value down">${price(s.ask)}</div></div>
+        <div><div class="stat-label">Spread</div><div class="stat-value">${spread == null ? "—" : price(spread)}</div></div>
+      </div>
+    </section>`;
+  };
+  function renderMarkets() {
+    const prices = TB.header?.prices || data?.header?.prices || {};
+    const syms = Object.keys(prices).sort();
+    $("markets").innerHTML = syms.length ? syms.map((s) => marketCard(s, prices[s])).join("")
+      : `<section class="card p-5 text-sm muted md:col-span-2">Waiting for the market stream…</section>`;
+  }
+  let marketTimer = null;
+  TB.on("MarketStats", () => { if (!marketTimer) marketTimer = setTimeout(() => { marketTimer = null; renderMarkets(); }, 1000); });
+
+  // ── positions across brokers ─────────────────────────────────────────────
+  async function loadPositions() {
+    const brokers = (data?.accounts || []).map((a) => a.broker);
+    const lists = await Promise.all(brokers.map((b) => TB.get(`/api/positions?broker=${b}`).then((ps) => ps.map((p) => ({ ...p, broker: b }))).catch(() => [])));
+    const all = lists.flat();
+    TB.rows("positions", all, (p) => `<tr>
+      <td>${brokerTag(p.broker)}</td><td class="font-semibold">${esc(p.symbol)}</td><td>${side(p.side)}</td>
+      <td class="r font-mono">${num(p.size, 0)}</td><td class="r font-mono">${price(p.entry_price)}</td><td class="r font-mono">${price(p.mark_price)}</td>
+      <td class="r font-mono ${pnlClass(p.unrealized_pnl)}">${signed(p.unrealized_pnl)}</td>
+      <td class="r font-mono ${pnlClass(p.roe_pct)}">${pct(p.roe_pct)}</td>
+      <td class="min-w-[140px]">${levelsBar(p)}</td>
+      <td>${p.control ? (p.control.trailing ? `<span class="badge badge-green">${p.control.steps}/${p.control.max_steps}</span>` : '<span class="badge">off</span>') : '<span class="muted">—</span>'}</td>
+    </tr>`, "No open positions", 10);
+    TB.icons();
+  }
+
+  // ── rules, performance, strategies, activity ──────────────────────────────
+  function renderRules() {
+    const r = data.risk, t = r.trailing;
+    const row = (icon, title, body) => `<div class="flex gap-2.5"><i data-lucide="${icon}" class="w-4 h-4 text-slate-400 shrink-0 mt-0.5"></i><div><div class="font-medium text-slate-800">${title}</div><div class="text-slate-500 text-[11.5px]">${body}</div></div></div>`;
+    $("rules").innerHTML = [
+      row("trending-up", `Auto trailing ${t.trailing_enabled ? '<span class="badge badge-green">on for new positions</span>' : '<span class="badge">off by default</span>'}`,
+        `At ${num(t.trailing_trigger_pct, 0)}% of the way to target, the target moves out ${num(t.trailing_extend_pct, 0)}% of its first distance and the stop locks ${num(t.trailing_lock_pct, 0)}% of the profit. Up to ${t.trailing_max_steps}× per position.`),
+      row("octagon-x", `Daily loss limit ${r.daily_loss_limit_pct ? `<span class="badge badge-amber">${num(r.daily_loss_limit_pct, 2)}%</span>` : '<span class="badge">off</span>'}`,
+        `Per broker. Hit it and that broker's positions close and nothing new opens until the next day (${esc(r.day_timezone)}).`),
+      row("percent", "Position size", `Strategies and manual tickets use a share of each broker's own available margin, so paper and Delta take the same risk relative to their capital.`),
+    ].join("");
+  }
+  function renderPerf() {
+    const o = data.paper.overall, curve = data.paper.equity_curve;
+    const tile = (label, value, cls = "") => `<div><div class="stat-label">${label}</div><div class="stat-value ${cls}">${value}</div></div>`;
+    $("perf").innerHTML = [
+      tile("Net P&L", signed(o.pnl), pnlClass(o.pnl)), tile("Trades", num(o.trades, 0)), tile("Win rate", `${num(o.win_rate, 1)}%`),
+      tile("Profit factor", o.profit_factor ?? "—"), tile("Max DD", `${num(o.max_drawdown_pct, 2)}%`, o.max_drawdown_pct ? "down" : ""), tile("Fees", money(o.fees)),
+    ].join("");
+    const ys = curve.map((c) => c[1]);
+    if (ys.length < 2) { $("equity").innerHTML = `<text x="150" y="44" text-anchor="middle" font-size="11" fill="#94a3b8">No closed trades yet</text>`; return; }
+    const lo = Math.min(...ys), hi = Math.max(...ys), span = hi - lo || 1;
+    const pts = ys.map((y, i) => `${(i / (ys.length - 1)) * 300},${76 - ((y - lo) / span) * 70}`).join(" ");
+    const color = ys.at(-1) >= ys[0] ? "#00b852" : "#eb5757";
+    $("equity").innerHTML = `<polyline points="0,80 ${pts} 300,80" fill="${color}" fill-opacity=".08" stroke="none"/><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>`;
+  }
+  function renderStrategies() {
+    TB.rows("strategies", data.strategies, (s) => `<tr>
+      <td class="font-mono"><a class="hover:underline" href="/signals?strategy=${encodeURIComponent(s.name)}">${esc(s.name)}</a></td><td><span class="badge">${esc(s.interval)}</span></td>
+      <td class="r font-mono">${num(s.stats.runs, 0)}</td><td class="r font-mono">${num(s.stats.signals, 0)}</td>
+      <td class="r font-mono ${s.stats.errors ? "down" : "muted"}">${num(s.stats.errors, 0)}</td>
+      <td>${s.enabled ? '<span class="dot on"></span>' : '<span class="dot"></span>'}</td></tr>`, "No strategies", 6);
+  }
+  function describe(e) {
+    switch (e.type) {
+      case "SignalGenerated": return `${esc(e.strategy)} → ${side(e.side)} ${esc(e.symbol)}`;
+      case "TradeSkipped": return `${esc(e.broker || "all")} skipped ${esc(e.symbol)}: ${esc(e.reason)}`;
+      case "OrderPlaced": return `order ${esc(e.status)} <span class="font-mono muted">${esc(e.client_order_id.slice(0, 12))}…</span>`;
+      case "OrderFailed": return `order failed: ${esc(e.error)}`;
+      case "PositionClosed": return `${esc(e.broker)} ${esc(e.symbol)} closed (${esc(e.reason)}) <b class="${pnlClass(e.pnl)}">${signed(e.pnl)}</b>`;
+      case "ProtectionTrailed": return `${esc(e.broker)} ${esc(e.symbol)} trailed ${e.step}/${e.max_steps} · SL ${price(e.stop_loss)} · TP ${price(e.take_profit)}`;
+      case "DailyLossHalt": return `${esc(e.broker)} halted: ${num(e.loss_pct, 2)}% daily loss`;
+      case "StrategyError": return `${esc(e.strategy)}: ${esc(e.error)}`;
+      default: return esc(e.symbol || e.broker || "");
+    }
+  }
+  function renderActivity() {
+    const c = data.counts_24h, labels = { SignalGenerated: "Signals", TradeSkipped: "Skipped", OrderPlaced: "Orders", OrderFailed: "Failed", PositionClosed: "Closed" };
+    $("counts").innerHTML = Object.entries(labels).map(([k, l]) => `<div><div class="font-mono text-base font-semibold ${k === "OrderFailed" && c[k] ? "down" : ""}">${num(c[k], 0)}</div><div class="text-[10px] muted">${l}</div></div>`).join("");
+    $("recent").innerHTML = data.recent.length ? data.recent.map((e) => `<div class="flex items-start gap-2 py-1.5 border-b border-slate-50 text-[12px]">
+        <span class="font-mono text-[11px] muted w-14 shrink-0" title="${esc(new Date(e.ts * 1000).toLocaleString())}">${time(e.ts)}</span>
+        <div class="min-w-0"><div>${eventBadge(e.type)}</div><div class="text-slate-600 mt-0.5 break-words">${describe(e)}</div></div></div>`).join("")
+      : '<div class="text-center muted text-xs py-6">Nothing yet</div>';
+  }
+
+  async function load() {
+    try {
+      data = await TB.get("/api/overview");
+      renderAccounts(); renderMarkets(); renderRules(); renderPerf(); renderStrategies(); renderActivity();
+      await loadPositions();
+    } catch (err) {
+      $("accounts").innerHTML = `<section class="card p-5 text-sm down lg:col-span-2">Could not load the overview: ${esc(err.message)}</section>`;
+    }
+    TB.icons();
+  }
+
+  TB.on(["PositionClosed", "OrderPlaced", "ProtectionTrailed", "DailyLossHalt", "SignalGenerated", "TradeSkipped", "SettingsChanged"], () => setTimeout(load, 300));
+  load();
+  setInterval(load, 5000);
+})();
+</script>
 {% endblock %}

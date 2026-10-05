@@ -45,6 +45,19 @@ class Account:
         return {**asdict(self), "equity": self.equity}
 
 
+def protection_error(side: str, price: float, stop_loss: float | None, take_profit: float | None) -> str:
+    """Why these SL/TP levels cannot protect a position opened on `side` ("buy"/"long" or "sell"/"short") at `price`, or ""."""
+    long = side in ("buy", "long")
+    for name, level in (("stop loss", stop_loss), ("take profit", take_profit)):
+        if level is not None and level <= 0:
+            return f"{name} must be a positive price"
+    if stop_loss is not None and ((stop_loss >= price) if long else (stop_loss <= price)):
+        return f"a {'long' if long else 'short'} stop loss must be {'below' if long else 'above'} the price {price:g}"
+    if take_profit is not None and ((take_profit <= price) if long else (take_profit >= price)):
+        return f"a {'long' if long else 'short'} take profit must be {'above' if long else 'below'} the price {price:g}"
+    return ""
+
+
 class Broker(Protocol):
     name: str
 
@@ -64,5 +77,11 @@ class Broker(Protocol):
     async def account(self) -> Account: ...
     async def open_orders(self) -> list[dict[str, Any]]: ...
     async def close_position(self, symbol: str) -> dict[str, Any]: ...
+    async def update_protection(self, symbol: str, stop_loss: float, take_profit: float | None) -> None:
+        """Replace the position's SL/TP. Never leaves the position without a stop: on failure the old one stays."""
+        ...
+
     async def close_all(self) -> dict[str, Any]: ...
-    async def size_for_margin(self, symbol: str, price: float, margin: float) -> int: ...
+    async def size_for_margin(self, symbol: str, price: float, margin: float) -> int:
+        """Whole contracts that `margin` pays for at `price`; 0 when it buys none. Raises BrokerError when it cannot tell."""
+        ...

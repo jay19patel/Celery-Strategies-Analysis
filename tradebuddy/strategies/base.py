@@ -1,7 +1,8 @@
 """What a strategy is.
 
-A strategy reacts to one closed candle and may return a Signal. It never sizes
-beyond its fixed `size`, never places orders, and never sees the forming bar.
+A strategy reacts to one closed candle and may return a Signal. It never places
+orders and never sees the forming bar. The Trader sizes each order from the
+broker's available margin (Settings: trade_margin_pct); `size` is informational.
 """
 
 from __future__ import annotations

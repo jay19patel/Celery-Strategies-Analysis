@@ -73,7 +73,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/tabs.js"></script>
+<script src="/static/js/tabs.js?v={{ v }}"></script>
 <script>
 (() => {
   const { $, esc, num, price, money, signed, pnlClass, dateTime, side, duration } = TB;

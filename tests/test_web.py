@@ -1,6 +1,7 @@
 """Pages, the settings API and broker routes. The lifespan (and so the stream) stays off."""
 
 import dataclasses
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -112,3 +113,9 @@ def test_close_all_stops_every_broker(cfg, exchange):
     system, client = make(cfg, exchange)
     assert client.post("/api/close-all").json() == {"closed": [], "errors": []}
     assert system.trading_on("paper") is False and system.trading_on("delta") is False
+
+
+def test_static_urls_carry_a_content_version(cfg, exchange):
+    _, client = make(cfg, exchange)
+    page = client.get("/market").text
+    assert re.search(r'/static/js/app\.js\?v=[0-9a-f]{12}"', page) and re.search(r'/static/css/app\.css\?v=[0-9a-f]{12}"', page)

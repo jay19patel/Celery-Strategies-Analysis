@@ -24,8 +24,9 @@ DELTA_ROUTING_FIELDS = ("delta_active", "delta_env", *SECRET_FIELDS)
 # Changing any of these changes where prices come from: the stream restarts.
 STREAM_FIELDS = ("paper_active", "market_data", *DELTA_ROUTING_FIELDS)
 
-BOOL_FIELDS = ("paper_active", "delta_active")
-CHOICES = {"market_data": ("demo", "live"), "delta_env": ("demo", "live")}
+BOOL_FIELDS = ("paper_active", "delta_active", "trailing_enabled")
+CHOICES = {"market_data": ("demo", "live"), "delta_env": ("demo", "live"), "day_timezone": ("Asia/Kolkata", "UTC")}
+INT_FIELDS = ("trailing_max_steps",)
 RANGES = {
     "stop_loss_pct": (0.05, 50.0),
     "take_profit_pct": (0.05, 100.0),
@@ -35,6 +36,11 @@ RANGES = {
     "paper_slippage_pct": (0.0, 1.0),
     "paper_max_hold_hours": (0.0, 24 * 90),
     "trade_margin_pct": (1.0, 100.0),
+    "trailing_trigger_pct": (50.0, 99.0),
+    "trailing_extend_pct": (10.0, 300.0),
+    "trailing_lock_pct": (0.0, 95.0),
+    "trailing_max_steps": (0, 50),
+    "daily_loss_limit_pct": (0.0, 100.0),
 }
 
 
@@ -58,6 +64,19 @@ class Settings:
     paper_slippage_pct: float = 0.02
     paper_max_hold_hours: float = 72.0  # 0 = no time exit
     trade_margin_pct: float = 20.0  # % of available margin to use per trade
+    # Auto trailing: when price has covered trailing_trigger_pct of the way from entry to the target,
+    # the target moves out by trailing_extend_pct of the original target distance and the stop moves
+    # to lock trailing_lock_pct of the open profit. A stop only ever tightens. At most trailing_max_steps
+    # times per position; after that the target stays and the position closes there.
+    trailing_enabled: bool = True  # default for new positions; each position can be switched on its own
+    trailing_trigger_pct: float = 80.0
+    trailing_extend_pct: float = 50.0
+    trailing_lock_pct: float = 50.0
+    trailing_max_steps: int = 3
+    # Daily loss limit, per broker: equity down this % from the start of the trading day closes every
+    # position on that broker and blocks new entries until the next day. 0 = off.
+    daily_loss_limit_pct: float = 5.0
+    day_timezone: str = "Asia/Kolkata"  # when the trading day starts
 
     @property
     def active_brokers(self) -> list[str]:
@@ -112,8 +131,20 @@ def apply_changes(current: Settings, changes: dict[str, Any], confirm: str = "")
             if not isinstance(value, bool):
                 raise SettingsError(f"{name} must be true or false")
             clean[name] = value
+        elif name in INT_FIELDS:
+            if isinstance(value, bool) or not isinstance(value, int | float | str):
+                raise SettingsError(f"{name} must be a whole number")
+            try:
+                number = float(value)
+            except ValueError as exc:
+                raise SettingsError(f"{name} must be a whole number") from exc
+            low, high = RANGES[name]
+            if number != int(number) or not low <= number <= high:
+                raise SettingsError(f"{name} must be a whole number between {low} and {high}")
+            clean[name] = int(number)
         elif name in CHOICES:
-            value = str(value).strip().lower()
+            value = str(value).strip()
+            value = value.lower() if name != "day_timezone" else value
             if value not in CHOICES[name]:
                 raise SettingsError(f"{name} must be one of {', '.join(CHOICES[name])}")
             clean[name] = value
