@@ -102,7 +102,7 @@
   setInterval(paintAll, 5000);
   TB.on("CandleClosed", (e) => { bars.unshift(e); bars = bars.slice(0, 100); TB.rows("bars", bars, barRow, "", 9); });
   loadMetrics(); loadBars();
-  setInterval(loadMetrics, 3000);
+  TB.every(loadMetrics, 3000);
 })();
 </script>
 {% endblock %}

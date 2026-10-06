@@ -12,7 +12,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from tradebuddy.delta import Candle
 
@@ -22,9 +22,15 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True, kw_only=True)
 class Event:
     ts: float = field(default_factory=time.time)
+    # How the event log treats it: "info" | "warning" (a refusal, a degraded state) | "error" (needs a look).
+    LEVEL: ClassVar[str] = "info"
+
+    @property
+    def level(self) -> str:
+        return self.LEVEL
 
     def to_dict(self) -> dict[str, Any]:
-        return {"type": type(self).__name__, **asdict(self)}
+        return {"type": type(self).__name__, "level": self.level, **asdict(self)}
 
 
 # -- market -------------------------------------------------------------------
@@ -68,9 +74,16 @@ class CandleClosed(Event):
 
 @dataclass(frozen=True, kw_only=True)
 class FeedStatus(Event):
+    """Published when the stream's state changes, not on every reconnect attempt."""
+
+    LEVEL: ClassVar[str] = "warning"  # the event log's filter; a reconnect itself is info
     connected: bool
     authenticated: bool = False
     error: str = ""
+
+    @property
+    def level(self) -> str:
+        return "info" if self.connected else "warning"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -118,6 +131,7 @@ class SignalGenerated(Event):
 
 @dataclass(frozen=True, kw_only=True)
 class StrategyError(Event):
+    LEVEL: ClassVar[str] = "error"
     strategy: str
     symbol: str
     error: str
@@ -125,6 +139,7 @@ class StrategyError(Event):
 
 @dataclass(frozen=True, kw_only=True)
 class TradeSkipped(Event):
+    LEVEL: ClassVar[str] = "warning"
     strategy: str
     symbol: str
     side: str
@@ -157,6 +172,7 @@ class OrderPlaced(Event):
 
 @dataclass(frozen=True, kw_only=True)
 class OrderFailed(Event):
+    LEVEL: ClassVar[str] = "error"
     client_order_id: str
     error: str
 
@@ -165,6 +181,7 @@ class OrderFailed(Event):
 class OrderUnknown(Event):
     """The exchange did not answer clearly. The order is looked up, never resent."""
 
+    LEVEL: ClassVar[str] = "warning"
     client_order_id: str
     error: str
 
@@ -218,6 +235,7 @@ class ProtectionTrailed(Event):
 class DailyLossHalt(Event):
     """A broker lost its daily limit: its positions are closed and it opens nothing more today."""
 
+    LEVEL: ClassVar[str] = "error"
     broker: str
     day: str
     loss_pct: float
@@ -232,6 +250,7 @@ class DailyLossHalt(Event):
 class GuardAlert(Event):
     """The position guard could not do something it should have (e.g. trail a stop)."""
 
+    LEVEL: ClassVar[str] = "error"
     broker: str
     symbol: str
     message: str

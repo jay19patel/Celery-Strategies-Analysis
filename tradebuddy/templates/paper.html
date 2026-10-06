@@ -101,9 +101,9 @@
     try { await TB.post("/api/paper/reset"); TB.toast("Paper account reset", "ok"); } catch (err) { TB.toast(err.message, "error"); }
     load();
   };
-  TB.on(["PositionClosed", "PositionUpdate"], () => setTimeout(load, 200));
+  TB.on(["PositionClosed", "PositionUpdate"], TB.debounce(load, 200));
   load();
-  setInterval(load, 10000);
+  TB.every(load, 10000);
 })();
 </script>
 {% endblock %}

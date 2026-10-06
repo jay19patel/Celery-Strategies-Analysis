@@ -198,8 +198,8 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
         return await call("metrics") | {"dashboard_clients": len(live.clients)}
 
     @app.get("/api/events")
-    async def events(limit: int = 300, type: str = "") -> list[dict]:
-        return await call("events", limit=limit, type=type)
+    async def events(limit: int = 300, type: str = "", level: Literal["", "warning", "error"] = "") -> list[dict]:
+        return await call("events", limit=limit, type=type, level=level)
 
     @app.get("/api/settings")
     async def get_settings() -> dict:

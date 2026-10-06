@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from tradebuddy.brokers import Broker
+from tradebuddy.codec import EVENT_TYPES
 from tradebuddy.delta import round_to_tick
 from tradebuddy.errors import BrokerError
 from tradebuddy.settings import SettingsError
@@ -20,6 +21,10 @@ from tradebuddy.transport import RpcClient, RpcError
 
 SIGNAL_EVENTS = ["SignalGenerated", "TradeSkipped", "StrategyError"]
 ACTIVITY_EVENTS = [*SIGNAL_EVENTS, "OrderPlaced", "OrderFailed", "OrderUnknown", "PositionClosed"]
+LEVEL_TYPES = {
+    "error": sorted(n for n, cls in EVENT_TYPES.items() if cls.LEVEL == "error"),
+    "warning": sorted(n for n, cls in EVENT_TYPES.items() if cls.LEVEL in ("warning", "error")),
+}
 
 # Methods the engine answers over RPC. Anything else is refused.
 METHODS = (
@@ -122,8 +127,12 @@ class Api:
     async def metrics(self) -> dict[str, Any]:
         return self.system.metrics()
 
-    async def events(self, limit: int = 300, type: str = "") -> list[dict[str, Any]]:
-        return self.system.store.recent_events(min(limit, 2000), types=[type] if type else None)
+    async def events(self, limit: int = 300, type: str = "", level: str = "") -> list[dict[str, Any]]:
+        """`level` "warning" -> warnings and errors, "error" -> errors only."""
+        types = [type] if type else None
+        if level in LEVEL_TYPES:
+            types = [t for t in LEVEL_TYPES[level] if not types or t in types] or ["-"]
+        return self.system.store.recent_events(min(limit, 2000), types=types)
 
     async def settings(self) -> dict[str, Any]:
         return self.system.settings.public() | {"token_required": bool(self.system.cfg.api_token)}

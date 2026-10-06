@@ -83,6 +83,11 @@ Enforced by tests. Breaking one should fail the build.
     its bar closed is dropped; Celery tasks expire after one bar.
 12. **ZeroMQ is not durable.** Nothing that must survive a restart travels
     only over ZeroMQ; ZeroMQ endpoints stay on loopback or a private network.
+13. **No price, no strategy.** A symbol with no fresh live price is not evaluated;
+    the pause is one `TradeSkipped` per outage, and every page shows a banner.
+14. **Bounded for a year.** Ticks, heartbeats and `StrategyEvaluated` are never
+    stored; the event log is pruned by `RETENTION_DAYS`; state changes, not
+    retries, become events. The orders and paper tables are the permanent record.
 
 ## Extension Points
 

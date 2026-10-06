@@ -18,7 +18,9 @@
       <div class="card-head">
         <div>
           <div class="font-mono text-sm font-semibold">${esc(s.name)} <span class="badge ml-1">v${s.version}</span></div>
-          <div class="text-[11px] text-slate-500 mt-0.5">${esc(s.doc || "")}</div>
+          <div class="text-[11px] text-slate-500 mt-0.5">${esc(summary(s.doc))}</div>
+          ${details(s.doc) ? `<details class="mt-1 text-[11px] text-slate-500"><summary class="cursor-pointer text-brand-600 select-none">Rules &amp; backtest</summary>
+            <div class="mt-1 whitespace-pre-line">${esc(details(s.doc))}</div></details>` : ""}
         </div>
         ${TB.switchHtml("strategy:" + s.name, s.enabled)}
       </div>
@@ -51,15 +53,20 @@
     </section>`;
   }
 
+  // A strategy's docstring: the first paragraph is the summary, the rest (rules, backtest) folds away.
+  const paragraphs = (doc) => (doc || "").split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const summary = (doc) => (paragraphs(doc)[0] || "").replace(/\s*\n\s*/g, " ");
+  const details = (doc) => paragraphs(doc).slice(1).join("\n\n");
+
   async function load() {
     const list = await TB.get("/api/strategies");
     $("cards").innerHTML = list.map(card).join("") || `<div class="card p-8 text-center muted">No strategies found.</div>`;
     TB.bindToggles($("cards"));
     TB.icons();
   }
-  TB.on(["StrategyEvaluated", "SignalGenerated", "StrategyError", "ToggleChanged", "CandleClosed"], () => setTimeout(load, 300));
+  TB.on(["StrategyEvaluated", "SignalGenerated", "StrategyError", "ToggleChanged", "CandleClosed"], TB.debounce(load, 300));
   load();
-  setInterval(load, 10000);
+  TB.every(load, 10000);
 })();
 </script>
 {% endblock %}

@@ -100,12 +100,38 @@
   }
 
   // ── toasts and modal ────────────────────────────────────────────────────
-  function toast(msg, kind = "") {
+  function toast(opts, kind = "") {
+    if (typeof opts === "string") opts = { title: opts, kind: kind };
     const el = document.createElement("div");
-    el.className = `toast ${kind}`;
-    el.textContent = msg;
+    el.className = `toast ${opts.kind || kind}`;
+    
+    let icon = `<i data-lucide="info" class="w-4 h-4 text-blue-400 mt-0.5 shrink-0"></i>`;
+    if ((opts.kind || kind) === "error") icon = `<i data-lucide="alert-circle" class="w-4 h-4 text-red-400 mt-0.5 shrink-0"></i>`;
+    else if ((opts.kind || kind) === "ok") icon = `<i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400 mt-0.5 shrink-0"></i>`;
+
+    let detailsHtml = "";
+    if (opts.details && opts.details.length) {
+      detailsHtml = `<div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 pt-2 border-t border-slate-700/50">` + 
+        opts.details.map(d => `<div class="text-[11px] truncate"><span class="text-slate-400 mr-1">${esc(d.label)}</span> <span class="font-medium text-white">${esc(d.value)}</span></div>`).join("") + 
+        `</div>`;
+    }
+
+    el.innerHTML = `
+      <div class="flex items-start gap-3">
+        ${icon}
+        <div class="flex-1 min-w-0">
+          <div class="font-medium text-[13px] text-white leading-tight">${esc(opts.title)}</div>
+          ${opts.desc ? `<div class="mt-1 text-[12px] text-slate-300 leading-snug">${esc(opts.desc)}</div>` : ""}
+          ${detailsHtml}
+        </div>
+        <button class="shrink-0 p-1 hover:bg-white/10 rounded-md transition-colors -mt-1 -mr-1" onclick="this.closest('.toast').remove()">
+          <i data-lucide="x" class="w-3.5 h-3.5 text-slate-400"></i>
+        </button>
+      </div>
+    `;
     $("toasts").append(el);
-    setTimeout(() => el.remove(), 4000);
+    if (window.lucide) window.lucide.createIcons({ root: el });
+    setTimeout(() => el.remove(), 6000);
   }
   function ask({ title, body = "", ok = "Confirm", danger = false, input = null, placeholder = "", value = "" }) {
     return new Promise((resolve) => {
@@ -147,6 +173,24 @@
     });
   }
   function icons() { if (window.lucide) lucide.createIcons(); }
+
+  // ── refresh ─────────────────────────────────────────────────────────────
+  // Live events push most changes; polling only fills the gaps. A poll runs only while the tab is
+  // visible, never overlaps itself, and catches up as soon as the tab is shown again, so ten
+  // forgotten background tabs cost the engine nothing.
+  function every(fn, ms) {
+    let busy = false, last = Date.now();
+    const run = async () => {
+      if (busy || document.hidden) return;
+      busy = true; last = Date.now();
+      try { await fn(); } catch (err) { console.error(err); } finally { busy = false; }
+    };
+    setInterval(run, ms);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - last >= ms) run(); });
+    return run;
+  }
+  // A burst of events (one per strategy per bar) becomes one reload.
+  const debounce = (fn, ms = 300) => { let timer; return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); }; };
   function setDot(id, on) { const el = $(id); if (el) el.className = `dot ${on ? "on" : "off"}`; }
 
   // ── header ──────────────────────────────────────────────────────────────
@@ -156,8 +200,21 @@
     if (b.real_money) return { text: "DELTA · LIVE MONEY", cls: "badge-solid-red" };
     return { text: "DELTA · DEMO", cls: "badge-amber" };
   }
+  function renderBanner(m) {
+    const el = $("marketBanner");
+    if (!el) return;
+    el.classList.toggle("hidden", !m || m.live);
+    if (!m || m.live) return;
+    const down = !m.missing || m.reason.startsWith("market data stream");
+    const since = m.down_since ? ` for ${duration(Date.now() / 1000 - m.down_since)}` : "";
+    el.className = `banner ${down ? "banner-down" : "banner-warn"}`;
+    el.innerHTML = `<i data-lucide="${down ? "wifi-off" : "triangle-alert"}" class="w-4 h-4 shrink-0"></i>
+      <div class="min-w-0"><b>${down ? `No market data${since}` : esc(m.reason)}</b> — strategies on ${esc((m.missing || []).join(", ") || "every symbol")} are paused and nothing new is entered. They resume on their own when prices return.
+      ${m.error ? `<div class="text-[11px] opacity-80 truncate" title="${esc(m.error)}">${esc(m.error)}</div>` : ""}</div>`;
+  }
   function renderHeader(h) {
     header = h;
+    renderBanner(h.market);
     $("brokerSwitches").innerHTML = h.brokers.map((b) => {
       const label = brokerLabel(b);
       const warn = b.not_ready ? `<i data-lucide="triangle-alert" class="w-3.5 h-3.5 text-amber-500"></i>` : "";
@@ -268,26 +325,69 @@
       lastTickAt[e.symbol] = Date.now();
       if (e.last != null && $("marqueeTrack")?.querySelector(`[data-sym="${CSS.escape(e.symbol)}"]`)) paintMarquee(e.symbol, e.last);
     });
-    on("SettingsChanged", (e) => { if (e.trading_stopped) toast("Delta settings changed — Delta trading switched off"); });
-    on("OrderFailed", (e) => toast(`Order failed: ${e.error}`, "error"));
-    on("OrderUnknown", (e) => toast(`Order outcome unknown — looking it up: ${e.error}`, "error"));
-    on("OrderPlaced", (e) => toast(`Order ${e.status}: ${e.client_order_id}`, "ok"));
-    on("ProtectionTrailed", (e) => toast(`${e.symbol} on ${e.broker} trailed (${e.step}/${e.max_steps}): SL ${price(e.stop_loss)} · TP ${price(e.take_profit)}`, "ok"));
-    on("DailyLossHalt", (e) => toast(`${e.broker}: daily loss limit hit (${num(e.loss_pct, 2)}%). Positions closed; no new entries today.`, "error"));
-    on("GuardAlert", (e) => toast(`${e.broker} ${e.symbol}: ${e.message}`, "error"));
-    on("PositionClosed", (e) => toast(`${e.symbol} closed (${e.reason}) ${signed(e.pnl, 4)}`, e.pnl >= 0 ? "ok" : "error"));
+    on("SettingsChanged", (e) => { if (e.trading_stopped) toast({ title: "Delta settings changed", desc: "Delta trading switched off", kind: "error" }); });
+    on("OrderRequested", (e) => toast({
+      title: "Order requested",
+      desc: `${e.strategy} on ${e.symbol}`,
+      details: [
+        { label: "Side", value: e.side.toUpperCase() },
+        { label: "Size", value: e.size },
+        { label: "Price", value: price(e.price) },
+        { label: "Broker", value: e.broker }
+      ],
+      kind: ""
+    }));
+    on("OrderFailed", (e) => toast({ title: "Order failed", desc: e.error, details: [{ label: "Order ID", value: e.client_order_id }], kind: "error" }));
+    on("OrderUnknown", (e) => toast({ title: "Order outcome unknown", desc: `Looking it up: ${e.error}`, details: [{ label: "Order ID", value: e.client_order_id }], kind: "error" }));
+    on("OrderPlaced", (e) => toast({ 
+      title: "Order placed", 
+      desc: `Status: ${e.status}`, 
+      details: [
+        { label: "ID", value: e.client_order_id },
+        { label: "Exchange ID", value: e.order_id }
+      ],
+      kind: "ok" 
+    }));
+    on("ProtectionTrailed", (e) => toast({ 
+      title: "Protection trailed", 
+      desc: `${e.symbol} on ${e.broker} (${e.step}/${e.max_steps})`,
+      details: [
+        { label: "SL", value: price(e.stop_loss) },
+        { label: "TP", value: price(e.take_profit) }
+      ],
+      kind: "ok" 
+    }));
+    on("DailyLossHalt", (e) => toast({ 
+      title: "Daily loss limit hit", 
+      desc: `${e.broker}: ${num(e.loss_pct, 2)}%. Positions closed; no new entries today.`, 
+      kind: "error" 
+    }));
+    on("GuardAlert", (e) => toast({ 
+      title: "Guard Alert", 
+      desc: `${e.broker} ${e.symbol}: ${e.message}`, 
+      kind: "error" 
+    }));
+    on("PositionClosed", (e) => toast({ 
+      title: "Position closed", 
+      desc: `${e.symbol} (${e.reason})`,
+      details: [
+        { label: "PnL", value: signed(e.pnl, 4) },
+        { label: "Exit Price", value: price(e.exit_price) }
+      ],
+      kind: e.pnl >= 0 ? "ok" : "error" 
+    }));
   }
 
   window.TB = {
     $, esc, num, price, money, signed, pnlClass, pct, compact, count, ms, levelsBar, stats, time, dateTime, ago, duration, side, status, eventBadge,
-    api, get, post, put, on, toast, ask, rows, switchHtml, bindToggles, icons, loadHeader,
+    api, get, post, put, on, toast, ask, rows, switchHtml, bindToggles, icons, loadHeader, every, debounce,
     get header() { return header; },
   };
 
   document.addEventListener("DOMContentLoaded", () => {
     initChrome();
     loadHeader();
-    setInterval(loadHeader, 10000);
+    every(loadHeader, 10000);
     connect();
   });
 })();

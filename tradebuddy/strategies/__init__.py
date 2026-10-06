@@ -16,7 +16,10 @@ def discover() -> list[Strategy]:
     for info in pkgutil.iter_modules(__path__):
         module = importlib.import_module(f"{__name__}.{info.name}")
         for obj in vars(module).values():
-            if inspect.isclass(obj) and issubclass(obj, Strategy) and obj.__module__ == module.__name__ and not inspect.isabstract(obj):
+            if (
+                inspect.isclass(obj) and issubclass(obj, Strategy) and obj.__module__ == module.__name__
+                and not inspect.isabstract(obj) and not obj.__name__.startswith("_")  # _Base: shared logic, not a strategy
+            ):
                 if obj.name in found:
                     raise ValueError(f"two strategies are named {obj.name!r}")
                 found[obj.name] = obj()

@@ -191,8 +191,8 @@
     load();
   };
   brokerTabs((b) => { broker = b; load(); });
-  TB.on(["PositionClosed", "OrderPlaced", "SettingsChanged"], () => setTimeout(load, 200));
-  setInterval(load, 5000);
+  TB.on(["PositionClosed", "OrderPlaced", "SettingsChanged"], TB.debounce(load, 200));
+  TB.every(load, 5000);
 })();
 </script>
 {% endblock %}

@@ -413,9 +413,9 @@
   brokerTabs((b) => { broker = b; $("posBroker").textContent = `on ${b}`; load(); });
   paintSide(); paintBrokers(); setMode("pct");
   setTimeout(() => refreshTicket(), 300);  // after the header has the symbol list
-  TB.on(["PositionUpdate", "PositionClosed", "OrderPlaced", "OrderFailed", "ProtectionTrailed", "DailyLossHalt", "SettingsChanged"], () => setTimeout(load, 200));
-  setInterval(load, 3000);
-  setInterval(() => { if (!document.hidden && !sending) refreshTicket(false); }, 15000);
+  TB.on(["PositionUpdate", "PositionClosed", "OrderPlaced", "OrderFailed", "ProtectionTrailed", "DailyLossHalt", "SettingsChanged"], TB.debounce(load, 200));
+  TB.every(load, 3000);
+  TB.every(() => { if (!sending) return refreshTicket(false); }, 15000);
 })();
 </script>
 {% endblock %}

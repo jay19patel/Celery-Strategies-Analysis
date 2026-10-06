@@ -11,7 +11,7 @@ from tradebuddy.strategies.base import Context, Signal, Strategy
 class PcrOptions(Strategy):
     name = "pcr_options"
     interval = "15m"
-    symbols = ("BTCUSD",)
+    symbols = ("BTCUSD", "ETHUSD")  # each reads its own chain: BTCUSD -> BTC options, ETHUSD -> ETH
 
     bullish_above = 1.3
     bearish_below = 0.7

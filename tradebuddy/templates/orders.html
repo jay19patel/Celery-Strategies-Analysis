@@ -48,7 +48,7 @@
   }
   $("search").oninput = render;
   brokerTabs((b) => { broker = b; load(); }, { allowAll: true });
-  TB.on(["OrderRequested", "OrderPlaced", "OrderFailed", "OrderUnknown", "OrderUpdate"], () => setTimeout(load, 150));
+  TB.on(["OrderRequested", "OrderPlaced", "OrderFailed", "OrderUnknown", "OrderUpdate"], TB.debounce(load, 150));
 })();
 </script>
 {% endblock %}

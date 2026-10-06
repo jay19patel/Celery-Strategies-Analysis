@@ -41,3 +41,14 @@ def crossed_above(a: list[float], b: list[float]) -> bool:
 
 def crossed_below(a: list[float], b: list[float]) -> bool:
     return len(a) >= 2 and len(b) >= 2 and a[-2] >= b[-2] and a[-1] < b[-1]
+
+
+def atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> list[float]:
+    """Wilder's Average True Range. len = len(values) - period."""
+    if len(closes) <= period:
+        return []
+    tr = [max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])) for i in range(1, len(closes))]
+    out = [sum(tr[:period]) / period]
+    for t in tr[period:]:
+        out.append((out[-1] * (period - 1) + t) / period)
+    return out

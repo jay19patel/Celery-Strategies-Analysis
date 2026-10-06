@@ -128,3 +128,11 @@ body { font-feature-settings: "tnum", "cv02", "cv03", "cv04", "cv11"; }
 .chip.on { border-color: #1e88e5; background: #eff6ff; color: #1565c0; }
 .skeleton { background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9); background-size: 200% 100%; animation: sk 1.2s infinite; border-radius: 6px; color: transparent !important; }
 @keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* market-data banner */
+.banner { display: flex; align-items: flex-start; gap: .6rem; padding: .55rem 1.5rem; font-size: 12.5px; line-height: 1.4; border-bottom: 1px solid; }
+.banner-down { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+.banner-warn { background: #fffbeb; color: #92400e; border-color: #fde68a; }
+/* event log levels */
+.log-line.lvl-error { background: #fef2f2; }
+.log-line.lvl-warning { background: #fffbeb; }

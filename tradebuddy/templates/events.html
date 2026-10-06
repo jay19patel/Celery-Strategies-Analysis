@@ -2,11 +2,15 @@
 {% block content %}
 <section class="card">
   <div class="card-head flex-wrap">
-    <div class="card-title"><i data-lucide="scroll-text"></i>Event log <span class="card-sub">every event on the bus, newest first</span></div>
+    <div class="card-title"><i data-lucide="scroll-text"></i>Event log <span class="card-sub" id="sub"></span></div>
     <div class="flex flex-wrap items-center gap-2">
-      <input id="search" class="input w-56" placeholder="Filter text…">
+      <select id="level" class="select" title="Which events to show">
+        <option value="warning">Warnings &amp; errors</option>
+        <option value="error">Errors only</option>
+        <option value="">Everything</option>
+      </select>
       <select id="type" class="select"><option value="">All types</option></select>
-      <label class="switch sm text-xs text-slate-600"><input type="checkbox" id="ticks"><span class="track"></span>Ticks</label>
+      <input id="search" class="input w-56" placeholder="Filter text…">
       <button id="pause" class="btn btn-sm"><i data-lucide="pause"></i><span>Pause</span></button>
       <span id="count" class="text-xs muted font-mono"></span>
     </div>
@@ -14,41 +18,58 @@
   <div id="log" class="card-body max-h-[75vh] overflow-auto"></div>
 </section>
 {% endblock %}
-
 {% block scripts %}
 <script>
 (() => {
-  const { $, esc, time, eventBadge } = TB;
-  let events = [], paused = false;
-  const HIDE = new Set(["ts", "type"]);
+  // The log keeps signals, skips, orders and errors for 90 days and plumbing (candle closes, feed
+  // state) for 2-14; prices and heartbeats are never stored. The page opens on what needs a look.
+  const { $, esc, time, dateTime, eventBadge } = TB;
+  const MAX = 500, SHOWN = 300;  // events held / lines drawn: the page stays fast after a day open
+  const RANK = { info: 0, warning: 1, error: 2 };
+  const LEVEL_OF = { error: ["StrategyError", "OrderFailed", "GuardAlert", "DailyLossHalt"], warning: ["TradeSkipped", "OrderUnknown"] };
+  const HIDE = new Set(["ts", "type", "level"]);
+  let events = [], paused = false, queued = 0, frame = 0;
 
+  const levelOf = (e) => e.level
+    || (LEVEL_OF.error.includes(e.type) ? "error" : LEVEL_OF.warning.includes(e.type) || (e.type === "FeedStatus" && !e.connected) ? "warning" : "info");
+  const minRank = () => ($("level").value ? RANK[$("level").value] : 0);
   const fmt = (v) => (v && typeof v === "object" ? JSON.stringify(v) : v);
-  const line = (e) => `<div class="log-line"><span class="text-slate-400 mr-2">${time(e.ts)}</span>${eventBadge(e.type)}
+  const line = (e) => `<div class="log-line lvl-${levelOf(e)}"><span class="text-slate-400 mr-2" title="${esc(dateTime(e.ts))}">${time(e.ts)}</span>${eventBadge(e.type)}
     <span class="ml-2 text-slate-600">${Object.entries(e).filter(([k]) => !HIDE.has(k)).map(([k, v]) => `<span class="text-slate-400">${esc(k)}=</span>${esc(fmt(v))}`).join("  ")}</span></div>`;
 
   function render() {
-    const type = $("type").value, q = $("search").value.trim().toLowerCase(), ticks = $("ticks").checked;
-    const list = events.filter((e) => (ticks || e.type !== "Tick") && (!type || e.type === type) && (!q || JSON.stringify(e).toLowerCase().includes(q)));
-    $("log").innerHTML = list.slice(0, 500).map(line).join("") || `<div class="text-center text-xs muted py-8">No events</div>`;
-    $("count").textContent = `${list.length} shown`;
+    frame = 0;
+    const type = $("type").value, q = $("search").value.trim().toLowerCase();
+    const list = events.filter((e) => (!type || e.type === type) && (!q || JSON.stringify(e).toLowerCase().includes(q)));
+    $("log").innerHTML = list.slice(0, SHOWN).map(line).join("") || `<div class="text-center text-xs muted py-8">${$("level").value ? "No warnings or errors. All quiet." : "No events"}</div>`;
+    $("count").textContent = `${list.length > SHOWN ? `${SHOWN} of ` : ""}${list.length} shown${queued ? ` · ${queued} new while paused` : ""}`;
     for (const t of new Set(events.map((e) => e.type))) if (![...$("type").options].some((o) => o.value === t)) $("type").add(new Option(t, t));
   }
-  async function load() { events = await TB.get("/api/events?limit=1000"); render(); }
+  // Many events in one second are drawn once, on the next frame.
+  const schedule = () => { if (!frame) frame = requestAnimationFrame(render); };
 
+  async function load() {
+    const level = $("level").value;
+    $("sub").textContent = level === "warning" ? "warnings and errors, newest first" : level === "error" ? "errors, newest first" : "everything stored, newest first";
+    events = await TB.get(`/api/events?limit=${MAX}${level ? `&level=${level}` : ""}`);
+    render();
+  }
   TB.on("*", (e) => {
-    if (e.type === "Tick" && !$("ticks").checked) return;
+    if (e.type === "Tick" || e.type === "MarketStats" || e.type === "FeedHeartbeat" || e.type === "StrategyEvaluated") return;  // never stored
+    if (RANK[levelOf(e)] < minRank()) return;
     events.unshift(e);
-    if (events.length > 2000) events.length = 2000;
-    if (!paused) render();
+    if (events.length > MAX) events.length = MAX;
+    if (paused) { queued++; $("count").textContent = `${queued} new while paused`; } else schedule();
   });
   $("pause").onclick = () => {
     paused = !paused;
     $("pause").innerHTML = paused ? '<i data-lucide="play"></i><span>Resume</span>' : '<i data-lucide="pause"></i><span>Pause</span>';
     TB.icons();
-    if (!paused) render();
+    if (!paused) { queued = 0; render(); }
   };
-  ["type", "ticks"].forEach((id) => $(id).onchange = render);
-  $("search").oninput = render;
+  $("level").onchange = load;
+  $("type").onchange = render;
+  $("search").oninput = TB.debounce(render, 150);
   load();
 })();
 </script>

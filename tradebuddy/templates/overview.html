@@ -233,9 +233,9 @@
     TB.icons();
   }
 
-  TB.on(["PositionClosed", "OrderPlaced", "ProtectionTrailed", "DailyLossHalt", "SignalGenerated", "TradeSkipped", "SettingsChanged"], () => setTimeout(load, 300));
+  TB.on(["PositionClosed", "OrderPlaced", "ProtectionTrailed", "DailyLossHalt", "SignalGenerated", "TradeSkipped", "SettingsChanged"], TB.debounce(load, 300));
   load();
-  setInterval(load, 5000);
+  TB.every(load, 5000);
 })();
 </script>
 {% endblock %}

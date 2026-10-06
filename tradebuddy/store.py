@@ -101,7 +101,20 @@ CREATE TABLE IF NOT EXISTS daily_risk (
     PRIMARY KEY (broker, day)
 );
 CREATE INDEX IF NOT EXISTS events_type ON events(type, id);
+CREATE INDEX IF NOT EXISTS events_type_ts ON events(type, ts);
+CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
 """
+
+# How long the event log keeps each type. The orders, paper_trades and daily_risk tables are the
+# permanent record; the log is for looking back. Market and plumbing events go first.
+RETENTION_DAYS = {
+    "CandleClosed": 2,
+    "FeedStatus": 14,
+    "OrderRequested": 14,
+    "OrderUpdate": 14,
+    "PositionUpdate": 14,
+}
+DEFAULT_RETENTION_DAYS = 90  # signals, skips, errors, orders, closed positions, settings changes
 
 # Orders that may still become a position. While one exists, the symbol is blocked.
 ACTIVE_STATUSES = ("pending", "unknown", "open")
@@ -214,6 +227,29 @@ class Store:
         else:
             rows = self.db.execute("SELECT data FROM events ORDER BY id DESC LIMIT ?", (limit,))
         return [json.loads(r["data"]) for r in rows]
+
+    def prune_events(self, now: float | None = None, batch: int = 5_000) -> int:
+        """Delete events past their retention, a batch at a time so the engine never waits long."""
+        now = time.time() if now is None else now
+        rules = [("type = ?", (t, now - days * 86_400)) for t, days in RETENTION_DAYS.items()]
+        others = ",".join("?" * len(RETENTION_DAYS))
+        rules.append((f"type NOT IN ({others})", (*RETENTION_DAYS, now - DEFAULT_RETENTION_DAYS * 86_400)))
+        deleted = 0
+        for where, params in rules:
+            while True:
+                cur = self.db.execute(
+                    f"DELETE FROM events WHERE id IN (SELECT id FROM events WHERE {where} AND ts < ? LIMIT ?)",  # noqa: S608 - fixed clauses, values bound
+                    (*params, batch),
+                )
+                deleted += cur.rowcount
+                if cur.rowcount < batch:
+                    break
+        return deleted
+
+    def events_size(self) -> dict[str, Any]:
+        rows = self.db.execute("SELECT COUNT(*) AS n, MIN(ts) AS oldest FROM events").fetchone()
+        pages = self.db.execute("PRAGMA page_count").fetchone()[0] * self.db.execute("PRAGMA page_size").fetchone()[0]
+        return {"rows": rows["n"], "oldest": rows["oldest"], "db_mb": round(pages / 1_048_576, 1)}
 
     def count_events_since(self, event_type: str, since: float) -> int:
         return self.db.execute("SELECT COUNT(*) FROM events WHERE type = ? AND ts >= ?", (event_type, since)).fetchone()[0]

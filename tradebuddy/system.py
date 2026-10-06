@@ -147,6 +147,7 @@ class RemoteFeed:
         self._status: dict[str, Any] = {"connected": False, "authenticated": False, "messages": {}, "bars_closed_by": {}}
         self.process: dict[str, Any] | None = None
         self.updated_at = 0.0
+        self.started_at = time.time()
 
     async def run(self) -> None:
         return None
@@ -157,7 +158,10 @@ class RemoteFeed:
     def status(self) -> dict[str, Any]:
         status = dict(self._status)
         if time.time() - self.updated_at > self.STALE_AFTER:
-            status |= {"connected": False, "authenticated": False, "last_error": "no heartbeat from the feed process — is it running?"}
+            status |= {
+                "connected": False, "authenticated": False, "last_error": "no heartbeat from the feed process — is it running?",
+                "down_since": status.get("down_since") or self.updated_at or self.started_at,
+            }
         return status
 
 
@@ -255,9 +259,47 @@ class System:
             s.delta_api_key if private else "", s.delta_api_secret if private else "",
         )
 
+    # Not written to the event log: prices arrive many times a second, heartbeats every few seconds,
+    # and a StrategyEvaluated per strategy per bar is summed up in the runner's stats (its failures
+    # are StrategyError, which is kept).
+    UNLOGGED = (Tick, MarketStats, FeedHeartbeat, StrategyEvaluated)
+
     async def record(self, event: Event) -> None:
-        if not isinstance(event, Tick | MarketStats | FeedHeartbeat):
+        if not isinstance(event, self.UNLOGGED):
             self.store.record_event(event.to_dict())
+
+    async def housekeeping(self, every: float = 3600.0) -> None:
+        """Keeps the event log inside its retention, so a year of running does not fill the disk."""
+        while True:
+            try:
+                deleted = await asyncio.to_thread(self.store.prune_events)
+                if deleted:
+                    log.info("events_pruned deleted=%d", deleted)
+            except Exception:
+                log.exception("events_prune_failed")
+            await asyncio.sleep(every)
+
+    def market_status(self) -> dict[str, Any]:
+        """Is there live market data for every symbol a strategy trades? Without it strategies are
+        paused and nothing new is entered (invariant 8): the dashboard says so on every page."""
+        feed = self.stream.status()
+        fresh = {sym for sym, p in self.prices.snapshot().items() if p["fresh"]}
+        wanted = sorted({sym for s in self.strategies for sym in s.symbols})
+        missing = [sym for sym in wanted if sym not in fresh]
+        if not feed.get("connected"):
+            reason = "market data stream is down"
+        elif missing:
+            reason = f"no live price for {', '.join(missing)}"
+        else:
+            reason = ""
+        return {
+            "live": not reason,
+            "reason": reason,
+            "missing": missing if feed.get("connected") else wanted,
+            "error": feed.get("last_error", ""),
+            "down_since": feed.get("down_since"),
+            "url": feed.get("url", ""),
+        }
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -268,6 +310,7 @@ class System:
             asyncio.create_task(self.monitor.run(), name="monitor"),
             asyncio.create_task(self.executor.reconcile(before=time.time()), name="reconcile"),
             asyncio.create_task(self.guard.run(), name="guard"),
+            asyncio.create_task(self.housekeeping(), name="housekeeping"),
         ]
         if self.local_feed:
             self._stream_task = asyncio.create_task(self.stream.run(), name="stream")
@@ -405,6 +448,7 @@ class System:
             "is_real_money": s.is_real_money,
             "feed_connected": bool(feed.get("connected")),
             "feed_authenticated": bool(feed.get("authenticated")),
+            "market": self.market_status(),
             "token_required": bool(self.cfg.api_token),
             "prices": self.prices.snapshot(),
         }
@@ -436,6 +480,7 @@ class System:
                 **{f"account · {k}": v for k, v in sorted(self.delta_client.calls.items())},
             },
             "orders": self.store.order_counts(),
+            "event_log": self.store.events_size(),
             "evaluator": self.evaluator.stats(),
             "processes": [me, *([self.remote_feed.process] if self.remote_feed and self.remote_feed.process else [])],
             "dashboard_clients": len(self.live.clients),

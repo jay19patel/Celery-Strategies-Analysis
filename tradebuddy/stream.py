@@ -107,6 +107,17 @@ class BarCloser:
         self.bus.publish(CandleClosed(symbol=key[0], resolution=key[1], bar_time=bar_time, source=source, candle=candle))
 
 
+def describe(exc: BaseException) -> str:
+    """A short reason for the dashboard. An HTTP refusal of the WebSocket handshake carries its
+    whole response (headers, HTML body); the status line is what matters."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status is not None:
+        hint = " (the exchange's CDN refuses this server's IP or region)" if status == 403 else ""
+        return f"handshake refused: HTTP {status} {getattr(response, 'reason_phrase', '')}".rstrip() + hint
+    return f"{type(exc).__name__}: {exc}"[:300]
+
+
 def _f(value: Any) -> float | None:
     try:
         return None if value is None or value == "" else float(value)
@@ -157,8 +168,10 @@ class DeltaStream:
         self.connected_since = 0.0
         self.last_message_at = 0.0
         self.last_error = ""
+        self.down_since: float | None = time.time()  # no data until the first connect
         self.messages: Counter[str] = Counter()
         self._ws: Any = None
+        self._published: tuple[bool, bool] | None = None
 
     def status(self) -> dict[str, Any]:
         return {
@@ -171,6 +184,7 @@ class DeltaStream:
             "messages": dict(self.messages),
             "bars_closed_by": dict(self.closer.closed_by),
             "last_error": self.last_error,
+            "down_since": self.down_since,
         }
 
     def subscribe_payload(self) -> dict[str, Any]:
@@ -195,6 +209,7 @@ class DeltaStream:
             try:
                 async with connect(self.url, ping_interval=20, ping_timeout=20, open_timeout=15, user_agent_header="tradebuddy") as ws:
                     self._ws = ws
+                    self.down_since = None
                     self._set_status(connected=True)
                     self.connected_since = time.time()
                     backoff = 1.0
@@ -207,9 +222,11 @@ class DeltaStream:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # any failure means reconnect
-                self.last_error = repr(exc)[:300]
-                log.warning("stream_disconnected error=%r", exc)
+                self.last_error = describe(exc)
+                log.warning("stream_disconnected attempt=%d error=%s", self.reconnects + 1, self.last_error)
             self._ws = None
+            if self.down_since is None:
+                self.down_since = time.time()
             self._set_status(connected=False, authenticated=False)
             self.reconnects += 1
             await asyncio.sleep(backoff + random.uniform(0, backoff))  # noqa: S311 - jitter
@@ -220,7 +237,10 @@ class DeltaStream:
             self.connected = connected
         if authenticated is not None:
             self.authenticated = authenticated
-        self.bus.publish(FeedStatus(connected=self.connected, authenticated=self.authenticated, error=self.last_error))
+        # Once per change of state: a socket refused for a day is one event, not one per retry.
+        if (self.connected, self.authenticated) != self._published:
+            self._published = (self.connected, self.authenticated)
+            self.bus.publish(FeedStatus(connected=self.connected, authenticated=self.authenticated, error=self.last_error))
 
     async def handle(self, msg: Any) -> None:
         if not isinstance(msg, dict):
