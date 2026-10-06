@@ -193,7 +193,7 @@ class DeltaStream:
         backoff = 1.0
         while True:
             try:
-                async with connect(self.url, ping_interval=20, ping_timeout=20, open_timeout=15) as ws:
+                async with connect(self.url, ping_interval=20, ping_timeout=20, open_timeout=15, user_agent_header="tradebuddy") as ws:
                     self._ws = ws
                     self._set_status(connected=True)
                     self.connected_since = time.time()
