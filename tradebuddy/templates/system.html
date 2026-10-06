@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<div data-ai-note="system"></div>
 <div id="kpis" class="grid grid-cols-2 md:grid-cols-5 gap-3"></div>
 
 <div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
@@ -14,6 +15,27 @@
     <table class="tbl"><tbody id="evaluator"></tbody></table>
   </section>
 </div>
+
+<section class="card min-w-0">
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="timer"></i>Background jobs <span class="card-sub">every timer in every process, and how its last run went</span></div>
+    <div id="jobSummary" class="flex flex-wrap gap-1.5"></div>
+  </div>
+  <div class="scroll">
+    <table class="tbl"><thead><tr><th>Process</th><th>Job</th><th>Every</th><th>State</th><th class="r">Runs</th><th class="r">Errors</th><th>Last run</th><th class="r">Took</th><th>Next</th><th>Result</th></tr></thead><tbody id="jobs"></tbody></table>
+  </div>
+</section>
+
+<section class="card min-w-0">
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="database"></i>Database <span id="dbSub" class="card-sub"></span></div>
+    <span id="dbMeasured" class="text-[11px] muted"></span>
+  </div>
+  <div id="dbKpis" class="grid grid-cols-2 md:grid-cols-5 gap-3 px-4 pt-3"></div>
+  <div class="scroll mt-2">
+    <table class="tbl"><thead><tr><th>Table</th><th>Holds</th><th class="r">Rows</th><th class="r">Data</th><th class="r">Indexes</th><th>Oldest</th><th>Newest</th><th>Kept</th></tr></thead><tbody id="tables"></tbody></table>
+  </div>
+</section>
 
 <section class="card">
   <div class="card-head"><div class="card-title"><i data-lucide="workflow"></i>Event flow</div></div>
@@ -118,6 +140,7 @@
         </div>`;
     }).join("");
 
+    renderJobs(m);
     TB.rows("workers", m.bus.workers, (w) => `<tr>
       <td class="font-mono">${esc(w.name)}${w.errors ? `<div class="text-[11px] down wrap font-sans" title="${esc(w.last_error)}">${esc(w.last_error.slice(0, 120))}</div>` : ""}</td>
       <td class="text-slate-500">${esc(w.listens_to.join(", "))}</td>
@@ -136,7 +159,53 @@
       .map(([k, v]) => `<tr><td class="muted">${k}</td><td class="r font-mono">${esc(v)}</td></tr>`).join("");
     TB.icons();
   }
+  // ── jobs and database ──────────────────────────────────────────────────────
+  const every = (s) => (s == null ? "once / on event" : s < 60 ? `${s}s` : s < 3600 ? `${s / 60}m` : `${s / 3600}h`);
+  const STATE = { running: "badge-blue", idle: "badge-green", failed: "badge-red", waiting: "", silent: "badge-red" };
+  function renderJobs(m) {
+    const jobs = m.jobs || [];
+    const counts = jobs.reduce((a, j) => ((a[j.state] = (a[j.state] || 0) + 1), a), {});
+    $("jobSummary").innerHTML = Object.entries(counts).map(([k, v]) => `<span class="badge ${STATE[k] || ""}">${v} ${esc(k)}</span>`).join("")
+      + (m.analyst ? `<span class="badge badge-ai" title="TradeBuddy AI (Mistral)">TB-AI ${esc(m.analyst.ai)}${m.analyst.ai_paused_until ? " · paused (rate limit)" : ""}${m.analyst.ai_errors ? ` · ${m.analyst.ai_errors} errors` : ""}</span>` : `<span class="badge badge-amber" title="Start the analyst service">no analyst</span>`)
+      + (m.options_feed ? `<span class="badge" title="Options snapshots by source">options ${Object.entries(m.options_feed.source || {}).map(([u, s]) => `${u}:${s}`).join(" ")}</span>` : "");
+    const now = Date.now() / 1000;
+    TB.rows("jobs", jobs, (j) => {
+      const overdue = j.next_at && now - j.next_at > Math.max(30, (j.every || 0) * 2);
+      return `<tr title="${esc(j.what)}">
+      <td><span class="badge badge-blue">${esc(j.process)}</span></td>
+      <td><div class="font-mono">${esc(j.name)}</div><div class="text-[11px] muted">${esc(j.what)}</div></td>
+      <td class="font-mono">${every(j.every)}</td>
+      <td><span class="badge ${overdue ? "badge-amber" : STATE[j.state] || ""}">${overdue ? "late" : esc(j.state)}</span></td>
+      <td class="r font-mono">${count(j.runs)}</td><td class="r font-mono ${j.errors ? "down" : "muted"}">${count(j.errors)}</td>
+      <td class="muted">${ago(j.last_at)}</td><td class="r font-mono">${j.runs ? ms(j.last_ms) : "—"}<div class="text-[10.5px] muted">max ${ms(j.max_ms)}</div></td>
+      <td class="muted">${j.next_at ? (j.next_at > now ? `in ${duration(j.next_at - now)}` : "due") : "—"}</td>
+      <td class="wrap text-[11.5px]">${j.last_error ? `<span class="down">${esc(j.last_error)}</span> <span class="muted">${ago(j.last_error_at)}</span>` : esc(j.note || "")}</td></tr>`;
+    }, "No jobs reported yet", 10);
+  }
+  const bytes = (b) => (b == null ? "—" : b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1073741824).toFixed(2)} GB`);
+  const day = (ts) => (ts ? new Date(ts * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
+  async function loadDb() {
+    const d = await TB.get("/api/database");
+    const data = d.tables.reduce((a, t) => a + (t.bytes || 0), 0), idx = d.tables.reduce((a, t) => a + t.index_bytes, 0);
+    $("dbSub").textContent = `${d.path} · SQLite ${d.sqlite_version} · ${d.journal_mode}`;
+    $("dbMeasured").textContent = `measured ${ago(d.measured_at)}`;
+    $("dbKpis").innerHTML = [
+      kpi("File", bytes(d.file_bytes), `${count(d.pages)} pages of ${bytes(d.page_size)}`),
+      kpi("Write-ahead log", bytes(d.wal_bytes), "folded into the file at checkpoints"),
+      kpi("Tables", bytes(data), `${d.tables.length} tables · ${count(d.tables.reduce((a, t) => a + t.rows, 0))} rows`),
+      kpi("Indexes", bytes(idx), `${d.tables.reduce((a, t) => a + t.indexes.length, 0)} indexes`),
+      kpi("Free space", bytes(d.free_pages * d.page_size), "reused by new rows; VACUUM to shrink the file"),
+    ].join("");
+    TB.rows("tables", d.tables, (t) => `<tr>
+      <td class="font-mono font-semibold">${esc(t.name)}</td><td class="text-[11.5px] text-slate-500">${esc(t.what)}</td>
+      <td class="r font-mono">${count(t.rows)}</td><td class="r font-mono">${bytes(t.bytes)}</td>
+      <td class="r font-mono" title="${esc(t.indexes.map((i) => `${i.name} ${bytes(i.bytes)}`).join("\n"))}">${bytes(t.index_bytes)} <span class="muted">(${t.indexes.length})</span></td>
+      <td class="muted">${day(t.oldest)}</td><td class="muted">${day(t.newest)}</td><td class="text-[11.5px]">${esc(t.keep)}</td></tr>`, "", 8);
+  }
+
   load();
+  loadDb();
+  TB.every(loadDb, 30000);
   TB.every(load, 3000);
 })();
 </script>

@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block content %}
+<!-- TradeBuddy AI: one written report over market, trading, portfolio and system. Everything here is AI text,
+     marked TB-AI; the numbers it is written from are on the other pages. -->
+<section id="hero" class="card ai-box p-5"><div class="skeleton h-20"></div></section>
+
+<div id="problem"></div>
+
+<div id="sections" class="grid grid-cols-1 xl:grid-cols-2 gap-5"></div>
+
+<section class="card min-w-0">
+  <div class="card-head"><div class="card-title"><i data-lucide="candlestick-chart"></i>By symbol <span class="card-sub">TB-AI on each market's numbers, findings, forecast and playbook</span></div><a href="/market" class="btn btn-sm">Market Data<i data-lucide="arrow-right"></i></a></div>
+  <div id="symbols" class="card-body grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
+</section>
+
+<section class="card min-w-0">
+  <div class="card-head"><div class="card-title"><i data-lucide="history"></i>Recent reports <span class="card-sub">every attempt, kept 14 days</span></div></div>
+  <div class="scroll max-h-96"><table class="tbl"><thead><tr><th>When</th><th>Result</th><th>Health</th><th>Model</th><th>Headline or error</th></tr></thead><tbody id="history"></tbody></table></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const { $, esc, ago, duration, dateTime, aiBadge, aiStatus } = TB;
+  const SECTIONS = [
+    ["market", "Market", "candlestick-chart", "/market", "BTC and ETH: options, positioning, forecast"],
+    ["trading", "Trading", "activity", "/positions", "Strategies, signals, orders and open positions"],
+    ["portfolio", "Portfolio", "wallet", "/account", "Accounts, today's P&L and risk, performance"],
+    ["system", "System", "gauge", "/system", "Feed, processes, background jobs, errors"],
+  ];
+  let data = null;
+
+  const list = (items, cls = "") => (items?.length ? `<ul class="space-y-1 ${cls}">${items.map((x) => `<li class="flex gap-2"><span class="text-violet-500">•</span><span>${esc(x)}</span></li>`).join("")}</ul>` : "");
+  const actions = (items) => (items?.length ? `<div class="mt-3 rounded-lg bg-amber-50/70 border border-amber-100 p-2.5"><div class="stat-label text-amber-800 mb-1">To do</div>
+    <ul class="space-y-1 text-[12.5px]">${items.map((x) => `<li class="flex gap-2"><i data-lucide="square" class="w-3.5 h-3.5 mt-0.5 text-amber-600 shrink-0"></i><span>${esc(x)}</span></li>`).join("")}</ul></div>` : "");
+
+  function nextLine(d) {
+    const a = d.analyst || {}, now = Date.now() / 1000;
+    if (!d.enabled) return `AI is off.`;
+    if (!d.has_key) return `AI is on but has no Mistral API key.`;
+    if (a.ai_paused_until && a.ai_paused_until > now) return `<span class="text-amber-700 font-medium">Paused after a rate limit: next try in ${duration(a.ai_paused_until - now)}</span>`;
+    if (a.ai_next_at && a.ai_next_at > now) return `Next report in about ${duration(a.ai_next_at - now + 30)}`;
+    if (!d.analyst) return `<span class="text-amber-700">The analyst process is not reporting: is the analyst service running?</span>`;
+    return "Next report at the next 5-minute mark";
+  }
+
+  function renderHero() {
+    const d = data, r = d.report?.report, at = d.report?.ts;
+    const meta = `${esc(d.model)} · every ${d.interval_minutes} min · ${d.share_account ? "reads trades, positions and portfolio" : "market and system only (portfolio not shared)"}`;
+    if (!d.enabled || !d.has_key) {
+      $("hero").innerHTML = `<div class="flex items-start gap-3">${aiBadge()}<div><div class="text-lg font-semibold">TradeBuddy AI is ${d.enabled ? "missing its API key" : "off"}</div>
+        <p class="text-[13px] text-slate-600 mt-1 max-w-2xl">TB-AI reads everything TradeBuddy computes (market, trading, portfolio, system) and writes one short report with what matters and what to do. It uses your Mistral account.</p>
+        <a href="/settings#ai" class="btn btn-primary btn-sm mt-3">Set up in Settings</a></div></div>`;
+      return;
+    }
+    $("hero").innerHTML = r ? `
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="flex items-center gap-2">${aiBadge()}${aiStatus(r.health)}<span class="text-[11.5px] muted">written ${ago(at)} · ${dateTime(at)}</span></div>
+        <div class="text-[11.5px] muted text-right">${meta}<br>${nextLine(d)}</div>
+      </div>
+      <div class="text-[19px] font-semibold leading-snug mt-3 max-w-4xl" style="text-wrap:balance">${esc(r.headline || "No headline")}</div>
+      ${r.priorities?.length ? `<div class="mt-3"><div class="stat-label mb-1">Priorities</div><ol class="list-decimal pl-5 space-y-1 text-[13px]">${r.priorities.map((p) => `<li>${esc(p)}</li>`).join("")}</ol></div>` : ""}`
+      : `<div class="flex items-center gap-2">${aiBadge()}<span class="text-[13px]">No report yet.</span></div><div class="text-[11.5px] muted mt-2">${meta} · ${nextLine(d)}</div>`;
+  }
+
+  function renderProblem() {
+    const l = data.latest;
+    if (!l || l.ok || !data.enabled) { $("problem").innerHTML = ""; return; }
+    const limited = l.status === 429;
+    const limits = Object.entries(l.limits || {});
+    $("problem").innerHTML = `<section class="card border-amber-200">
+      <div class="card-head"><div class="card-title"><i data-lucide="triangle-alert" class="text-amber-600"></i>${limited ? "Mistral is rate-limiting this account" : "The last report failed"} <span class="card-sub">${ago(l.ts)}</span></div>
+        <button id="testAi" class="btn btn-sm"><i data-lucide="stethoscope"></i>Test key and model</button></div>
+      <div class="card-body text-[12.5px] space-y-2">
+        <div class="font-mono down">${esc(l.error)}</div>
+        ${limited ? `<p>TradeBuddy sends one request per report (every ${data.interval_minutes} min) and waits after a 429 as long as Mistral asks, doubling from 5 to 60 minutes. A 429 at this pace means the limit is on the Mistral account or model: the free (Experiment) plan, a monthly token cap, a workspace limit, or the same key used elsewhere. Open console.mistral.ai → Limits, or raise the interval in Settings. The last good report stays on this page meanwhile.</p>` : ""}
+        ${limits.length ? `<table class="tbl text-[11.5px] max-w-xl"><tbody>${limits.map(([k, v]) => `<tr><td class="font-mono muted">${esc(k)}</td><td class="font-mono r">${esc(v)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">Mistral sent no rate-limit headers with this answer.</p>`}
+        <div id="testOut"></div>
+      </div></section>`;
+    $("testAi").onclick = testAi;
+  }
+
+  async function testAi() {
+    $("testOut").innerHTML = '<div class="muted">Asking Mistral…</div>';
+    try {
+      const r = await TB.post("/api/ai/test", {});
+      const rows = Object.entries(r.limits || {}).map(([k, v]) => `<tr><td class="font-mono muted">${esc(k)}</td><td class="font-mono r">${esc(v)}</td></tr>`).join("");
+      $("testOut").innerHTML = `<div class="rounded-lg border ${r.ok ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"} p-3 space-y-1">
+        <div class="font-semibold ${r.ok ? "up" : "down"}">${r.ok ? `Works: ${esc(r.model)} answered in ${r.latency_ms} ms` : esc(r.error || "failed")}</div>
+        ${r.models_available != null ? `<div>Key sees ${r.models_available} models. ${r.model_listed ? `<b>${esc(r.model)}</b> is one of them.` : `<b class="down">${esc(r.model)} is not in the list.</b> Similar: ${esc((r.similar || []).join(", ") || "none")}`}</div>` : ""}
+        ${rows ? `<table class="tbl text-[11.5px] max-w-xl mt-1"><tbody>${rows}</tbody></table>` : ""}</div>`;
+    } catch (err) { $("testOut").innerHTML = `<div class="down">${esc(err.message)}</div>`; }
+  }
+
+  function renderSections() {
+    const r = data.report?.report;
+    $("sections").innerHTML = SECTIONS.map(([key, title, icon, href, what]) => {
+      const s = r?.sections?.[key];
+      return `<section class="card min-w-0">
+        <div class="card-head"><div class="card-title"><i data-lucide="${icon}"></i>${title} <span class="card-sub">${what}</span></div>
+          <div class="flex items-center gap-1.5">${s ? aiStatus(s.status) : ""}${aiBadge()}</div></div>
+        <div class="card-body text-[13px]">
+          ${s ? `<p class="leading-relaxed">${esc(s.summary || "—")}</p>${list(s.points, "mt-2 text-[12.5px] text-slate-700")}${actions(s.actions)}`
+            : `<p class="muted text-[12.5px]">${data.enabled && data.has_key ? "Waiting for the first report." : "TB-AI is off."}</p>`}
+          <a href="${href}" class="text-[11.5px] text-brand-600 mt-3 inline-block">See the numbers →</a>
+        </div></section>`;
+    }).join("");
+  }
+
+  function renderSymbols() {
+    const syms = data.report?.report?.symbols || {};
+    $("symbols").innerHTML = Object.entries(syms).map(([sym, v]) => `<div class="rounded-lg border border-slate-100 p-3">
+      <div class="flex items-center justify-between mb-1"><span class="font-semibold">${esc(sym)}</span>${aiBadge()}</div>
+      <p class="text-[12.5px]">${esc(v.summary)}</p>${list(v.points, "mt-2 text-[12px] text-slate-700")}
+      ${v.risks?.length ? `<div class="mt-2 text-[11.5px]"><span class="font-semibold text-amber-700">Risks:</span> ${v.risks.map(esc).join(" · ")}</div>` : ""}
+      ${v.playbook_view ? `<div class="mt-1 text-[11.5px] muted">Playbook: ${esc(v.playbook_view)}</div>` : ""}</div>`).join("")
+      || `<div class="text-[12px] muted">No per-symbol review yet.</div>`;
+  }
+
+  function renderHistory() {
+    TB.rows("history", data.history || [], (h) => `<tr>
+      <td class="muted whitespace-nowrap" title="${esc(dateTime(h.ts))}">${ago(h.ts)}</td>
+      <td>${h.ok ? '<span class="badge badge-green">ok</span>' : `<span class="badge badge-red">${h.status || "error"}</span>`}</td>
+      <td>${h.health ? aiStatus(h.health) : ""}</td><td class="font-mono text-[11px] muted">${esc(h.model)}</td>
+      <td class="text-[12px] ${h.ok ? "" : "down"}">${esc(h.ok ? h.headline : h.error)}</td></tr>`, "No reports yet", 5);
+  }
+
+  async function load() {
+    data = await TB.get("/api/ai");
+    renderHero(); renderProblem(); renderSections(); renderSymbols(); renderHistory();
+    TB.icons();
+  }
+  TB.on(["AIReport", "SettingsChanged"], TB.debounce(load, 300));
+  load();
+  TB.every(load, 30000);
+})();
+</script>
+{% endblock %}

@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 from tradebuddy.delta import RESOLUTION_SECONDS, Candle, DeltaClient, OptionQuote
 from tradebuddy.events import CandleClosed, EventBus, SignalGenerated, StrategyError, StrategyEvaluated, TradeSkipped
+from tradebuddy.settings import RANGES
 from tradebuddy.store import Store
 from tradebuddy.strategies import Context, Strategy
 
@@ -52,6 +53,12 @@ class MarketData:
 
     async def option_chain(self, underlying: str) -> list[OptionQuote]:
         return await self.delta.option_chain(underlying)
+
+    async def option_summary(self, underlying: str) -> dict[str, Any] | None:
+        """The whole options book for `underlying` (options.summarize): ATM IV, skew, put/call, walls."""
+        from tradebuddy.options import summarize
+
+        return summarize(underlying, await self.delta.option_tickers(underlying), None)
 
 
 def make_job(strategy: Strategy, event: CandleClosed, prices: dict[str, float], data_env: str) -> dict[str, Any]:
@@ -103,7 +110,19 @@ async def evaluate(strategy: Strategy, job: dict[str, Any], market: Any, worker:
         return result()
     if signal.side not in ("buy", "sell"):
         return result(error=f"invalid side {signal.side!r}")
+    if strategy.is_default_sl_tp:
+        return result(side=signal.side, reason=signal.reason)  # Settings' stop loss and take profit apply
+    if error := levels_error(signal.stop_loss_pct, signal.take_profit_pct):
+        return result(error=f"is_default_sl_tp is False, so the signal must set its own levels: {error}")
     return result(side=signal.side, reason=signal.reason, stop_loss_pct=signal.stop_loss_pct, take_profit_pct=signal.take_profit_pct)
+
+
+def levels_error(stop_loss_pct: Any, take_profit_pct: Any) -> str:
+    """A strategy's own stop loss and take profit, as % from entry, within the ranges Settings allows."""
+    for name, value, (lo, hi) in (("stop_loss_pct", stop_loss_pct, RANGES["stop_loss_pct"]), ("take_profit_pct", take_profit_pct, RANGES["take_profit_pct"])):
+        if isinstance(value, bool) or not isinstance(value, int | float) or not lo <= value <= hi:
+            return f"{name} must be a number from {lo:g} to {hi:g} (got {value!r})"
+    return ""
 
 
 class Evaluator(Protocol):

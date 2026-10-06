@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>{% endblock %}
 {% block content %}
+<div data-ai-note="portfolio"></div>
 <div class="flex flex-wrap items-center justify-between gap-3">
   {% with all_tab=False %}{% include "_broker_tabs.html" %}{% endwith %}
   <span id="updated" class="text-xs muted"></span>
@@ -57,15 +58,15 @@
 </div>
 
 <div id="tradeModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 p-4">
-  <div class="bg-white rounded-xl shadow-xl w-full max-w-lg border border-slate-200">
-    <div class="p-5 space-y-4">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-lg border border-slate-200 flex flex-col max-h-[90vh]">
+    <div class="p-5 space-y-4 overflow-y-auto">
       <h3 class="text-sm font-semibold border-b pb-2">Closed Trade Details</h3>
       <table class="w-full text-sm">
         <tbody id="tradeDetailsTbody" class="divide-y divide-slate-100">
         </tbody>
       </table>
     </div>
-    <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 rounded-b-xl flex justify-end gap-2">
+    <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 rounded-b-xl flex justify-end gap-2 shrink-0">
       <button onclick="TB.$('tradeModal').classList.replace('flex', 'hidden')" class="btn">Close</button>
     </div>
   </div>
@@ -166,7 +167,7 @@
     if (!t) return;
     
     $("tradeDetailsTbody").innerHTML = `
-      <tr><td class="py-2 text-slate-500 w-1/3">Client Order ID</td><td class="py-2 font-mono">${esc(t.client_order_id)}</td></tr>
+      <tr><td class="py-2 text-slate-500 w-1/3">Client Order ID</td><td class="py-2 font-mono break-all">${esc(t.client_order_id)}</td></tr>
       <tr><td class="py-2 text-slate-500">Symbol</td><td class="py-2 font-semibold">${esc(t.symbol)}</td></tr>
       <tr><td class="py-2 text-slate-500">Strategy</td><td class="py-2 font-mono">${esc(t.strategy)}</td></tr>
       <tr><td class="py-2 text-slate-500">Side</td><td class="py-2">${side(t.side)}</td></tr>

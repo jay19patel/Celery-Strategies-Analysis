@@ -1,6 +1,61 @@
 {% extends "base.html" %}
 {% block head %}{% endblock %}
 {% block content %}
+<div data-ai-note="market"></div>
+<section class="card">
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="radar"></i>Market analysis <span class="card-sub">options every 15s · analysis every 5 min</span></div>
+    <div class="flex flex-wrap items-center gap-2"><div id="symTabs" class="flex gap-1"></div><span id="srcBadge"></span></div>
+  </div>
+  <div class="card-body"><div id="kpis" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-2"></div></div>
+</section>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+  <section class="card xl:col-span-2 min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="lightbulb"></i>Insights <span class="card-sub">rules over the numbers above: no model, no AI</span></div></div>
+    <div class="card-body">
+      <div id="insights"></div>
+      <div class="mt-4 rounded-lg border border-violet-100 bg-violet-50/40 p-3">
+        <div class="flex items-center gap-2 mb-1.5"><span class="badge badge-ai" title="Written by TradeBuddy AI (Mistral) from the numbers above">TB-AI</span><span class="text-[12px] font-semibold">Review</span><span id="aiModel" class="text-[10.5px] muted"></span><a href="/ai" class="ml-auto text-[11px] text-brand-600">Full report →</a></div>
+        <div id="ai"></div>
+      </div>
+    </div>
+  </section>
+  <section class="card min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="brain-circuit"></i>Forecast &amp; playbook <span class="card-sub">next 24h</span></div></div>
+    <div id="forecast" class="card-body"></div>
+  </section>
+</div>
+
+<section class="card min-w-0">
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="table-2"></i>Option chain <span id="chainSub" class="card-sub"></span></div>
+    <select id="expiry" class="select" aria-label="Expiry"></select>
+  </div>
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 px-4 pt-3">
+    <div><div class="stat-label mb-1">Open interest by strike <span style="color:#2a78d6">■ calls</span> <span style="color:#eb6834">■ puts</span></div><div id="oiChart"></div></div>
+    <div><div class="stat-label mb-1">IV smile <span style="color:#2a78d6">■ calls</span> <span style="color:#eb6834">■ puts</span></div><div id="smile"></div></div>
+  </div>
+  <div class="scroll max-h-[32rem] mt-2">
+    <table class="tbl text-[12px]">
+      <thead><tr>
+        <th class="r" style="color:#2a78d6">Mark</th><th class="r">Δ</th><th class="r">IV</th><th class="r">Vol 24h</th><th class="r">Call OI</th>
+        <th class="text-center">Strike</th>
+        <th class="r">Put OI</th><th class="r">Vol 24h</th><th class="r">IV</th><th class="r">Δ</th><th class="r" style="color:#eb6834">Mark</th>
+      </tr></thead>
+      <tbody id="chain"></tbody>
+    </table>
+  </div>
+  <p class="text-[10.5px] muted px-4 py-2">OI and volume in the underlying (BTC or ETH). Prices per 1 underlying, at Delta's mark. Shaded row: at the money.</p>
+</section>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="calendar-range"></i>Term structure <span class="card-sub">ATM IV by expiry</span></div></div><div id="term" class="card-body"></div></section>
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="activity"></i>ATM IV <span class="card-sub">last 24h</span></div></div><div id="ivSpark" class="card-body"></div></section>
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="scale"></i>Put / call OI <span class="card-sub">last 24h</span></div></div><div id="pcrSpark" class="card-body"></div></section>
+</div>
+
+<h2 class="text-[13px] font-semibold text-slate-500 uppercase tracking-wider pt-2">Exchange feed</h2>
 <div id="priceCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
 
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
@@ -30,7 +85,61 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/analysis.js?v={{ v }}"></script>
 <script>
+// ── market analysis ──────────────────────────────────────────────────────────
+(() => {
+  const { $, esc } = TB;
+  let data = null, sym = "BTCUSD", expiry = null, frame = 0, centred = "";
+  const hist = {};
+  const SYMS = ["BTCUSD", "ETHUSD"];
+
+  function render() {
+    frame = 0;
+    if (!data) return;
+    const d = data.symbols[sym] || {}, o = d.options;
+    $("symTabs").innerHTML = SYMS.map((s) => `<button class="btn btn-sm ${s === sym ? "btn-primary" : ""}" data-sym="${s}">${s.replace("USD", "")}</button>`).join("");
+    $("symTabs").querySelectorAll("[data-sym]").forEach((b) => (b.onclick = () => { sym = b.dataset.sym; expiry = null; render(); loadHist(); }));
+    $("srcBadge").innerHTML = TBA.sourceBadge(o);
+    $("kpis").innerHTML = TBA.kpis(d);
+    $("insights").innerHTML = TBA.insights(d);
+    $("ai").innerHTML = TBA.ai(d, data.ai);
+    $("aiModel").textContent = data.ai === "on" ? data.ai_model : "";
+    $("forecast").innerHTML = TBA.forecast(d);
+    const exps = o?.summary?.expiries || [];
+    if (!expiry || !exps.some((e) => String(Math.trunc(e.expiry)) === expiry)) {
+      const day = o?.summary?.day;
+      expiry = String(Math.trunc((day && exps.find((e) => e.expiry === day.expiry) ? day : exps[0])?.expiry || 0));
+    }
+    $("expiry").innerHTML = exps.map((e) => `<option value="${Math.trunc(e.expiry)}" ${String(Math.trunc(e.expiry)) === expiry ? "selected" : ""}>${esc(e.label)} · ${Math.round(e.hours)}h · ATM IV ${TBA.ivp(e.atm_iv)}</option>`).join("");
+    const e = exps.find((x) => String(Math.trunc(x.expiry)) === expiry);
+    $("chainSub").textContent = e ? `${e.contracts} contracts · put/call OI ${e.pcr_oi ?? "—"} · max pain ${TB.num(e.max_pain, 0)} · straddle ${TB.price(e.straddle)}` : "";
+    $("chain").innerHTML = TBA.chain(o, expiry);
+    // Bring the at-the-money row to the middle when the chain is first shown or the expiry changes.
+    const key = `${sym}:${expiry}`, atm = $("chain").querySelector("tr.bg-sky-50");
+    if (atm && key !== centred) { const box = atm.closest(".scroll"); box.scrollTop = atm.offsetTop - box.clientHeight / 2; centred = key; }
+    $("oiChart").innerHTML = TBA.oiChart(o, expiry) || '<div class="text-xs muted">No data</div>';
+    $("smile").innerHTML = TBA.smileChart(o, expiry) || '<div class="text-xs muted">No data</div>';
+    $("term").innerHTML = TBA.termChart(o) || '<div class="text-xs muted">No data</div>';
+    TB.icons();
+  }
+  const schedule = () => { if (!frame) frame = setTimeout(render, 500); };  // live updates redraw at most twice a second
+  function renderHist() {
+    const rows = hist[sym] || [];
+    $("ivSpark").innerHTML = TBA.spark(rows, "atm_iv", "#7c3aed", (v) => TBA.ivp(v));
+    $("pcrSpark").innerHTML = TBA.spark(rows, "pcr_oi", "#0f766e", (v) => v.toFixed(2));
+  }
+  async function load() { data = await TB.get("/api/analysis"); render(); }
+  async function loadHist() { hist[sym] = await TB.get(`/api/options/history?symbol=${sym}&hours=24`); renderHist(); }
+  $("expiry").onchange = () => { expiry = $("expiry").value; render(); };
+  TB.on("OptionsSnapshot", (e) => { if (!data) return; (data.symbols[e.symbol] ||= {}).options = { source: e.source, at: e.ts, summary: e.summary }; schedule(); });
+  TB.on("MarketAnalysis", (e) => { if (!data) return; (data.symbols[e.symbol] ||= {}).analysis = e; schedule(); });
+  TB.on("MarketStats", (e) => { if (!data?.symbols[e.symbol]) return; data.symbols[e.symbol].stats = e; if (e.symbol === sym) schedule(); });
+  load(); loadHist();
+  TB.every(load, 60000);
+  TB.every(loadHist, 60000);
+})();
+
 (() => {
   const { $, esc, num, price, time, ago, pct, compact, pnlClass } = TB;
   const cards = {}, seenAt = {};

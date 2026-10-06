@@ -71,14 +71,53 @@
         </div>
       </div>
     </section>
+
+    <section class="card" id="ai">
+      <div class="card-head">
+        <div class="card-title"><i data-lucide="sparkles"></i>TradeBuddy AI <span class="badge badge-ai">TB-AI</span> <span class="card-sub">written reports by Mistral, optional</span></div>
+        <span id="aiState" class="badge"></span>
+      </div>
+      <div class="card-body space-y-4">
+        <label class="flex items-center gap-2 text-[13px]"><span class="switch sm"><input type="checkbox" id="ai_enabled"><span class="track"></span></span>Write TB-AI reports with Mistral</label>
+        <div>
+          <label class="field-label" for="mistral_api_key">Mistral API key</label>
+          <input id="mistral_api_key" class="input w-full mt-1 font-mono" autocomplete="off" spellcheck="false">
+          <div class="field-help">Stored on this server, never sent back to a browser. Leave blank to keep the stored key. Get one at console.mistral.ai.</div>
+        </div>
+        <div>
+          <label class="field-label" for="mistral_model">Model</label>
+          <input id="mistral_model" list="mistralModels" class="input w-full mt-1 font-mono" spellcheck="false" autocomplete="off">
+          <datalist id="mistralModels">
+            <option value="ministral-3b-2512">small, fast, free tier</option><option value="ministral-8b-2512"></option><option value="ministral-14b-2512"></option>
+            <option value="ministral-3b-latest"></option><option value="ministral-8b-latest"></option>
+            <option value="mistral-small-latest"></option><option value="mistral-medium-latest"></option><option value="mistral-large-latest"></option>
+          </datalist>
+          <div class="field-help">Any model id your key can use. "Test key and model" checks it against Mistral's list.</div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="field-label" for="ai_interval_minutes">One report every</label>
+            <select id="ai_interval_minutes" class="select w-full mt-1">
+              <option value="5">5 minutes (~290 requests a day)</option><option value="10">10 minutes</option><option value="15">15 minutes</option>
+              <option value="30">30 minutes</option><option value="60">60 minutes (24 a day)</option>
+            </select>
+          </div>
+          <div class="flex items-end"><button type="button" id="testAiBtn" class="btn w-full justify-center"><i data-lucide="stethoscope"></i>Test key and model</button></div>
+        </div>
+        <label class="flex items-start gap-2 text-[13px]"><span class="switch sm mt-0.5"><input type="checkbox" id="ai_share_account"><span class="track"></span></span>
+          <span>Include my trades, positions, orders and account figures<span class="field-help block">Needed for the Trading and Portfolio sections. Off: TB-AI reads only market and system numbers.</span></span></label>
+        <div id="aiTestOut" class="text-[12px]"></div>
+        <div class="field-help">What is sent: computed numbers and findings only (market, system, and with the switch above trades, positions and account figures). Never API keys, secrets or order ids. After a 429 (rate limit) TB-AI waits as long as Mistral asks, doubling from 5 to 60 minutes. Insights and the playbook work without AI.</div>
+      </div>
+    </section>
   </div>
 
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
     <section class="card">
       <div class="card-head"><div class="card-title"><i data-lucide="shield-check"></i>Risk <span class="card-sub">every entry, both brokers</span></div></div>
       <div class="card-body grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div><label class="field-label" for="stop_loss_pct">Stop loss %</label><input id="stop_loss_pct" name="stop_loss_pct" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">From entry price. A signal may override it.</div></div>
-        <div><label class="field-label" for="take_profit_pct">Take profit %</label><input id="take_profit_pct" name="take_profit_pct" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">From entry price. A signal may override it.</div></div>
+        <div><label class="field-label" for="stop_loss_pct">Stop loss %</label><input id="stop_loss_pct" name="stop_loss_pct" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">From entry price, for strategies on default levels (is_default_sl_tp). TB Master and mother candle set their own.</div></div>
+        <div><label class="field-label" for="take_profit_pct">Take profit %</label><input id="take_profit_pct" name="take_profit_pct" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">From entry price, for strategies on default levels.</div></div>
         <div><label class="field-label" for="trade_margin_pct">Trade Margin %</label><input id="trade_margin_pct" name="trade_margin_pct" type="number" step="1.0" class="input w-full mt-1 font-mono"><div class="field-help">% of available balance to use per trade. (1-100)</div></div>
       </div>
     </section>
@@ -162,6 +201,14 @@
     document.querySelector('input[name="delta_active"]').checked = s.delta_active;
     $("market_data").value = s.market_data;
     $("trailing_enabled").checked = s.trailing_enabled;
+    $("ai_enabled").checked = s.ai_enabled;
+    $("mistral_model").value = s.mistral_model;
+    $("ai_interval_minutes").value = String(s.ai_interval_minutes);
+    $("ai_share_account").checked = s.ai_share_account;
+    $("mistral_api_key").value = "";
+    $("mistral_api_key").placeholder = s.mistral_api_key ? `stored: ${s.mistral_api_key}` : "not set";
+    $("aiState").textContent = s.ai_enabled ? (s.mistral_api_key ? "on" : "on · no key") : "off";
+    $("aiState").className = `badge ${s.ai_enabled && s.mistral_api_key ? "badge-green" : s.ai_enabled ? "badge-amber" : ""}`;
     $("day_timezone").value = s.day_timezone;
     for (const k of NUMBERS) $(k).value = s[k];
     $("delta_api_key").value = ""; $("delta_api_secret").value = "";
@@ -182,17 +229,21 @@
       delta_active: document.querySelector('input[name="delta_active"]').checked,
       delta_env: env, market_data: $("market_data").value,
       trailing_enabled: $("trailing_enabled").checked, day_timezone: $("day_timezone").value,
+      ai_enabled: $("ai_enabled").checked, mistral_model: $("mistral_model").value.trim(),
+      ai_interval_minutes: Number($("ai_interval_minutes").value), ai_share_account: $("ai_share_account").checked,
     };
     for (const k of NUMBERS) out[k] = Number($(k).value);
     const key = $("delta_api_key").value.trim(), secret = $("delta_api_secret").value.trim();
     if (key) out.delta_api_key = key;
     if (secret) out.delta_api_secret = secret;
+    const mkey = $("mistral_api_key").value.trim();
+    if (mkey) out.mistral_api_key = mkey;
     return out;
   }
   function changes() {
     const now = current(), diff = {};
     for (const [k, v] of Object.entries(now)) {
-      if (k === "delta_api_key" || k === "delta_api_secret") { diff[k] = v; continue; }
+      if (k === "delta_api_key" || k === "delta_api_secret" || k === "mistral_api_key") { diff[k] = v; continue; }
       if (String(v) !== String(saved[k])) diff[k] = v;
     }
     return diff;
@@ -219,6 +270,18 @@
 
   document.querySelectorAll("#envTabs button").forEach((b) => (b.onclick = () => { env = b.dataset.env; paint(); }));
   $("form").addEventListener("input", paint);
+  $("testAiBtn").onclick = async () => {
+    const out = $("aiTestOut");
+    out.innerHTML = '<span class="muted">Asking Mistral… (uses the stored key)</span>';
+    try {
+      const r = await TB.post("/api/ai/test", { model: $("mistral_model").value.trim() });
+      const limits = Object.entries(r.limits || {}).map(([k, v]) => `<span class="font-mono">${esc(k)}=${esc(v)}</span>`).join(" · ");
+      out.innerHTML = `<div class="rounded-lg border ${r.ok ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"} p-2.5 space-y-1">
+        <div class="font-semibold ${r.ok ? "up" : "down"}">${r.ok ? `Works: ${esc(r.model)} answered in ${r.latency_ms} ms` : esc(r.error || "failed")}</div>
+        ${r.models_available != null ? `<div>${r.model_listed ? `${esc(r.model)} is available to this key.` : `<span class="down">${esc(r.model)} is not available to this key.</span> Similar: ${esc((r.similar || []).join(", ") || "none")}`}</div>` : ""}
+        ${limits ? `<div class="text-[11px] muted break-words">${limits}</div>` : ""}</div>`;
+    } catch (err) { out.innerHTML = `<div class="down">${esc(err.message)}</div>`; }
+  };
   $("form").addEventListener("change", paint);
   $("discardBtn").onclick = () => fill(saved);
 

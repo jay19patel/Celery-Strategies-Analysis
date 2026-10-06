@@ -43,6 +43,7 @@ class _MotherCandle(Strategy):
 
     symbols = ("BTCUSD", "ETHUSD")
     lookback = 200  # EMA50 and ATR14 need history to settle
+    is_default_sl_tp = False  # stop at the far side of the mother, target 2R
 
     max_inside: ClassVar[int] = 5
     min_mother_atr: ClassVar[float] = 1.0

@@ -7,6 +7,7 @@ phrase, and any change to the Delta account or keys switches Delta trading off.
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any
 
@@ -18,15 +19,25 @@ ENVIRONMENTS = {
 LIVE_CONFIRM_PHRASE = "I UNDERSTAND THIS IS REAL MONEY"
 
 BROKERS = ("paper", "delta")
-SECRET_FIELDS = ("delta_api_key", "delta_api_secret")
+DELTA_SECRET_FIELDS = ("delta_api_key", "delta_api_secret")
+# Every field that is never sent back to a browser. The Mistral key only feeds the market analyst.
+SECRET_FIELDS = (*DELTA_SECRET_FIELDS, "mistral_api_key")
+# Suggestions for the Settings page; any model id the key can use is accepted (Settings → Test AI checks it).
+MISTRAL_MODELS = (
+    "ministral-3b-2512", "ministral-8b-2512", "ministral-14b-2512", "ministral-3b-latest", "ministral-8b-latest",
+    "mistral-small-latest", "mistral-medium-latest", "mistral-large-latest",
+)
+PATTERNS = {"mistral_model": re.compile(r"^[a-z0-9][a-z0-9.\-]{2,63}$")}
 # Changing any of these changes where Delta orders go: Delta trading stops.
-DELTA_ROUTING_FIELDS = ("delta_active", "delta_env", *SECRET_FIELDS)
+DELTA_ROUTING_FIELDS = ("delta_active", "delta_env", *DELTA_SECRET_FIELDS)
 # Changing any of these changes where prices come from: the stream restarts.
 STREAM_FIELDS = ("paper_active", "market_data", *DELTA_ROUTING_FIELDS)
 
-BOOL_FIELDS = ("paper_active", "delta_active", "trailing_enabled")
-CHOICES = {"market_data": ("demo", "live"), "delta_env": ("demo", "live"), "day_timezone": ("Asia/Kolkata", "UTC")}
-INT_FIELDS = ("trailing_max_steps",)
+BOOL_FIELDS = ("paper_active", "delta_active", "trailing_enabled", "ai_enabled", "ai_share_account")
+CHOICES = {
+    "market_data": ("demo", "live"), "delta_env": ("demo", "live"), "day_timezone": ("Asia/Kolkata", "UTC"),
+}
+INT_FIELDS = ("trailing_max_steps", "ai_interval_minutes")
 RANGES = {
     "stop_loss_pct": (0.05, 50.0),
     "take_profit_pct": (0.05, 100.0),
@@ -40,6 +51,7 @@ RANGES = {
     "trailing_extend_pct": (10.0, 300.0),
     "trailing_lock_pct": (0.0, 95.0),
     "trailing_max_steps": (0, 50),
+    "ai_interval_minutes": (5, 60),
     "daily_loss_limit_pct": (0.0, 100.0),
 }
 
@@ -79,6 +91,13 @@ class Settings:
     # position on that broker and blocks new entries until the next day. 0 = off.
     daily_loss_limit_pct: float = 5.0
     day_timezone: str = "Asia/Kolkata"  # when the trading day starts
+    # Market analysis: rule-based insights always run. With ai_enabled and a key, every 5 minutes the
+    # analyst also sends the computed numbers (never keys or account data) to Mistral for a written review.
+    ai_enabled: bool = False
+    mistral_api_key: str = ""
+    mistral_model: str = "ministral-3b-2512"  # small, fast, on Mistral's free tier
+    ai_interval_minutes: int = 5  # one Mistral request per report; raise it if the account's limit is low
+    ai_share_account: bool = True  # include trades, positions, orders and account figures in what TB-AI reads
 
     @property
     def active_brokers(self) -> list[str]:
@@ -97,12 +116,18 @@ class Settings:
     def has_credentials(self) -> bool:
         return bool(self.delta_api_key and self.delta_api_secret)
 
+    @property
+    def ai_ready(self) -> bool:
+        return self.ai_enabled and bool(self.mistral_api_key)
+
     def public(self) -> dict[str, Any]:
         """Safe to send to a browser: secrets are masked, never returned."""
         data = asdict(self)
         key = self.delta_api_key
         data["delta_api_key"] = f"••••{key[-4:]}" if len(key) > 8 else ("set" if key else "")
         data["delta_api_secret"] = "set" if self.delta_api_secret else ""
+        mkey = self.mistral_api_key
+        data["mistral_api_key"] = f"••••{mkey[-4:]}" if len(mkey) > 8 else ("set" if mkey else "")
         data |= {
             "active_brokers": self.active_brokers,
             "data_env": self.data_env,
@@ -144,6 +169,11 @@ def apply_changes(current: Settings, changes: dict[str, Any], confirm: str = "")
             if number != int(number) or not low <= number <= high:
                 raise SettingsError(f"{name} must be a whole number between {low} and {high}")
             clean[name] = int(number)
+        elif name in PATTERNS:
+            value = str(value).strip()
+            if not PATTERNS[name].match(value):
+                raise SettingsError(f"{name} must look like a model id, e.g. ministral-3b-2512")
+            clean[name] = value
         elif name in CHOICES:
             value = str(value).strip()
             value = value.lower() if name != "day_timezone" else value

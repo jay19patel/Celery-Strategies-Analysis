@@ -28,6 +28,7 @@ HERE = Path(__file__).parent
 # (id, path, lucide icon, title, nav group)
 PAGES = [
     ("overview", "/", "layout-dashboard", "Overview", "Trading"),
+    ("ai", "/ai", "sparkles", "TradeBuddy AI", "Trading"),
     ("strategies", "/strategies", "brain-circuit", "Strategies", "Trading"),
     ("signals", "/signals", "activity", "Signals", "Trading"),
     ("positions", "/positions", "layers", "Positions", "Portfolio"),
@@ -70,6 +71,10 @@ class ManualOrder(BaseModel):
     request_id: str = Field(min_length=8, max_length=64)
     stop_loss: float = Field(gt=0)
     take_profit: float | None = Field(default=None, gt=0)
+
+
+class AITest(BaseModel):
+    model: str = Field(default="", max_length=64)
 
 
 class PositionControl(BaseModel):
@@ -196,6 +201,26 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
     @app.get("/api/metrics")
     async def metrics() -> dict:
         return await call("metrics") | {"dashboard_clients": len(live.clients)}
+
+    @app.get("/api/analysis")
+    async def analysis() -> dict:
+        return await call("analysis")
+
+    @app.get("/api/options/history")
+    async def options_history(symbol: str = "BTCUSD", hours: float = 24) -> list[dict]:
+        return await call("options_history", symbol=symbol, hours=hours)
+
+    @app.get("/api/database")
+    async def database() -> dict:
+        return await call("database")
+
+    @app.get("/api/ai")
+    async def ai_report() -> dict:
+        return await call("ai_report")
+
+    @app.post("/api/ai/test", dependencies=[Depends(protected)])
+    async def test_ai(body: AITest) -> dict:
+        return await call("test_ai", model=body.model)
 
     @app.get("/api/events")
     async def events(limit: int = 300, type: str = "", level: Literal["", "warning", "error"] = "") -> list[dict]:

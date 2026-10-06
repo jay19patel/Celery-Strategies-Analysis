@@ -11,7 +11,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
 COPY pyproject.toml uv.lock /app/
-RUN uv venv /opt/venv && uv sync --active --frozen --no-cache --no-dev
+RUN uv venv /opt/venv && uv sync --active --frozen --no-cache --no-dev --extra ml
 COPY tradebuddy /app/tradebuddy
 
 EXPOSE 8080

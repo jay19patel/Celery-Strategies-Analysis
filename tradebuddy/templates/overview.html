@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
+<!-- TB-AI: the latest report's headline and priorities, when AI is on -->
+<div id="aiHeadline"></div>
 <!-- Accounts today: equity, today's P&L and how much of the daily loss limit is used -->
 <div id="accounts" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
   <section class="card p-5"><div class="skeleton h-24"></div></section>
@@ -53,6 +55,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/analysis.js?v={{ v }}"></script>
 <script>
 (() => {
   const { $, esc, num, price, money, signed, pnlClass, pct, compact, levelsBar, side, time, ago, eventBadge } = TB;
@@ -140,8 +143,50 @@
         <div><div class="stat-label">Ask</div><div class="stat-value down">${price(s.ask)}</div></div>
         <div><div class="stat-label">Spread</div><div class="stat-value">${spread == null ? "—" : price(spread)}</div></div>
       </div>
+      ${analysisBlock(sym)}
     </section>`;
   };
+  // Options and analysis under each market: the few numbers that matter and the top findings.
+  let analysis = null;
+  function analysisBlock(sym) {
+    const d = analysis?.symbols?.[sym];
+    if (!d) return "";
+    const o = d.options?.summary, day = o?.day || {}, a = d.analysis, c = a?.context || {}, p = a?.playbook;
+    const [name, cls] = TBA.STRAT[p?.strategy] || ["—", ""];
+    const top = (a?.insights || []).filter((i) => i.severity !== "info").slice(0, 3);
+    const lean = c.lean?.lean;
+    return `<div class="mt-4 pt-3 border-t border-slate-100">
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <div class="stat-label">Options &amp; analysis</div>
+        <div class="flex items-center gap-1.5">${lean ? `<span class="badge ${lean === "bullish" ? "badge-green" : lean === "bearish" ? "badge-red" : ""}">${esc(lean)}</span>` : ""}
+          ${p ? `<span class="badge ${cls}" title="${esc(p.reason)}">${esc(name)}</span>` : ""}<a href="/market" class="text-[11px] text-brand-600">Details →</a></div>
+      </div>
+      <div class="grid grid-cols-4 gap-2">
+        <div><div class="stat-label">ATM IV</div><div class="stat-value">${TBA.ivp(day.atm_iv)}</div></div>
+        <div><div class="stat-label">IV / RV</div><div class="stat-value">${c.iv_rv_ratio == null ? "—" : c.iv_rv_ratio.toFixed(2)}</div></div>
+        <div><div class="stat-label">Put / call</div><div class="stat-value">${o?.pcr_oi == null ? "—" : o.pcr_oi.toFixed(2)}</div></div>
+        <div><div class="stat-label">Move by ${esc(day.label || "—")}</div><div class="stat-value">${day.implied_move_pct == null ? "—" : `±${day.implied_move_pct.toFixed(2)}%`}</div></div>
+      </div>
+      ${a?.ai?.summary ? `<div class="mt-3 ai-box px-2.5 py-2 text-[11.5px] flex gap-2">${TB.aiBadge()}<span>${esc(a.ai.summary)}</span></div>` : ""}
+      ${top.length ? `<ul class="mt-3 space-y-1">${top.map((i) => `<li class="text-[11.5px] flex gap-1.5"><span class="badge ${i.severity === "alert" ? "badge-red" : "badge-amber"}">${esc(i.severity)}</span><span>${esc(i.title)}</span></li>`).join("")}</ul>`
+        : a ? `<div class="mt-2 text-[11.5px] muted">Nothing stands out · ${ago(a.ts)}</div>` : `<div class="mt-2 text-[11.5px] muted">First analysis within 5 minutes.</div>`}
+    </div>`;
+  }
+  async function loadAi() {
+    let d;
+    try { d = await TB.get("/api/ai"); } catch { return; }
+    const r = d.report?.report;
+    $("aiHeadline").innerHTML = d.enabled && r ? `<section class="card ai-box px-5 py-4">
+      <div class="flex flex-wrap items-center gap-2">${TB.aiBadge()}${TB.aiStatus(r.health)}<span class="text-[11px] muted">${ago(d.report.ts)}${d.latest && !d.latest.ok ? ' · <span class="text-amber-700">latest attempt failed</span>' : ""}</span>
+        <a href="/ai" class="ml-auto btn btn-sm">Full report<i data-lucide="arrow-right"></i></a></div>
+      <div class="text-[15px] font-semibold mt-2">${esc(r.headline)}</div>
+      ${r.priorities?.length ? `<ol class="list-decimal pl-5 mt-1.5 text-[12.5px] space-y-0.5">${r.priorities.map((p) => `<li>${esc(p)}</li>`).join("")}</ol>` : ""}
+    </section>` : "";
+    TB.icons();
+  }
+  TB.on("AIReport", TB.debounce(loadAi, 500));
+  async function loadAnalysis() { try { analysis = await TB.get("/api/analysis"); renderMarkets(); } catch (err) { console.error(err); } }
+  TB.on(["MarketAnalysis"], TB.debounce(loadAnalysis, 500));
   function renderMarkets() {
     const prices = TB.header?.prices || data?.header?.prices || {};
     const syms = Object.keys(prices).sort();
@@ -236,6 +281,10 @@
   TB.on(["PositionClosed", "OrderPlaced", "ProtectionTrailed", "DailyLossHalt", "SignalGenerated", "TradeSkipped", "SettingsChanged"], TB.debounce(load, 300));
   load();
   TB.every(load, 5000);
+  loadAnalysis();
+  TB.every(loadAnalysis, 60000);
+  loadAi();
+  TB.every(loadAi, 60000);
 })();
 </script>
 {% endblock %}

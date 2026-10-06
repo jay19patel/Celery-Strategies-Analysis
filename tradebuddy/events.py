@@ -94,6 +94,59 @@ class FeedHeartbeat(Event):
     process: dict[str, Any]
 
 
+@dataclass(frozen=True, kw_only=True)
+class OptionsSnapshot(Event):
+    """The options book for one underlying, summarised (options.summarize). Every few seconds."""
+
+    symbol: str  # the perpetual it belongs to: BTCUSD
+    underlying: str  # BTC
+    source: str  # "websocket" | "rest"
+    summary: dict[str, Any]
+
+
+@dataclass(frozen=True, kw_only=True)
+class MarketAnalysis(Event):
+    """The analyst's view of one symbol, every few minutes: context numbers, rule-based insights,
+    the model forecast and the options playbook when a model is trained, and the AI review when on."""
+
+    symbol: str
+    context: dict[str, Any]
+    insights: list[dict[str, Any]]
+    forecast: dict[str, Any] | None = None
+    playbook: dict[str, Any] | None = None
+    ai: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class AIReport(Event):
+    """One TradeBuddy AI (TB-AI) attempt: the written report, or why there is none this time."""
+
+    ok: bool
+    model: str
+    report: dict[str, Any] | None = None  # tbai.clean(): headline, health, priorities, sections, symbols
+    error: str = ""
+    status: int | None = None  # Mistral's HTTP status on failure (429 = rate limited)
+    paused_until: float | None = None  # no new request before this, after a rate limit
+    limits: dict[str, str] = field(default_factory=dict)  # Mistral's rate-limit headers
+    usage: dict[str, Any] = field(default_factory=dict)
+    ms: float = 0.0
+    shared_account: bool = False  # whether trades, positions and account figures were included
+
+    @property
+    def level(self) -> str:
+        return "info" if self.ok else "warning"
+
+
+@dataclass(frozen=True, kw_only=True)
+class ProcessHeartbeat(Event):
+    """A helper process (the analyst) saying it is alive: its load, its background jobs, its status."""
+
+    role: str
+    process: dict[str, Any]
+    jobs: list[dict[str, Any]]
+    status: dict[str, Any] = field(default_factory=dict)
+
+
 # -- strategy -----------------------------------------------------------------
 
 

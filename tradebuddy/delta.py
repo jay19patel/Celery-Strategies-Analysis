@@ -133,6 +133,33 @@ class DeltaClient:
         )
         return [c for c in bars if c.time + step <= now][-count:]
 
+    async def option_tickers(self, underlying: str) -> list[Any]:
+        """Every live option on `underlying` with quotes, IVs, greeks, OI and volume (options.OptionQuote)."""
+        from tradebuddy.options import parse_ticker
+
+        params = {"contract_types": "call_options,put_options", "underlying_asset_symbols": underlying}
+        now = time.time()
+        rows = await self.request("GET", "/v2/tickers", params=params) or []
+        return [q for q in (parse_ticker(r, now) for r in rows) if q is not None]
+
+    async def history_range(self, symbol: str, resolution: str, start: int, end: int, page: int = 1900) -> list[Candle]:
+        """Closed candles between two times, any length, fetched a page at a time (for training).
+        Works for every history series: BTCUSD, OI:BTCUSD, FUNDING:BTCUSD, MARK:BTCUSD."""
+        step = RESOLUTION_SECONDS[resolution]
+        bars: dict[int, Candle] = {}
+        hi = end
+        while hi > start:
+            lo = max(start, hi - page * step)
+            rows = await self.request("GET", "/v2/history/candles", params={"resolution": resolution, "symbol": symbol, "start": lo, "end": hi}) or []
+            for r in rows:
+                c = Candle(int(r["time"]), float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]), float(r.get("volume") or 0))
+                bars[c.time] = c
+            if not rows:
+                break
+            hi = lo
+        now = int(time.time())
+        return [bars[k] for k in sorted(bars) if k + step <= now]
+
     async def option_chain(self, underlying: str) -> list[OptionQuote]:
         params = {"contract_types": "call_options,put_options", "underlying_asset_symbols": underlying}
         quotes = []

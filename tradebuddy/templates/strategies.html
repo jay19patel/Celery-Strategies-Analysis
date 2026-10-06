@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<div data-ai-note="trading"></div>
 <div class="flex flex-wrap items-center justify-between gap-3">
   <p class="text-xs text-slate-500 max-w-3xl">Each strategy runs when its candle closes on the WebSocket (or when the clock passes the bar's end). A strategy only produces signals; whether a signal becomes an order is decided by the trading switch, these toggles, and the broker.</p>
   <span class="text-xs muted">Add a strategy: drop a file into <span class="font-mono">tradebuddy/strategies/</span> and restart.</span>
@@ -25,10 +26,11 @@
         ${TB.switchHtml("strategy:" + s.name, s.enabled)}
       </div>
       <div class="card-body space-y-4">
-        <div class="grid grid-cols-3 gap-2 text-xs">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
           <div class="bg-slate-50 rounded-lg p-2.5"><div class="muted">Trigger</div><div class="font-mono font-semibold mt-0.5">${esc(s.interval)} close</div></div>
           <div class="bg-slate-50 rounded-lg p-2.5"><div class="muted">History</div><div class="font-mono font-semibold mt-0.5">${s.lookback ? s.lookback + " bars" : "none"}</div></div>
-          <div class="bg-slate-50 rounded-lg p-2.5"><div class="muted">Size</div><div class="font-mono font-semibold mt-0.5">20% Margin</div></div>
+          <div class="bg-slate-50 rounded-lg p-2.5"><div class="muted">Size</div><div class="font-mono font-semibold mt-0.5">Settings margin %</div></div>
+          <div class="bg-slate-50 rounded-lg p-2.5" title="${s.is_default_sl_tp ? "is_default_sl_tp = True: stop loss % and take profit % from Settings" : "is_default_sl_tp = False: each signal carries its own stop loss and take profit"}"><div class="muted">SL / TP</div><div class="font-mono font-semibold mt-0.5 ${s.is_default_sl_tp ? "" : "text-brand-600"}">${s.is_default_sl_tp ? "Settings" : "Own, per signal"}</div></div>
         </div>
         <div>
           <div class="field-label mb-2">Symbols</div>

@@ -6,7 +6,7 @@ TradeBuddy turns strategy signals into orders on pluggable brokers: the
 built-in paper broker and Delta Exchange India, independently, either or both.
 
 It runs as containers under `docker compose up`: feed · engine · web ·
-Celery workers, joined by ZeroMQ, with Redis as the Celery broker.
+analyst · Celery workers, joined by ZeroMQ, with Redis as the Celery broker.
 
 **Paper is active and trading by default. Delta is opt-in, defaults to demo,
 and its trading switch is off at every start.** Runtime settings live in
@@ -31,6 +31,8 @@ engine  PriceBook · StrategyRunner · Trader · Executor · brokers · SQLite
         ── PUB every event ──► web (dashboard /ws), feed (SettingsChanged)
         ◄─ RPC (api.METHODS) ── web
 worker  Celery task: evaluate() one strategy on one bar, PUSH the result
+feed    option tickers (WebSocket, REST fallback) ─► OptionsBook ─► OptionsSnapshot every 15s
+analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─► playbook ─► Mistral? ─► PUSH MarketAnalysis
 ```
 
 - `System` (`system.py`) is the engine. It is the only writer of orders,
@@ -50,7 +52,14 @@ worker  Celery task: evaluate() one strategy on one bar, PUSH the result
   auto trailing (per-position switch and max trails in `position_controls`). It moves
   SL/TP only through `Broker.update_protection`, under `System.protection_lock`.
 - `settings.py` — validation for every runtime setting; `System._apply` applies them.
-- `strategies/` — signal logic only.
+- `strategies/` — signal logic only. `tb_master.py` is the all-in-one: 1d bias, 1h breakout (swing) or 15m
+  squeeze (scalp), confirmed by rising open interest, options walls cap the target; its `decide()` is pure so
+  the backtest runs the code that trades.
+- `options.py` — the options book and its arithmetic (ATM IV, skew, put/call, max pain, walls).
+- `insights.py` (rules), `forecast.py` (scikit-learn, `ml` extra), `playbook.py` (options
+  structure), `tbai.py` + `mistral.py` (TradeBuddy AI report), `analyst.py` (runs them). Analysis is advisory:
+  nothing in it places an order.
+- `jobs.py` — every background loop wraps a pass in `job.tick()`; the System page shows them all.
 
 ## Invariants
 
@@ -88,6 +97,13 @@ Enforced by tests. Breaking one should fail the build.
 14. **Bounded for a year.** Ticks, heartbeats and `StrategyEvaluated` are never
     stored; the event log is pruned by `RETENTION_DAYS`; state changes, not
     retries, become events. The orders and paper tables are the permanent record.
+15. **Analysis never trades and never leaks.** The analyst reads market data and
+    the engine's `ai_digest` and writes only events. A forecast model is used only
+    for what it beat a naive baseline at on unseen data (`ModelCard.skill`).
+    TradeBuddy AI (TB-AI) sends Mistral computed numbers and findings, never keys,
+    secrets or order ids; trades, positions and account figures only with
+    `ai_share_account`. After a 429 it waits as long as Mistral asks (backoff
+    5 → 60 min). Every AI-written text in the UI carries the TB-AI badge.
 
 ## Extension Points
 
@@ -96,6 +112,9 @@ Enforced by tests. Breaking one should fail the build.
 One module in `tradebuddy/strategies/` with a concrete `Strategy` subclass; it
 is discovered automatically. Keep `name` stable, bump `version` when logic
 changes. Strategies return a `Signal` or `None`; they never place orders.
+`is_default_sl_tp = True` (default) takes stop loss and take profit from Settings and ignores the Signal's;
+`False` means every Signal carries both `stop_loss_pct` and `take_profit_pct` (within Settings' ranges),
+or the result is an error and nothing trades.
 
 ### Broker
 
@@ -123,6 +142,7 @@ Live updates come from `TB.on(eventType, fn)`.
 docker compose up          # everything: http://127.0.0.1:8080 (rebuilds on every up)
 make install && make check # local lint + tests
 make token                 # an API_TOKEN for .env
+docker compose run --rm analyst train --symbols BTCUSD ETHUSD --days 365   # fit the forecaster
 ```
 
 Tests run the engine in one process (`app.local_app`, inline evaluator, fake

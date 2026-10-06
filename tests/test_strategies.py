@@ -21,7 +21,7 @@ def ctx(candles, market=None, symbol="BTCUSD"):
 def test_discover_finds_every_strategy_once():
     names = [s.name for s in discover()]
     assert names == sorted(names) == [
-        "ema_9_15_15m", "ema_cross_15m", "mother_candle_15m", "mother_candle_1h", "pcr_options", "rsi_5m",
+        "ema_9_15_15m", "ema_cross_15m", "mother_candle_15m", "mother_candle_1h", "pcr_options", "rsi_5m", "tb_master_15m",
     ]
 
 

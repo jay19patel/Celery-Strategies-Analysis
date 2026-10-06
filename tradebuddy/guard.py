@@ -27,6 +27,7 @@ from tradebuddy.brokers.base import protection_error
 from tradebuddy.delta import round_to_tick
 from tradebuddy.errors import BrokerError
 from tradebuddy.events import DailyLossHalt, EventBus, GuardAlert, ProtectionTrailed
+from tradebuddy.jobs import NULL_JOB
 from tradebuddy.settings import Settings
 from tradebuddy.store import Store
 
@@ -77,10 +78,13 @@ class PositionGuard:
         self.status: dict[str, dict[str, Any]] = {}
         self._failed_at: dict[tuple[str, str], float] = {}
 
+    job = NULL_JOB  # set by the System, for the dashboard
+
     async def run(self, interval: float = 3.0) -> None:
         while True:
             try:
-                await self.check()
+                with self.job.tick():
+                    await self.check()
             except Exception:
                 log.exception("guard_pass_failed")
             await asyncio.sleep(interval)

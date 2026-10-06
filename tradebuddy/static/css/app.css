@@ -85,9 +85,7 @@ body { font-feature-settings: "tnum", "cv02", "cv03", "cv04", "cv11"; }
 #modal.open { display: flex; }
 
 /* Scrolling price ticker under the header */
-.marquee { overflow: hidden; height: 30px; display: flex; align-items: center; background: #0f172a; border-bottom: 1px solid #1e293b;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
+.marquee { overflow: hidden; height: 30px; display: flex; align-items: center; background: #0f172a; border-bottom: 1px solid #1e293b; }
 .marquee-track { display: inline-flex; white-space: nowrap; will-change: transform; animation: marquee var(--marquee-duration, 30s) linear infinite; }
 .marquee:hover .marquee-track { animation-play-state: paused; }
 .marquee-item { display: inline-flex; align-items: center; gap: 8px; padding: 0 22px; font: 500 12px "JetBrains Mono", monospace; color: #e2e8f0;
@@ -136,3 +134,9 @@ body { font-feature-settings: "tnum", "cv02", "cv03", "cv04", "cv11"; }
 /* event log levels */
 .log-line.lvl-error { background: #fef2f2; }
 .log-line.lvl-warning { background: #fffbeb; }
+
+/* TB-AI: marks everything written by TradeBuddy AI (Mistral), on every page */
+.badge-ai { background: linear-gradient(90deg, #6d28d9, #2563eb); color: #fff; font-weight: 700; letter-spacing: .05em; border: 0; }
+.badge-ai::before { content: "✦"; margin-right: 3px; font-size: 9px; }
+.ai-box { border: 1px solid #ddd6fe; background: linear-gradient(180deg, #faf5ff, #ffffff); border-radius: 10px; }
+.st-good { color: #047857; background: #d1fae5; } .st-watch { color: #92400e; background: #fef3c7; } .st-act { color: #991b1b; background: #fee2e2; }

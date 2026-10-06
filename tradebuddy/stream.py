@@ -24,6 +24,8 @@ from websockets.asyncio.client import connect
 
 from tradebuddy.delta import RESOLUTION_SECONDS, Candle, sign
 from tradebuddy.events import CandleClosed, EventBus, FeedStatus, MarketStats, OrderUpdate, PositionUpdate, Tick
+from tradebuddy.jobs import NULL_JOB
+from tradebuddy.options import OptionsBook
 
 log = logging.getLogger(__name__)
 
@@ -94,9 +96,12 @@ class BarCloser:
             forming = self._forming.get(key)
             self._close(key, bar, forming if forming and forming.time == bar else None, "clock")
 
+    job = NULL_JOB
+
     async def run(self) -> None:
         while True:
-            self.tick_clock()
+            with self.job.tick():
+                self.tick_clock()
             await asyncio.sleep(1)
 
     def _close(self, key: tuple[str, str], bar_time: int, candle: Candle | None, source: str) -> None:
@@ -155,9 +160,10 @@ class DeltaStream:
     SILENCE_TIMEOUT = 60.0  # no message for this long means the socket is dead
 
     def __init__(
-        self, url: str, bus: EventBus, closer: BarCloser, api_key: str = "", api_secret: str = ""
+        self, url: str, bus: EventBus, closer: BarCloser, api_key: str = "", api_secret: str = "", options: OptionsBook | None = None,
     ) -> None:
         self.url = url
+        self.options = options  # when set, every option ticker goes into this book, not onto the bus
         self.bus = bus
         self.closer = closer
         self.api_key = api_key
@@ -192,6 +198,8 @@ class DeltaStream:
         for symbol, res in sorted(self.closer.pairs):
             by_res.setdefault(res, []).append(symbol)
         symbols = sorted({s for s, _ in self.closer.pairs})
+        if self.options is not None:
+            symbols += ["call_options", "put_options"]  # every option contract; the book keeps the ones it wants
         channels = [{"name": "v2/ticker", "symbols": symbols}]
         channels += [{"name": f"candlestick_{res}", "symbols": syms} for res, syms in by_res.items()]
         return {"type": "subscribe", "payload": {"channels": channels}}
@@ -246,8 +254,12 @@ class DeltaStream:
         if not isinstance(msg, dict):
             return
         kind = str(msg.get("type", ""))
-        self.messages[kind] += 1
         self.last_message_at = time.time()
+        if kind == "v2/ticker" and self.options is not None and str(msg.get("symbol", ""))[:2] in ("C-", "P-"):
+            self.messages["v2/ticker (options)"] += 1
+            self.options.observe(msg)
+            return
+        self.messages[kind] += 1
 
         if kind == "v2/ticker":
             price = msg.get("mark_price") or msg.get("close")

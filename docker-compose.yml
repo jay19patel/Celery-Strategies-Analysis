@@ -5,7 +5,7 @@
 # Every `up` rebuilds the image, so code changes are picked up. More strategy
 # workers: docker compose up --scale worker=4
 #
-# feed · engine · web · Celery workers, joined by ZeroMQ; Redis is the Celery
+# feed · engine · web · analyst · Celery workers, joined by ZeroMQ; Redis is the Celery
 # broker. Only the dashboard is published, and only on this machine's
 # loopback. The ZeroMQ ports carry commands and API keys and stay inside the
 # compose network.
@@ -61,6 +61,14 @@ services:
     command: ["worker", "--concurrency", "4"]
     depends_on:
       redis: { condition: service_healthy }
+
+  # Market analysis every 5 minutes: insights, the trained forecaster, the options playbook and,
+  # when switched on in Settings, a Mistral review. Train its models once (and now and then):
+  #   docker compose run --rm analyst train --symbols BTCUSD ETHUSD --days 365
+  analyst:
+    <<: *app
+    command: ["analyst"]
+    depends_on: [engine]
 
   web:
     <<: *app

@@ -19,13 +19,17 @@ from tradebuddy.config import Config
 from tradebuddy.delta import DeltaClient
 from tradebuddy.errors import BrokerError
 from tradebuddy.events import (
+    AIReport,
     CandleClosed,
     Event,
     EventBus,
     FeedHeartbeat,
+    MarketAnalysis,
     MarketStats,
+    OptionsSnapshot,
     OrderRequested,
     OrderUpdate,
+    ProcessHeartbeat,
     SettingsChanged,
     SignalGenerated,
     StrategyEvaluated,
@@ -33,6 +37,8 @@ from tradebuddy.events import (
     ToggleChanged,
 )
 from tradebuddy.guard import PositionGuard
+from tradebuddy.jobs import Jobs
+from tradebuddy.options import UNDERLYINGS, OptionsBook, OptionsFeed, history_row
 from tradebuddy.runner import Evaluator, InlineEvaluator, MarketData, StrategyRunner, pair_key, strategy_key
 from tradebuddy.settings import (
     BROKERS,
@@ -179,6 +185,8 @@ class System:
         evaluator: Callable[[System], Evaluator] | None = None,
         local_feed: bool = True,
         role: str = "all",
+        options_feed: bool = False,  # single process: also run the options book (distributed: the feed does)
+        analyst: Callable[[System], Any] | None = None,  # single process: a market analyst to run here
     ) -> None:
         self.cfg = cfg
         self.bus = EventBus()
@@ -193,6 +201,21 @@ class System:
         self._client_factory = client_factory or DeltaClient
         self._stream_factory = stream_factory or DeltaStream
         self.market_client, self.delta_client = self._make_clients()
+
+        # Options and analysis, for the dashboard: the latest per symbol, wherever it was made.
+        self.options_latest: dict[str, dict[str, Any]] = {}
+        self.analysis_latest: dict[str, dict[str, Any]] = {}
+        for e in self.store.recent_events(20, types=["MarketAnalysis"]):  # survive a restart
+            self.analysis_latest.setdefault(e["symbol"], e)
+        reports = self.store.recent_events(50, types=["AIReport"])
+        self.ai_latest: dict[str, Any] | None = reports[0] if reports else None  # the last attempt
+        self.ai_last_good: dict[str, Any] | None = next((r for r in reports if r.get("ok")), None)
+        self._options_minute: dict[str, int] = {}
+        self.options_book = OptionsBook(set(UNDERLYINGS.values())) if local_feed and options_feed else None
+        self.options_feed = (
+            OptionsFeed(self.options_book, self.bus.publish, lambda u: self.market_client.option_tickers(u), self.prices.price)
+            if self.options_book else None
+        )
 
         pairs = {(sym, s.interval) for s in self.strategies for sym in s.symbols}
         self.closer = BarCloser(self.bus, pairs) if local_feed else None
@@ -226,7 +249,25 @@ class System:
         self.bus.subscribe(self.executor.on_order_requested, OrderRequested)
         self.bus.subscribe(self.executor.on_order_update, OrderUpdate)
         self.bus.subscribe(self.record)
+        self.bus.subscribe(self.on_options, OptionsSnapshot)
+        self.bus.subscribe(self.on_analysis, MarketAnalysis)
+        self.bus.subscribe(self.on_process, ProcessHeartbeat)
+        self.bus.subscribe(self.on_ai_report, AIReport)
         self.bus.subscribe(self.live.on_event)
+        self.analyst = analyst(self) if analyst else None
+
+        # Background jobs, for the System page. The feed's and the analyst's come with their heartbeats.
+        self.jobs = Jobs(role)
+        self.jobs_housekeeping = self.jobs.add("housekeeping", "Deletes events and options minutes past their retention", 3600)
+        self.guard.job = self.jobs.add("position guard", "Daily loss limit and auto trailing, every active broker", 3)
+        self.jobs_reconcile = self.jobs.add("reconcile", "At start: asks brokers about orders a previous run left open")
+        if self.closer:
+            self.closer.job = self.jobs.add("bar clock", "Closes bars the stream has not, when their time is up", 1)
+        if self.options_feed:
+            self.options_feed.job = self.jobs.add("options snapshot", "Summarises the options book per underlying (REST if the socket is quiet)", self.options_feed.every)
+        if self.analyst:
+            self.analyst.job = self.jobs.add("market analysis", "Insights, forecast, options playbook, AI review", self.analyst.every)
+        self.remote_processes: dict[str, dict[str, Any]] = {}  # role -> latest heartbeat (analyst)
 
         # Fail closed: a broker that moves real orders starts every run switched off.
         self.store.set_enabled(trading_key("delta"), False)
@@ -254,15 +295,16 @@ class System:
     def _make_stream(self) -> Stream:
         s = self.settings
         private = s.delta_active and s.has_credentials  # Delta's orders/positions channels, only when Delta is in use
+        extra = {"options": self.options_book} if self.options_book is not None else {}
         return self._stream_factory(
             ENVIRONMENTS[s.data_env][1], self.bus, self.closer,
-            s.delta_api_key if private else "", s.delta_api_secret if private else "",
+            s.delta_api_key if private else "", s.delta_api_secret if private else "", **extra,
         )
 
     # Not written to the event log: prices arrive many times a second, heartbeats every few seconds,
     # and a StrategyEvaluated per strategy per bar is summed up in the runner's stats (its failures
     # are StrategyError, which is kept).
-    UNLOGGED = (Tick, MarketStats, FeedHeartbeat, StrategyEvaluated)
+    UNLOGGED = (Tick, MarketStats, FeedHeartbeat, ProcessHeartbeat, StrategyEvaluated, OptionsSnapshot)  # options: summarised per minute below
 
     async def record(self, event: Event) -> None:
         if not isinstance(event, self.UNLOGGED):
@@ -272,12 +314,56 @@ class System:
         """Keeps the event log inside its retention, so a year of running does not fill the disk."""
         while True:
             try:
-                deleted = await asyncio.to_thread(self.store.prune_events)
-                if deleted:
-                    log.info("events_pruned deleted=%d", deleted)
+                with self.jobs_housekeeping.tick() as job:
+                    deleted = await asyncio.to_thread(self.store.prune_events)
+                    minutes = await asyncio.to_thread(self.store.prune_options)
+                    job.note = f"deleted {deleted} events, {minutes} options minutes"
+                if deleted or minutes:
+                    log.info("events_pruned deleted=%d options_minutes=%d", deleted, minutes)
             except Exception:
                 log.exception("events_prune_failed")
             await asyncio.sleep(every)
+
+    async def _reconcile(self) -> None:
+        try:
+            with self.jobs_reconcile.tick():
+                await self.executor.reconcile(before=time.time())
+        except Exception:
+            log.exception("reconcile_failed")
+
+    async def on_options(self, e: OptionsSnapshot) -> None:
+        self.options_latest[e.symbol] = {"source": e.source, "at": e.ts, "summary": e.summary}
+        minute = int(e.ts // 60)
+        if self._options_minute.get(e.underlying) != minute:  # one stored row per minute
+            self._options_minute[e.underlying] = minute
+            self.store.record_options(history_row(e.summary))
+
+    async def on_ai_report(self, e: AIReport) -> None:
+        self.ai_latest = e.to_dict()
+        if e.ok:
+            self.ai_last_good = self.ai_latest
+
+    async def on_process(self, e: ProcessHeartbeat) -> None:
+        self.remote_processes[e.role] = {"process": e.process, "jobs": e.jobs, "status": e.status, "at": e.ts}
+
+    def all_jobs(self) -> list[dict[str, Any]]:
+        """Every background job in every process. A process that stopped reporting shows its jobs as silent."""
+        now = time.time()
+
+        def mark(jobs: list[dict[str, Any]], role: str, at: float, stale: float) -> list[dict[str, Any]]:
+            if now - at <= stale:
+                return jobs
+            return [j | {"state": "silent", "last_error": f"no heartbeat from the {role} for {now - at:.0f}s"} for j in jobs]
+
+        jobs = self.jobs.snapshot()
+        if self.remote_feed and self.remote_feed.updated_at:
+            jobs += mark(self.remote_feed._status.get("jobs", []), "feed", self.remote_feed.updated_at, RemoteFeed.STALE_AFTER)
+        for role, beat in self.remote_processes.items():
+            jobs += mark(beat["jobs"], role, beat["at"], 60)
+        return jobs
+
+    async def on_analysis(self, e: MarketAnalysis) -> None:
+        self.analysis_latest[e.symbol] = e.to_dict()
 
     def market_status(self) -> dict[str, Any]:
         """Is there live market data for every symbol a strategy trades? Without it strategies are
@@ -308,13 +394,17 @@ class System:
         self._started = True
         self._tasks = [
             asyncio.create_task(self.monitor.run(), name="monitor"),
-            asyncio.create_task(self.executor.reconcile(before=time.time()), name="reconcile"),
+            asyncio.create_task(self._reconcile(), name="reconcile"),
             asyncio.create_task(self.guard.run(), name="guard"),
             asyncio.create_task(self.housekeeping(), name="housekeeping"),
         ]
         if self.local_feed:
             self._stream_task = asyncio.create_task(self.stream.run(), name="stream")
             self._tasks.append(asyncio.create_task(self.closer.run(), name="bar-clock"))
+            if self.options_feed:
+                self._tasks.append(asyncio.create_task(self.options_feed.run(), name="options"))
+        if self.analyst:
+            self._tasks.append(asyncio.create_task(self.analyst.run(), name="analyst"))
         log.info("system_started brokers=%s data=%s strategies=%s", self.settings.active_brokers, self.settings.data_env, [s.name for s in self.strategies])
 
     async def stop(self) -> None:
@@ -461,6 +551,7 @@ class System:
                 "interval": s.interval,
                 "size": s.size,
                 "lookback": s.lookback,
+                "is_default_sl_tp": s.is_default_sl_tp,
                 "doc": (type(s).__doc__ or sys.modules[type(s).__module__].__doc__ or "").strip(),
                 "enabled": self.store.enabled(strategy_key(s.name)),
                 "symbols": [{"symbol": sym, "enabled": self.store.enabled(pair_key(s.name, sym))} for sym in s.symbols],
@@ -482,6 +573,12 @@ class System:
             "orders": self.store.order_counts(),
             "event_log": self.store.events_size(),
             "evaluator": self.evaluator.stats(),
-            "processes": [me, *([self.remote_feed.process] if self.remote_feed and self.remote_feed.process else [])],
+            "processes": [
+                me, *([self.remote_feed.process] if self.remote_feed and self.remote_feed.process else []),
+                *[b["process"] for b in self.remote_processes.values()],
+            ],
+            "jobs": self.all_jobs(),
+            "analyst": (self.remote_processes.get("analyst") or {}).get("status") or (self.analyst.status() if self.analyst else None),
+            "options_feed": (self.remote_feed.status() if self.remote_feed else {}).get("options") or (self.options_feed.stats() if self.options_feed else None),
             "dashboard_clients": len(self.live.clients),
         }

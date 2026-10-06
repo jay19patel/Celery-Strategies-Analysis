@@ -53,9 +53,14 @@
   const EVENT_BADGE = {
     SignalGenerated: "badge-blue", OrderPlaced: "badge-green", PositionClosed: "badge-green", TradeSkipped: "badge-amber",
     OrderUnknown: "badge-amber", OrderFailed: "badge-red", StrategyError: "badge-red", SettingsChanged: "badge-blue", ToggleChanged: "",
-    ProtectionTrailed: "badge-green", DailyLossHalt: "badge-solid-red", GuardAlert: "badge-red",
+    ProtectionTrailed: "badge-green", DailyLossHalt: "badge-solid-red", GuardAlert: "badge-red", AIReport: "badge-ai", MarketAnalysis: "badge-blue",
   };
   const eventBadge = (t) => `<span class="badge ${EVENT_BADGE[t] ?? ""}">${esc(t)}</span>`;
+  // Everything TradeBuddy AI wrote carries this badge, so AI text is never mistaken for computed numbers.
+  const aiBadge = (title = "Written by TradeBuddy AI (Mistral) from the numbers on this page. It explains; it does not decide trades.") =>
+    `<span class="badge badge-ai" title="${esc(title)}">TB-AI</span>`;
+  const AI_STATUS = { good: "Good", watch: "Watch", act: "Act now" };
+  const aiStatus = (s) => `<span class="badge st-${esc(s || "watch")}">${esc(AI_STATUS[s] || s || "—")}</span>`;
 
   // ── API ─────────────────────────────────────────────────────────────────
   async function api(method, url, body) {
@@ -378,8 +383,31 @@
     }));
   }
 
+  // ── TB-AI notes ─────────────────────────────────────────────────────────
+  // A page that has <div data-ai-note="trading"></div> shows TB-AI's take on that section of the latest
+  // report, badged, with a link to the full report. Nothing is shown while AI is off or has no report.
+  const AI_SECTIONS = { market: "Market", trading: "Trading", portfolio: "Portfolio", system: "System" };
+  async function aiNotes() {
+    const slots = document.querySelectorAll("[data-ai-note]");
+    if (!slots.length) return;
+    let d;
+    try { d = await get("/api/ai"); } catch { return; }
+    const r = d.report?.report, at = d.report?.ts;
+    slots.forEach((el) => {
+      const s = r?.sections?.[el.dataset.aiNote];
+      if (!d.enabled || !s) { el.innerHTML = ""; return; }
+      const stale = d.latest && !d.latest.ok ? ` · <span class="text-amber-700" title="${esc(d.latest.error)}">latest attempt failed, showing the last good report</span>` : "";
+      el.innerHTML = `<section class="ai-box px-4 py-3 text-[12.5px]">
+        <div class="flex flex-wrap items-center gap-2">${aiBadge()}${aiStatus(s.status)}<span class="font-medium">${esc(AI_SECTIONS[el.dataset.aiNote] || "")}</span>
+          <span class="text-[11px] muted">${ago(at)}${stale}</span><a href="/ai" class="ml-auto text-[11.5px] text-brand-600">Full report →</a></div>
+        <p class="mt-1.5 leading-relaxed">${esc(s.summary)}</p>
+        ${s.actions?.length ? `<div class="mt-1.5 text-[12px]"><span class="font-semibold text-amber-800">To do:</span> ${s.actions.map(esc).join(" · ")}</div>` : ""}
+      </section>`;
+    });
+  }
+
   window.TB = {
-    $, esc, num, price, money, signed, pnlClass, pct, compact, count, ms, levelsBar, stats, time, dateTime, ago, duration, side, status, eventBadge,
+    $, esc, num, price, money, signed, pnlClass, pct, compact, count, ms, levelsBar, stats, time, dateTime, ago, duration, side, status, eventBadge, aiBadge, aiStatus,
     api, get, post, put, on, toast, ask, rows, switchHtml, bindToggles, icons, loadHeader, every, debounce,
     get header() { return header; },
   };
@@ -388,6 +416,9 @@
     initChrome();
     loadHeader();
     every(loadHeader, 10000);
+    aiNotes();
+    on("AIReport", debounce(aiNotes, 500));
+    every(aiNotes, 60000);
     connect();
   });
 })();

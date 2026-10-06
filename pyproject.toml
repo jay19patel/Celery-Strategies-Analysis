@@ -17,6 +17,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The market forecaster (tradebuddy/forecast.py): only the analyst process imports it, and only once
+# a model has been trained. Without it the analyst still produces rule-based insights.
+ml = [
+    "scikit-learn>=1.5.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",

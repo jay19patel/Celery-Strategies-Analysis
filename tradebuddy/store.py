@@ -103,12 +103,55 @@ CREATE TABLE IF NOT EXISTS daily_risk (
 CREATE INDEX IF NOT EXISTS events_type ON events(type, id);
 CREATE INDEX IF NOT EXISTS events_type_ts ON events(type, ts);
 CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
+-- One row per underlying per minute: the options numbers worth charting and, later, training on.
+-- Rows on a 15-minute boundary are kept for good (keep = 1); the rest for OPTIONS_MINUTE_DAYS.
+CREATE TABLE IF NOT EXISTS options_history (
+    underlying       TEXT NOT NULL,
+    ts               REAL NOT NULL,
+    keep             INTEGER NOT NULL DEFAULT 0,
+    spot             REAL,
+    atm_iv           REAL,
+    near_atm_iv      REAL,
+    skew_25d         REAL,
+    pcr_oi           REAL,
+    pcr_volume       REAL,
+    call_oi          REAL,
+    put_oi           REAL,
+    oi_usd           REAL,
+    turnover_usd     REAL,
+    max_pain         REAL,
+    implied_move_pct REAL,
+    PRIMARY KEY (underlying, ts)
+);
+CREATE INDEX IF NOT EXISTS options_history_keep ON options_history(keep, ts);
 """
+
+OPTIONS_COLUMNS = (
+    "spot", "atm_iv", "near_atm_iv", "skew_25d", "pcr_oi", "pcr_volume", "call_oi", "put_oi", "oi_usd", "turnover_usd",
+    "max_pain", "implied_move_pct",
+)
+OPTIONS_MINUTE_DAYS = 30
+
+# What each table holds and keeps, for the System page.
+TABLE_INFO = {
+    "events": ("Event log: signals, skips, orders, errors, analysis", "ts", "2-90 days by type (RETENTION_DAYS)"),
+    "orders": ("Every order ever reserved, on every broker", "ts", "forever"),
+    "paper_trades": ("Closed paper trades", "closed_at", "forever"),
+    "paper_positions": ("Open paper positions", "opened_at", "while open"),
+    "paper_account": ("Paper balance and totals", None, "one row"),
+    "options_history": ("Options numbers per underlying per minute", "ts", f"{OPTIONS_MINUTE_DAYS} days; 15-minute rows forever"),
+    "daily_risk": ("Start-of-day equity and halts, per broker", None, "forever (one row a day)"),
+    "position_controls": ("Trailing switch and steps per open position", "updated_at", "while open"),
+    "settings": ("Runtime settings (secrets included, never sent out)", None, "forever"),
+    "toggles": ("Trading, strategy and symbol switches", None, "forever"),
+}
 
 # How long the event log keeps each type. The orders, paper_trades and daily_risk tables are the
 # permanent record; the log is for looking back. Market and plumbing events go first.
 RETENTION_DAYS = {
     "CandleClosed": 2,
+    "MarketAnalysis": 3,
+    "AIReport": 14,  # the TB-AI page shows the latest and a history  # one per symbol every 5 minutes; the latest is what the dashboard shows
     "FeedStatus": 14,
     "OrderRequested": 14,
     "OrderUpdate": 14,
@@ -245,6 +288,61 @@ class Store:
                 if cur.rowcount < batch:
                     break
         return deleted
+
+    # -- options history ------------------------------------------------------------
+
+    def record_options(self, row: dict[str, Any]) -> None:
+        """One minute of options numbers. A row whose minute starts a 15-minute bar is kept for good."""
+        minute = int(row["ts"] // 60 * 60)
+        values = {c: row.get(c) for c in OPTIONS_COLUMNS}
+        self.db.execute(
+            f"INSERT OR REPLACE INTO options_history (underlying, ts, keep, {', '.join(OPTIONS_COLUMNS)})"  # noqa: S608 - fixed column names
+            f" VALUES (?, ?, ?, {', '.join('?' * len(OPTIONS_COLUMNS))})",
+            (row["underlying"], minute, int(minute % 900 == 0), *values.values()),
+        )
+
+    def options_history(self, underlying: str, since: float, step: int = 60) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            "SELECT * FROM options_history WHERE underlying = ? AND ts >= ? AND CAST(ts AS INTEGER) % ? = 0 ORDER BY ts",
+            (underlying, since, step),
+        )
+        return [dict(r) for r in rows]
+
+    def prune_options(self, now: float | None = None) -> int:
+        now = time.time() if now is None else now
+        cur = self.db.execute("DELETE FROM options_history WHERE keep = 0 AND ts < ?", (now - OPTIONS_MINUTE_DAYS * 86_400,))
+        return cur.rowcount
+
+
+    def db_stats(self) -> dict[str, Any]:
+        """Size of the database file and of every table and index in it."""
+        path = self.db.execute("PRAGMA database_list").fetchone()["file"]
+        files = {s: Path(path + s).stat().st_size if path and Path(path + s).exists() else 0 for s in ("", "-wal", "-shm")}
+        page = self.db.execute("PRAGMA page_size").fetchone()[0]
+        try:
+            sizes = {r["name"]: r["bytes"] for r in self.db.execute("SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY name")}
+        except sqlite3.OperationalError:  # SQLite built without the dbstat table
+            sizes = {}
+        objects = self.db.execute("SELECT name, type, tbl_name FROM sqlite_master WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'").fetchall()
+        tables = []
+        for o in [o for o in objects if o["type"] == "table"]:
+            name = o["name"]
+            what, ts_col, keep = TABLE_INFO.get(name, ("", None, ""))
+            row = {"name": name, "what": what, "keep": keep, "rows": self.db.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0], "bytes": sizes.get(name)}  # noqa: S608 - names from sqlite_master
+            if ts_col:
+                span = self.db.execute(f'SELECT MIN("{ts_col}"), MAX("{ts_col}") FROM "{name}"').fetchone()  # noqa: S608 - fixed column names
+                row |= {"oldest": span[0], "newest": span[1]}
+            row["indexes"] = [{"name": i["name"], "bytes": sizes.get(i["name"])} for i in objects if i["type"] == "index" and i["tbl_name"] == name]
+            row["index_bytes"] = sum(i["bytes"] or 0 for i in row["indexes"])
+            tables.append(row)
+        tables.sort(key=lambda r: -((r["bytes"] or 0) + r["index_bytes"]))
+        return {
+            "path": path, "file_bytes": files[""], "wal_bytes": files["-wal"], "shm_bytes": files["-shm"],
+            "page_size": page, "pages": self.db.execute("PRAGMA page_count").fetchone()[0],
+            "free_pages": self.db.execute("PRAGMA freelist_count").fetchone()[0],
+            "journal_mode": self.db.execute("PRAGMA journal_mode").fetchone()[0],
+            "sqlite_version": sqlite3.sqlite_version, "tables": tables,
+        }
 
     def events_size(self) -> dict[str, Any]:
         rows = self.db.execute("SELECT COUNT(*) AS n, MIN(ts) AS oldest FROM events").fetchone()
