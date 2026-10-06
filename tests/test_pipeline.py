@@ -16,7 +16,7 @@ from tradebuddy.trading import client_order_id
 
 from .conftest import IdleStream, bars
 
-BAR = (int(time.time()) // 60 - 1) * 60  # the bar that just closed: results for old bars are stale
+BAR = int(time.time()) // 60 * 60  # a fresh bar: results more than a bar late are stale, so this leaves the run two minutes
 
 
 class AlwaysBuy(Strategy):

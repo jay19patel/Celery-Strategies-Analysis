@@ -124,6 +124,18 @@ CREATE TABLE IF NOT EXISTS options_history (
     PRIMARY KEY (underlying, ts)
 );
 CREATE INDEX IF NOT EXISTS options_history_keep ON options_history(keep, ts);
+-- Every TradeBuddy AI attempt with its full written report, so any day's analysis can be read again.
+CREATE TABLE IF NOT EXISTS ai_reports (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts       REAL NOT NULL UNIQUE,
+    ok       INTEGER NOT NULL,
+    health   TEXT,
+    model    TEXT,
+    headline TEXT,
+    status   INTEGER,
+    error    TEXT,
+    data     TEXT NOT NULL
+);
 """
 
 OPTIONS_COLUMNS = (
@@ -131,6 +143,8 @@ OPTIONS_COLUMNS = (
     "max_pain", "implied_move_pct",
 )
 OPTIONS_MINUTE_DAYS = 30
+AI_REPORT_DAYS = 90  # written reports; about 1.5 MB a day at one every 5 minutes
+AI_FAILED_DAYS = 14  # attempts that produced no report
 
 # What each table holds and keeps, for the System page.
 TABLE_INFO = {
@@ -140,6 +154,7 @@ TABLE_INFO = {
     "paper_positions": ("Open paper positions", "opened_at", "while open"),
     "paper_account": ("Paper balance and totals", None, "one row"),
     "options_history": ("Options numbers per underlying per minute", "ts", f"{OPTIONS_MINUTE_DAYS} days; 15-minute rows forever"),
+    "ai_reports": ("Every TradeBuddy AI report, in full", "ts", f"{AI_REPORT_DAYS} days; failed attempts {AI_FAILED_DAYS}"),
     "daily_risk": ("Start-of-day equity and halts, per broker", None, "forever (one row a day)"),
     "position_controls": ("Trailing switch and steps per open position", "updated_at", "while open"),
     "settings": ("Runtime settings (secrets included, never sent out)", None, "forever"),
@@ -172,6 +187,7 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
         self._add_missing_columns()
+        self._backfill_ai_reports()
 
     def _add_missing_columns(self) -> None:
         # Databases created before orders were tagged with a broker.
@@ -179,6 +195,14 @@ class Store:
         if "broker" not in columns:
             self.db.execute("ALTER TABLE orders ADD COLUMN broker TEXT NOT NULL DEFAULT 'delta'")
         self.db.execute("CREATE INDEX IF NOT EXISTS orders_symbol_status ON orders(broker, symbol, status)")
+
+    def _backfill_ai_reports(self) -> None:
+        # Reports written before the ai_reports table existed live only in the event log: copy them once.
+        if self.db.execute("SELECT 1 FROM ai_reports LIMIT 1").fetchone():
+            return
+        with self.db:
+            for row in self.db.execute("SELECT data FROM events WHERE type = 'AIReport' ORDER BY id").fetchall():
+                self.record_ai_report(json.loads(row["data"]))
 
     # -- settings -----------------------------------------------------------
 
@@ -313,6 +337,46 @@ class Store:
         cur = self.db.execute("DELETE FROM options_history WHERE keep = 0 AND ts < ?", (now - OPTIONS_MINUTE_DAYS * 86_400,))
         return cur.rowcount
 
+
+    # -- TradeBuddy AI reports ------------------------------------------------
+
+    AI_SUMMARY = "id, ts, ok, health, model, headline, status, error"
+
+    def record_ai_report(self, e: dict[str, Any]) -> None:
+        report = e.get("report") or {}
+        self.db.execute(
+            "INSERT OR IGNORE INTO ai_reports (ts, ok, health, model, headline, status, error, data) VALUES (?,?,?,?,?,?,?,?)",
+            (e["ts"], int(bool(e.get("ok"))), report.get("health"), e.get("model"), report.get("headline"), e.get("status"), e.get("error") or "", json.dumps(e)),
+        )
+
+    def ai_reports(self, start: float = 0.0, end: float = 0.0, ok_only: bool = False, limit: int = 500) -> list[dict[str, Any]]:
+        """Summaries (no report body), newest first, with start <= ts < end (end 0 = now)."""
+        rows = self.db.execute(
+            f"SELECT {self.AI_SUMMARY} FROM ai_reports WHERE ts >= ? AND ts < ? AND ok >= ? ORDER BY ts DESC LIMIT ?",  # noqa: S608 - fixed columns
+            (start, end or time.time() + 60, int(ok_only), limit),
+        )
+        return [dict(r) | {"ok": bool(r["ok"])} for r in rows]
+
+    def ai_report(self, report_id: int) -> dict[str, Any] | None:
+        """One attempt in full, with the ids of the reports either side of it (successful ones only)."""
+        row = self.db.execute("SELECT id, ts, data FROM ai_reports WHERE id = ?", (report_id,)).fetchone()
+        if row is None:
+            return None
+        older = self.db.execute("SELECT id FROM ai_reports WHERE ts < ? AND ok = 1 ORDER BY ts DESC LIMIT 1", (row["ts"],)).fetchone()
+        newer = self.db.execute("SELECT id FROM ai_reports WHERE ts > ? AND ok = 1 ORDER BY ts LIMIT 1", (row["ts"],)).fetchone()
+        return json.loads(row["data"]) | {"id": row["id"], "older_id": older["id"] if older else None, "newer_id": newer["id"] if newer else None}
+
+    def ai_reports_span(self) -> dict[str, Any]:
+        row = self.db.execute("SELECT COUNT(*) AS n, MIN(ts) AS oldest, SUM(ok) AS good FROM ai_reports").fetchone()
+        return {"count": row["n"], "good": row["good"] or 0, "oldest": row["oldest"], "keep_days": AI_REPORT_DAYS}
+
+    def prune_ai_reports(self, now: float | None = None) -> int:
+        now = time.time() if now is None else now
+        cur = self.db.execute(
+            "DELETE FROM ai_reports WHERE (ok = 1 AND ts < ?) OR (ok = 0 AND ts < ?)",
+            (now - AI_REPORT_DAYS * 86_400, now - AI_FAILED_DAYS * 86_400),
+        )
+        return cur.rowcount
 
     def db_stats(self) -> dict[str, Any]:
         """Size of the database file and of every table and index in it."""

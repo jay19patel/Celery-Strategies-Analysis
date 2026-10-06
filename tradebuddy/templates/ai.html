@@ -2,6 +2,8 @@
 {% block content %}
 <!-- TradeBuddy AI: one written report over market, trading, portfolio and system. Everything here is AI text,
      marked TB-AI; the numbers it is written from are on the other pages. -->
+<div id="viewing"></div>
+
 <section id="hero" class="card ai-box p-5"><div class="skeleton h-20"></div></section>
 
 <div id="problem"></div>
@@ -13,9 +15,19 @@
   <div id="symbols" class="card-body grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
 </section>
 
-<section class="card min-w-0">
-  <div class="card-head"><div class="card-title"><i data-lucide="history"></i>Recent reports <span class="card-sub">every attempt, kept 14 days</span></div></div>
-  <div class="scroll max-h-96"><table class="tbl"><thead><tr><th>When</th><th>Result</th><th>Health</th><th>Model</th><th>Headline or error</th></tr></thead><tbody id="history"></tbody></table></div>
+<section class="card min-w-0" id="historyCard">
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="history"></i>Report history <span class="card-sub" id="savedNote">every report is saved; click one to open it</span></div>
+    <div class="flex flex-wrap items-center gap-1.5">
+      <button id="dayPrev" class="btn btn-sm" title="Previous day"><i data-lucide="chevron-left"></i></button>
+      <input id="day" type="date" class="input py-1 text-[12px] font-mono" aria-label="Day">
+      <button id="dayNext" class="btn btn-sm" title="Next day"><i data-lucide="chevron-right"></i></button>
+      <button id="dayToday" class="btn btn-sm">Today</button>
+      <label class="flex items-center gap-1.5 text-[12px] ml-1 cursor-pointer select-none"><input id="okOnly" type="checkbox" class="accent-violet-600">Reports only</label>
+    </div>
+  </div>
+  <div class="px-4 pt-2 text-[11.5px] muted" id="dayNote"></div>
+  <div class="scroll max-h-[28rem]"><table class="tbl"><thead><tr><th>Time</th><th>Result</th><th>Health</th><th>Model</th><th>Headline or error</th><th></th></tr></thead><tbody id="history"></tbody></table></div>
 </section>
 {% endblock %}
 
@@ -30,6 +42,8 @@
     ["system", "System", "gauge", "/system", "Feed, processes, background jobs, errors"],
   ];
   let data = null;
+  let viewing = null; // a saved report opened from the history, or null for the latest
+  let dayRows = [];
 
   const list = (items, cls = "") => (items?.length ? `<ul class="space-y-1 ${cls}">${items.map((x) => `<li class="flex gap-2"><span class="text-violet-500">•</span><span>${esc(x)}</span></li>`).join("")}</ul>` : "");
   const actions = (items) => (items?.length ? `<div class="mt-3 rounded-lg bg-amber-50/70 border border-amber-100 p-2.5"><div class="stat-label text-amber-800 mb-1">To do</div>
@@ -45,10 +59,33 @@
     return "Next report at the next 5-minute mark";
   }
 
+  // The report on screen: the one opened from the history, else the latest good one.
+  const shown = () => (viewing ? (viewing.ok ? viewing : null) : data.report);
+
+  function renderViewing() {
+    if (!viewing) { $("viewing").innerHTML = ""; return; }
+    const v = viewing;
+    $("viewing").innerHTML = `<section class="card border-violet-200 bg-violet-50/60 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2 text-[13px]"><i data-lucide="archive" class="w-4 h-4 text-violet-600"></i>
+        <span>Saved report from <b>${esc(dateTime(v.ts))}</b> <span class="muted">(${ago(v.ts)})</span>${v.ok ? "" : ' · <span class="down font-semibold">this attempt failed</span>'}</span></div>
+      <div class="flex flex-wrap gap-1.5">
+        <button class="btn btn-sm" data-open="${v.older_id ?? ""}" ${v.older_id ? "" : "disabled"}><i data-lucide="chevron-left"></i>Older</button>
+        <button class="btn btn-sm" data-open="${v.newer_id ?? ""}" ${v.newer_id ? "" : "disabled"}>Newer<i data-lucide="chevron-right"></i></button>
+        <button class="btn btn-sm" id="copyLink"><i data-lucide="link"></i>Copy link</button>
+        <button class="btn btn-sm btn-primary" id="backLatest"><i data-lucide="sparkles"></i>Back to latest</button>
+      </div>
+      ${v.ok ? "" : `<div class="w-full font-mono text-[12px] down">${esc(v.error || "failed")}</div>`}
+    </section>`;
+    $("backLatest").onclick = () => openReport(null);
+    $("copyLink").onclick = async () => {
+      try { await navigator.clipboard.writeText(location.href); TB.toast("Link copied", "ok"); } catch { TB.toast(location.href, "info"); }
+    };
+  }
+
   function renderHero() {
-    const d = data, r = d.report?.report, at = d.report?.ts;
+    const d = data, rep = shown(), r = rep?.report, at = rep?.ts;
     const meta = `${esc(d.model)} · every ${d.interval_minutes} min · ${d.share_account ? "reads trades, positions and portfolio" : "market and system only (portfolio not shared)"}`;
-    if (!d.enabled || !d.has_key) {
+    if (!viewing && (!d.enabled || !d.has_key)) {
       $("hero").innerHTML = `<div class="flex items-start gap-3">${aiBadge()}<div><div class="text-lg font-semibold">TradeBuddy AI is ${d.enabled ? "missing its API key" : "off"}</div>
         <p class="text-[13px] text-slate-600 mt-1 max-w-2xl">TB-AI reads everything TradeBuddy computes (market, trading, portfolio, system) and writes one short report with what matters and what to do. It uses your Mistral account.</p>
         <a href="/settings#ai" class="btn btn-primary btn-sm mt-3">Set up in Settings</a></div></div>`;
@@ -57,16 +94,17 @@
     $("hero").innerHTML = r ? `
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="flex items-center gap-2">${aiBadge()}${aiStatus(r.health)}<span class="text-[11.5px] muted">written ${ago(at)} · ${dateTime(at)}</span></div>
-        <div class="text-[11.5px] muted text-right">${meta}<br>${nextLine(d)}</div>
+        <div class="text-[11.5px] muted text-right">${viewing ? `${esc(rep.model || "")}${rep.shared_account ? " · read trades, positions and portfolio" : ""}` : `${meta}<br>${nextLine(d)}`}</div>
       </div>
       <div class="text-[19px] font-semibold leading-snug mt-3 max-w-4xl" style="text-wrap:balance">${esc(r.headline || "No headline")}</div>
       ${r.priorities?.length ? `<div class="mt-3"><div class="stat-label mb-1">Priorities</div><ol class="list-decimal pl-5 space-y-1 text-[13px]">${r.priorities.map((p) => `<li>${esc(p)}</li>`).join("")}</ol></div>` : ""}`
+      : viewing ? `<div class="flex items-center gap-2">${aiBadge()}<span class="text-[13px]">This attempt wrote no report: Mistral answered with an error (above).</span></div>`
       : `<div class="flex items-center gap-2">${aiBadge()}<span class="text-[13px]">No report yet.</span></div><div class="text-[11.5px] muted mt-2">${meta} · ${nextLine(d)}</div>`;
   }
 
   function renderProblem() {
     const l = data.latest;
-    if (!l || l.ok || !data.enabled) { $("problem").innerHTML = ""; return; }
+    if (viewing || !l || l.ok || !data.enabled) { $("problem").innerHTML = ""; return; }
     const limited = l.status === 429;
     const limits = Object.entries(l.limits || {});
     $("problem").innerHTML = `<section class="card border-amber-200">
@@ -94,7 +132,7 @@
   }
 
   function renderSections() {
-    const r = data.report?.report;
+    const r = shown()?.report;
     $("sections").innerHTML = SECTIONS.map(([key, title, icon, href, what]) => {
       const s = r?.sections?.[key];
       return `<section class="card min-w-0">
@@ -102,14 +140,14 @@
           <div class="flex items-center gap-1.5">${s ? aiStatus(s.status) : ""}${aiBadge()}</div></div>
         <div class="card-body text-[13px]">
           ${s ? `<p class="leading-relaxed">${esc(s.summary || "—")}</p>${list(s.points, "mt-2 text-[12.5px] text-slate-700")}${actions(s.actions)}`
-            : `<p class="muted text-[12.5px]">${data.enabled && data.has_key ? "Waiting for the first report." : "TB-AI is off."}</p>`}
+            : `<p class="muted text-[12.5px]">${viewing ? "Not in this attempt." : data.enabled && data.has_key ? "Waiting for the first report." : "TB-AI is off."}</p>`}
           <a href="${href}" class="text-[11.5px] text-brand-600 mt-3 inline-block">See the numbers →</a>
         </div></section>`;
     }).join("");
   }
 
   function renderSymbols() {
-    const syms = data.report?.report?.symbols || {};
+    const syms = shown()?.report?.symbols || {};
     $("symbols").innerHTML = Object.entries(syms).map(([sym, v]) => `<div class="rounded-lg border border-slate-100 p-3">
       <div class="flex items-center justify-between mb-1"><span class="font-semibold">${esc(sym)}</span>${aiBadge()}</div>
       <p class="text-[12.5px]">${esc(v.summary)}</p>${list(v.points, "mt-2 text-[12px] text-slate-700")}
@@ -118,21 +156,96 @@
       || `<div class="text-[12px] muted">No per-symbol review yet.</div>`;
   }
 
+  // -- history: one local day at a time ----------------------------------------------------------
+  const pad = (n) => String(n).padStart(2, "0");
+  const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const dayStart = (key) => { const [y, m, d] = key.split("-").map(Number); return new Date(y, m - 1, d); };
+  const clock = (ts) => new Date(ts * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+  async function loadDay() {
+    const key = $("day").value || dayKey(new Date());
+    const from = dayStart(key), to = new Date(from); to.setDate(to.getDate() + 1);
+    dayRows = await TB.get(`/api/ai/history?start=${from / 1000}&end=${to / 1000}&ok_only=${$("okOnly").checked}&limit=2000`);
+    const good = dayRows.filter((h) => h.ok).length;
+    $("dayNote").textContent = dayRows.length
+      ? `${from.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}: ${good} report${good === 1 ? "" : "s"}${dayRows.length > good ? `, ${dayRows.length - good} failed attempt${dayRows.length - good === 1 ? "" : "s"}` : ""}`
+      : "";
+    $("dayNext").disabled = key >= dayKey(new Date());
+    renderHistory();
+  }
+
   function renderHistory() {
-    TB.rows("history", data.history || [], (h) => `<tr>
-      <td class="muted whitespace-nowrap" title="${esc(dateTime(h.ts))}">${ago(h.ts)}</td>
+    const last = data?.history?.[0];
+    const lastDay = last ? dayKey(new Date(last.ts * 1000)) : null;
+    const jump = lastDay && lastDay !== $("day").value
+      ? ` <button class="text-brand-600 underline" data-day="${lastDay}">Most recent: ${dayStart(lastDay).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</button>` : "";
+    TB.rows("history", dayRows, (h) => `<tr class="cursor-pointer hover:bg-violet-50/60 ${viewing?.id === h.id ? "bg-violet-50" : ""}" data-open="${h.id}" title="Open this report">
+      <td class="font-mono whitespace-nowrap">${clock(h.ts)} <span class="muted text-[11px]">${ago(h.ts)}</span></td>
       <td>${h.ok ? '<span class="badge badge-green">ok</span>' : `<span class="badge badge-red">${h.status || "error"}</span>`}</td>
       <td>${h.health ? aiStatus(h.health) : ""}</td><td class="font-mono text-[11px] muted">${esc(h.model)}</td>
-      <td class="text-[12px] ${h.ok ? "" : "down"}">${esc(h.ok ? h.headline : h.error)}</td></tr>`, "No reports yet", 5);
+      <td class="text-[12px] ${h.ok ? "" : "down"}">${esc(h.ok ? h.headline : h.error)}</td>
+      <td class="text-violet-600"><i data-lucide="chevron-right" class="w-4 h-4"></i></td></tr>`,
+      "", 6);
+    if (!dayRows.length) {
+      const since = data?.saved?.oldest ? ` (saved from ${new Date(data.saved.oldest * 1000).toLocaleDateString("en-GB")}, kept ${data.saved.keep_days} days)` : "";
+      $("history").innerHTML = `<tr><td class="empty" colspan="6">No reports on this day${esc(since)}.${jump}</td></tr>`;
+    }
+    TB.icons();
+  }
+
+  async function openReport(id, push = true) {
+    try {
+      viewing = id ? await TB.get(`/api/ai/reports/${id}`) : null;
+    } catch (err) {
+      TB.toast(err.message, "error");
+      viewing = null;
+    }
+    if (push) {
+      const url = new URL(location.href);
+      if (viewing) url.searchParams.set("report", viewing.id); else url.searchParams.delete("report");
+      history.pushState({ report: viewing?.id ?? null }, "", url);
+    }
+    if (viewing) {
+      const key = dayKey(new Date(viewing.ts * 1000));
+      if ($("day").value !== key) { $("day").value = key; await loadDay(); }
+    }
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  document.addEventListener("click", (ev) => {
+    const day = ev.target.closest("[data-day]");
+    if (day) { $("day").value = day.dataset.day; loadDay(); return; }
+    const el = ev.target.closest("[data-open]");
+    if (el && el.dataset.open && !el.disabled) openReport(Number(el.dataset.open));
+  });
+  window.addEventListener("popstate", () => openReport(Number(new URL(location.href).searchParams.get("report")) || null, false));
+
+  const shiftDay = (n) => { const d = dayStart($("day").value || dayKey(new Date())); d.setDate(d.getDate() + n); $("day").value = dayKey(d); loadDay(); };
+  $("dayPrev").onclick = () => shiftDay(-1);
+  $("dayNext").onclick = () => shiftDay(1);
+  $("dayToday").onclick = () => { $("day").value = dayKey(new Date()); loadDay(); };
+  $("day").onchange = loadDay;
+  $("okOnly").onchange = loadDay;
+  $("day").max = dayKey(new Date());
+  $("day").value = dayKey(new Date());
+
+  function render() {
+    renderViewing(); renderHero(); renderProblem(); renderSections(); renderSymbols(); renderHistory();
+    TB.icons();
   }
 
   async function load() {
     data = await TB.get("/api/ai");
-    renderHero(); renderProblem(); renderSections(); renderSymbols(); renderHistory();
-    TB.icons();
+    if ($("day").value === dayKey(new Date())) await loadDay(); // today's list grows; other days do not
+    render();
   }
   TB.on(["AIReport", "SettingsChanged"], TB.debounce(load, 300));
-  load();
+  (async () => {
+    const id = Number(new URL(location.href).searchParams.get("report"));
+    await load();
+    if (id) openReport(id, false);
+  })();
   TB.every(load, 30000);
 })();
 </script>

@@ -57,7 +57,8 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   the backtest runs the code that trades.
 - `options.py` — the options book and its arithmetic (ATM IV, skew, put/call, max pain, walls).
 - `insights.py` (rules), `forecast.py` (scikit-learn, `ml` extra), `playbook.py` (options
-  structure), `tbai.py` + `mistral.py` (TradeBuddy AI report), `analyst.py` (runs them). Analysis is advisory:
+  structure), `tbai.py` + `mistral.py` (TradeBuddy AI report; every attempt saved in full in `ai_reports`,
+  90 days, failed 14), `analyst.py` (runs them). Analysis is advisory:
   nothing in it places an order.
 - `jobs.py` — every background loop wraps a pass in `job.tick()`; the System page shows them all.
 

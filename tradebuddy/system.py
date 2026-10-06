@@ -317,7 +317,8 @@ class System:
                 with self.jobs_housekeeping.tick() as job:
                     deleted = await asyncio.to_thread(self.store.prune_events)
                     minutes = await asyncio.to_thread(self.store.prune_options)
-                    job.note = f"deleted {deleted} events, {minutes} options minutes"
+                    reports = await asyncio.to_thread(self.store.prune_ai_reports)
+                    job.note = f"deleted {deleted} events, {minutes} options minutes, {reports} AI reports"
                 if deleted or minutes:
                     log.info("events_pruned deleted=%d options_minutes=%d", deleted, minutes)
             except Exception:
@@ -340,6 +341,7 @@ class System:
 
     async def on_ai_report(self, e: AIReport) -> None:
         self.ai_latest = e.to_dict()
+        self.store.record_ai_report(self.ai_latest)
         if e.ok:
             self.ai_last_good = self.ai_latest
 

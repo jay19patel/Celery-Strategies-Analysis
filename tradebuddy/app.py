@@ -218,6 +218,14 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
     async def ai_report() -> dict:
         return await call("ai_report")
 
+    @app.get("/api/ai/history")
+    async def ai_history(start: float = 0.0, end: float = 0.0, ok_only: bool = False, limit: int = 500) -> list[dict]:
+        return await call("ai_history", start=start, end=end, ok_only=ok_only, limit=limit)
+
+    @app.get("/api/ai/reports/{report_id}")
+    async def ai_report_at(report_id: int) -> dict:
+        return await call("ai_report_at", report_id=report_id)
+
     @app.post("/api/ai/test", dependencies=[Depends(protected)])
     async def test_ai(body: AITest) -> dict:
         return await call("test_ai", model=body.model)

@@ -498,3 +498,68 @@ def test_the_tbai_page_and_model_ids():
     assert apply_changes(Settings(), {"mistral_model": "mistral-large-2411"}).mistral_model == "mistral-large-2411"
     with pytest.raises(ValueError):
         apply_changes(Settings(), {"mistral_model": "rm -rf /"})
+
+
+# -- saved TB-AI reports ---------------------------------------------------------------------------
+
+
+def _report(ts: float, ok: bool = True, headline: str = "fine") -> dict:
+    e = AIReport(ok=ok, model="ministral-3b-2512", report={"headline": headline, "health": "watch", "sections": {}} if ok else None,
+                 error="" if ok else "Mistral answered HTTP 429", status=None if ok else 429)
+    return e.to_dict() | {"ts": ts}
+
+
+def test_every_ai_report_is_saved_in_full_and_found_by_day():
+    from tradebuddy.store import Store
+
+    store, day = Store(":memory:"), 1_780_000_000.0
+    for n, ok in enumerate((True, False, True)):
+        store.record_ai_report(_report(day + 300 * n, ok, f"report {n}"))
+    store.record_ai_report(_report(day + 86_400, True, "next day"))
+    store.record_ai_report(_report(day, True, "duplicate"))  # same moment: recorded once
+
+    rows = store.ai_reports(day, day + 86_400)
+    assert [r["headline"] for r in rows] == ["report 2", None, "report 0"] and [r["ok"] for r in rows] == [True, False, True]
+    assert "data" not in rows[0]  # the list is summaries; the body comes one at a time
+    assert [r["headline"] for r in store.ai_reports(day, day + 86_400, ok_only=True)] == ["report 2", "report 0"]
+
+    first = store.ai_report(rows[-1]["id"])
+    assert first["report"]["headline"] == "report 0" and first["older_id"] is None
+    assert store.ai_report(first["newer_id"])["report"]["headline"] == "report 2"  # skips the failed attempt
+    assert store.ai_report(9999) is None
+
+
+def test_old_ai_reports_are_pruned_failed_ones_sooner():
+    from tradebuddy.store import AI_FAILED_DAYS, AI_REPORT_DAYS, Store
+
+    store, now = Store(":memory:"), 1_780_000_000.0
+    store.record_ai_report(_report(now - (AI_REPORT_DAYS + 1) * 86_400))
+    store.record_ai_report(_report(now - (AI_FAILED_DAYS + 1) * 86_400, ok=False))
+    store.record_ai_report(_report(now - (AI_FAILED_DAYS + 1) * 86_400 + 1))
+    assert store.prune_ai_reports(now) == 2
+    assert [r["ok"] for r in store.ai_reports()] == [True]
+
+
+def test_reports_from_the_event_log_are_copied_once(tmp_path):
+    from tradebuddy.store import Store
+
+    path = str(tmp_path / "tb.db")
+    old = Store(path)
+    old.db.execute("DELETE FROM ai_reports")
+    old.record_event(_report(1_780_000_000.0, headline="from before the table"))
+    assert old.ai_reports() == []
+    again = Store(path)
+    assert [r["headline"] for r in again.ai_reports()] == ["from before the table"]
+
+
+async def test_the_engine_saves_each_report_and_serves_it(cfg, exchange):
+    s = System(cfg, strategies=[AlwaysBuy()], stream_factory=IdleStream, client_factory=exchange.client)
+    await s.on_ai_report(AIReport(ok=True, model="ministral-3b-2512", report={"headline": "saved", "health": "good"}))
+    api = Api(s)
+    [row] = await api.ai_history()
+    full = await api.ai_report_at(row["id"])
+    assert full["report"]["headline"] == "saved" and full["id"] == row["id"]
+    assert (await api.ai_report())["saved"]["count"] == 1
+    with pytest.raises(Exception, match="no saved AI report"):
+        await api.ai_report_at(row["id"] + 1)
+    assert {"ai_history", "ai_report_at"} <= set(METHODS)

@@ -34,7 +34,7 @@ METHODS = (
     "paper_stats", "paper_trades", "metrics", "events", "settings", "update_settings", "clear_credentials",
     "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order", "order_ticket",
     "set_position_control", "risk", "risk_resume", "analysis", "options_history", "database",
-    "ai_digest", "ai_report", "test_ai",
+    "ai_digest", "ai_report", "ai_history", "ai_report_at", "test_ai",
 )
 
 
@@ -263,17 +263,25 @@ class Api:
 
     async def ai_report(self) -> dict[str, Any]:
         s, settings = self.system, self.system.settings
-        history = [
-            {"ts": e["ts"], "ok": e.get("ok"), "model": e.get("model"), "error": e.get("error"), "status": e.get("status"),
-             "headline": (e.get("report") or {}).get("headline"), "health": (e.get("report") or {}).get("health")}
-            for e in s.store.recent_events(30, types=["AIReport"])
-        ]
+        history = s.store.ai_reports(limit=30)
         analyst = (s.remote_processes.get("analyst") or {}).get("status") or (s.analyst.status() if s.analyst else None)
         return {
             "enabled": settings.ai_enabled, "ready": settings.ai_ready, "has_key": bool(settings.mistral_api_key),
             "model": settings.mistral_model, "interval_minutes": settings.ai_interval_minutes, "share_account": settings.ai_share_account,
             "latest": s.ai_latest, "report": s.ai_last_good, "history": history, "analyst": analyst,
+            "saved": s.store.ai_reports_span(),
         }
+
+    async def ai_history(self, start: float = 0.0, end: float = 0.0, ok_only: bool = False, limit: int = 500) -> list[dict[str, Any]]:
+        """Saved TB-AI attempts between two times (the dashboard asks for one local day), newest first."""
+        return self.system.store.ai_reports(start, end, ok_only, min(max(limit, 1), 2000))
+
+    async def ai_report_at(self, report_id: int) -> dict[str, Any]:
+        """One saved TB-AI attempt in full."""
+        report = self.system.store.ai_report(int(report_id))
+        if report is None:
+            raise ApiError(404, f"no saved AI report {report_id}: it may be older than the retention")
+        return report
 
     async def test_ai(self, model: str = "") -> dict[str, Any]:
         """Try the stored Mistral key: is it accepted, is the model available, what are its limits."""

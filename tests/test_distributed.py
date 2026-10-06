@@ -19,7 +19,7 @@ from tradebuddy.worker import TASK, CeleryEvaluator, run_job
 from .conftest import IdleStream, bars
 from .test_pipeline import AlwaysBuy, NeedsHistory
 
-BAR = (int(time.time()) // 60 - 1) * 60
+BAR = int(time.time()) // 60 * 60  # fresh for two minutes: later results are dropped as stale
 REGISTRY = {s.name: s for s in (AlwaysBuy(), NeedsHistory())}
 ANY_PORT = "tcp://127.0.0.1:*"
 
