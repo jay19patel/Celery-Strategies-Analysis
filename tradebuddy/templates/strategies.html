@@ -35,15 +35,16 @@
               <span class="font-mono text-xs font-medium">${esc(x.symbol)}</span>${TB.switchHtml(`pair:${s.name}:${x.symbol}`, x.enabled, true)}
             </div>`).join("")}</div>
         </div>
-        <div class="grid grid-cols-4 gap-2 text-center">
-          <div><div class="font-mono text-base font-semibold">${num(st.runs, 0)}</div><div class="text-[10px] muted">runs</div></div>
-          <div><div class="font-mono text-base font-semibold text-brand-600">${num(st.signals, 0)}</div><div class="text-[10px] muted">signals</div></div>
-          <div><div class="font-mono text-base font-semibold ${st.errors ? "down" : ""}">${num(st.errors, 0)}</div><div class="text-[10px] muted">errors</div></div>
-          <div><div class="font-mono text-base font-semibold">${st.last_ms}<span class="text-[10px]">ms</span></div><div class="text-[10px] muted">last run</div></div>
+        <div class="grid grid-cols-5 gap-2 text-center">
+          <div><div class="font-mono text-base font-semibold">${TB.count(st.runs)}</div><div class="text-[10px] muted">runs</div></div>
+          <div><div class="font-mono text-base font-semibold text-brand-600">${TB.count(st.signals)}</div><div class="text-[10px] muted">signals</div></div>
+          <div><div class="font-mono text-base font-semibold ${st.errors ? "down" : ""}">${TB.count(st.errors)}</div><div class="text-[10px] muted">errors</div></div>
+          <div title="bars not evaluated: no fresh live price"><div class="font-mono text-base font-semibold ${st.paused ? "text-amber-600" : ""}">${TB.count(st.paused)}</div><div class="text-[10px] muted">paused</div></div>
+          <div><div class="font-mono text-base font-semibold">${TB.ms(st.last_ms)}</div><div class="text-[10px] muted">last run</div></div>
         </div>
         <div class="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
           <div class="text-[10px] uppercase tracking-wider muted mb-1">Last result · ${ago(st.last_run_at)}${st.last_worker ? ` · ${esc(st.last_worker)} · ${st.last_latency_ms} ms end-to-end` : ""}${st.in_flight ? ` · ${st.in_flight} running` : ""}</div>
-          <div class="font-mono text-xs break-words ${st.last_result.includes("error") ? "down" : ""}">${esc(st.last_result || "Waiting for the first candle close")}</div>
+          <div class="font-mono text-xs break-words ${st.last_result.includes("error") ? "down" : st.last_result.includes("paused") ? "text-amber-600" : ""}">${esc(st.last_result || "Waiting for the first candle close")}</div>
         </div>
         <a href="/signals?strategy=${encodeURIComponent(s.name)}" class="btn btn-sm w-full justify-center"><i data-lucide="activity"></i>Signal history</a>
       </div>

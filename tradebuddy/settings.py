@@ -52,7 +52,9 @@ class SettingsError(ValueError):
 class Settings:
     paper_active: bool = True  # simulated broker; always on
     delta_active: bool = False  # Delta broker; shown and fed signals
-    market_data: str = "demo"  # price source when Delta is not active: "demo" | "live" (public data only)
+    # Price source when Delta is not active: "live" (public data only, no keys) | "demo". Live by default:
+    # paper should trade on the real market, and the testnet socket refuses connections from outside India.
+    market_data: str = "live"
     delta_env: str = "demo"  # Delta account: "demo" (testnet) | "live" (real money)
     delta_api_key: str = ""
     delta_api_secret: str = ""

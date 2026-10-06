@@ -132,7 +132,7 @@ async def test_candle_close_dispatches_one_task_per_due_strategy(engine):
     assert set(jobs) == {"always_buy", "needs_history"}
     task = jobs["always_buy"]
     assert (task["name"], task["queue"], task["expires"]) == (TASK, "strategies", 60)
-    assert task["job"]["prices"] == {"BTCUSD": 100.0} and task["job"]["data_env"] == "demo"
+    assert task["job"]["prices"] == {"BTCUSD": 100.0} and task["job"]["data_env"] == "live"
     assert system.runner.stats["always_buy"].in_flight == 1
 
 

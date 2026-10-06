@@ -14,6 +14,10 @@
   const pnlClass = (v) => (v > 0 ? "up" : v < 0 ? "down" : "muted");
   const pct = (v, d = 2) => (v === null || v === undefined || Number.isNaN(Number(v)) ? "—" : `${v > 0 ? "+" : ""}${Number(v).toFixed(d)}%`);
   const compact = (v) => (v === null || v === undefined ? "—" : Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(v));
+  // A counter that may run for a year: 950 · 1.1K · 14.7K · 15M, exact value on hover.
+  const count = (v) => (v === null || v === undefined ? "—"
+    : `<span title="${Number(v).toLocaleString("en-US")}">${Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(v)}</span>`);
+  const ms = (v) => (v === null || v === undefined ? "—" : v >= 1000 ? `${num(v / 1000, 2)} s` : `${num(v, v >= 100 ? 0 : 1)} ms`);
   // A gauge from SL (0%) through entry to TP (100%), with the mark as a needle.
   function levelsBar(p) {
     if (!p.stop_loss || !p.take_profit) return '<span class="muted text-[11px]">no SL/TP</span>';
@@ -275,7 +279,7 @@
   }
 
   window.TB = {
-    $, esc, num, price, money, signed, pnlClass, pct, compact, levelsBar, stats, time, dateTime, ago, duration, side, status, eventBadge,
+    $, esc, num, price, money, signed, pnlClass, pct, compact, count, ms, levelsBar, stats, time, dateTime, ago, duration, side, status, eventBadge,
     api, get, post, put, on, toast, ask, rows, switchHtml, bindToggles, icons, loadHeader,
     get header() { return header; },
   };

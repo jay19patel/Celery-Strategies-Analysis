@@ -15,11 +15,14 @@ from dataclasses import asdict, dataclass
 from typing import Any, Protocol
 
 from tradebuddy.delta import RESOLUTION_SECONDS, Candle, DeltaClient, OptionQuote
-from tradebuddy.events import CandleClosed, EventBus, SignalGenerated, StrategyError, StrategyEvaluated
+from tradebuddy.events import CandleClosed, EventBus, SignalGenerated, StrategyError, StrategyEvaluated, TradeSkipped
 from tradebuddy.store import Store
 from tradebuddy.strategies import Context, Strategy
 
 log = logging.getLogger(__name__)
+
+
+PAUSED = "no fresh live price from the WebSocket — strategy paused until prices return"
 
 
 def strategy_key(name: str) -> str:
@@ -146,6 +149,7 @@ class _Stats:
     runs: int = 0
     signals: int = 0
     errors: int = 0
+    paused: int = 0  # bars not evaluated because the symbol had no fresh live price
     in_flight: int = 0
     last_run_at: float = 0.0
     last_ms: float = 0.0
@@ -167,22 +171,41 @@ class StrategyRunner:
         self.prices = prices
         self.data_env = data_env
         self.stats: dict[str, _Stats] = {s.name: _Stats() for s in strategies}
+        self._paused: set[tuple[str, str]] = set()  # (strategy, symbol) waiting for prices to return
 
     def is_on(self, strategy: Strategy, symbol: str) -> bool:
         return self.store.enabled(strategy_key(strategy.name)) and self.store.enabled(pair_key(strategy.name, symbol))
 
     async def on_candle_closed(self, event: CandleClosed) -> None:
+        prices = self.prices()
         for s in self.strategies:
             if s.interval == event.resolution and event.symbol in s.symbols and self.is_on(s, event.symbol):
                 stats = self.stats[s.name]
+                if event.symbol not in prices:
+                    self._pause(s, event.symbol, stats)
+                    continue
+                if (s.name, event.symbol) in self._paused:
+                    self._paused.discard((s.name, event.symbol))
+                    log.info("strategy_resumed strategy=%s symbol=%s", s.name, event.symbol)
                 stats.in_flight += 1
                 try:
-                    await self.evaluator.submit(s, make_job(s, event, self.prices(), self.data_env()))
+                    await self.evaluator.submit(s, make_job(s, event, prices, self.data_env()))
                 except Exception as exc:
                     stats.in_flight -= 1
                     stats.errors += 1
                     stats.last_result = f"{event.symbol}: error — {exc}"
                     self.bus.publish(StrategyError(strategy=s.name, symbol=event.symbol, error=f"not dispatched: {exc}"))
+
+    def _pause(self, s: Strategy, symbol: str, stats: _Stats) -> None:
+        """No live price, no evaluation: a signal could not be traded anyway. Said once per outage,
+        not once per bar, so a feed that is down for a day does not flood the event log."""
+        stats.paused += 1
+        stats.last_result = f"{symbol}: paused — no fresh live price from the WebSocket"
+        if (s.name, symbol) in self._paused:
+            return
+        self._paused.add((s.name, symbol))
+        log.warning("strategy_paused strategy=%s symbol=%s reason=no_fresh_price", s.name, symbol)
+        self.bus.publish(TradeSkipped(strategy=s.name, symbol=symbol, side="", broker="", reason=PAUSED))
 
     async def on_evaluated(self, e: StrategyEvaluated) -> None:
         stats = self.stats.get(e.strategy)

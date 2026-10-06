@@ -7,9 +7,10 @@ from tradebuddy.trading import trading_key
 from .conftest import IdleStream
 
 
-def test_defaults_are_paper_only_on_demo_prices():
+def test_defaults_are_paper_only_on_live_prices():
     s = Settings()
-    assert (s.active_brokers, s.data_env, s.is_real_money) == (["paper"], "demo", False)
+    assert (s.active_brokers, s.data_env, s.is_real_money) == (["paper"], "live", False)
+    assert s.delta_env == "demo"  # live market data never makes Delta real-money
 
 
 def test_at_least_one_broker_stays_active():

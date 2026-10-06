@@ -9,6 +9,7 @@ import pytest
 
 from tradebuddy.delta import DeltaError, DeltaTimeout
 from tradebuddy.events import CandleClosed, OrderRequested, SignalGenerated, Tick
+from tradebuddy.runner import PAUSED
 from tradebuddy.strategies import Context, Signal, Strategy
 from tradebuddy.system import System
 from tradebuddy.trading import client_order_id
@@ -123,8 +124,27 @@ async def test_pair_off_is_not_evaluated(paper):
     assert not [e for e in events(paper, "SignalGenerated") if e["strategy"] == "always_buy"]
 
 
-async def test_no_fresh_price_blocks(paper):
-    await close_bar(paper, symbol="ETHUSD")  # never ticked
+async def test_no_fresh_price_pauses_the_strategy_once_per_outage(paper):
+    for i in range(3):
+        await close_bar(paper, bar=BAR - 60 * i, symbol="ETHUSD")  # never ticked
+    assert skipped(paper) == [PAUSED]  # said once, not once per bar
+    assert events(paper, "StrategyEvaluated") == []  # not run at all
+    assert paper.runner.stats["always_buy"].paused == 3
+    assert "paused" in paper.runner.stats["always_buy"].last_result
+
+    paper.bus.publish(Tick(symbol="ETHUSD", price=50.0))
+    await close_bar(paper, symbol="ETHUSD")
+    assert [e["symbol"] for e in events(paper, "OrderRequested")] == ["ETHUSD"]  # prices back: trading again
+
+    paper.prices.clear()
+    await close_bar(paper, bar=BAR + 60, symbol="ETHUSD")
+    assert skipped(paper) == [PAUSED, PAUSED]  # a new outage is reported again
+
+
+async def test_trader_still_refuses_a_signal_without_a_fresh_price(paper):
+    paper.prices.clear()
+    paper.bus.publish(SignalGenerated(strategy="always_buy", version=1, symbol="BTCUSD", side="buy", reason="t", bar_time=BAR, size=1))
+    await paper.drain()
     assert skipped(paper) == ["no fresh live price from the WebSocket"]
 
 
@@ -181,6 +201,7 @@ async def test_delta_without_keys_is_blocked(cfg, exchange):
     s = await make(cfg, exchange)
     await s.update_settings({"delta_active": True, "paper_active": False})
     s.set_toggle("trading:delta", True)
+    s.bus.publish(Tick(symbol="BTCUSD", price=100.0))  # the switch to demo prices cleared the live ones
     await close_bar(s)
     assert skipped(s) == ["Delta API key and secret are not set (Settings)"]
     await s.bus.stop()
