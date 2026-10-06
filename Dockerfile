@@ -13,6 +13,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
 COPY pyproject.toml uv.lock /app/
 RUN uv venv /opt/venv && uv sync --active --frozen --no-cache --no-dev --extra ml
 COPY tradebuddy /app/tradebuddy
+COPY models /app/models
 
 EXPOSE 8080
 # docker-compose passes the role: feed, engine, web or worker.

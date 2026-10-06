@@ -143,7 +143,8 @@ Live updates come from `TB.on(eventType, fn)`.
 docker compose up          # everything: http://127.0.0.1:8080 (rebuilds on every up)
 make install && make check # local lint + tests
 make token                 # an API_TOKEN for .env
-docker compose run --rm analyst train --symbols BTCUSD ETHUSD --days 365   # fit the forecaster
+docker compose run --rm analyst train --symbols BTCUSD ETHUSD --days 365   # fit the forecaster (data/models)
+cp data/models/forecast_* models/   # ship them: models/ is in git and the image, used when data/models has none
 ```
 
 Tests run the engine in one process (`app.local_app`, inline evaluator, fake

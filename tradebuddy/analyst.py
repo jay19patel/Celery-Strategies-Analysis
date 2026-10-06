@@ -42,13 +42,14 @@ class Analyst:
         self, client: Callable[[], DeltaClient], settings: Callable[[], Settings], publish: Callable[[Any], None],
         options: Callable[[str], dict[str, Any] | None], stats: Callable[[str], dict[str, Any] | None],
         model_dir: Path | None = None, every: float = 300.0, symbols: tuple[str, ...] = tuple(UNDERLYINGS), http: Any = None,
-        digest: Callable[[bool], Awaitable[dict[str, Any]]] | None = None,
+        digest: Callable[[bool], Awaitable[dict[str, Any]]] | None = None, bundled_models: Path | None = None,
     ) -> None:
+        self.bundled_models = BUNDLED_MODELS if bundled_models is None else bundled_models
         self.digest = digest  # the engine's numbers on trading, portfolio and system (Api.ai_digest)
         self.client, self.settings, self.publish = client, settings, publish
         self.options, self.stats = options, stats
         self.model_dir, self.every, self.symbols, self.http = model_dir, every, symbols, http
-        self._models: dict[str, tuple[float, Any]] = {}  # symbol -> (file mtime, Forecaster)
+        self._models: dict[str, tuple[Any, Any]] = {}  # symbol -> ((file, mtime), Forecaster)
         self.runs = 0
         self.last_error = ""
         self.ai_calls = 0
@@ -126,10 +127,10 @@ class Analyst:
     def _model(self, symbol: str) -> tuple[Any, dict[str, Any]]:
         if self.model_dir is None:
             return None, {"status": "off"}
-        path = self.model_dir / f"forecast_{symbol}.joblib"
-        if not path.exists():
+        path, source = model_path(self.model_dir, symbol, self.bundled_models)
+        if path is None:
             return None, {"status": "not_trained", "hint": f"python -m tradebuddy train --symbols {symbol}"}
-        mtime = path.stat().st_mtime
+        mtime = (str(path), path.stat().st_mtime)
         cached = self._models.get(symbol)
         if cached is None or cached[0] != mtime:
             try:
@@ -142,7 +143,7 @@ class Analyst:
                 return None, {"status": "error", "hint": str(exc)[:200]}
         card = self._models[symbol][1].card
         return self._models[symbol][1], {
-            "status": "ready", "trained_at": card.trained_at, "train_from": card.train_from, "train_to": card.train_to,
+            "status": "ready", "source": source, "trained_at": card.trained_at, "train_from": card.train_from, "train_to": card.train_to,
             "metrics": card.metrics, "baselines": card.baselines, "skill": card.skill,
         }
 
@@ -220,6 +221,19 @@ class Analyst:
         if r["playbook"]:
             brief["playbook"] = {"strategy": r["playbook"]["strategy"], "reason": r["playbook"]["reason"]}
         return brief
+
+
+# Models trained once and shipped with the code (git and the image), so a new server need not train.
+# One trained on this server (data/models) wins over them.
+BUNDLED_MODELS = Path(__file__).resolve().parent.parent / "models"
+
+
+def model_path(model_dir: Path, symbol: str, bundled: Path = BUNDLED_MODELS) -> tuple[Path | None, str]:
+    name = f"forecast_{symbol}.joblib"
+    for path, source in ((model_dir / name, "trained here"), (bundled / name, "bundled")):
+        if path.exists():
+            return path, source
+    return None, ""
 
 
 def model_dir_for(db_path: str) -> Path:

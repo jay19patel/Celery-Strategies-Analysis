@@ -335,7 +335,8 @@ class CandleClient:
 def make_analyst(tmp_path, settings, published, digest=None):
     client = CandleClient(bars(700))
     live = summarize("BTC", book_quotes(expiry=time.time() + 86_400), SPOT)
-    a = Analyst(lambda: client, lambda: settings[0], published.append, lambda s: live if s == "BTCUSD" else None, lambda s: None, model_dir=tmp_path, digest=digest)
+    a = Analyst(lambda: client, lambda: settings[0], published.append, lambda s: live if s == "BTCUSD" else None, lambda s: None, model_dir=tmp_path, digest=digest,
+                 bundled_models=tmp_path / "none")
     return a, client
 
 
@@ -563,3 +564,17 @@ async def test_the_engine_saves_each_report_and_serves_it(cfg, exchange):
     with pytest.raises(Exception, match="no saved AI report"):
         await api.ai_report_at(row["id"] + 1)
     assert {"ai_history", "ai_report_at"} <= set(METHODS)
+
+
+def test_a_model_trained_here_wins_over_the_bundled_one(tmp_path):
+    from tradebuddy.analyst import BUNDLED_MODELS, model_path
+
+    here, bundled = tmp_path / "data_models", tmp_path / "bundled"
+    here.mkdir(), bundled.mkdir()
+    assert model_path(here, "BTCUSD", bundled) == (None, "")
+    (bundled / "forecast_BTCUSD.joblib").write_bytes(b"x")
+    assert model_path(here, "BTCUSD", bundled) == (bundled / "forecast_BTCUSD.joblib", "bundled")
+    (here / "forecast_BTCUSD.joblib").write_bytes(b"x")
+    assert model_path(here, "BTCUSD", bundled) == (here / "forecast_BTCUSD.joblib", "trained here")
+    # the repo ships models for both symbols, with their cards
+    assert {p.name for p in BUNDLED_MODELS.glob("forecast_*")} >= {f"forecast_{s}.{x}" for s in ("BTCUSD", "ETHUSD") for x in ("joblib", "json")}

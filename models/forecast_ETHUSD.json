@@ -1,0 +1,64 @@
+{
+  "symbol": "ETHUSD",
+  "version": 1,
+  "trained_at": 1791312160.8857846,
+  "config": {
+    "horizon_bars": 96,
+    "breakout_pct": 4.0,
+    "holdout": 0.25,
+    "min_rows": 2000,
+    "min_direction_auc": 0.56,
+    "min_breakout_auc": 0.6,
+    "max_error_ratio": 0.95,
+    "random_state": 42
+  },
+  "train_from": 1760121900,
+  "train_to": 1791224100,
+  "rows_train": 25823,
+  "rows_test": 8640,
+  "features": [
+    "ret_1",
+    "ret_4",
+    "ret_16",
+    "ret_96",
+    "rv_16",
+    "rv_96",
+    "rv_384",
+    "rv_ratio",
+    "atr_pct",
+    "range_pos_96",
+    "dist_ema20",
+    "dist_ema50",
+    "dist_ema200",
+    "volume_z_96",
+    "oi_chg_4",
+    "oi_chg_96",
+    "funding",
+    "funding_avg_96",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos"
+  ],
+  "metrics": {
+    "direction_auc": 0.47545,
+    "direction_accuracy": 0.47095,
+    "breakout_auc": 0.64063,
+    "breakout_rate": 0.16748,
+    "return_mae": 0.01825,
+    "abs_move_mae": 0.01289,
+    "realized_vol_mae": 0.107
+  },
+  "baselines": {
+    "return_mae": 0.01677,
+    "abs_move_mae": 0.01293,
+    "realized_vol_mae": 0.1404
+  },
+  "skill": {
+    "direction": false,
+    "breakout": true,
+    "return": false,
+    "abs_move": false,
+    "realized_vol": true
+  }
+}
