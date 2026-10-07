@@ -17,6 +17,7 @@ from fastapi import WebSocket
 from tradebuddy.brokers import Broker, DeltaBroker, PaperBroker
 from tradebuddy.config import Config
 from tradebuddy.delta import DeltaClient
+from tradebuddy.email_report import DailyReporter
 from tradebuddy.errors import BrokerError
 from tradebuddy.events import (
     AIReport,
@@ -267,6 +268,8 @@ class System:
             self.options_feed.job = self.jobs.add("options snapshot", "Summarises the options book per underlying (REST if the socket is quiet)", self.options_feed.every)
         if self.analyst:
             self.analyst.job = self.jobs.add("market analysis", "Insights, forecast, options playbook, AI review", self.analyst.every)
+        self.reporter = DailyReporter(self)
+        self.reporter.job = self.jobs.add("daily email", "Emails the day's report once, at the hour set in Settings", self.reporter.every)
         self.remote_processes: dict[str, dict[str, Any]] = {}  # role -> latest heartbeat (analyst)
 
         # Fail closed: a broker that moves real orders starts every run switched off.
@@ -399,6 +402,7 @@ class System:
             asyncio.create_task(self._reconcile(), name="reconcile"),
             asyncio.create_task(self.guard.run(), name="guard"),
             asyncio.create_task(self.housekeeping(), name="housekeeping"),
+            asyncio.create_task(self.reporter.run(), name="daily-email"),
         ]
         if self.local_feed:
             self._stream_task = asyncio.create_task(self.stream.run(), name="stream")

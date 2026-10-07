@@ -21,7 +21,7 @@ LIVE_CONFIRM_PHRASE = "I UNDERSTAND THIS IS REAL MONEY"
 BROKERS = ("paper", "delta")
 DELTA_SECRET_FIELDS = ("delta_api_key", "delta_api_secret")
 # Every field that is never sent back to a browser. The Mistral key only feeds the market analyst.
-SECRET_FIELDS = (*DELTA_SECRET_FIELDS, "mistral_api_key")
+SECRET_FIELDS = (*DELTA_SECRET_FIELDS, "mistral_api_key", "email_smtp_pass")
 # Suggestions for the Settings page; any model id the key can use is accepted (Settings → Test AI checks it).
 MISTRAL_MODELS = (
     "ministral-3b-2512", "ministral-8b-2512", "ministral-14b-2512", "ministral-3b-latest", "ministral-8b-latest",
@@ -33,11 +33,12 @@ DELTA_ROUTING_FIELDS = ("delta_active", "delta_env", *DELTA_SECRET_FIELDS)
 # Changing any of these changes where prices come from: the stream restarts.
 STREAM_FIELDS = ("paper_active", "market_data", *DELTA_ROUTING_FIELDS)
 
-BOOL_FIELDS = ("paper_active", "delta_active", "trailing_enabled", "ai_enabled", "ai_share_account")
+BOOL_FIELDS = ("paper_active", "delta_active", "trailing_enabled", "ai_enabled", "ai_share_account", "email_enabled")
+TEXT_FIELDS = ("email_to", "email_smtp_host", "email_smtp_user")
 CHOICES = {
     "market_data": ("demo", "live"), "delta_env": ("demo", "live"), "day_timezone": ("Asia/Kolkata", "UTC"),
 }
-INT_FIELDS = ("trailing_max_steps", "ai_interval_minutes")
+INT_FIELDS = ("trailing_max_steps", "ai_interval_minutes", "email_smtp_port", "email_report_hour")
 RANGES = {
     "stop_loss_pct": (0.05, 50.0),
     "take_profit_pct": (0.05, 100.0),
@@ -53,7 +54,11 @@ RANGES = {
     "trailing_max_steps": (0, 50),
     "ai_interval_minutes": (5, 60),
     "daily_loss_limit_pct": (0.0, 100.0),
+    "email_smtp_port": (1, 65535),
+    "email_report_hour": (0, 23),
 }
+EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
+HOST = re.compile(r"^[A-Za-z0-9.\-]{1,253}$")
 
 
 class SettingsError(ValueError):
@@ -96,8 +101,17 @@ class Settings:
     ai_enabled: bool = False
     mistral_api_key: str = ""
     mistral_model: str = "ministral-3b-2512"  # small, fast, on Mistral's free tier
-    ai_interval_minutes: int = 5  # one Mistral request per report; raise it if the account's limit is low
+    ai_interval_minutes: int = 15  # one Mistral request per report; raise it if the account's limit is low
     ai_share_account: bool = True  # include trades, positions, orders and account figures in what TB-AI reads
+
+    # Daily email report: the engine sends the day's story once a day at email_report_hour (day_timezone).
+    email_enabled: bool = False
+    email_report_hour: int = 21  # 9 PM
+    email_to: str = ""  # one address, or several separated by commas
+    email_smtp_host: str = ""
+    email_smtp_port: int = 587
+    email_smtp_user: str = ""
+    email_smtp_pass: str = ""
 
     @property
     def active_brokers(self) -> list[str]:
@@ -120,6 +134,14 @@ class Settings:
     def ai_ready(self) -> bool:
         return self.ai_enabled and bool(self.mistral_api_key)
 
+    @property
+    def email_recipients(self) -> list[str]:
+        return [a.strip() for a in self.email_to.split(",") if a.strip()]
+
+    @property
+    def email_ready(self) -> bool:
+        return self.email_enabled and bool(self.email_recipients) and bool(self.email_smtp_host)
+
     def public(self) -> dict[str, Any]:
         """Safe to send to a browser: secrets are masked, never returned."""
         data = asdict(self)
@@ -128,6 +150,7 @@ class Settings:
         data["delta_api_secret"] = "set" if self.delta_api_secret else ""
         mkey = self.mistral_api_key
         data["mistral_api_key"] = f"••••{mkey[-4:]}" if len(mkey) > 8 else ("set" if mkey else "")
+        data["email_smtp_pass"] = "set" if self.email_smtp_pass else ""
         data |= {
             "active_brokers": self.active_brokers,
             "data_env": self.data_env,
@@ -157,6 +180,15 @@ def apply_changes(current: Settings, changes: dict[str, Any], confirm: str = "")
         elif name in BOOL_FIELDS:
             if not isinstance(value, bool):
                 raise SettingsError(f"{name} must be true or false")
+            clean[name] = value
+        elif name in TEXT_FIELDS:
+            value = str(value or "").strip()
+            if len(value) > 500:
+                raise SettingsError(f"{name} is too long")
+            if name == "email_to" and not all(EMAIL.match(a.strip()) for a in value.split(",") if a.strip()):
+                raise SettingsError("email_to must be email addresses separated by commas")
+            if name == "email_smtp_host" and value and not HOST.match(value):
+                raise SettingsError("email_smtp_host must be a host name, e.g. smtp.gmail.com")
             clean[name] = value
         elif name in INT_FIELDS:
             if isinstance(value, bool) or not isinstance(value, int | float | str):

@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from tradebuddy.analytics import collect_daily_analytics, collect_monthly_calendar_data, gather_live, get_day_bounds, parse_day
 from tradebuddy.brokers import Broker
 from tradebuddy.codec import EVENT_TYPES
 from tradebuddy.delta import round_to_tick
@@ -34,7 +37,8 @@ METHODS = (
     "paper_stats", "paper_trades", "metrics", "events", "settings", "update_settings", "clear_credentials",
     "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order", "order_ticket",
     "set_position_control", "risk", "risk_resume", "analysis", "options_history", "database",
-    "ai_digest", "ai_report", "ai_history", "ai_report_at", "test_ai",
+    "ai_digest", "ai_report", "ai_history", "ai_report_at", "test_ai", "send_email_report",
+    "journal_summary", "journal_month",
 )
 
 
@@ -70,7 +74,7 @@ class Api:
 
     async def page_context(self) -> dict[str, Any]:
         s = self.system.settings
-        return {"active_brokers": s.active_brokers, "paper_active": s.paper_active}
+        return {"active_brokers": s.active_brokers, "paper_active": s.paper_active, "ai_enabled": s.ai_enabled}
 
     async def header(self) -> dict[str, Any]:
         return self.system.header()
@@ -275,6 +279,45 @@ class Api:
     async def ai_history(self, start: float = 0.0, end: float = 0.0, ok_only: bool = False, limit: int = 500) -> list[dict[str, Any]]:
         """Saved TB-AI attempts between two times (the dashboard asks for one local day), newest first."""
         return self.system.store.ai_reports(start, end, ok_only, min(max(limit, 1), 2000))
+
+    async def send_email_report(self, date: str = "") -> dict[str, Any]:
+        """Email one day's report now (blank = today). It goes in the background: SMTP can take longer than
+        an RPC, so the outcome arrives as an EmailReport event (and in the Event Log)."""
+        s = self.system.settings
+        if not s.email_ready:
+            raise ApiError(400, "Turn on Daily Email Report in Settings and set a recipient and SMTP host first.")
+        day = self._report_day(date)
+        self.system.reporter.send_soon(day)
+        recipients = len(s.email_recipients)
+        return {"status": "queued", "day": day, "message": f"Sending the {day} report to {recipients} recipient(s)…"}
+
+    def _report_day(self, date: str) -> str:
+        tz = self.system.settings.day_timezone
+        try:
+            day = parse_day(date)
+        except ValueError as exc:
+            raise ApiError(400, "date must be YYYY-MM-DD") from exc
+        today = get_day_bounds(None, tz)[2]
+        if day and day.isoformat() > today:
+            raise ApiError(400, f"{day} has not happened yet")
+        return day.isoformat() if day else today
+
+    async def journal_summary(self, date: str = "") -> dict[str, Any]:
+        """Everything that happened on one local day: trades, orders, timeline, skips, risk and system."""
+        tz = self.system.settings.day_timezone
+        day = self._report_day(date)
+        live = await gather_live(self.system) if day == get_day_bounds(None, tz)[2] else None
+        return await asyncio.to_thread(collect_daily_analytics, self.system.store, day, tz, live)
+
+    async def journal_month(self, year: int = 0, month: int = 0) -> dict[str, Any]:
+        """PnL, trades and orders per day of one month (default: this month, in day_timezone)."""
+        tz = self.system.settings.day_timezone
+        if not year or not month:
+            now = datetime.now(ZoneInfo(tz))
+            year, month = now.year, now.month
+        if not 2000 <= int(year) <= 2100 or not 1 <= int(month) <= 12:
+            raise ApiError(400, "year or month out of range")
+        return await asyncio.to_thread(collect_monthly_calendar_data, self.system.store, int(year), int(month), tz)
 
     async def ai_report_at(self, report_id: int) -> dict[str, Any]:
         """One saved TB-AI attempt in full."""

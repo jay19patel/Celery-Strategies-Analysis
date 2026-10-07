@@ -324,6 +324,20 @@ class SettingsChanged(Event):
     trading_stopped: bool
 
 
+@dataclass(frozen=True, kw_only=True)
+class EmailReport(Event):
+    """One attempt to email a day's report. No recipient or SMTP detail: the event log is on the dashboard."""
+
+    day: str
+    trigger: str  # "schedule" | "manual"
+    ok: bool
+    error: str = ""
+
+    @property
+    def level(self) -> str:
+        return "info" if self.ok else "warning"
+
+
 # -- bus ----------------------------------------------------------------------
 
 Handler = Callable[[Any], Awaitable[None]]

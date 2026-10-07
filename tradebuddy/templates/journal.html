@@ -1,0 +1,627 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="h-[calc(100vh-6rem)] flex flex-col">
+  <!-- Calendar Header & Navigation -->
+  <div class="flex items-center justify-between mb-4 px-2">
+    <div>
+      <h1 class="text-xl font-bold flex items-center gap-2 text-slate-800">
+        <i data-lucide="calendar-days" class="text-brand-500"></i>Trade Journal & Daily Operations Audit
+      </h1>
+      <p class="text-xs text-slate-500 mt-0.5">Click any day for full in-depth execution analysis, dynamic trailing stop events, and system load.</p>
+    </div>
+    <div class="flex gap-2 items-center bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
+      <button id="prevMonth" class="p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+      <span id="currentMonthLabel" class="font-semibold text-sm w-36 text-center text-slate-700"></span>
+      <button id="nextMonth" class="p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+      <button id="todayBtn" class="btn btn-sm text-xs font-semibold ml-2">Today</button>
+    </div>
+  </div>
+
+  <!-- Calendar Container Grid -->
+  <div class="card flex-1 flex flex-col overflow-hidden shadow-sm">
+    <div class="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
+      <div class="py-2.5 text-center text-xs font-bold text-slate-500 uppercase tracking-wider border-r border-slate-200">Sun</div>
+      <div class="py-2.5 text-center text-xs font-bold text-slate-500 uppercase tracking-wider border-r border-slate-200">Mon</div>
+      <div class="py-2.5 text-center text-xs font-bold text-slate-500 uppercase tracking-wider border-r border-slate-200">Tue</div>
+      <div class="py-2.5 text-center text-xs font-bold text-slate-500 uppercase tracking-wider border-r border-slate-200">Wed</div>
+      <div class="py-2.5 text-center text-xs font-bold text-slate-500 uppercase tracking-wider border-r border-slate-200">Thu</div>
+      <div class="py-2.5 text-center text-xs font-bold text-slate-500 uppercase tracking-wider border-r border-slate-200">Fri</div>
+      <div class="py-2.5 text-center text-xs font-bold text-slate-500 uppercase tracking-wider last:border-0">Sat</div>
+    </div>
+    <div id="calendarGrid" class="grid grid-cols-7 flex-1 bg-slate-200 gap-px border-b border-slate-200 overflow-y-auto"></div>
+  </div>
+</div>
+
+<!-- In-Depth Daily Report Modal -->
+<div id="reportModal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
+    
+    <!-- Modal Header -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center text-brand-600 font-bold">
+          <i data-lucide="bar-chart-2" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h2 id="modalDateTitle" class="text-lg font-bold text-slate-900">Daily Operations Audit</h2>
+          <div id="modalDateSubtitle" class="text-xs text-slate-500 font-medium">Loading session numbers...</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <button id="sendEmailBtn" class="btn btn-sm btn-primary flex items-center gap-2">
+          <i data-lucide="mail" class="w-4 h-4"></i><span>Email This Report</span>
+        </button>
+        <button id="closeModalBtn" class="p-2 rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="flex border-b border-slate-200 px-6 bg-white gap-6 text-sm font-semibold">
+      <button class="tab-btn py-3 border-b-2 border-brand-500 text-brand-600 flex items-center gap-2" data-tab="tabOverview">
+        <i data-lucide="sparkles" class="w-4 h-4"></i>Overview
+      </button>
+      <button class="tab-btn py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-800 flex items-center gap-2" data-tab="tabTimeline">
+        <i data-lucide="clock" class="w-4 h-4"></i>Timeline & Skips <span id="badgeTimelineCount" class="badge text-[10px]">0</span>
+      </button>
+      <button class="tab-btn py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-800 flex items-center gap-2" data-tab="tabOrdersTrailing">
+        <i data-lucide="trending-up" class="w-4 h-4"></i>Orders & Trailing Stops <span id="badgeTrailsCount" class="badge badge-blue text-[10px] hidden">0</span>
+      </button>
+      <button class="tab-btn py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-800 flex items-center gap-2" data-tab="tabSystem">
+        <i data-lucide="cpu" class="w-4 h-4"></i>System Health & Load
+      </button>
+      <button class="tab-btn py-3 border-b-2 border-transparent text-slate-500 hover:text-slate-800 flex items-center gap-2" data-tab="tabTrades">
+        <i data-lucide="list-checks" class="w-4 h-4"></i>Closed Trades Log <span id="badgeTradesCount" class="badge text-[10px]">0</span>
+      </button>
+    </div>
+
+    <!-- Modal Content Body -->
+    <div class="p-6 overflow-y-auto flex-1 space-y-6 bg-slate-50/50">
+      
+      <!-- TAB 1: OVERVIEW & AI COACH -->
+      <div id="tabOverview" class="tab-pane space-y-6">
+        
+        <!-- Hero KPI Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div class="text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">Net Realized PnL</div>
+            <div id="ovNetPnl" class="font-mono text-2xl font-bold text-slate-800">$0.00</div>
+            <div class="text-[11px] text-slate-400 mt-1 flex justify-between">
+              <span>Gross Profit: <b id="ovGrossProfit" class="text-bull">$0</b></span>
+              <span>Gross Loss: <b id="ovGrossLoss" class="text-bear">$0</b></span>
+            </div>
+          </div>
+          <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div class="text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">Win Rate</div>
+            <div id="ovWinRate" class="font-mono text-2xl font-bold text-slate-800">0%</div>
+            <div class="text-[11px] text-slate-400 mt-1">
+              <span id="ovWinLossDetail">0 Wins / 0 Losses</span>
+            </div>
+          </div>
+          <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div class="text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">Orders Dispatched</div>
+            <div id="ovTotalOrders" class="font-mono text-2xl font-bold text-slate-800">0</div>
+            <div class="text-[11px] text-slate-400 mt-1">
+              <span id="ovOrdersBreakdown">0 Filled, 0 Failed</span>
+            </div>
+          </div>
+          <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div class="text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">Dynamic Trailing Steps</div>
+            <div id="ovTrailingSteps" class="font-mono text-2xl font-bold text-brand-600">0</div>
+            <div class="text-[11px] text-slate-400 mt-1">
+              Stops tightened & profit secured
+            </div>
+          </div>
+        </div>
+
+        <!-- Conversational AI Executive Coach Review -->
+        <div class="bg-white rounded-xl border border-indigo-100 shadow-sm overflow-hidden border-l-4 border-l-indigo-600">
+          <div class="bg-indigo-50/60 px-5 py-3 border-b border-indigo-100 flex items-center justify-between">
+            <div class="flex items-center gap-2 text-indigo-900 font-bold text-sm">
+              <i data-lucide="sparkles" class="w-4 h-4 text-indigo-600"></i>The day in brief <span class="text-[10px] font-normal text-slate-400">written by rules from the numbers, not AI</span>
+            </div>
+            <span class="badge badge-ai text-[11px]">Human-Readable Synthesis</span>
+          </div>
+          <div class="p-5 space-y-3.5 text-sm">
+            <div class="font-semibold text-slate-900 leading-snug" id="aiHeadline">Generating narrative review...</div>
+            <div class="text-slate-600 leading-relaxed text-[13px] bg-slate-50 p-3.5 rounded-lg border border-slate-100" id="aiExecution"></div>
+            <div class="text-slate-600 leading-relaxed text-[13px] bg-slate-50 p-3.5 rounded-lg border border-slate-100" id="aiTrailing"></div>
+            <div class="text-slate-600 leading-relaxed text-[13px] bg-slate-50 p-3.5 rounded-lg border border-slate-100" id="aiSystem"></div>
+            <div class="pt-2 border-t border-slate-100 text-xs font-medium text-indigo-800 flex items-center gap-1.5" id="aiCoachTip"></div>
+          </div>
+        </div>
+
+        <!-- Strategy Contribution Breakdown -->
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <i data-lucide="pie-chart" class="w-4 h-4 text-slate-500"></i>Strategy Contribution & Performance
+            </h3>
+            <span class="text-xs text-slate-400 font-medium">PnL contribution per automated strategy</span>
+          </div>
+          <div id="strategiesContainer" class="space-y-3"></div>
+        </div>
+
+      </div>
+
+      <!-- TAB 2: ORDERS & TRAILING STOPS -->
+      <div id="tabOrdersTrailing" class="tab-pane hidden space-y-6">
+        
+        <!-- Dynamic Trailing Stop Audit Card -->
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <i data-lucide="trending-up" class="w-4 h-4 text-brand-500"></i>Dynamic Trailing Stop Audits
+              </h3>
+              <p class="text-xs text-slate-500 mt-0.5">How stops were progressively tightened to protect floating profits on active positions.</p>
+            </div>
+            <span class="badge badge-green text-xs" id="trailingActiveBadge">0 Positions Trailed</span>
+          </div>
+          <div id="trailingTableContainer" class="overflow-x-auto"></div>
+        </div>
+
+        <!-- Orders Dispatched Log -->
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+            <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <i data-lucide="send" class="w-4 h-4 text-slate-500"></i>Order Routing & Execution Activity
+            </h3>
+            <span class="text-xs text-slate-400" id="ordersCountHeader">0 Orders</span>
+          </div>
+          <table class="tbl w-full text-xs">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Symbol</th>
+                <th>Strategy</th>
+                <th>Side</th>
+                <th class="r">Size</th>
+                <th class="r">Price</th>
+                <th>Stop Loss &middot; Take Profit</th>
+                <th class="r">Status</th>
+              </tr>
+            </thead>
+            <tbody id="ordersTableBody"></tbody>
+          </table>
+        </div>
+
+      </div>
+
+      <!-- TAB: TIMELINE & SKIPS -->
+      <div id="tabTimeline" class="tab-pane hidden space-y-6">
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+            <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-brand-600"></i>What happened, in order</h3>
+            <span id="timelineNote" class="text-xs text-slate-400"></span>
+          </div>
+          <div id="timelineContainer" class="p-4 text-xs"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="bg-slate-50 px-5 py-3 border-b border-slate-200">
+            <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i data-lucide="ban" class="w-4 h-4 text-amber-500"></i>Why signals were skipped</h3>
+          </div>
+          <div id="skippedContainer" class="p-4 text-xs"></div>
+        </div>
+      </div>
+
+      <!-- TAB 3: SYSTEM HEALTH & LOAD -->
+      <div id="tabSystem" class="tab-pane hidden space-y-6">
+        
+        <!-- System Resource Indicators -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+            <div class="flex justify-between items-center mb-2">
+              <span class="text-xs font-bold uppercase text-slate-400">CPU (busiest process)</span>
+              <span id="sysStatusBadge" class="badge badge-green">Optimal</span>
+            </div>
+            <div id="sysCpuVal" class="font-mono text-3xl font-bold text-slate-800">0%</div>
+            <div class="w-full bg-slate-100 rounded-full h-2 mt-3 overflow-hidden">
+              <div id="sysCpuBar" class="bg-bull h-full rounded-full" style="width: 10%;"></div>
+            </div>
+            <div class="text-[11px] text-slate-400 mt-2">Average across processes: <b id="sysAvgCpu">0%</b> · <span id="sysMeasured"></span></div>
+          </div>
+          <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+            <div class="text-xs font-bold uppercase text-slate-400 mb-2">Memory (largest process)</div>
+            <div id="sysRssVal" class="font-mono text-3xl font-bold text-slate-800">0 MB</div>
+            <div class="text-[11px] text-slate-400 mt-4">Engine, feed and analyst, at the time you opened this</div>
+          </div>
+          <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+            <div class="text-xs font-bold uppercase text-slate-400 mb-2">Worst event-loop lag</div>
+            <div id="sysLagVal" class="font-mono text-3xl font-bold text-slate-800">0 ms</div>
+            <div class="text-[11px] text-slate-400 mt-4">Since each process started</div>
+          </div>
+        </div>
+
+        <!-- System Errors & Operational Warnings Log -->
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div class="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+            <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-500"></i>Operational Errors & Warning Events
+            </h3>
+            <span id="sysErrorCountBadge" class="badge badge-green text-xs">0 Errors</span>
+          </div>
+          <div id="sysErrorsContainer" class="p-4 text-xs"></div>
+        </div>
+
+      </div>
+
+      <!-- TAB 4: CLOSED TRADES LOG -->
+      <div id="tabTrades" class="tab-pane hidden space-y-6">
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <table class="tbl w-full text-xs">
+            <thead>
+              <tr>
+                <th>Closed Time</th>
+                <th>Symbol</th>
+                <th>Strategy</th>
+                <th>Side</th>
+                <th class="r">Size</th>
+                <th class="r">Entry Price</th>
+                <th class="r">Exit Price</th>
+                <th class="r">Fees</th>
+                <th class="r">Realized PnL</th>
+                <th>Close Reason</th>
+              </tr>
+            </thead>
+            <tbody id="tradesTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const { $, esc, num, money, signed, pnlClass, status, time, dateTime } = TB;
+  let currentDate = new Date();
+  let selectedDateStr = "";
+  let monthDataCache = {};
+
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+  async function fetchMonthData(year, month) {
+    try {
+      monthDataCache = await TB.get(`/api/journal/month?year=${year}&month=${month}`);
+    } catch (e) {
+      console.warn("Could not load month stats:", e);
+      monthDataCache = {};
+    }
+  }
+
+  async function renderCalendar() {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth() + 1; // 1-indexed
+    $("currentMonthLabel").innerText = currentDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+    await fetchMonthData(year, month);
+
+    const firstDay = new Date(year, month - 1, 1).getDay();
+    const daysInMonth = new Date(year, month, 0).getDate();
+
+    let html = "";
+    // Blank days preceding start
+    for (let i = 0; i < firstDay; i++) {
+      html += `<div class="bg-slate-50 min-h-[110px]"></div>`;
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const isToday = dateStr === todayStr;
+      const dayData = monthDataCache[dateStr] || { pnl: 0, trades: 0, orders: 0 };
+      const hasActivity = dayData.trades > 0 || dayData.orders > 0;
+
+      const dayHeaderClass = isToday
+        ? "w-7 h-7 rounded-full bg-brand-500 text-white flex items-center justify-center font-bold text-xs shadow-sm ring-2 ring-brand-200"
+        : "text-slate-700 font-bold text-xs";
+
+      let pnlBadge = "";
+      if (dayData.trades > 0) {
+        const pClass = dayData.pnl > 0 ? "text-bull bg-bull-bg font-bold" : (dayData.pnl < 0 ? "text-bear bg-bear-bg font-bold" : "text-slate-500 bg-slate-100");
+        pnlBadge = `
+          <div class="mt-2 text-right">
+            <span class="inline-block px-1.5 py-0.5 rounded font-mono text-[11px] ${pClass}">
+              ${signed(dayData.pnl)}
+            </span>
+            <div class="text-[10px] text-slate-400 font-medium mt-0.5">${dayData.trades} ${dayData.trades === 1 ? 'trade' : 'trades'}</div>
+          </div>
+        `;
+      } else if (dayData.orders > 0) {
+        pnlBadge = `
+          <div class="mt-2 text-right">
+            <span class="inline-block px-1.5 py-0.5 rounded font-mono text-[10px] bg-slate-100 text-slate-600">
+              ${dayData.orders} orders
+            </span>
+          </div>
+        `;
+      } else {
+        pnlBadge = `<div class="mt-2 text-right opacity-30"><div class="text-[10px] text-slate-400 font-medium pt-2">—</div></div>`;
+      }
+
+      html += `
+        <div class="bg-white min-h-[110px] p-2.5 flex flex-col transition-all hover:bg-slate-50/80 hover:shadow-inner cursor-pointer ${isToday ? 'bg-blue-50/20' : ''}" onclick="window.openDayAudit('${dateStr}')">
+          <div class="flex justify-between items-start">
+            <div class="${dayHeaderClass}">${day}</div>
+            ${hasActivity ? '<span class="w-1.5 h-1.5 rounded-full bg-brand-500"></span>' : ''}
+          </div>
+          <div class="flex-1"></div>
+          ${pnlBadge}
+        </div>
+      `;
+    }
+
+    const totalCells = firstDay + daysInMonth;
+    const remainingCells = (7 - (totalCells % 7)) % 7;
+    for (let i = 0; i < remainingCells; i++) {
+      html += `<div class="bg-slate-50 min-h-[110px]"></div>`;
+    }
+
+    $("calendarGrid").innerHTML = html;
+    TB.icons();
+  }
+
+  // Open modal and fetch full in-depth report
+  window.openDayAudit = async function(dateStr) {
+    selectedDateStr = dateStr;
+    $("reportModal").classList.remove("hidden");
+    $("modalDateTitle").innerText = `Operations Audit — ${dateStr}`;
+    $("modalDateSubtitle").innerText = "Fetching in-depth trade, trailing, and CPU metrics...";
+
+    // Reset tabs to overview
+    switchTab("tabOverview");
+
+    try {
+      const data = await TB.get(`/api/journal/summary?date=${dateStr}`);
+      paintModal(data);
+    } catch (err) {
+      alert("Failed to load daily analytics: " + err.message);
+      $("reportModal").classList.add("hidden");
+    }
+  };
+
+  function paintModal(data) {
+    $("modalDateTitle").innerText = `Session Audit — ${data.date_human}`;
+    $("modalDateSubtitle").innerText = `${data.date} · all times ${data.timezone}${data.is_today ? " · today so far" : ""}`;
+
+    const s = data.summary;
+    const sys = data.system_health;
+    const ai = data.narrative;
+
+    // Badges
+    $("badgeTradesCount").innerText = s.total_trades;
+    $("badgeTrailsCount").innerText = s.total_trailing_steps;
+    $("badgeTrailsCount").classList.toggle("hidden", s.total_trailing_steps === 0);
+
+    // KPI Cards
+    $("ovNetPnl").innerHTML = `<span class="${pnlClass(s.total_pnl)}">${signed(s.total_pnl)}</span>`;
+    $("ovGrossProfit").innerText = signed(s.gross_profit);
+    $("ovGrossLoss").innerText = signed(-s.gross_loss);
+    $("ovWinRate").innerText = `${s.win_rate}%`;
+    $("ovWinLossDetail").innerText = `${s.wins_count} Wins / ${s.losses_count} Losses (${s.total_trades} trades)`;
+    $("ovTotalOrders").innerText = s.total_orders;
+    const filled = s.order_status_counts.filled || 0;
+    const failed = (s.order_status_counts.failed || 0) + (s.order_status_counts.rejected || 0);
+    $("ovOrdersBreakdown").innerText = `${filled} filled, ${failed} failed`;
+    $("ovTrailingSteps").innerText = s.total_trailing_steps;
+
+    // AI Narrative
+    $("aiHeadline").innerText = ai.headline;
+    $("aiExecution").innerHTML = `<b>Orders:</b> ${esc(ai.execution)}`;
+    $("aiTrailing").innerHTML = `<b>Risk:</b> ${esc(ai.trailing)}`;
+    $("aiSystem").innerHTML = `<b>System:</b> ${esc(ai.system)}`;
+    $("aiCoachTip").innerHTML = `<i data-lucide="check-circle-2" class="w-4 h-4 text-indigo-600"></i><b>Next:</b> ${esc(ai.coach_tip)}`;
+
+    // Timeline & skips
+    $("badgeTimelineCount").innerText = data.timeline_total;
+    $("timelineNote").innerText = data.timeline_total > data.timeline.length ? `latest ${data.timeline.length} of ${data.timeline_total}` : "";
+    const LV = { error: "badge-red", warning: "badge-amber" };
+    $("timelineContainer").innerHTML = !data.timeline.length
+      ? `<div class="text-slate-400 text-center py-4">No signals, orders or alerts on this day.</div>`
+      : `<div class="space-y-1.5">${data.timeline.map(x => `
+          <div class="flex items-start gap-2">
+            <span class="text-slate-400 font-mono shrink-0">${esc(x.time)}</span>
+            <span class="badge ${LV[x.level] || ""} shrink-0">${esc(x.type)}</span>
+            <span class="text-slate-700 flex-1">${esc(x.text)}</span>
+          </div>`).join("")}</div>`;
+    $("skippedContainer").innerHTML = !data.skipped.length
+      ? `<div class="text-slate-400 text-center py-4">No signal was refused on this day.</div>`
+      : `<table class="w-full"><thead><tr class="text-left text-slate-400"><th class="py-1 pr-3">Count</th><th class="pr-3">Reason</th><th class="pr-3">Strategies · symbols</th><th>Between</th></tr></thead><tbody>${data.skipped.map(g => `
+          <tr class="border-t border-slate-100 align-top">
+            <td class="py-1.5 pr-3 font-mono font-bold">${g.count}</td>
+            <td class="pr-3 text-slate-700">${esc(g.reason)}</td>
+            <td class="pr-3 text-slate-500">${esc(g.strategies.join(", "))} · ${esc(g.symbols.join(", "))}</td>
+            <td class="font-mono text-slate-400 whitespace-nowrap">${esc(g.first)} – ${esc(g.last)}</td>
+          </tr>`).join("")}</tbody></table>`;
+
+    // Strategy Performance Bars
+    const stratBox = $("strategiesContainer");
+    if (!data.strategies_performance.length) {
+      stratBox.innerHTML = `<div class="text-xs text-slate-400 py-3 text-center">No strategy trades executed on this date.</div>`;
+    } else {
+      stratBox.innerHTML = data.strategies_performance.map(sp => {
+        const pColor = sp.total_pnl >= 0 ? "text-bull" : "text-bear";
+        const barColor = sp.total_pnl >= 0 ? "bg-bull" : "bg-bear";
+        const barWidth = Math.min(Math.max(Math.abs(sp.total_pnl) * 3, 10), 100);
+        return `
+          <div class="border border-slate-100 rounded-lg p-3 bg-slate-50/50">
+            <div class="flex justify-between items-center text-xs mb-1">
+              <span class="font-bold text-slate-800">${esc(sp.strategy)}</span>
+              <span class="font-mono font-bold ${pColor}">${signed(sp.total_pnl)}</span>
+            </div>
+            <div class="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden my-1.5">
+              <div class="${barColor} h-full rounded-full" style="width: ${barWidth}%;"></div>
+            </div>
+            <div class="flex justify-between items-center text-[11px] text-slate-400">
+              <span>Trades: ${sp.trades_count} (${sp.wins_count}W / ${sp.losses_count}L &middot; ${sp.win_rate}% win)</span>
+              <span>Fees: ${money(sp.fees)}</span>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    // Trailing Stops Table
+    const trailBox = $("trailingTableContainer");
+    $("trailingActiveBadge").innerText = `${data.trailing_actions.length} Active Trailing Positions`;
+    if (!data.trailing_actions.length) {
+      trailBox.innerHTML = `<div class="text-xs text-slate-400 py-6 text-center italic">No dynamic trailing stop triggers on this date.</div>`;
+    } else {
+      trailBox.innerHTML = `
+        <table class="tbl w-full text-xs">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Steps Taken</th>
+              <th>Stop Loss Progression</th>
+              <th>Final Target</th>
+              <th>Last Trigger Price</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.trailing_actions.map(t => `
+              <tr>
+                <td class="font-bold text-slate-800">${esc(t.symbol)}</td>
+                <td><span class="badge badge-green font-mono">${t.steps_count} / ${t.max_steps} Steps</span></td>
+                <td class="font-mono">${money(t.initial_stop_loss)} &rarr; <b class="text-bull">${money(t.latest_stop_loss)}</b></td>
+                <td class="font-mono">${money(t.latest_take_profit)}</td>
+                <td class="font-mono text-slate-500">${money(t.price_at_last_trail)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      `;
+    }
+
+    // Orders Table
+    $("ordersCountHeader").innerText = `${data.orders.length} Orders Recorded`;
+    const ordersBody = $("ordersTableBody");
+    if (!data.orders.length) {
+      ordersBody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-slate-400">No orders placed today.</td></tr>`;
+    } else {
+      ordersBody.innerHTML = data.orders.map(o => `
+        <tr>
+          <td class="text-slate-400">${time(o.ts)}</td>
+          <td class="font-bold">${esc(o.symbol)}</td>
+          <td class="text-slate-600">${esc(o.strategy || '—')}</td>
+          <td><span class="side-${esc(o.side)}">${esc(String(o.side).toUpperCase())}</span></td>
+          <td class="r font-mono">${o.size}</td>
+          <td class="r font-mono">${money(o.price)}</td>
+          <td class="font-mono text-[11px] text-slate-400">SL ${money(o.stop_loss)} &middot; TP ${money(o.take_profit)}</td>
+          <td class="r">${status(o.status)}</td>
+        </tr>
+      `).join("");
+    }
+
+    // System Health Tab
+    const or = (v, unit) => v == null ? "—" : `${v}${unit}`;
+    $("sysCpuVal").innerText = or(sys.peak_cpu_pct, "%");
+    $("sysAvgCpu").innerText = or(sys.avg_cpu_pct, "%");
+    $("sysMeasured").innerText = sys.measured ? "measured now" : "not recorded for past days";
+    $("sysCpuBar").style.width = `${Math.min(sys.peak_cpu_pct || 0, 100)}%`;
+    $("sysRssVal").innerText = or(sys.peak_rss_mb, " MB");
+    $("sysLagVal").innerText = or(sys.max_loop_lag_ms, " ms");
+    $("sysStatusBadge").innerText = sys.status_label;
+    $("sysStatusBadge").className = `badge ${sys.peak_cpu_pct > 70 ? 'badge-red' : (sys.peak_cpu_pct > 40 ? 'badge-amber' : 'badge-green')}`;
+    $("sysErrorCountBadge").innerText = `${sys.system_errors_count} Events`;
+    $("sysErrorCountBadge").className = `badge ${sys.system_errors_count > 0 ? 'badge-amber' : 'badge-green'}`;
+
+    const errBox = $("sysErrorsContainer");
+    if (!sys.error_samples.length) {
+      errBox.innerHTML = `<div class="text-slate-400 text-center py-4">Zero system errors or guard alerts recorded during this session.</div>`;
+    } else {
+      errBox.innerHTML = `
+        <div class="space-y-2">
+          ${sys.error_samples.map(e => `
+            <div class="p-2.5 rounded bg-slate-50 border border-slate-200 flex items-start gap-2 text-xs">
+              <span class="badge badge-red font-mono">${esc(e.type)}</span>
+              <span class="text-slate-400 font-mono">${esc(e.time)}</span>
+              <span class="text-slate-700 flex-1 break-all">${esc(e.text)}</span>
+            </div>
+          `).join("")}
+        </div>
+      `;
+    }
+
+    // Trades Table
+    const tradesBody = $("tradesTableBody");
+    if (!data.trades.length) {
+      tradesBody.innerHTML = `<tr><td colspan="10" class="text-center py-6 text-slate-400">No closed trades recorded.</td></tr>`;
+    } else {
+      tradesBody.innerHTML = data.trades.map(t => `
+        <tr>
+          <td class="text-slate-400">${time(t.closed_at)}</td>
+          <td class="font-bold">${esc(t.symbol)}</td>
+          <td class="text-slate-600">${esc(t.strategy)}</td>
+          <td><span class="side-${esc(t.side)}">${esc(String(t.side).toUpperCase())}</span></td>
+          <td class="r font-mono">${t.size}</td>
+          <td class="r font-mono">${money(t.entry_price)}</td>
+          <td class="r font-mono">${money(t.exit_price)}</td>
+          <td class="r font-mono text-slate-400">${money(t.fees)}</td>
+          <td class="r font-mono font-bold ${pnlClass(t.pnl)}">${signed(t.pnl)}</td>
+          <td class="text-slate-500">${esc(t.reason || '—')}</td>
+        </tr>
+      `).join("");
+    }
+
+    TB.icons();
+  }
+
+  function switchTab(targetId) {
+    document.querySelectorAll(".tab-btn").forEach(b => {
+      const active = b.dataset.tab === targetId;
+      b.classList.toggle("border-brand-500", active);
+      b.classList.toggle("text-brand-600", active);
+      b.classList.toggle("border-transparent", !active);
+      b.classList.toggle("text-slate-500", !active);
+    });
+    document.querySelectorAll(".tab-pane").forEach(p => {
+      p.classList.toggle("hidden", p.id !== targetId);
+    });
+    TB.icons();
+  }
+
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    b.onclick = () => switchTab(b.dataset.tab);
+  });
+
+  $("closeModalBtn").onclick = () => $("reportModal").classList.add("hidden");
+  $("reportModal").addEventListener('click', (e) => {
+    if (e.target === $("reportModal")) $("reportModal").classList.add("hidden");
+  });
+
+  $("prevMonth").onclick = () => { currentDate.setMonth(currentDate.getMonth() - 1); renderCalendar(); };
+  $("nextMonth").onclick = () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); };
+  $("todayBtn").onclick = () => { currentDate = new Date(); renderCalendar(); };
+
+  $("sendEmailBtn").onclick = async () => {
+    try {
+      $("sendEmailBtn").innerHTML = `<i data-lucide="loader" class="animate-spin w-4 h-4"></i><span>Sending…</span>`;
+      $("sendEmailBtn").disabled = true;
+      TB.icons();
+      const res = await TB.post("/api/send-email-report", { date: selectedDateStr });
+      TB.toast(res.message);
+    } catch (e) {
+      TB.toast("Email not sent: " + e.message, "error");
+    } finally {
+      $("sendEmailBtn").innerHTML = `<i data-lucide="mail" class="w-4 h-4"></i><span>Email This Report</span>`;
+      $("sendEmailBtn").disabled = false;
+      TB.icons();
+    }
+  };
+
+  // The send runs on the engine; its outcome arrives as an event.
+  TB.on("EmailReport", (e) => {
+    if (e.trigger !== "manual") return;
+    TB.toast(e.ok ? `Report for ${e.day} emailed.` : `Report for ${e.day} not sent: ${e.error}`, e.ok ? "ok" : "error");
+  });
+
+  renderCalendar();
+})();
+</script>
+{% endblock %}

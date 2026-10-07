@@ -19,6 +19,7 @@ x-app: &app
   restart: unless-stopped
   volumes:
     - ./data:/app/data
+    - .:/app
   environment: &env
     DB_PATH: /app/data/tradebuddy.db
     CELERY_BROKER_URL: redis://redis:6379/0

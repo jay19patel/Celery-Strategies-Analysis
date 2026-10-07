@@ -110,6 +110,49 @@
         <div class="field-help">What is sent: computed numbers and findings only (market, system, and with the switch above trades, positions and account figures). Never API keys, secrets or order ids. After a 429 (rate limit) TB-AI waits as long as Mistral asks, doubling from 5 to 60 minutes. Insights and the playbook work without AI.</div>
       </div>
     </section>
+
+    <section class="card">
+      <div class="card-head border-b border-slate-100">
+        <div class="card-title flex items-center gap-2">
+          <div class="w-6 h-6 rounded-md bg-purple-50 flex items-center justify-center text-purple-600"><i data-lucide="mail" class="w-3.5 h-3.5"></i></div>
+          Daily Email Report
+        </div>
+        <label class="switch sm"><input type="checkbox" id="email_enabled"><span class="track"></span></label>
+      </div>
+      <div class="card-body space-y-5">
+        <div class="grid grid-cols-3 gap-3">
+          <div class="col-span-2">
+            <label class="field-label" for="email_to">Recipient Email(s)</label>
+            <input id="email_to" type="text" class="input w-full mt-1 font-mono" placeholder="you@example.com, partner@example.com">
+          </div>
+          <div>
+            <label class="field-label" for="email_report_hour">Send at</label>
+            <select id="email_report_hour" class="select w-full mt-1"></select>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div class="col-span-2">
+            <label class="field-label" for="email_smtp_host">SMTP Host</label>
+            <input id="email_smtp_host" type="text" class="input w-full mt-1 font-mono" placeholder="smtp.gmail.com">
+          </div>
+          <div>
+            <label class="field-label" for="email_smtp_port">Port</label>
+            <input id="email_smtp_port" type="number" class="input w-full mt-1 font-mono" placeholder="587">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="field-label" for="email_smtp_user">SMTP User</label>
+            <input id="email_smtp_user" type="text" class="input w-full mt-1 font-mono">
+          </div>
+          <div>
+            <label class="field-label" for="email_smtp_pass">SMTP Password</label>
+            <input id="email_smtp_pass" type="password" class="input w-full mt-1 font-mono" placeholder="Leave blank to keep saved">
+          </div>
+        </div>
+        <div class="field-help">Once a day at this hour (in the "Trading day starts" timezone) the engine emails what happened today: PnL, every trade and order, a timeline, why signals were skipped, trailing stops, open positions, accounts and errors. A failed send is retried twice, 15 minutes apart; each attempt is in the Event Log. Gmail: port 587 (or 465) with an App Password. Send any day by hand from the Trading Journal.</div>
+      </div>
+    </section>
   </div>
 
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
@@ -190,7 +233,7 @@
   const { $, esc, money } = TB;
   const PHRASE = {{ live_phrase | tojson }};
   const NUMBERS = ["stop_loss_pct", "take_profit_pct", "trade_margin_pct", "paper_starting_balance", "paper_leverage", "paper_fee_pct", "paper_slippage_pct", "paper_max_hold_hours",
-    "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct"];
+    "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct", "email_smtp_port"];
   const HOSTS = { demo: "demo.delta.exchange", live: "www.delta.exchange" };
   let saved = null, env = "demo";
 
@@ -205,6 +248,16 @@
     $("mistral_model").value = s.mistral_model;
     $("ai_interval_minutes").value = String(s.ai_interval_minutes);
     $("ai_share_account").checked = s.ai_share_account;
+    $("email_enabled").checked = s.email_enabled;
+    $("email_report_hour").innerHTML = Array.from({ length: 24 }, (_, h) =>
+      `<option value="${h}">${String(h).padStart(2, "0")}:00 (${h % 12 || 12} ${h < 12 ? "AM" : "PM"})</option>`).join("");
+    $("email_report_hour").value = String(s.email_report_hour);
+    $("email_to").value = s.email_to;
+    $("email_smtp_host").value = s.email_smtp_host;
+    $("email_smtp_port").value = s.email_smtp_port || 587;
+    $("email_smtp_user").value = s.email_smtp_user;
+    $("email_smtp_pass").value = "";
+    $("email_smtp_pass").placeholder = s.email_smtp_pass ? "stored: set" : "Leave blank to keep saved";
     $("mistral_api_key").value = "";
     $("mistral_api_key").placeholder = s.mistral_api_key ? `stored: ${s.mistral_api_key}` : "not set";
     $("aiState").textContent = s.ai_enabled ? (s.mistral_api_key ? "on" : "on · no key") : "off";
@@ -231,6 +284,11 @@
       trailing_enabled: $("trailing_enabled").checked, day_timezone: $("day_timezone").value,
       ai_enabled: $("ai_enabled").checked, mistral_model: $("mistral_model").value.trim(),
       ai_interval_minutes: Number($("ai_interval_minutes").value), ai_share_account: $("ai_share_account").checked,
+      email_enabled: $("email_enabled").checked, email_to: $("email_to").value.trim(),
+      email_smtp_host: $("email_smtp_host").value.trim(),
+      email_smtp_port: Number($("email_smtp_port").value) || 587,
+      email_report_hour: Number($("email_report_hour").value),
+      email_smtp_user: $("email_smtp_user").value.trim(),
     };
     for (const k of NUMBERS) out[k] = Number($(k).value);
     const key = $("delta_api_key").value.trim(), secret = $("delta_api_secret").value.trim();
@@ -238,12 +296,14 @@
     if (secret) out.delta_api_secret = secret;
     const mkey = $("mistral_api_key").value.trim();
     if (mkey) out.mistral_api_key = mkey;
+    const epass = $("email_smtp_pass").value.trim();
+    if (epass) out.email_smtp_pass = epass;
     return out;
   }
   function changes() {
     const now = current(), diff = {};
     for (const [k, v] of Object.entries(now)) {
-      if (k === "delta_api_key" || k === "delta_api_secret" || k === "mistral_api_key") { diff[k] = v; continue; }
+      if (k === "delta_api_key" || k === "delta_api_secret" || k === "mistral_api_key" || k === "email_smtp_pass") { diff[k] = v; continue; }
       if (String(v) !== String(saved[k])) diff[k] = v;
     }
     return diff;

@@ -34,6 +34,7 @@ PAGES = [
     ("positions", "/positions", "layers", "Positions", "Portfolio"),
     ("orders", "/orders", "list-checks", "Orders", "Portfolio"),
     ("account", "/account", "wallet", "Account", "Portfolio"),
+    ("journal", "/journal", "calendar-days", "Trading Journal", "Portfolio"),
     ("market", "/market", "candlestick-chart", "Market Data", "Monitoring"),
     ("system", "/system", "gauge", "System", "Monitoring"),
     ("events", "/events", "scroll-text", "Event Log", "Monitoring"),
@@ -82,6 +83,10 @@ class PositionControl(BaseModel):
     max_steps: int | None = Field(default=None, ge=0, le=50)
 
 
+class EmailReportRequest(BaseModel):
+    date: str = Field(default="", max_length=32)
+
+
 def asset_version() -> str:
     digest = hashlib.sha256()
     for path in sorted((HERE / "static").rglob("*")):
@@ -121,7 +126,7 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
                 {
                     "page": page_id,
                     "title": title,
-                    "pages": [p for p in PAGES if p[0] != "paper" or ctx["paper_active"]],
+                    "pages": [p for p in PAGES if (p[0] != "paper" or ctx["paper_active"]) and (p[0] != "ai" or ctx.get("ai_enabled"))],
                     "active_brokers": ctx["active_brokers"],
                     "live_phrase": LIVE_CONFIRM_PHRASE,
                 },
@@ -238,6 +243,14 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
     async def get_settings() -> dict:
         return await call("settings")
 
+    @app.get("/api/journal/summary")
+    async def journal_summary(date: str = "") -> dict:
+        return await call("journal_summary", date=date)
+
+    @app.get("/api/journal/month")
+    async def journal_month(year: int = 0, month: int = 0) -> dict:
+        return await call("journal_month", year=year, month=month)
+
     # -- write --------------------------------------------------------------
 
     @app.put("/api/settings", dependencies=[Depends(protected)])
@@ -247,6 +260,10 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
     @app.post("/api/settings/clear-credentials", dependencies=[Depends(protected)])
     async def clear_credentials() -> dict:
         return await call("clear_credentials")
+
+    @app.post("/api/send-email-report", dependencies=[Depends(protected)])
+    async def send_email_report(body: EmailReportRequest = EmailReportRequest()) -> dict:
+        return await call("send_email_report", date=body.date)
 
     @app.post("/api/settings/test-delta", dependencies=[Depends(protected)])
     async def test_delta(body: DeltaTest) -> dict:
