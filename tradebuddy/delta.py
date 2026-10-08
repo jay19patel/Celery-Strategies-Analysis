@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -16,6 +18,8 @@ from urllib.parse import urlencode
 import httpx
 
 from tradebuddy.errors import BrokerError, BrokerTimeout
+
+log = logging.getLogger(__name__)
 
 PROTECTIVE_TYPES = ("stop_loss_order", "take_profit_order")
 RESOLUTION_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
@@ -98,11 +102,24 @@ class DeltaClient:
             stat["last_ms"] = round(1000 * (time.perf_counter() - started), 1)
             stat["last_at"] = time.time()
 
+    # A dropped TLS handshake or reset connection (e.g. "[SSL: RECORD_LAYER_FAILURE]") is a network blip, not an
+    # answer. Reads are retried a couple of times; anything that could place, change or cancel an order is never
+    # resent: its outcome is looked up by client_order_id instead (timeout is not rejection).
+    GET_RETRY_DELAYS = (0.5, 1.0)
+
     async def _send(self, method: str, path: str, query: str, payload: str, headers: dict[str, str]) -> httpx.Response:
-        try:
-            return await self.http.request(method, self.base_url + path + query, content=payload or None, headers=headers)
-        except httpx.TransportError as exc:
-            raise DeltaTimeout(f"{method} {path}: {exc!r}") from exc
+        delays = self.GET_RETRY_DELAYS if method == "GET" else ()
+        for attempt in range(len(delays) + 1):
+            try:
+                return await self.http.request(method, self.base_url + path + query, content=payload or None, headers=headers)
+            except httpx.TransportError as exc:
+                if attempt == len(delays):
+                    raise DeltaTimeout(f"{method} {path}: {exc!r}") from exc
+                stat = self.calls[f"{method} {path}"]
+                stat["retries"] = stat.get("retries", 0) + 1
+                log.info("delta_retry %s %s attempt=%d error=%r", method, path, attempt + 1, exc)
+                await asyncio.sleep(delays[attempt])
+        raise AssertionError("unreachable")
 
     @staticmethod
     def _parse(method: str, path: str, resp: httpx.Response) -> Any:

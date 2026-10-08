@@ -81,6 +81,28 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     opened_at       REAL NOT NULL,
     closed_at       REAL NOT NULL
 );
+-- Open paper option structures (straddle, condor, ...). A close moves the structure to paper_trades.
+CREATE TABLE IF NOT EXISTS paper_structures (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_order_id TEXT NOT NULL UNIQUE,
+    symbol          TEXT NOT NULL,              -- the perpetual whose options these are (BTCUSD)
+    underlying      TEXT NOT NULL,              -- BTC
+    kind            TEXT NOT NULL,
+    label           TEXT NOT NULL,
+    expiry          REAL NOT NULL,
+    qty             INTEGER NOT NULL,           -- contracts per leg
+    contract_value  REAL NOT NULL,
+    legs            TEXT NOT NULL,              -- JSON: action, kind, strike, symbol, fill price
+    net             REAL NOT NULL,              -- per unit: + premium paid (debit), - received (credit)
+    premium         REAL NOT NULL,              -- USD paid or received
+    capital         REAL NOT NULL,              -- USD max loss, held as margin
+    max_profit      REAL,                       -- USD; NULL = unlimited
+    entry_fee       REAL NOT NULL,
+    sl_pct          REAL NOT NULL,
+    tp_pct          REAL NOT NULL,
+    strategy        TEXT NOT NULL,
+    opened_at       REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS position_controls (
     broker      TEXT NOT NULL,
     symbol      TEXT NOT NULL,

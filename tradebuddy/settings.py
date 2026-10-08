@@ -33,12 +33,12 @@ DELTA_ROUTING_FIELDS = ("delta_active", "delta_env", *DELTA_SECRET_FIELDS)
 # Changing any of these changes where prices come from: the stream restarts.
 STREAM_FIELDS = ("paper_active", "market_data", *DELTA_ROUTING_FIELDS)
 
-BOOL_FIELDS = ("paper_active", "delta_active", "trailing_enabled", "ai_enabled", "ai_share_account", "email_enabled")
+BOOL_FIELDS = ("paper_active", "delta_active", "trailing_enabled", "ai_enabled", "ai_share_account", "email_enabled", "options_auto_enabled")
 TEXT_FIELDS = ("email_to", "email_smtp_host", "email_smtp_user")
 CHOICES = {
     "market_data": ("demo", "live"), "delta_env": ("demo", "live"), "day_timezone": ("Asia/Kolkata", "UTC"),
 }
-INT_FIELDS = ("trailing_max_steps", "ai_interval_minutes", "email_smtp_port", "email_report_hour")
+INT_FIELDS = ("trailing_max_steps", "ai_interval_minutes", "email_smtp_port", "email_report_hour", "options_auto_qty")
 RANGES = {
     "stop_loss_pct": (0.05, 50.0),
     "take_profit_pct": (0.05, 100.0),
@@ -52,10 +52,13 @@ RANGES = {
     "trailing_extend_pct": (10.0, 300.0),
     "trailing_lock_pct": (0.0, 95.0),
     "trailing_max_steps": (0, 50),
-    "ai_interval_minutes": (5, 60),
+    "ai_interval_minutes": (10, 60),  # 5 used too many Mistral tokens; a stored 5 falls back to the default
     "daily_loss_limit_pct": (0.0, 100.0),
     "email_smtp_port": (1, 65535),
     "email_report_hour": (0, 23),
+    "options_auto_qty": (1, 100),
+    "options_auto_sl_pct": (5.0, 100.0),
+    "options_auto_tp_pct": (5.0, 500.0),
 }
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 HOST = re.compile(r"^[A-Za-z0-9.\-]{1,253}$")
@@ -96,13 +99,20 @@ class Settings:
     # position on that broker and blocks new entries until the next day. 0 = off.
     daily_loss_limit_pct: float = 5.0
     day_timezone: str = "Asia/Kolkata"  # when the trading day starts
-    # Market analysis: rule-based insights always run. With ai_enabled and a key, every 5 minutes the
+    # Market analysis: rule-based insights run every 5 minutes (no tokens). With ai_enabled and a key, every ai_interval_minutes the
     # analyst also sends the computed numbers (never keys or account data) to Mistral for a written review.
     ai_enabled: bool = False
     mistral_api_key: str = ""
     mistral_model: str = "ministral-3b-2512"  # small, fast, on Mistral's free tier
-    ai_interval_minutes: int = 15  # one Mistral request per report; raise it if the account's limit is low
+    ai_interval_minutes: int = 15  # one Mistral request per report (~96 a day); 10 is the minimum
     ai_share_account: bool = True  # include trades, positions, orders and account figures in what TB-AI reads
+
+    # Options auto-trading (paper only): the engine opens the structure the options-market rule suggests
+    # (structures.suggest), with a small whole-structure stop and target. Off until switched on.
+    options_auto_enabled: bool = False
+    options_auto_qty: int = 1  # contracts per leg
+    options_auto_sl_pct: float = 30.0  # close when the loss reaches this % of the max loss
+    options_auto_tp_pct: float = 40.0  # close when the profit reaches this % of the premium paid or received
 
     # Daily email report: the engine sends the day's story once a day at email_report_hour (day_timezone).
     email_enabled: bool = False

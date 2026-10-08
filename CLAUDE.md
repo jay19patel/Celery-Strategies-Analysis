@@ -56,6 +56,13 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   squeeze (scalp), confirmed by rising open interest, options walls cap the target; its `decide()` is pure so
   the backtest runs the code that trades.
 - `options.py` — the options book and its arithmetic (ATM IV, skew, put/call, max pain, walls).
+- `structures.py` — defined-risk option structures (straddle, strangle, iron condor, debit spreads) built from
+  the live chain, and the suggestion (playbook, else IV rank + OI). Placed through `Trader.manual_structure`, on
+  paper only (`STRUCTURE_BROKERS`): by a person from the ticket, or by `trading.AutoStructures` when
+  `options_auto_enabled` (rules on the engine's own chain only, never the playbook or AI; one per underlying,
+  30-min cooldown, 3 a day). `brokers/paper_options.py` holds them, reserves the max loss as margin and closes on
+  whole-structure SL/TP or an hour before expiry.
+- `email_report.py` — `DailyReporter`, an engine job: the day's report by email once at `email_report_hour`.
 - `insights.py` (rules), `forecast.py` (scikit-learn, `ml` extra), `playbook.py` (options
   structure), `tbai.py` + `mistral.py` (TradeBuddy AI report; every attempt saved in full in `ai_reports`,
   90 days, failed 14), `analyst.py` (runs them). Analysis is advisory:

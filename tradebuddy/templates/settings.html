@@ -98,7 +98,7 @@
           <div>
             <label class="field-label" for="ai_interval_minutes">One report every</label>
             <select id="ai_interval_minutes" class="select w-full mt-1">
-              <option value="5">5 minutes (~290 requests a day)</option><option value="10">10 minutes</option><option value="15">15 minutes</option>
+              <option value="10">10 minutes (~144 requests a day)</option><option value="15">15 minutes (~96 a day, default)</option>
               <option value="30">30 minutes</option><option value="60">60 minutes (24 a day)</option>
             </select>
           </div>
@@ -108,6 +108,24 @@
           <span>Include my trades, positions, orders and account figures<span class="field-help block">Needed for the Trading and Portfolio sections. Off: TB-AI reads only market and system numbers.</span></span></label>
         <div id="aiTestOut" class="text-[12px]"></div>
         <div class="field-help">What is sent: computed numbers and findings only (market, system, and with the switch above trades, positions and account figures). Never API keys, secrets or order ids. After a 429 (rate limit) TB-AI waits as long as Mistral asks, doubling from 5 to 60 minutes. Insights and the playbook work without AI.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head border-b border-slate-100">
+        <div class="card-title flex items-center gap-2">
+          <div class="w-6 h-6 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600"><i data-lucide="git-fork" class="w-3.5 h-3.5"></i></div>
+          Options Auto-Trade (paper)
+        </div>
+        <label class="switch sm"><input type="checkbox" id="options_auto_enabled"><span class="track"></span></label>
+      </div>
+      <div class="card-body space-y-4">
+        <div class="grid grid-cols-3 gap-3">
+          <div><label class="field-label" for="options_auto_qty">Contracts / leg</label><input id="options_auto_qty" type="number" min="1" max="100" step="1" class="input w-full mt-1 font-mono"></div>
+          <div><label class="field-label" for="options_auto_sl_pct">Stop loss %</label><input id="options_auto_sl_pct" type="number" min="5" max="100" step="1" class="input w-full mt-1 font-mono"></div>
+          <div><label class="field-label" for="options_auto_tp_pct">Target %</label><input id="options_auto_tp_pct" type="number" min="5" max="500" step="1" class="input w-full mt-1 font-mono"></div>
+        </div>
+        <div class="field-help">Every minute the engine opens the structure the options-market rule picks: IV cheap (bottom 25% of its 7-day range) → long straddle or strangle; IV rich (top 25%) and no event priced into the nearest expiry → iron condor; otherwise nothing. Stop loss is a % of the structure's max loss, target a % of the premium paid or received, on the whole structure. One per underlying, at most 3 a day, 30 minutes apart, closed an hour before expiry. Rules only, no AI; paper only. The kill switch and the daily loss limit stop it.</div>
       </div>
     </section>
 
@@ -233,7 +251,8 @@
   const { $, esc, money } = TB;
   const PHRASE = {{ live_phrase | tojson }};
   const NUMBERS = ["stop_loss_pct", "take_profit_pct", "trade_margin_pct", "paper_starting_balance", "paper_leverage", "paper_fee_pct", "paper_slippage_pct", "paper_max_hold_hours",
-    "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct", "email_smtp_port"];
+    "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct", "email_smtp_port",
+    "options_auto_qty", "options_auto_sl_pct", "options_auto_tp_pct"];
   const HOSTS = { demo: "demo.delta.exchange", live: "www.delta.exchange" };
   let saved = null, env = "demo";
 
@@ -248,6 +267,7 @@
     $("mistral_model").value = s.mistral_model;
     $("ai_interval_minutes").value = String(s.ai_interval_minutes);
     $("ai_share_account").checked = s.ai_share_account;
+    $("options_auto_enabled").checked = s.options_auto_enabled;
     $("email_enabled").checked = s.email_enabled;
     $("email_report_hour").innerHTML = Array.from({ length: 24 }, (_, h) =>
       `<option value="${h}">${String(h).padStart(2, "0")}:00 (${h % 12 || 12} ${h < 12 ? "AM" : "PM"})</option>`).join("");
@@ -284,6 +304,7 @@
       trailing_enabled: $("trailing_enabled").checked, day_timezone: $("day_timezone").value,
       ai_enabled: $("ai_enabled").checked, mistral_model: $("mistral_model").value.trim(),
       ai_interval_minutes: Number($("ai_interval_minutes").value), ai_share_account: $("ai_share_account").checked,
+      options_auto_enabled: $("options_auto_enabled").checked,
       email_enabled: $("email_enabled").checked, email_to: $("email_to").value.trim(),
       email_smtp_host: $("email_smtp_host").value.trim(),
       email_smtp_port: Number($("email_smtp_port").value) || 587,

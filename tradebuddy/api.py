@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from tradebuddy import structures as st
 from tradebuddy.analytics import collect_daily_analytics, collect_monthly_calendar_data, gather_live, get_day_bounds, parse_day
 from tradebuddy.brokers import Broker
 from tradebuddy.codec import EVENT_TYPES
@@ -39,6 +40,7 @@ METHODS = (
     "set_position_control", "risk", "risk_resume", "analysis", "options_history", "database",
     "ai_digest", "ai_report", "ai_history", "ai_report_at", "test_ai", "send_email_report",
     "journal_summary", "journal_month",
+    "option_ticket", "place_structure", "structures", "close_structure", "paper_history",
 )
 
 
@@ -114,8 +116,37 @@ class Api:
             c = controls.get(p.symbol)
             row["control"] = {k: c[k] for k in ("trailing", "max_steps", "steps")} | {"trailing": bool(c["trailing"])} if c else None
             row["roe_pct"] = p.unrealized_pnl / p.margin * 100 if p.margin else None
+            row |= await self._position_extras(b, p)
             out.append(row)
-        return out
+        return out  # option structures have their own list (structures()), not mixed in here
+
+    async def _position_extras(self, b: Broker, p: Any) -> dict[str, Any]:
+        """Size in money, the risk and reward at SL / TP, how far each level is, and R now. Never fails the list."""
+        extra: dict[str, Any] = {}
+        details = getattr(b, "position_details", None)
+        if details is not None:
+            extra |= details(p.symbol) or {}
+        if "contract_value" not in extra:
+            try:
+                extra["contract_value"] = float((await self.system.market_client.product(p.symbol)).get("contract_value") or 0) or None
+            except Exception:
+                extra["contract_value"] = None
+        cv, mark, entry = extra["contract_value"], p.mark_price or p.entry_price, p.entry_price
+        units = (cv or 0) * p.size
+        d = 1 if p.side == "long" else -1
+        extra["notional"] = round(units * mark, 4) if units else None
+        extra.setdefault("leverage", round(units * entry / p.margin, 2) if units and p.margin else None)
+        at = lambda level: round(d * (level - entry) * units, 4) if level and units else None  # noqa: E731
+        dist = lambda level: round(100 * (level - mark) / mark, 3) if level and mark else None  # noqa: E731
+        extra |= {
+            "risk_usd": at(p.stop_loss), "reward_usd": at(p.take_profit),
+            "sl_distance_pct": dist(p.stop_loss), "tp_distance_pct": dist(p.take_profit), "liq_distance_pct": dist(p.liquidation_price),
+            "move_pct": round(100 * d * (mark - entry) / entry, 3) if entry else None,
+        }
+        risk = extra["risk_usd"]
+        extra["r_now"] = round(p.unrealized_pnl / -risk, 2) if risk and risk < 0 else None
+        extra["reward_risk"] = round(extra["reward_usd"] / -risk, 2) if risk and risk < 0 and extra["reward_usd"] else None
+        return extra
 
     async def orders(self, broker: str | None = None, limit: int = 300) -> list[dict[str, Any]]:
         return self.system.store.recent_orders(min(limit, 2000), broker=broker)
@@ -128,6 +159,10 @@ class Api:
 
     async def paper_stats(self) -> dict[str, Any]:
         return self.system.paper.stats()
+
+    async def paper_history(self, page: int = 1, per_page: int = 25, strategy: str = "", q: str = "", outcome: str = "") -> dict[str, Any]:
+        """Closed paper trades a page at a time, filtered, each with its SL / TP and option legs."""
+        return await asyncio.to_thread(self.system.paper.history, page, per_page, strategy[:64], q[:64], outcome)
 
     async def paper_trades(self, limit: int = 300) -> list[dict[str, Any]]:
         return self.system.paper.trades(min(limit, 5000))
@@ -405,6 +440,70 @@ class Api:
         if not orders:
             raise ApiError(409, "; ".join(f"{b}: {e}" for b, e in errors.items()))
         return {"orders": orders, "errors": errors}
+
+    # -- option structures (paper) --------------------------------------------------------
+
+    async def option_ticket(self, symbol: str = "", kind: str = "", qty: int = 1, expiry: float = 0, suggested: bool = False) -> dict[str, Any]:
+        """The structure ticket: which underlyings have options, their expiries, the suggestion for now and,
+        for `kind` (or the suggestion), the exact legs and risk the order would open. Nothing is placed."""
+        s = self.system
+        symbols = [sym for sym in UNDERLYINGS if (s.options_latest.get(sym) or {}).get("summary")]
+        symbol = symbol if symbol in symbols else (symbols[0] if symbols else symbol)
+        summary = (s.options_latest.get(symbol) or {}).get("summary")
+        out: dict[str, Any] = {
+            "symbols": symbols, "symbol": symbol, "kinds": st.KINDS, "fresh": st.fresh(summary, time.time()),
+            "age_seconds": round(time.time() - summary["at"], 1) if summary else None,
+            "expiries": [{"expiry": e["expiry"], "label": e["label"], "hours": e["hours"], "atm_iv": e["atm_iv"]} for e in (summary or {}).get("expiries", [])],
+            "sl_pct": st.DEFAULT_SL_PCT, "tp_pct": st.DEFAULT_TP_PCT, "structure": None, "error": "",
+            "open": [v["label"] for v in await self.structures("paper") if v["symbol"] == symbol],
+            "auto": {
+                "enabled": s.settings.options_auto_enabled, "qty": s.settings.options_auto_qty,
+                "sl_pct": s.settings.options_auto_sl_pct, "tp_pct": s.settings.options_auto_tp_pct,
+                "status": s.auto_options.status.get(symbol) or s.auto_options.job.note or "waiting for the first pass",
+            },
+        }
+        if not summary:
+            out["error"] = f"no options data for {symbol or 'any symbol'} yet"
+            return out
+        playbook = (s.analysis_latest.get(symbol) or {}).get("playbook")
+        history = await asyncio.to_thread(s.store.options_history, summary["underlying"], time.time() - 7 * 86_400, 300)
+        out["suggestion"] = st.suggest(summary, playbook, history)
+        picks = None
+        if suggested and out["suggestion"].get("kind"):
+            kind, picks = out["suggestion"]["kind"], out["suggestion"].get("picks")
+        kind = kind or out["suggestion"].get("kind") or "straddle"
+        out["kind"] = kind
+        try:
+            built = st.build(kind, summary, max(1, int(qty)), expiry=expiry or None, slippage_pct=s.settings.paper_slippage_pct, picks=picks)
+            spec = await self._call(s.market_client.product(built["legs"][0]["symbol"]))
+            built = st.build(kind, summary, max(1, int(qty)), float(spec.get("contract_value") or 0.001), expiry=expiry or None,
+                             slippage_pct=s.settings.paper_slippage_pct, picks=picks)
+            out["structure"] = built | {"picks": picks, "tp_default": st.DEFAULT_TP_PCT[built["type"]]}
+        except st.StructureError as exc:
+            out["error"] = str(exc)
+        return out
+
+    async def place_structure(
+        self, broker: str, symbol: str, kind: str, qty: int, request_id: str, sl_pct: float, tp_pct: float | None = None,
+        expiry: float | None = None, legs: list[str] | None = None, picks: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return await self.system.trader.manual_structure(broker, symbol, kind, qty, request_id, sl_pct, tp_pct, expiry, legs, picks)
+        except TradeRefused as exc:
+            raise ApiError(409, str(exc)) from exc
+
+    async def structures(self, broker: str = "paper") -> list[dict[str, Any]]:
+        book = getattr(self._broker(broker), "options", None)
+        return [book.view(r) for r in book.rows()] if book is not None else []
+
+    async def close_structure(self, broker: str, structure_id: int) -> dict[str, Any]:
+        book = getattr(self._broker(broker), "options", None)
+        if book is None:
+            raise ApiError(404, f"{broker} holds no option structures")
+        try:
+            return book.close(int(structure_id))
+        except BrokerError as exc:
+            raise ApiError(409, str(exc)) from exc
 
     async def order_ticket(self, symbol: str, side: str = "buy", margin_pct: float | None = None) -> dict[str, Any]:
         """Defaults for the order form, and what the ticket would open on each active broker."""

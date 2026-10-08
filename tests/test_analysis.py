@@ -393,9 +393,9 @@ async def test_tbai_backs_off_after_a_rate_limit_and_keeps_the_last_review(tmp_p
     a.http = mistral(handler)
     now, results = time.time(), {"BTCUSD": {"context": {}, "insights": [], "forecast": None, "playbook": None}}
     await a._tbai(settings[0], results, now=now)
-    reviews = await a._tbai(settings[0], results, now=now + 300)  # next slot: 429
+    reviews = await a._tbai(settings[0], results, now=now + 900)  # next 15-minute slot: 429
     failure = [e for e in published if isinstance(e, AIReport)][-1]
-    assert not failure.ok and failure.status == 429 and failure.paused_until == pytest.approx(now + 300 + 900)
+    assert not failure.ok and failure.status == 429 and failure.paused_until == pytest.approx(now + 900 + 900)
     assert reviews["BTCUSD"]["summary"] == "kept" and reviews["BTCUSD"]["stale"] is True and "429" in reviews["BTCUSD"]["error"]
     await a._tbai(settings[0], results, now=now + 900)  # still paused: no request
     assert len(calls) == 2

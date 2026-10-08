@@ -61,6 +61,46 @@
   </div>
 </section>
 
+<section class="card" id="optionsCard">
+  <div class="card-head flex-wrap">
+    <div class="card-title"><i data-lucide="git-fork"></i>Options structures <span class="card-sub">paper · defined risk · straddle, strangle, iron condor, spreads</span></div>
+    <div class="flex items-center gap-3">
+      <label class="flex items-center gap-2 text-[12px] font-semibold" title="Open the suggested structure automatically on paper">
+        <span>Auto-trade</span><label class="switch sm"><input type="checkbox" id="osAuto"><span class="track"></span></label>
+      </label>
+      <button id="osSuggestBtn" class="btn btn-sm" type="button"><i data-lucide="wand-sparkles"></i>Suggest for now</button>
+    </div>
+  </div>
+  <div id="osAutoBar" class="hidden px-5 py-2 text-[12px] border-b border-slate-100 bg-emerald-50 text-emerald-800"></div>
+  <div class="card-body grid grid-cols-1 xl:grid-cols-5 gap-5">
+    <div class="xl:col-span-3 space-y-4">
+      <div id="osKinds" class="flex flex-wrap gap-1.5"></div>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div><label class="block text-slate-500 mb-1 text-xs font-semibold">Underlying</label><select id="osSymbol" class="input w-full font-mono text-sm"></select></div>
+        <div class="md:col-span-2"><label class="block text-slate-500 mb-1 text-xs font-semibold">Expiry</label><select id="osExpiry" class="input w-full font-mono text-sm"></select></div>
+        <div><label class="block text-slate-500 mb-1 text-xs font-semibold">Contracts / leg</label><input id="osQty" type="number" min="1" max="1000" step="1" value="1" class="input w-full font-mono text-sm"></div>
+        <div class="grid grid-cols-2 gap-1.5">
+          <div><label class="block text-slate-500 mb-1 text-xs font-semibold" title="Close when the loss reaches this % of the max loss">SL %</label><input id="osSl" type="number" min="5" max="100" step="5" class="input w-full font-mono text-sm"></div>
+          <div><label class="block text-slate-500 mb-1 text-xs font-semibold" title="Close when the profit reaches this % of the premium">TP %</label><input id="osTp" type="number" min="5" max="500" step="5" class="input w-full font-mono text-sm"></div>
+        </div>
+      </div>
+      <div id="osSuggest" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">Loading the options chain…</div>
+      <div class="field-help">Legs, strikes and expiry are picked from the live chain (nearest expiry at least 20h out). Buys fill at the ask, sells at the bid. The structure closes on its own at SL / TP (whole-structure P&amp;L) or an hour before expiry. Suggestions are advisory: nothing is placed until you press the button.</div>
+    </div>
+    <div class="xl:col-span-2 flex flex-col gap-3">
+      <div class="rounded-xl border border-slate-200 overflow-hidden">
+        <div class="px-3 py-2 bg-slate-50 text-[11px] font-semibold text-slate-500 uppercase tracking-wide flex justify-between"><span>Legs</span><span id="osAge" class="normal-case font-normal"></span></div>
+        <div id="osPreview" class="text-[12px]"></div>
+      </div>
+      <button id="osSubmit" class="btn btn-primary w-full justify-center text-sm font-semibold py-2.5 mt-auto" disabled>Place structure on paper</button>
+    </div>
+  </div>
+  <div class="border-t border-slate-100 px-5 py-3 flex items-center justify-between">
+    <div class="text-[12px] font-semibold text-slate-600 uppercase tracking-wide">Open structures <span id="osCount" class="badge ml-1">0</span></div>
+  </div>
+  <div id="structures" class="px-5 pb-5 space-y-4"></div>
+</section>
+
 <section class="card">
   <div class="card-head">
     <div class="card-title"><i data-lucide="layers"></i>Open positions <span id="posBroker" class="card-sub"></span></div>
@@ -68,8 +108,8 @@
   </div>
   <div class="scroll">
     <table class="tbl">
-      <thead><tr><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Mark · liq.</th><th class="r">P&amp;L · ROE</th><th>SL · entry · TP</th><th class="r">TP / SL</th><th>Auto trail</th><th>By · held</th><th class="r">Close</th></tr></thead>
-      <tbody id="positions"><tr><td colspan="11"><div class="skeleton h-6"></div></td></tr></tbody>
+      <thead><tr><th class="w-6"></th><th>Symbol · notional</th><th>Side</th><th class="r">Size</th><th class="r">Entry · move</th><th class="r">Mark · liq.</th><th class="r">P&amp;L · ROE · R</th><th>SL · entry · TP</th><th class="r">TP / SL · reward / risk</th><th>Auto trail</th><th>By · held</th><th class="r">Close</th></tr></thead>
+      <tbody id="positions"><tr><td colspan="12"><div class="skeleton h-6"></div></td></tr></tbody>
     </table>
   </div>
 </section>
@@ -302,6 +342,7 @@
 
   // ── positions ─────────────────────────────────────────────────────────────
   let loading = false;
+  const openPos = new Set();  // positions whose detail row is showing; survives the 3s refresh
   async function load() {
     if (!broker || loading) return;
     loading = true;
@@ -318,27 +359,53 @@
             <span class="font-mono text-[11px] ${c.steps >= c.max_steps ? "muted" : ""}" title="trails done / max">${c.steps}/</span>
             <input type="number" min="0" max="50" step="1" value="${c.max_steps}" data-max="${esc(p.symbol)}" class="input font-mono !py-0.5 !px-1.5 w-12 text-[11px]" title="Max trails for this position">
           </div>` : '<span class="muted text-[11px]">starting…</span>';
-        return `<tr>
-          <td class="font-semibold">${esc(p.symbol)}</td><td>${side(p.side)}</td>
-          <td class="r font-mono">${num(p.size, 0)}</td><td class="r font-mono">${price(p.entry_price)}</td><td class="r font-mono">${price(p.mark_price)}<div class="text-[10px] muted" title="liquidation price">liq ${price(p.liquidation_price)}</div></td>
-          <td class="r font-mono ${pnlClass(p.unrealized_pnl)}" title="margin ${money(p.margin)}">${signed(p.unrealized_pnl)}<div class="text-[10px]">${pct(p.roe_pct)} on ${money(p.margin)}</div></td>
+        const shown = openPos.has(p.symbol);
+        const d = (v) => (v == null ? "" : `<span class="muted text-[10px]">(${v > 0 ? "+" : ""}${num(v, 2)}%)</span>`);
+        const field = (label, value, cls = "") => `<div><div class="text-[10.5px] uppercase tracking-wide text-slate-400 font-semibold">${label}</div><div class="font-mono text-[12px] ${cls}">${value}</div></div>`;
+        const fees = (p.entry_fee ?? 0) + (p.exit_fee_est ?? 0);
+        return `<tr class="cursor-pointer hover:bg-slate-50" data-pos="${esc(p.symbol)}">
+          <td><i data-lucide="chevron-right" data-chev class="w-3.5 h-3.5 muted transition-transform ${shown ? "rotate-90" : ""}"></i></td>
+          <td class="py-3"><div class="font-semibold">${esc(p.symbol)}</div><div class="text-[10.5px] muted font-mono">${p.notional == null ? "" : money(p.notional)}${p.leverage ? ` · ${num(p.leverage, 1)}x` : ""}</div></td>
+          <td>${side(p.side)}</td>
+          <td class="r font-mono">${num(p.size, 0)}<div class="text-[10px] muted">${p.contract_value ? `${num(p.size * p.contract_value, 4)} units` : "contracts"}</div></td>
+          <td class="r font-mono">${price(p.entry_price)}<div class="text-[10.5px] ${pnlClass(p.move_pct)}">${p.move_pct == null ? "" : `${p.move_pct > 0 ? "+" : ""}${num(p.move_pct, 2)}%`}</div></td>
+          <td class="r font-mono">${price(p.mark_price)}<div class="text-[10px] muted" title="liquidation price">liq ${price(p.liquidation_price)} ${d(p.liq_distance_pct)}</div></td>
+          <td class="r font-mono ${pnlClass(p.unrealized_pnl)}" title="margin ${money(p.margin)}">${signed(p.unrealized_pnl)}<div class="text-[10px]">${pct(p.roe_pct)} on ${money(p.margin)}</div>${p.r_now == null ? "" : `<div class="text-[10px]">${num(p.r_now, 2)}R</div>`}</td>
           <td class="min-w-[140px]">${levelsBar(p)}</td>
           <td class="r font-mono text-xs cursor-pointer group" title="Edit SL / TP" data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}" data-entry="${p.entry_price}" data-side="${esc(p.side)}">
-             <div class="up group-hover:underline">TP ${p.take_profit ? `${price(p.take_profit)} ${rel(p.take_profit, p.entry_price)}` : "—"}</div>
-             <div class="down group-hover:underline mt-1">SL ${p.stop_loss ? `${price(p.stop_loss)} ${rel(p.stop_loss, p.entry_price)}` : "—"}</div>
+             <div class="up group-hover:underline">TP ${p.take_profit ? `${price(p.take_profit)} ${d(p.tp_distance_pct)}` : "—"}${p.reward_usd == null ? "" : ` <span class="text-[10px]">${signed(p.reward_usd)}</span>`}</div>
+             <div class="down group-hover:underline mt-1">SL ${p.stop_loss ? `${price(p.stop_loss)} ${d(p.sl_distance_pct)}` : "—"}${p.risk_usd == null ? "" : ` <span class="text-[10px]">${signed(p.risk_usd)}</span>`}</div>
+             ${p.reward_risk == null ? "" : `<div class="text-[10px] muted mt-0.5">R:R ${num(p.reward_risk, 2)}</div>`}
           </td>
           <td>${trail}</td>
           <td class="font-mono text-[11px]">${p.strategy === "manual" ? '<span class="badge badge-blue">MANUAL</span>' : p.strategy ? `<span class="badge">AUTO</span> ${esc(p.strategy)}` : "—"}
             <div class="muted mt-0.5">${p.opened_at ? duration(Date.now() / 1000 - p.opened_at) : ""}</div></td>
-          <td class="r"><button class="btn btn-sm btn-danger px-2" title="Market close on ${esc(broker)}" data-close="${esc(p.symbol)}"><i data-lucide="x"></i></button></td></tr>`;
-      }, `No open ${broker} positions`, 11);
+          <td class="r"><button class="btn btn-sm btn-danger px-2" title="Market close on ${esc(broker)}" data-close="${esc(p.symbol)}"><i data-lucide="x"></i></button></td></tr>
+        <tr class="${shown ? "" : "hidden"} bg-slate-50/70"><td></td><td colspan="11" class="py-3">
+          <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+            ${field("Opened", p.opened_at ? TB.dateTime(p.opened_at) : "—")}
+            ${field("Notional", p.notional == null ? "—" : money(p.notional))}
+            ${field("Margin · leverage", `${money(p.margin)}${p.leverage ? ` · ${num(p.leverage, 1)}x` : ""}`)}
+            ${field("Contract value", p.contract_value ? `${num(p.contract_value, 6)} × ${num(p.size, 0)}` : "—")}
+            ${field("Loss at SL", p.risk_usd == null ? "—" : signed(p.risk_usd), "down")}
+            ${field("Gain at TP", p.reward_usd == null ? "—" : signed(p.reward_usd), "up")}
+            ${field("Liquidation", `${price(p.liquidation_price)} ${d(p.liq_distance_pct)}`)}
+            ${field("Fees (in + est. out)", p.entry_fee == null ? "—" : `${money(p.entry_fee, 4)} + ${money(p.exit_fee_est ?? 0, 4)}`)}
+            ${field("Net if closed now", p.entry_fee == null ? "—" : signed(p.unrealized_pnl - fees), pnlClass(p.unrealized_pnl - fees))}
+            ${field("Distance to SL", p.sl_distance_pct == null ? "—" : `${num(p.sl_distance_pct, 2)}%`)}
+            ${field("Distance to TP", p.tp_distance_pct == null ? "—" : `${num(p.tp_distance_pct, 2)}%`)}
+            ${field("Trails done", c ? `${c.steps} of ${c.max_steps}${c.trailing ? "" : " (off)"}` : "—")}
+          </div>
+          ${p.client_order_id ? `<div class="mt-2 text-[11px] muted font-mono">order ${esc(p.client_order_id)}</div>` : ""}
+        </td></tr>`;
+      }, `No open ${broker} positions`, 12);
       TB.rows("legs", legs, (o) => `<tr>
         <td class="font-semibold">${esc(o.symbol)}</td><td><span class="badge">${esc(o.type)}</span></td><td>${side(o.side)}</td>
         <td class="r font-mono">${num(o.size, 4)}</td><td class="r font-mono">${price(o.price)}</td><td>${TB.status(o.state)}</td>
         <td class="font-mono muted">${esc(o.client_order_id || o.id)}</td></tr>`, "No resting orders", 7);
     } catch (err) {
       $("posError").textContent = err.message;
-      TB.rows("positions", [], () => "", `Could not load ${broker} positions`, 11);
+      TB.rows("positions", [], () => "", `Could not load ${broker} positions`, 12);
       TB.rows("legs", [], () => "", "—", 7);
     } finally {
       loading = false;
@@ -354,6 +421,13 @@
   }
 
   function bind() {
+    document.querySelectorAll("[data-pos]").forEach((el) => (el.onclick = (e) => {
+      if (e.target.closest("button, input, label, [data-edit]")) return;  // the row's own controls keep working
+      const sym = el.dataset.pos;
+      openPos.has(sym) ? openPos.delete(sym) : openPos.add(sym);
+      el.nextElementSibling.classList.toggle("hidden");
+      el.querySelector("[data-chev]").classList.toggle("rotate-90");
+    }));
     document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = async () => {
       const symbol = b.dataset.close;
       const ok = await TB.ask({
@@ -417,6 +491,189 @@
   TB.on(["PositionUpdate", "PositionClosed", "OrderPlaced", "OrderFailed", "ProtectionTrailed", "DailyLossHalt", "SettingsChanged"], TB.debounce(load, 200));
   TB.every(load, 3000);
   TB.every(() => { if (!sending) return refreshTicket(false); }, 15000);
+})();
+</script>
+<script>
+(() => {
+  // ── option structures (paper) ─────────────────────────────────────────────
+  const { $, esc, num, price, money, signed, pnlClass, duration } = TB;
+  let os = null, kind = "", suggested = false, placing = false, requestId = newId();
+  function newId() {
+    return crypto.randomUUID ? crypto.randomUUID() : [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function refresh() {
+    const qs = new URLSearchParams({ symbol: $("osSymbol").value || $("poSymbol")?.value || "", kind, qty: Math.max(1, Number($("osQty").value) || 1),
+      expiry: $("osExpiry").value || 0, suggested });
+    try { os = await TB.get(`/api/option-ticket?${qs}`); } catch (err) { os = null; $("osSuggest").textContent = err.message; return paint(); }
+    kind = os.kind || kind;
+    $("osSymbol").innerHTML = os.symbols.map((x) => `<option ${x === os.symbol ? "selected" : ""}>${esc(x)}</option>`).join("") || `<option>${esc(os.symbol || "—")}</option>`;
+    const exp = os.structure?.expiry;
+    $("osExpiry").innerHTML = os.expiries.map((e) => `<option value="${e.expiry}" ${e.expiry === exp ? "selected" : ""}>${esc(e.label)} · ${num(e.hours, 0)}h · IV ${e.atm_iv ? num(e.atm_iv * 100, 1) + "%" : "—"}</option>`).join("");
+    if (!$("osSl").value) $("osSl").value = os.sl_pct;
+    if (!$("osTp").dataset.touched && os.structure) $("osTp").value = os.structure.tp_default;
+    paint();
+  }
+
+  function paint() {
+    $("osKinds").innerHTML = Object.entries(os?.kinds || {}).map(([k, label]) =>
+      `<button type="button" data-kind="${k}" class="btn btn-sm ${k === kind ? "btn-primary" : ""}">${esc(label)}</button>`).join("");
+    $("osKinds").querySelectorAll("[data-kind]").forEach((b) => (b.onclick = () => { kind = b.dataset.kind; suggested = false; $("osTp").dataset.touched = ""; requestId = newId(); refresh(); }));
+    const sg = os?.suggestion;
+    $("osSuggest").innerHTML = !os ? $("osSuggest").innerHTML : sg
+      ? `<b>${sg.kind ? esc(os.kinds[sg.kind]) : "No structure has an edge now"}</b> <span class="badge">${esc(sg.source === "playbook" ? "forecast playbook" : "options market")}</span><div class="mt-1">${esc(sg.reason)}</div>`
+      : esc(os.error || "");
+    $("osAge").textContent = os?.age_seconds == null ? "" : `chain ${num(os.age_seconds, 0)}s old${os.fresh ? "" : " · stale"}`;
+    const auto = os?.auto;
+    if (auto) {
+      $("osAuto").checked = auto.enabled;
+      $("osAutoBar").className = auto.enabled ? "px-5 py-2 text-[12px] border-b border-slate-100 bg-emerald-50 text-emerald-800" : "hidden";
+      $("osAutoBar").innerHTML = `<b>Auto-trade on</b> · ${auto.qty} contract(s)/leg · SL ${num(auto.sl_pct, 0)}% of max loss · TP ${num(auto.tp_pct, 0)}% of premium · max 3 a day per underlying, 30 min apart <span class="muted">(change in Settings)</span><div class="mt-0.5 font-mono text-[11px]">${esc(auto.status)}</div>`;
+    }
+    const st = os?.structure;
+    if (!st) {
+      $("osPreview").innerHTML = `<div class="p-3 down">${esc(os?.error || "—")}</div>`;
+      $("osSubmit").disabled = true;
+      return;
+    }
+    const row = (l, r, cls = "") => `<div class="flex justify-between px-3 py-1.5"><span class="muted">${l}</span><span class="font-mono ${cls}">${r}</span></div>`;
+    $("osPreview").innerHTML = `
+      <table class="w-full text-[11.5px]"><tbody>${st.legs.map((l) => `<tr class="border-b border-slate-100">
+        <td class="px-3 py-1.5 font-semibold ${l.action === "buy" ? "up" : "down"}">${l.action.toUpperCase()}</td>
+        <td class="font-mono">${esc(l.symbol)}</td><td class="r font-mono">${price(l.price)}</td>
+        <td class="r font-mono muted pr-3">Δ ${l.delta == null ? "—" : num(l.delta, 2)}</td></tr>`).join("")}</tbody></table>
+      ${row(st.type === "debit" ? "Premium paid" : "Premium received", money(st.premium_usd))}
+      ${row("Max loss (held as margin)", money(st.max_loss_usd), "down")}
+      ${row("Max profit", st.max_profit_usd == null ? "unlimited" : money(st.max_profit_usd), "up")}
+      ${row("Breakevens at expiry", st.breakevens.map((b) => price(b)).join(" · ") || "—")}
+      ${row("Spot · ATM IV", `${price(st.spot)} · ${st.atm_iv ? num(st.atm_iv * 100, 1) + "%" : "—"}`)}`;
+    const blocked = !os.fresh ? "Options chain is stale" : os.open.length ? `A ${os.symbol} structure is already open` : "";
+    $("osSubmit").disabled = placing || !!blocked;
+    $("osSubmit").title = os.open[0] || "";
+    $("osSubmit").textContent = blocked || `Place ${st.name} · ${st.qty}× on paper`;
+  }
+
+  $("osSubmit").onclick = async () => {
+    const st = os?.structure;
+    if (!st || placing) return;
+    const sl = Number($("osSl").value), tp = Number($("osTp").value) || null;
+    const ok = await TB.ask({ title: `Open ${st.label} on paper?`, ok: "Place structure",
+      body: `${st.legs.map((l) => `${l.action.toUpperCase()} ${st.qty}× ${esc(l.symbol)} @ ${price(l.price)}`).join("<br>")}<br><br>Max loss <b>${money(st.max_loss_usd)}</b> · SL at ${num(sl, 0)}% of it · TP at ${tp ? num(tp, 0) + "% of the premium" : "default"}.` });
+    if (!ok) return;
+    placing = true; paint();
+    try {
+      await TB.post("/api/structures", { broker: "paper", symbol: os.symbol, kind: st.kind, qty: st.qty, request_id: requestId, sl_pct: sl, tp_pct: tp,
+        expiry: st.expiry, legs: st.legs.map((l) => l.symbol), picks: st.picks || null });
+      TB.toast(`${st.name} opened on paper`, "ok");
+      requestId = newId();
+    } catch (err) { TB.toast(err.message, "error"); }
+    placing = false; refresh(); load();
+  };
+  $("osSuggestBtn").onclick = () => { suggested = true; kind = ""; $("osTp").dataset.touched = ""; requestId = newId(); refresh(); };
+  $("osSymbol").onchange = () => { $("osExpiry").value = ""; requestId = newId(); refresh(); };
+  $("osExpiry").onchange = () => { requestId = newId(); refresh(); };
+  $("osQty").onchange = () => { requestId = newId(); refresh(); };
+  $("osTp").oninput = () => ($("osTp").dataset.touched = "1");
+  $("osAuto").onchange = async () => {
+    const on = $("osAuto").checked;
+    if (on && !await TB.ask({ title: "Auto-trade option structures on paper?", ok: "Turn on",
+      body: "Every minute the engine opens the structure the options-market rule suggests (straddle, strangle or iron condor) on paper, with the SL / TP from Settings. One per underlying, at most 3 a day, 30 minutes apart. No AI decides." })) { $("osAuto").checked = false; return; }
+    try { await TB.put("/api/settings", { changes: { options_auto_enabled: on } }); TB.toast(`Options auto-trade ${on ? "on" : "off"}`, "ok"); }
+    catch (err) { $("osAuto").checked = !on; TB.toast(err.message, "error"); }
+    refresh();
+  };
+
+  // One open structure: what it can make or lose, where it is now, and each leg.
+  function card(r) {
+    const kpi = (label, value, sub = "", cls = "") =>
+      `<div class="rounded-lg border border-slate-200 px-3 py-2"><div class="text-[10.5px] uppercase tracking-wide text-slate-400 font-semibold">${label}</div>
+        <div class="font-mono text-[15px] font-semibold ${cls}">${value}</div><div class="text-[10.5px] muted">${sub}</div></div>`;
+    const auto = r.strategy === "auto_options";
+    const pnl = r.unrealized_pnl;
+    // SL ... 0 ... TP, with the live P&L as the marker.
+    const lo = r.stop_at, hi = r.target_at, span = hi - lo || 1;
+    const at = (v) => Math.max(0, Math.min(100, ((v - lo) / span) * 100));
+    const bar = `
+      <div class="relative h-2 rounded-full bg-gradient-to-r from-red-200 via-slate-200 to-emerald-200 mt-9 mb-1">
+        <span class="absolute -top-1 w-0.5 h-4 bg-slate-500" style="left:${at(0)}%" title="entry (P&L 0)"></span>
+        ${pnl == null ? "" : `<span class="absolute -top-1.5 w-3 h-5 -ml-1.5 rounded-sm border-2 border-white shadow ${pnl >= 0 ? "bg-emerald-500" : "bg-red-500"}" style="left:${at(pnl)}%"></span>
+        <span class="absolute -top-6 -translate-x-1/2 font-mono text-[11px] font-semibold ${pnlClass(pnl)}" style="left:${at(pnl)}%">${signed(pnl)}</span>`}
+      </div>
+      <div class="flex justify-between font-mono text-[11px]"><span class="down">SL ${signed(lo)} <span class="muted">(${num(r.sl_pct, 0)}% of max loss)</span></span>
+        <span class="muted">entry</span><span class="up">TP ${signed(hi)} <span class="muted">(${num(r.tp_pct, 0)}% of premium)</span></span></div>
+      <div class="text-[11px] muted mt-0.5">${r.progress_pct == null ? "no fresh option prices: not valued, SL / TP waiting" : r.progress_pct >= 0 ? `${num(r.progress_pct, 0)}% of the way to target` : `${num(-r.progress_pct, 0)}% of the way to stop`}</div>`;
+    const be = r.breakevens.map((b, i) => `${price(b)} <span class="muted">(${r.breakeven_distance_pct[i] > 0 ? "+" : ""}${num(r.breakeven_distance_pct[i], 2)}%)</span>`).join(" · ");
+    const needs = r.kind === "straddle" || r.kind === "strangle"
+      ? `profits at expiry below ${price(r.breakevens[0])} or above ${price(r.breakevens[r.breakevens.length - 1])}`
+      : r.kind === "iron_condor" ? `profits at expiry between ${price(r.breakevens[0])} and ${price(r.breakevens[r.breakevens.length - 1])}`
+      : r.kind === "call_spread" ? `profits at expiry above ${price(r.breakevens[0])}` : `profits at expiry below ${price(r.breakevens[0])}`;
+    const g = r.greeks;
+    const legs = r.legs.map((l) => `<tr class="border-t border-slate-100">
+        <td class="py-1.5 font-semibold ${l.action === "buy" ? "up" : "down"}">${l.action === "buy" ? "BUY" : "SELL"} ${r.qty}</td>
+        <td class="font-mono">${esc(l.symbol)}</td>
+        <td class="r font-mono">${price(l.price)}</td>
+        <td class="r font-mono">${l.mark == null ? '<span class="muted">no quote</span>' : price(l.mark)}<div class="text-[10px] muted">${l.exit_price == null ? "" : `${l.action === "buy" ? "bid" : "ask"} ${price(l.exit_price)}`}</div></td>
+        <td class="r font-mono ${pnlClass(l.pnl)}">${l.pnl == null ? "—" : signed(l.pnl)}</td>
+        <td class="r font-mono muted">${l.iv == null ? "—" : num(l.iv * 100, 1) + "%"}</td>
+        <td class="r font-mono muted">${l.delta == null ? "—" : num(l.delta, 2)}</td></tr>`).join("");
+    return `<div class="rounded-xl border border-slate-200 overflow-hidden">
+      <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="font-semibold">${esc(r.name)}</span>
+          <span class="badge ${auto ? "" : "badge-blue"}">${auto ? "AUTO" : "MANUAL"}</span>
+          <span class="badge">${esc(r.type)}</span>
+          <span class="font-mono text-[11px] muted">${esc(r.label)}</span>
+        </div>
+        <div class="flex items-center gap-3 text-[11.5px]">
+          <span class="muted">expiry <b class="font-mono text-slate-700">${esc(r.expiry_label)}</b> · ${num(r.hours_left, 1)}h left · auto-close in ${duration(r.close_at - Date.now() / 1000)}</span>
+          <span class="muted">held ${duration(r.held_seconds)}</span>
+          <button class="btn btn-sm btn-danger px-2" data-close-structure="${r.id}" title="Close every leg on paper"><i data-lucide="x"></i>Close</button>
+        </div>
+      </div>
+      <div class="p-4 grid grid-cols-1 xl:grid-cols-5 gap-4">
+        <div class="xl:col-span-3 space-y-3">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            ${kpi("P&L (mark)", pnl == null ? "—" : signed(pnl), pnl == null ? "no fresh prices" : `${num(r.pnl_pct, 1)}% of premium · close now ${r.close_pnl == null ? "—" : signed(r.close_pnl)}`, pnlClass(pnl))}
+            ${kpi(r.type === "debit" ? "Premium paid" : "Premium received", money(r.premium), `value now ${r.value_now == null ? "—" : money(Math.abs(r.value_now))}`)}
+            ${kpi("Max loss", money(r.capital), "held as margin", "down")}
+            ${kpi("Max profit", r.max_profit == null ? "Unlimited" : money(r.max_profit), r.max_profit == null ? "grows with the move" : "at expiry", "up")}
+          </div>
+          ${bar}
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11.5px]">
+            <div class="rounded-lg bg-slate-50 px-3 py-2"><div class="muted">${esc(r.underlying)} now <b class="font-mono text-slate-700">${price(r.spot)}</b> · breakevens</div><div class="font-mono mt-0.5">${be || "—"}</div><div class="muted mt-0.5">${needs}</div></div>
+            <div class="rounded-lg bg-slate-50 px-3 py-2"><div class="muted">Greeks (whole structure)</div>
+              <div class="font-mono mt-0.5">${g ? `Δ ${num(g.delta, 4)} ${esc(r.underlying)} · Θ ${num(g.theta, 4)} $/day · Vega ${num(g.vega, 4)}` : "—"}</div>
+              <div class="muted mt-0.5">fees paid ${money(r.entry_fee)} · ${r.qty} × ${num(r.contract_value, 3)} ${esc(r.underlying)} per leg</div></div>
+          </div>
+        </div>
+        <div class="xl:col-span-2">
+          <table class="w-full text-[11.5px]"><thead><tr class="text-slate-400 text-left"><th class="pb-1">Leg</th><th>Contract</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">P&amp;L</th><th class="r">IV</th><th class="r">Δ</th></tr></thead>
+            <tbody>${legs}</tbody></table>
+          <div class="text-[10.5px] muted mt-2">P&amp;L is at the mark, as Delta shows it, and SL / TP trigger on it. "Close now" is what you would actually get: buys sold at the bid, sells bought back at the ask, after fees.${r.chain_age_seconds == null ? "" : ` Chain ${num(r.chain_age_seconds, 0)}s old.`}</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  async function load() {
+    let rows = [];
+    try { rows = await TB.get("/api/structures?broker=paper"); } catch (err) { /* paper may be inactive */ }
+    $("osCount").textContent = rows.length;
+    $("structures").innerHTML = rows.length ? rows.map(card).join("") : `<div class="text-center text-[12px] muted py-6">No open option structures</div>`;
+    document.querySelectorAll("[data-close-structure]").forEach((b) => (b.onclick = async () => {
+      if (!await TB.ask({ title: "Close this structure on paper?", body: "Every leg is closed at the chain's bid / ask.", ok: "Close", danger: true })) return;
+      try { await TB.post(`/api/structures/paper/${b.dataset.closeStructure}/close`); TB.toast("Structure closed", "ok"); }
+      catch (err) { TB.toast(err.message, "error"); }
+      load(); refresh();
+    }));
+    TB.icons();
+  }
+
+  setTimeout(refresh, 400);
+  load();
+  TB.every(load, 5000);
+  TB.every(() => { if (!placing) return refresh(); }, 15000);
+  TB.on(["PositionClosed", "OrderPlaced"], TB.debounce(load, 300));
 })();
 </script>
 {% endblock %}

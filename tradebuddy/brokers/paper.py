@@ -9,7 +9,9 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from tradebuddy import structures
 from tradebuddy.brokers.base import Account, Position, protection_error
+from tradebuddy.brokers.paper_options import PaperOptions
 from tradebuddy.errors import BrokerError
 from tradebuddy.events import EventBus, PositionClosed, PositionUpdate, Tick
 from tradebuddy.settings import Settings
@@ -17,18 +19,23 @@ from tradebuddy.store import Store
 from tradebuddy.stream import PriceBook
 
 Specs = Callable[[str], Awaitable[dict[str, Any]]]
+HISTORY_OUTCOMES = {"win": "pnl > 0", "loss": "pnl <= 0"}  # fixed SQL for the history filter
 
 
 class PaperBroker:
     name = "paper"
 
-    def __init__(self, store: Store, bus: EventBus, prices: PriceBook, specs: Specs, settings: Callable[[], Settings]) -> None:
+    def __init__(
+        self, store: Store, bus: EventBus, prices: PriceBook, specs: Specs, settings: Callable[[], Settings],
+        options_snapshot: Callable[[str], dict[str, Any] | None] = lambda _symbol: None,
+    ) -> None:
         self.store = store
         self.db = store.db
         self.bus = bus
         self.prices = prices
         self.specs = specs
         self.settings = settings
+        self.options = PaperOptions(store, bus, settings, options_snapshot, prices.price)
 
     def not_ready(self) -> str:
         return ""
@@ -62,8 +69,8 @@ class PaperBroker:
     async def account(self) -> Account:
         acct = self._account_row()
         rows = self._rows()
-        margin = sum(p["margin"] for p in rows)
-        upnl = sum(self._upnl(p, self.prices.price(p["symbol"]) or p["entry_price"]) for p in rows)
+        margin = sum(p["margin"] for p in rows) + self.options.margin()
+        upnl = sum(self._upnl(p, self.prices.price(p["symbol"]) or p["entry_price"]) for p in rows) + self.options.unrealized()
         return Account(
             broker=self.name,
             currency="USD",
@@ -103,7 +110,7 @@ class PaperBroker:
         margin = notional / s.paper_leverage
         fee = notional * s.paper_fee_pct / 100
         acct = self._account_row()
-        available = acct["balance"] - sum(p["margin"] for p in self._rows())
+        available = acct["balance"] - sum(p["margin"] for p in self._rows()) - self.options.margin()
         if margin + fee > available:
             raise BrokerError(f"paper: insufficient margin (needs {margin + fee:.2f}, available {available:.2f})")
 
@@ -172,7 +179,8 @@ class PaperBroker:
                 closed.append(p["symbol"])
             except BrokerError as exc:
                 errors.append(f"{p['symbol']}: {exc}")
-        return {"closed": closed, "errors": errors}
+        structures = self.options.close_all()
+        return {"closed": closed + structures["closed"], "errors": errors + structures["errors"]}
 
     async def size_for_margin(self, symbol: str, price: float, margin: float) -> int:
         spec = await self.specs(symbol)
@@ -245,6 +253,7 @@ class PaperBroker:
         balance = self.settings().paper_starting_balance
         with self.db:
             self.db.execute("DELETE FROM paper_positions")
+            self.db.execute("DELETE FROM paper_structures")
             self.db.execute("DELETE FROM paper_trades")
             self.db.execute("DELETE FROM paper_account")
             self.db.execute(
@@ -262,7 +271,14 @@ class PaperBroker:
             wins = [t for t in trades if t["pnl"] > 0]
             losses = [t for t in trades if t["pnl"] <= 0]
             gross_win, gross_loss = sum(t["pnl"] for t in wins), -sum(t["pnl"] for t in losses)
+            n = len(trades)
             return {
+                "losses": len(losses),
+                "avg_win": round(gross_win / len(wins), 4) if wins else None,
+                "avg_loss": round(-gross_loss / len(losses), 4) if losses else None,
+                "expectancy": round((gross_win - gross_loss) / n, 4) if n else None,  # average net P&L per trade
+                "avg_hold_seconds": round(sum(t["closed_at"] - t["opened_at"] for t in trades) / n) if n else None,
+                "last_closed_at": max((t["closed_at"] for t in trades), default=None),
                 "trades": len(trades),
                 "wins": len(wins),
                 "win_rate": round(100 * len(wins) / len(trades), 1) if trades else 0.0,
@@ -283,8 +299,66 @@ class PaperBroker:
         by_strategy = {}
         for t in rows:
             by_strategy.setdefault(t["strategy"], []).append(t)
+        total_abs = sum(abs(t["pnl"]) for t in rows) or 1.0
+        reasons: dict[str, int] = {}
+        for t in rows:
+            reasons[t["reason"]] = reasons.get(t["reason"], 0) + 1
         return {
             "overall": summary(rows) | {"max_drawdown_pct": round(max_dd, 2)},
-            "by_strategy": [{"strategy": k} | summary(v) for k, v in sorted(by_strategy.items())],
+            "by_strategy": sorted(
+                ({"strategy": k, "share_pct": round(100 * sum(abs(t["pnl"]) for t in v) / total_abs, 1)} | summary(v) for k, v in by_strategy.items()),
+                key=lambda s: -s["pnl"],
+            ),
             "equity_curve": curve,
+            "exit_reasons": reasons,
         }
+
+    def history(self, page: int = 1, per_page: int = 25, strategy: str = "", q: str = "", outcome: str = "") -> dict[str, Any]:
+        """Closed trades, newest first, a page at a time, with each trade's order (its SL / TP) and, for an option
+        structure, its leg orders. Filters: strategy, a symbol / reason / id search, win or loss."""
+        where, args = ["1 = 1"], []
+        if strategy:
+            where.append("strategy = ?")
+            args.append(strategy)
+        if q:
+            where.append("(symbol LIKE ? OR reason LIKE ? OR client_order_id LIKE ?)")
+            args += [f"%{q}%"] * 3
+        if outcome in HISTORY_OUTCOMES:
+            where.append(HISTORY_OUTCOMES[outcome])  # fixed SQL from the dict above, never user text
+        clause = " AND ".join(where)
+        per_page = max(5, min(int(per_page), 200))
+        agg = self.db.execute(
+            f"SELECT COUNT(*) AS n, COALESCE(SUM(pnl), 0) AS pnl, COALESCE(SUM(pnl > 0), 0) AS wins, COALESCE(SUM(fees), 0) AS fees FROM paper_trades WHERE {clause}",  # noqa: S608 - fixed clauses, values bound
+            args,
+        ).fetchone()
+        pages = max(1, -(-agg["n"] // per_page))
+        page = max(1, min(int(page), pages))
+        rows = [dict(r) for r in self.db.execute(
+            f"SELECT * FROM paper_trades WHERE {clause} ORDER BY closed_at DESC LIMIT ? OFFSET ?",  # noqa: S608 - fixed clauses, values bound
+            (*args, per_page, (page - 1) * per_page),
+        )]
+        for t in rows:
+            order = self.store.order(t["client_order_id"])
+            t["stop_loss"] = order["stop_loss"] if order else None
+            t["take_profit"] = order["take_profit"] if order else None
+            t["order_id"] = order["order_id"] if order else None
+            t["legs"] = [o for i in range(4) if (o := self.store.order(structures.leg_order_id(t["client_order_id"], i)))]
+            t["hold_seconds"] = round(t["closed_at"] - t["opened_at"])
+            t["return_pct"] = round(100 * t["pnl"] / t["margin"], 2) if t["margin"] else None
+            risk = abs(t["entry_price"] - t["stop_loss"]) * t["size"] * t["contract_value"] if t["stop_loss"] and not t["legs"] else None
+            t["risk_usd"] = round(risk, 4) if risk else None
+            t["r_multiple"] = round(t["pnl"] / risk, 2) if risk else None
+        strategies = [r[0] for r in self.db.execute("SELECT DISTINCT strategy FROM paper_trades ORDER BY strategy")]
+        return {
+            "rows": rows, "total": agg["n"], "page": page, "pages": pages, "per_page": per_page, "strategies": strategies,
+            "summary": {"trades": agg["n"], "pnl": round(agg["pnl"], 4), "wins": agg["wins"], "fees": round(agg["fees"], 4),
+                        "win_rate": round(100 * agg["wins"] / agg["n"], 1) if agg["n"] else 0.0},
+        }
+
+    def position_details(self, symbol: str) -> dict[str, Any] | None:
+        """What a paper position knows beyond the Broker protocol: contract size, leverage, fees, its order id."""
+        row = self._row(symbol)
+        if row is None:
+            return None
+        exit_fee = row["size"] * row["contract_value"] * (self.prices.price(symbol) or row["entry_price"]) * self.settings().paper_fee_pct / 100
+        return {k: row[k] for k in ("contract_value", "leverage", "entry_fee", "client_order_id")} | {"exit_fee_est": round(exit_fee, 4)}

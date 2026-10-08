@@ -55,7 +55,7 @@ from tradebuddy.settings import (
 from tradebuddy.store import Store
 from tradebuddy.strategies import Strategy, discover
 from tradebuddy.stream import BarCloser, DeltaStream, PriceBook
-from tradebuddy.trading import TRADING_DEFAULT, Executor, Trader, trading_key
+from tradebuddy.trading import AUTO_EVERY, TRADING_DEFAULT, AutoStructures, Executor, Trader, trading_key
 
 log = logging.getLogger(__name__)
 
@@ -223,7 +223,10 @@ class System:
         self.remote_feed = None if local_feed else RemoteFeed()
         self.stream: Stream = self._make_stream() if local_feed else self.remote_feed
 
-        self.paper = PaperBroker(self.store, self.bus, self.prices, specs=lambda sym: self.market_client.product(sym), settings=lambda: self.settings)
+        self.paper = PaperBroker(
+            self.store, self.bus, self.prices, specs=lambda sym: self.market_client.product(sym), settings=lambda: self.settings,
+            options_snapshot=lambda sym: (self.options_latest.get(sym) or {}).get("summary"),
+        )
         self.delta = DeltaBroker(self.delta_client)
         self.brokers: dict[str, Broker] = {"paper": self.paper, "delta": self.delta}
 
@@ -268,6 +271,13 @@ class System:
             self.options_feed.job = self.jobs.add("options snapshot", "Summarises the options book per underlying (REST if the socket is quiet)", self.options_feed.every)
         if self.analyst:
             self.analyst.job = self.jobs.add("market analysis", "Insights, forecast, options playbook, AI review", self.analyst.every)
+        self.jobs_option_exits = self.jobs.add("paper option exits", "Stop loss, take profit and pre-expiry close of paper option structures", 5)
+        self.auto_options = AutoStructures(
+            self.trader, self.store, lambda: self.settings,
+            snapshots=lambda: {sym: v["summary"] for sym, v in self.options_latest.items() if v.get("summary")},
+            history=lambda underlying, since: self.store.options_history(underlying, since, 300),
+        )
+        self.auto_options.job = self.jobs.add("options auto-trade", "Opens the suggested option structure on paper, when switched on", AUTO_EVERY)
         self.reporter = DailyReporter(self)
         self.reporter.job = self.jobs.add("daily email", "Emails the day's report once, at the hour set in Settings", self.reporter.every)
         self.remote_processes: dict[str, dict[str, Any]] = {}  # role -> latest heartbeat (analyst)
@@ -326,6 +336,21 @@ class System:
                     log.info("events_pruned deleted=%d options_minutes=%d", deleted, minutes)
             except Exception:
                 log.exception("events_prune_failed")
+            await asyncio.sleep(every)
+
+    async def option_exits(self, every: float = 5.0) -> None:
+        """Paper option structures: combined SL/TP on the latest chain, and the close before expiry."""
+        while True:
+            try:
+                with self.jobs_option_exits.tick() as job:
+                    if self.paper.options.count():
+                        async with self.protection_lock:
+                            closed = self.paper.options.check()
+                        job.note = f"closed {', '.join(closed)}" if closed else f"{self.paper.options.count()} open"
+                    else:
+                        job.note = "none open"
+            except Exception:
+                log.exception("option_exits_failed")
             await asyncio.sleep(every)
 
     async def _reconcile(self) -> None:
@@ -403,6 +428,8 @@ class System:
             asyncio.create_task(self.guard.run(), name="guard"),
             asyncio.create_task(self.housekeeping(), name="housekeeping"),
             asyncio.create_task(self.reporter.run(), name="daily-email"),
+            asyncio.create_task(self.option_exits(), name="option-exits"),
+            asyncio.create_task(self.auto_options.run(), name="auto-options"),
         ]
         if self.local_feed:
             self._stream_task = asyncio.create_task(self.stream.run(), name="stream")

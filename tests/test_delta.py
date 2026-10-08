@@ -51,12 +51,42 @@ async def test_server_error_is_ambiguous(status):
         await client(lambda r: httpx.Response(status)).request("GET", "/v2/x")
 
 
-async def test_network_error_is_ambiguous():
+async def test_network_error_is_ambiguous(monkeypatch):
+    monkeypatch.setattr(DeltaClient, "GET_RETRY_DELAYS", (0, 0))
+
     def handler(req):
         raise httpx.ReadTimeout("slow", request=req)
 
     with pytest.raises(DeltaTimeout):
         await client(handler).request("GET", "/v2/x")
+
+
+async def test_a_dropped_tls_handshake_on_a_read_is_retried(monkeypatch):
+    monkeypatch.setattr(DeltaClient, "GET_RETRY_DELAYS", (0, 0))
+    attempts = []
+
+    def handler(req):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise httpx.ConnectError("[SSL: RECORD_LAYER_FAILURE] record layer failure", request=req)
+        return ok([1])
+
+    c = client(handler)
+    assert await c.request("GET", "/v2/history/candles") == [1]
+    assert len(attempts) == 3 and c.calls["GET /v2/history/candles"]["retries"] == 2
+
+
+async def test_an_order_is_never_resent_after_a_network_error(monkeypatch):
+    monkeypatch.setattr(DeltaClient, "GET_RETRY_DELAYS", (0, 0))
+    attempts = []
+
+    def handler(req):
+        attempts.append(1)
+        raise httpx.ConnectError("[SSL: RECORD_LAYER_FAILURE] record layer failure", request=req)
+
+    with pytest.raises(DeltaTimeout):
+        await client(handler).request("POST", "/v2/orders", body={"size": 1}, auth=True)
+    assert len(attempts) == 1  # timeout is not rejection: looked up by client_order_id, never resent
 
 
 async def test_rejection_is_not_a_timeout():

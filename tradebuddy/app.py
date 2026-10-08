@@ -74,6 +74,25 @@ class ManualOrder(BaseModel):
     take_profit: float | None = Field(default=None, gt=0)
 
 
+class StructurePick(BaseModel):
+    action: Literal["buy", "sell"]
+    kind: Literal["call", "put"]
+    strike: float = Field(gt=0)
+
+
+class StructureOrder(BaseModel):
+    broker: Literal["paper"] = "paper"
+    symbol: str = Field(min_length=1, max_length=32)
+    kind: Literal["straddle", "strangle", "iron_condor", "call_spread", "put_spread"]
+    qty: int = Field(ge=1, le=1000)
+    request_id: str = Field(min_length=8, max_length=64)
+    sl_pct: float = Field(ge=5, le=100)  # of the max loss; required, entries are always protected
+    tp_pct: float | None = Field(default=None, ge=5, le=500)  # of the premium
+    expiry: float | None = None
+    legs: list[str] = Field(min_length=2, max_length=4)  # the contracts the person reviewed
+    picks: list[StructurePick] | None = Field(default=None, max_length=4)
+
+
 class AITest(BaseModel):
     model: str = Field(default="", max_length=64)
 
@@ -175,6 +194,24 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
     async def order_ticket(symbol: str, side: Literal["buy", "sell"] = "buy", margin_pct: float | None = None) -> dict:
         return await call("order_ticket", symbol=symbol, side=side, margin_pct=margin_pct)
 
+    @app.get("/api/option-ticket")
+    async def option_ticket(symbol: str = "", kind: str = "", qty: int = 1, expiry: float = 0, suggested: bool = False) -> dict:
+        return await call("option_ticket", symbol=symbol, kind=kind, qty=qty, expiry=expiry, suggested=suggested)
+
+    @app.get("/api/structures")
+    async def structures(broker: str = "paper") -> list:
+        return await call("structures", broker=broker)
+
+    @app.post("/api/structures", dependencies=[Depends(protected)])
+    async def place_structure(body: StructureOrder) -> dict:
+        data = body.model_dump()
+        data["picks"] = data["picks"] or None
+        return await call("place_structure", **data)
+
+    @app.post("/api/structures/{broker}/{structure_id}/close", dependencies=[Depends(protected)])
+    async def close_structure(broker: str, structure_id: int) -> dict:
+        return await call("close_structure", broker=broker, structure_id=structure_id)
+
     @app.get("/api/risk")
     async def risk() -> dict:
         return await call("risk")
@@ -198,6 +235,10 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
     @app.get("/api/paper/stats")
     async def paper_stats() -> dict:
         return await call("paper_stats")
+
+    @app.get("/api/paper/history")
+    async def paper_history(page: int = 1, per_page: int = 25, strategy: str = "", q: str = "", outcome: str = "") -> dict:
+        return await call("paper_history", page=page, per_page=per_page, strategy=strategy, q=q, outcome=outcome)
 
     @app.get("/api/paper/trades")
     async def paper_trades(limit: int = 300) -> list[dict]:

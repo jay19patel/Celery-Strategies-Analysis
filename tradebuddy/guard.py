@@ -40,6 +40,12 @@ def trading_day(tz: str, now: float | None = None) -> str:
     return datetime.fromtimestamp(time.time() if now is None else now, ZoneInfo(tz)).date().isoformat()
 
 
+def open_structures(broker: Broker) -> int:
+    """Option structures a broker holds besides its positions (paper only, so far)."""
+    options = getattr(broker, "options", None)
+    return options.count() if options is not None else 0
+
+
 def position_key(p: Position) -> str:
     return f"{p.side}:{p.entry_price:.10g}"
 
@@ -136,7 +142,7 @@ class PositionGuard:
             self.store.halt_day(broker.name, day, reason)
             self.status[broker.name] |= {"halted": True, "halt_reason": reason}
             log.warning("daily_loss_halt broker=%s %s", broker.name, reason)
-        elif not positions:
+        elif not positions and not open_structures(broker):
             return True
         # Halted: flatten. Repeated on every pass while anything is still open.
         try:

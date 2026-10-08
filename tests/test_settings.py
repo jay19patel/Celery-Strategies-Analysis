@@ -106,3 +106,9 @@ async def test_settings_survive_restart_but_delta_trading_does_not(cfg, exchange
     assert second.settings.active_brokers == ["paper", "delta"] and second.settings.take_profit_pct == 3
     assert second.trading_on("delta") is False
     assert second.trading_on("paper") is False  # paper's switch is the user's choice and persists
+
+
+def test_ai_reports_no_more_often_than_every_10_minutes_and_a_stored_5_falls_back():
+    with pytest.raises(SettingsError):
+        apply_changes(Settings(), {"ai_interval_minutes": 5})
+    assert from_stored({"ai_interval_minutes": 5}).ai_interval_minutes == 15

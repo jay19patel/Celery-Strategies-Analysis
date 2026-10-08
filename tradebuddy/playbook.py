@@ -12,8 +12,8 @@ Deterministic, so the same numbers always give the same answer, and every choice
                                                -> IRON_CONDOR
     otherwise                                  NO_TRADE
 
-Legs are real contracts from the snapshot's chain, priced at mark. Advisory only: TradeBuddy
-does not place option orders.
+Legs are real contracts from the snapshot's chain, priced at mark. Advisory only: the Positions
+page can load its pick into the options ticket (structures.suggest), and a person places it.
 """
 
 from __future__ import annotations
