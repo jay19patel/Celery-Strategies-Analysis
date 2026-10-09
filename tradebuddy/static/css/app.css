@@ -140,3 +140,22 @@ body { font-feature-settings: "tnum", "cv02", "cv03", "cv04", "cv11"; }
 .badge-ai::before { content: "✦"; margin-right: 3px; font-size: 9px; }
 .ai-box { border: 1px solid #ddd6fe; background: linear-gradient(180deg, #faf5ff, #ffffff); border-radius: 10px; }
 .st-good { color: #047857; background: #d1fae5; } .st-watch { color: #92400e; background: #fef3c7; } .st-act { color: #991b1b; background: #fee2e2; }
+
+/* Read-only (no PIN): watch everything, change nothing. Unlocking flips the body attribute, no reload. */
+body[data-locked] .edit-only { display: none !important; }
+body:not([data-locked]) .locked-only { display: none !important; }
+body[data-locked] .switch { cursor: not-allowed; }
+body[data-locked] .switch .track { opacity: .75; }
+.read-note { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #475569; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px; padding: 10px 14px; }
+.read-note svg { width: 14px; height: 14px; color: #94a3b8; flex: none; }
+#pinModal.open { display: flex; }
+/* PIN boxes: the same as the /login page */
+.pin-box { width: 44px; height: 56px; text-align: center; font: 700 22px "JetBrains Mono", monospace; color: #0f172a; background: #f8fafc;
+  border: 2px solid #e2e8f0; border-radius: 12px; outline: none; transition: all .15s ease; }
+.pin-box:focus { border-color: #1e88e5; background: #fff; box-shadow: 0 0 0 3px rgba(30, 136, 229, .15); }
+@media (min-width: 640px) { .pin-box { width: 52px; height: 64px; font-size: 24px; } }
+#pinBoxes.shake { animation: shake .4s ease-in-out; }
+#pinBoxes.shake .pin-box { border-color: #fca5a5; }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); } }
+/* Slots that may hold nothing (no AI note, one broker so no tabs) take no space between cards */
+[data-ai-note]:empty, .collapse-empty:not(:has(> :not(.hidden))) { display: none; }

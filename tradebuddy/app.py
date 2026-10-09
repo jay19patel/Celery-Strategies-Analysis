@@ -44,6 +44,22 @@ PAGES = [
 ]
 
 
+# Without the PIN the dashboard is read-only: every page but these, every GET but these, and the live stream.
+LOCKED_PAGES = {"/settings"}
+LOCKED_READS = {"/api/settings"}  # masked anyway, but it is the admin form
+READ_METHODS = {"GET", "HEAD", "OPTIONS"}
+PUBLIC_WRITES = {"/api/auth/login", "/api/auth/logout"}
+LOCKED = "Locked: enter your PIN to make changes"
+
+
+def safe_next(url: str) -> str:
+    """A post-login destination on this site only: a path, never another host."""
+    url = (url or "").strip()
+    if not url.startswith("/") or url.startswith("//") or "\\" in url:
+        return "/"
+    return url
+
+
 class Toggle(BaseModel):
     key: str
     enabled: bool
@@ -164,36 +180,26 @@ def create_app(
         return bool(api_token and token_header and hmac.compare_digest(token_header, api_token))
 
     def protected(request: Request, x_api_token: str = Header(default="")) -> None:
-        """Protect mutating actions: allowed if session is active or valid API token is supplied."""
+        """Every state-changing route: an unlocked PIN session, or the API token."""
         if has_valid_session(request):
             return
         if api_token and hmac.compare_digest(x_api_token, api_token):
             return
+        if auth_pin:
+            raise HTTPException(401, LOCKED)
         if api_token:
             raise HTTPException(401, "missing or wrong API token")
-        if auth_pin and not is_authenticated(request):
-            raise HTTPException(401, "Authentication required")
 
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next: Any) -> Response:
-        """Block unauthorized access to pages and APIs; redirect to PIN login screen."""
-        path = request.url.path
-        # Static files and auth endpoints remain publicly reachable
-        if not auth_pin or path.startswith("/static/") or path in ("/login", "/logout", "/api/auth/login", "/api/auth/status", "/favicon.ico"):
-            if path == "/login" and auth_pin and is_authenticated(request):
-                return RedirectResponse(url="/", status_code=303)
+        """Read-only is open to everyone; changing anything, and Settings, needs the PIN."""
+        if not auth_pin or is_authenticated(request):
             return await call_next(request)
-
-        if not is_authenticated(request):
-            # API requests return 401 JSON error
-            if path.startswith("/api/"):
-                return JSONResponse({"detail": "Authentication required. Please log in with PIN."}, status_code=401)
-            # Web page requests redirect to login with destination path
-            next_url = request.url.path
-            if request.url.query:
-                next_url += f"?{request.url.query}"
-            return RedirectResponse(url=f"/login?next={urllib.parse.quote(next_url)}", status_code=303)
-
+        path = request.url.path
+        if path in LOCKED_PAGES:
+            return RedirectResponse(url=f"/login?next={urllib.parse.quote(path)}", status_code=303)
+        if path.startswith("/api/") and path not in PUBLIC_WRITES and (request.method not in READ_METHODS or path in LOCKED_READS):
+            return JSONResponse({"detail": LOCKED}, status_code=401)
         return await call_next(request)
 
     async def call(method: str, **params: Any) -> Any:
@@ -206,13 +212,13 @@ def create_app(
 
     @app.get("/login", response_class=HTMLResponse, response_model=None, include_in_schema=False)
     async def login_page(request: Request, next: str = "/") -> Response:
-        if auth_pin and is_authenticated(request):
-            return RedirectResponse(url="/", status_code=303)
+        if is_authenticated(request):
+            return RedirectResponse(url=safe_next(next), status_code=303)
         return templates.TemplateResponse(
             request,
             "login.html",
             {
-                "next": next or "/",
+                "next": safe_next(next),
                 "title": "Login · Security PIN",
                 "v": asset_version(),
             },
@@ -220,7 +226,8 @@ def create_app(
 
     @app.get("/logout", include_in_schema=False)
     async def logout_page() -> RedirectResponse:
-        res = RedirectResponse(url="/login", status_code=303)
+        # Locking drops back to the read-only dashboard, not to a login wall.
+        res = RedirectResponse(url="/", status_code=303)
         res.delete_cookie(auth.SESSION_COOKIE_NAME, path="/")
         return res
 
@@ -256,7 +263,8 @@ def create_app(
             secure=request.url.scheme == "https",
             path="/",
         )
-        return {"ok": True, "token": token, "redirect": body.next or "/"}
+        # The token travels only in the HttpOnly cookie, never in a body page script can read.
+        return {"ok": True, "redirect": safe_next(body.next)}
 
     @app.post("/api/auth/logout")
     async def api_auth_logout(response: Response) -> dict[str, Any]:
@@ -302,6 +310,8 @@ def create_app(
                     ],
                     "active_brokers": ctx["active_brokers"],
                     "live_phrase": LIVE_CONFIRM_PHRASE,
+                    "can_edit": is_authenticated(request),
+                    "pin_required": bool(auth_pin),
                 },
             )
 
@@ -488,20 +498,8 @@ def create_app(
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket) -> None:
-        if auth_pin:
-            cookie = socket.cookies.get(auth.SESSION_COOKIE_NAME, "")
-            param = socket.query_params.get("token", "")
-            hdr = socket.headers.get("x-api-token", "")
-            is_authed = (
-                (cookie and auth.validate_session_token(cookie, auth_secret))
-                or (param and auth.validate_session_token(param, auth_secret))
-                or (api_token and hdr and hmac.compare_digest(hdr, api_token))
-            )
-            if not is_authed:
-                # SECURITY: Reject unauthenticated WebSocket connection attempts
-                await socket.close(code=1008, reason="Unauthorized")
-                return
-
+        # Read-only, like the GET routes: the server only pushes, and nothing a client sends is read.
+        # Events carry no secret (SettingsChanged names fields only).
         await socket.accept()
         live.clients.add(socket)
         try:

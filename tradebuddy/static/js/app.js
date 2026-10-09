@@ -62,19 +62,109 @@
   const AI_STATUS = { good: "Good", watch: "Watch", act: "Act now" };
   const aiStatus = (s) => `<span class="badge st-${esc(s || "watch")}">${esc(AI_STATUS[s] || s || "—")}</span>`;
 
+  // ── read-only / unlocked ────────────────────────────────────────────────
+  // Without the PIN everything can be watched and nothing changed. The server enforces it; this only
+  // hides the controls and asks for the PIN in place, so a viewer never loses the page they are on.
+  const pinRequired = () => document.body.hasAttribute("data-pin");
+  const canEdit = () => !document.body.hasAttribute("data-locked");
+  function setUnlocked(on) {
+    document.body.toggleAttribute("data-locked", !on);
+    emit({ type: "AuthChanged", can_edit: on });
+  }
+  let unlocking = null;  // one PIN prompt at a time, shared by every caller waiting on it
+  function unlock(why = "") {
+    if (canEdit()) return Promise.resolve(true);
+    if (!pinRequired()) return Promise.resolve(false);
+    return (unlocking ||= new Promise((resolve) => {
+      const modal = $("pinModal"), boxes = [...modal.querySelectorAll("[data-digit]")], okBtn = $("pinOk");
+      const pin = () => boxes.map((b) => b.value).join("");
+      const clear = () => { boxes.forEach((b) => (b.value = "")); boxes[0].focus(); };
+      let busy = false;
+      $("pinWhy").textContent = why || "Watching is open to everyone. Enter your 6-digit PIN to trade and change settings.";
+      $("pinError").classList.add("hidden");
+      modal.classList.add("open");
+      icons();
+      setTimeout(clear, 30);
+      const done = (ok) => {
+        modal.classList.remove("open");
+        $("pinForm").onsubmit = $("pinCancel").onclick = $("pinClose").onclick = $("pinMask").onclick = modal.onkeydown = null;
+        boxes.forEach((b) => (b.oninput = b.onkeydown = b.onpaste = null));
+        unlocking = null;
+        if (ok) { setUnlocked(true); toast("Unlocked: changes allowed on this browser", "ok"); }
+        resolve(ok);
+      };
+      const fail = (msg) => {
+        $("pinErrorMsg").textContent = msg; $("pinError").classList.remove("hidden");
+        const row = $("pinBoxes"); row.classList.remove("shake"); void row.offsetWidth; row.classList.add("shake");
+        clear();
+      };
+      const submit = async () => {
+        if (busy) return;
+        if (!/^\d{6}$/.test(pin())) return fail("Please enter all 6 digits");
+        busy = true; okBtn.disabled = true; $("pinOkText").textContent = "Verifying...";
+        try {
+          const res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: pin() }) });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) return done(true);
+          fail(typeof data.detail === "string" ? data.detail : `HTTP ${res.status}`);
+        } catch { fail("Connection error. Please try again."); }
+        finally { busy = false; okBtn.disabled = false; $("pinOkText").textContent = "Unlock Terminal"; }
+      };
+      // Typing moves along the boxes, backspace and arrows move back, pasting fills all six; the sixth digit submits.
+      boxes.forEach((b, i) => {
+        b.oninput = () => {
+          b.value = b.value.replace(/\D/g, "").slice(-1);
+          if (b.value && i < 5) boxes[i + 1].focus();
+          if (pin().length === 6) submit();
+        };
+        b.onkeydown = (ev) => {
+          if (ev.key === "Backspace" && !b.value && i > 0) { boxes[i - 1].focus(); boxes[i - 1].value = ""; ev.preventDefault(); }
+          else if (ev.key === "ArrowLeft" && i > 0) boxes[i - 1].focus();
+          else if (ev.key === "ArrowRight" && i < 5) boxes[i + 1].focus();
+        };
+        b.onpaste = (ev) => {
+          ev.preventDefault();
+          const digits = (ev.clipboardData?.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+          digits.split("").forEach((d, k) => (boxes[k].value = d));
+          boxes[Math.min(digits.length, 5)].focus();
+          if (digits.length === 6) submit();
+        };
+      });
+      $("pinMask").onclick = () => {
+        const show = boxes[0].type === "password";
+        boxes.forEach((b) => (b.type = show ? "text" : "password"));
+        $("pinMask").innerHTML = `<i data-lucide="${show ? "eye-off" : "eye"}" class="w-3.5 h-3.5"></i><span>${show ? "Hide PIN" : "Show PIN"}</span>`;
+        icons();
+      };
+      $("pinForm").onsubmit = (ev) => { ev.preventDefault(); submit(); };
+      $("pinCancel").onclick = $("pinClose").onclick = () => done(false);
+      modal.onkeydown = (ev) => { if (ev.key === "Escape") done(false); };
+    }));
+  }
+  // Resolves true when changes are allowed now, prompting for the PIN if needed.
+  const requireEdit = (why) => unlock(why);
+  async function lock() {
+    try { await fetch("/api/auth/logout", { method: "POST" }); } catch { /* the cookie clears on /logout too */ }
+    if (document.body.dataset.page === "settings") { location.href = "/"; return; }
+    setUnlocked(false);
+    toast("Locked: read-only on this browser");
+  }
+
   // ── API ─────────────────────────────────────────────────────────────────
-  async function api(method, url, body) {
+  async function api(method, url, body, retried = false) {
     const res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json", "X-API-Token": token },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && pinRequired()) {
+      // The session ended (or never started): ask for the PIN here and send the same request once more.
+      document.body.toggleAttribute("data-locked", true);
+      if (!retried && await unlock()) return api(method, url, body, true);
+      throw new Error("Read-only: unlock with your PIN to make changes");
+    }
     if (res.status === 401) {
-      if (data.detail && (data.detail.includes("PIN") || data.detail.includes("Authentication required") || data.detail.includes("Unauthorized"))) {
-        window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
-        return;
-      }
       const entered = await ask({ title: "API token required", body: "This action is protected. Enter the API_TOKEN the server was started with.", input: "password", ok: "Save token" });
       if (entered) {
         token = entered;
@@ -227,8 +317,8 @@
     $("brokerSwitches").innerHTML = h.brokers.map((b) => {
       const label = brokerLabel(b);
       const warn = b.not_ready ? `<i data-lucide="triangle-alert" class="w-3.5 h-3.5 text-amber-500"></i>` : "";
-      return `<div class="flex items-center gap-2 border border-slate-200 rounded-lg pl-2 pr-2.5 py-1 bg-white" title="${esc(b.not_ready || `Trading on ${b.name}`)}">
-        <span class="badge ${label.cls}">${esc(label.text)}</span>${warn}
+      return `<div class="flex items-center gap-2 border border-slate-200 rounded-lg pl-2 pr-2.5 py-1 bg-white" title="${esc(b.not_ready || (canEdit() ? `Trading on ${b.name}` : `Trading on ${b.name} is ${b.trading ? "on" : "off"} · unlock to change`))}">
+        <span class="badge ${label.cls} hidden sm:inline-flex">${esc(label.text)}</span><span class="badge ${label.cls} sm:hidden">${esc(b.name.toUpperCase())}</span>${warn}
         <label class="switch sm"><input type="checkbox" data-broker-switch="${esc(b.name)}" ${b.trading ? "checked" : ""}><span class="track"></span></label>
         <span class="text-[11px] font-semibold w-6 ${b.trading ? "text-emerald-600" : "text-slate-400"}">${b.trading ? "ON" : "OFF"}</span>
       </div>`;
@@ -319,6 +409,19 @@
     const open = (v) => { sidebar.classList.toggle("-translate-x-full", !v); shade.classList.toggle("hidden", !v); };
     $("menuBtn").onclick = () => open(true);
     shade.onclick = () => open(false);
+    if ($("unlockBtn")) $("unlockBtn").onclick = () => unlock();
+    if ($("lockBtn")) $("lockBtn").onclick = lock;
+    // While locked a switch shows its state; pressing it asks for the PIN instead of flipping it.
+    // Anything else marked .needs-edit does the same. Unlocking does not replay the click.
+    document.addEventListener("click", (ev) => {
+      if (canEdit()) return;
+      const nav = ev.target.closest("[data-locked-nav]");
+      if (nav) { ev.preventDefault(); unlock("Settings change how TradeBuddy trades, so they need your PIN.").then((ok) => { if (ok) location.href = nav.href; }); return; }
+      if (!ev.target.closest(".switch, .needs-edit")) return;
+      ev.preventDefault(); ev.stopPropagation();
+      unlock();
+    }, true);
+    on("AuthChanged", loadHeader);
 
     on(["ToggleChanged", "SettingsChanged", "FeedStatus"], loadHeader);
     on("Tick", (e) => {
@@ -413,6 +516,8 @@
   window.TB = {
     $, esc, num, price, money, signed, pnlClass, pct, compact, count, ms, levelsBar, stats, time, dateTime, ago, duration, side, status, eventBadge, aiBadge, aiStatus,
     api, get, post, put, on, toast, ask, rows, switchHtml, bindToggles, icons, loadHeader, every, debounce,
+    requireEdit, lock,
+    get canEdit() { return canEdit(); },
     get header() { return header; },
   };
 

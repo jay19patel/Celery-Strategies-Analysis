@@ -109,7 +109,7 @@
     const limits = Object.entries(l.limits || {});
     $("problem").innerHTML = `<section class="card border-amber-200">
       <div class="card-head"><div class="card-title"><i data-lucide="triangle-alert" class="text-amber-600"></i>${limited ? "Mistral is rate-limiting this account" : "The last report failed"} <span class="card-sub">${ago(l.ts)}</span></div>
-        <button id="testAi" class="btn btn-sm"><i data-lucide="stethoscope"></i>Test key and model</button></div>
+        <button id="testAi" class="edit-only btn btn-sm"><i data-lucide="stethoscope"></i>Test key and model</button></div>
       <div class="card-body text-[12.5px] space-y-2">
         <div class="font-mono down">${esc(l.error)}</div>
         ${limited ? `<p>TradeBuddy sends one request per report (every ${data.interval_minutes} min) and waits after a 429 as long as Mistral asks, doubling from 5 to 60 minutes. A 429 at this pace means the limit is on the Mistral account or model: the free (Experiment) plan, a monthly token cap, a workspace limit, or the same key used elsewhere. Open console.mistral.ai → Limits, or raise the interval in Settings. The last good report stays on this page meanwhile.</p>` : ""}

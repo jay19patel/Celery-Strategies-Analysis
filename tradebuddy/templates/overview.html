@@ -102,7 +102,7 @@
           <div class="meter"><div style="width:${limit ? used : 0}%;background:${meterColor(used)}"></div></div>
           ${r.halted ? `<div class="mt-3 flex items-center justify-between gap-2 rounded-lg bg-red-50 border border-red-100 p-2.5">
               <span class="text-[11.5px] text-red-700"><b>Halted for today.</b> ${esc(r.halt_reason)}</span>
-              <button class="btn btn-sm btn-danger" data-resume="${esc(broker)}">Resume</button></div>` : ""}
+              <button class="edit-only btn btn-sm btn-danger" data-resume="${esc(broker)}">Resume</button></div>` : ""}
           ${r.error ? `<div class="mt-2 text-[11px] down">${esc(r.error)}</div>` : ""}
         </div>
       </section>`;

@@ -29,7 +29,7 @@
   <link rel="stylesheet" href="/static/css/app.css?v={{ v }}">
   {% block head %}{% endblock %}
 </head>
-<body class="bg-slate-50 text-slate-800 font-sans antialiased" data-page="{{ page }}">
+<body class="bg-slate-50 text-slate-800 font-sans antialiased" data-page="{{ page }}"{% if not can_edit %} data-locked{% endif %}{% if pin_required %} data-pin{% endif %}>
 <div class="flex min-h-screen">
 
   <!-- Sidebar -->
@@ -48,9 +48,10 @@
       <div>
         <div class="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{{ group }}</div>
         {% for pid, path, icon, label, g in pages if g == group %}
-        <a href="{{ path }}" class="nav-link {{ 'active' if pid == page }} flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50">
+        <a href="{{ path }}" class="nav-link {{ 'active' if pid == page }} flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50"{% if pid == 'settings' %} data-locked-nav{% endif %}>
           <i data-lucide="{{ icon }}" class="w-4 h-4 flex-shrink-0"></i>
           <span class="truncate">{{ label }}</span>
+          {% if pid == 'settings' %}<i data-lucide="lock" class="locked-only ml-auto w-3.5 h-3.5 text-slate-400" aria-label="Needs PIN"></i>{% endif %}
           {% if pid == 'positions' %}<span id="navPositions" class="ml-auto nav-badge hidden"></span>{% endif %}
           {% if pid == 'signals' %}<span id="navSignals" class="ml-auto nav-badge hidden"></span>{% endif %}
         </a>
@@ -73,9 +74,13 @@
       <button id="menuBtn" class="lg:hidden p-1.5 rounded-md hover:bg-slate-100" aria-label="Menu"><i data-lucide="menu" class="w-5 h-5"></i></button>
       <h1 class="text-[15px] font-semibold truncate">{{ title }}</h1>
       <div class="flex-1"></div>
+      <span class="locked-only badge !hidden md:!inline-flex" title="Anyone can watch. Unlock with your PIN to trade or change anything."><i data-lucide="eye" class="w-3 h-3"></i>READ-ONLY</span>
       <div id="brokerSwitches" class="flex items-center gap-2"></div>
-      <button id="closeAllBtn" class="btn btn-danger"><i data-lucide="octagon-x" class="w-4 h-4"></i><span class="hidden sm:inline">Close all</span></button>
-      <a href="/logout" id="logoutBtn" class="btn text-slate-500 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition-colors" title="Lock terminal (clears 7-day session)"><i data-lucide="lock" class="w-4 h-4"></i><span class="hidden sm:inline text-xs">Lock</span></a>
+      <button id="closeAllBtn" class="edit-only btn btn-danger"><i data-lucide="octagon-x" class="w-4 h-4"></i><span class="hidden sm:inline">Close all</span></button>
+      {% if pin_required %}
+      <button id="unlockBtn" class="locked-only btn btn-primary" title="Enter your PIN to trade and change settings"><i data-lucide="lock-open" class="w-4 h-4"></i><span class="hidden sm:inline">Unlock</span></button>
+      <button id="lockBtn" class="edit-only btn text-slate-500 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200" title="Lock: back to read-only on this browser"><i data-lucide="lock" class="w-4 h-4"></i><span class="hidden sm:inline">Lock</span></button>
+      {% endif %}
     </header>
     <!-- Live prices, scrolling like a news ticker. Hover to pause. -->
     <div id="marquee" class="marquee hidden" aria-label="Live prices"><div id="marqueeTrack" class="marquee-track"></div></div>
@@ -102,6 +107,45 @@
       <button id="modalOk" class="btn btn-primary">OK</button>
     </div>
   </div>
+</div>
+<!-- PIN unlock, the same card as /login: changes need it, watching does not -->
+<div id="pinModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 backdrop-blur-[2px] p-4" role="dialog" aria-modal="true" aria-labelledby="pinTitle">
+  <form id="pinForm" class="relative w-full max-w-sm sm:max-w-md bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-8 shadow-xl shadow-slate-900/10 flex flex-col items-center" autocomplete="off">
+    <button type="button" id="pinClose" class="absolute top-3 right-3 p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100" aria-label="Close, stay read-only"><i data-lucide="x" class="w-4 h-4"></i></button>
+    <div class="w-12 h-12 rounded-xl bg-brand-500 text-white grid place-items-center shadow-md shadow-brand-500/20 mb-3.5"><i data-lucide="candlestick-chart" class="w-6 h-6"></i></div>
+    <div id="pinTitle" class="text-xl font-bold tracking-tight text-slate-900">TradeBuddy</div>
+    <div class="inline-flex items-center gap-1.5 px-2.5 py-0.5 mt-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full">
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Terminal Security
+    </div>
+    <p id="pinWhy" class="text-xs sm:text-sm text-slate-500 text-center mt-2 mb-6"></p>
+
+    <div id="pinError" class="hidden w-full mb-5 p-3 rounded-xl text-xs flex items-center gap-2.5 bg-rose-50 border border-rose-200 text-rose-700" role="alert">
+      <i data-lucide="alert-circle" class="w-4 h-4 shrink-0"></i><span id="pinErrorMsg" class="font-medium"></span>
+    </div>
+
+    <div id="pinBoxes" class="flex items-center justify-center gap-2 sm:gap-3 mb-5">
+        <input type="password" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="pin-box" data-digit="0" aria-label="PIN digit 1">
+        <input type="password" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="pin-box" data-digit="1" aria-label="PIN digit 2">
+        <input type="password" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="pin-box" data-digit="2" aria-label="PIN digit 3">
+        <input type="password" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="pin-box" data-digit="3" aria-label="PIN digit 4">
+        <input type="password" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="pin-box" data-digit="4" aria-label="PIN digit 5">
+        <input type="password" maxlength="1" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="pin-box" data-digit="5" aria-label="PIN digit 6">
+    </div>
+
+    <div class="flex items-center justify-between w-full px-1 mb-6 text-xs text-slate-500">
+      <button type="button" id="pinMask" class="flex items-center gap-1.5 hover:text-slate-800 transition-colors"><i data-lucide="eye" class="w-3.5 h-3.5"></i><span>Show PIN</span></button>
+      <div class="flex items-center gap-1"><i data-lucide="shield-check" class="w-3.5 h-3.5 text-brand-500"></i><span>7-day persistent session</span></div>
+    </div>
+
+    <button type="submit" id="pinOk" class="w-full h-11 sm:h-12 rounded-xl bg-brand-500 hover:bg-brand-600 active:scale-[0.99] disabled:opacity-75 text-white font-medium text-sm shadow-sm shadow-brand-500/25 flex items-center justify-center gap-2 transition-all">
+      <span id="pinOkText">Unlock Terminal</span><i data-lucide="arrow-right" class="w-4 h-4"></i>
+    </button>
+    <button type="button" id="pinCancel" class="mt-3 text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1.5"><i data-lucide="eye" class="w-3.5 h-3.5"></i>Stay read-only</button>
+
+    <div class="mt-6 pt-5 border-t border-slate-100 w-full text-center text-[11px] text-slate-400 flex items-center justify-center gap-1.5">
+      <i data-lucide="lock" class="w-3 h-3"></i><span>Secured by Argon2id &amp; Encrypted Sessions</span>
+    </div>
+  </form>
 </div>
 <div id="toasts" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
 

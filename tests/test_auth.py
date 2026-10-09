@@ -56,20 +56,62 @@ def test_session_token_validity_and_expiration():
     assert auth.validate_session_token(expired_token, secret) is False
 
 
-def test_unauthenticated_request_redirects_to_login(cfg, exchange):
-    """Unauthorized page requests must be redirected to /login with next query param."""
+def test_read_only_without_pin(cfg, exchange):
+    """Without the PIN every page but Settings and every read API is open; the page renders locked."""
     _, client = make_authed_system(cfg, exchange, pin="242425")
-    res = client.get("/", follow_redirects=False)
+    home = client.get("/", follow_redirects=False)
+    assert home.status_code == 200
+    assert " data-locked " in home.text and 'id="unlockBtn"' in home.text
+    for page in ("/positions", "/orders", "/account", "/journal", "/system", "/events"):
+        assert client.get(page, follow_redirects=False).status_code == 200, page
+    for url in ("/api/header", "/api/overview", "/api/positions?broker=paper", "/api/orders", "/api/structures", "/api/risk"):
+        assert client.get(url).status_code == 200, url
+
+
+def test_settings_page_and_api_need_the_pin(cfg, exchange):
+    _, client = make_authed_system(cfg, exchange, pin="242425")
+    res = client.get("/settings", follow_redirects=False)
     assert res.status_code == 303
-    assert res.headers["location"] == "/login?next=/"
+    assert res.headers["location"] == "/login?next=/settings"
+    assert client.get("/api/settings").status_code == 401
 
 
-def test_unauthenticated_api_returns_401(cfg, exchange):
-    """Unauthorized API requests must return 401 JSON error."""
+def test_every_change_needs_the_pin(cfg, exchange):
+    """Writes are refused without a session, including routes whose own guard would let them through."""
     _, client = make_authed_system(cfg, exchange, pin="242425")
-    res = client.get("/api/header")
-    assert res.status_code == 401
-    assert "Authentication required" in res.json()["detail"]
+    writes = [
+        ("post", "/api/toggles", {"key": "trading:paper", "enabled": False}),
+        ("post", "/api/close-all", None),
+        ("put", "/api/settings", {"changes": {}}),
+        ("post", "/api/paper/reset", None),
+        ("post", "/api/risk/paper/resume", None),
+        ("post", "/api/structures/paper/1/close", None),
+        ("post", "/api/auth/change-pin", {"old_pin": "242425", "new_pin": "111111"}),
+    ]
+    for method, url, body in writes:
+        res = getattr(client, method)(url, json=body) if body is not None else getattr(client, method)(url)
+        assert res.status_code == 401, url
+        assert "PIN" in res.json()["detail"]
+    with client:
+        assert client.get("/api/header").json()["brokers"][0]["trading"] is True
+
+
+def test_read_only_live_stream(cfg, exchange):
+    """The dashboard stream is read-only like the GET routes, so viewers see live updates."""
+    _, client = make_authed_system(cfg, exchange, pin="242425")
+    with client.websocket_connect("/ws"):
+        pass
+
+
+def test_login_next_stays_on_this_site(cfg, exchange):
+    _, client = make_authed_system(cfg, exchange, pin="242425")
+    for bad in ("https://evil.example", "//evil.example", "/\\evil.example"):
+        res = client.post("/api/auth/login", json={"pin": "242425", "next": bad})
+        assert res.json()["redirect"] == "/", bad
+        client.cookies.clear()
+    res = client.post("/api/auth/login", json={"pin": "242425", "next": "/positions?broker=paper"})
+    assert res.json()["redirect"] == "/positions?broker=paper"
+    assert "token" not in res.json()  # the session lives only in the HttpOnly cookie
 
 
 def test_login_page_renders_correctly(cfg, exchange):
@@ -111,10 +153,13 @@ def test_authenticated_access_granted_with_cookie(cfg, exchange):
     login_res = client.post("/api/auth/login", json={"pin": "242425"})
     assert login_res.status_code == 200
 
-    # Test pages render without redirect
+    # Pages render unlocked, Settings included
     home_res = client.get("/")
     assert home_res.status_code == 200
     assert "Overview · TradeBuddy" in home_res.text
+    assert " data-locked " not in home_res.text and 'id="lockBtn"' in home_res.text
+    assert client.get("/settings", follow_redirects=False).status_code == 200
+    assert client.get("/api/settings").status_code == 200
 
     # Test API responds
     api_res = client.get("/api/header")
@@ -167,11 +212,12 @@ def test_change_pin_flow(cfg, exchange):
 
 
 def test_logout_clears_cookie(cfg, exchange):
-    """GET /logout clears the session cookie and redirects to /login."""
+    """GET /logout clears the session cookie and drops back to the read-only dashboard."""
     _, client = make_authed_system(cfg, exchange, pin="242425")
     client.post("/api/auth/login", json={"pin": "242425"})
     assert client.cookies.get(auth.SESSION_COOKIE_NAME) is not None
 
     logout_res = client.get("/logout", follow_redirects=False)
     assert logout_res.status_code == 303
-    assert logout_res.headers["location"] == "/login"
+    assert logout_res.headers["location"] == "/"
+    assert client.post("/api/toggles", json={"key": "trading:paper", "enabled": False}).status_code == 401

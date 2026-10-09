@@ -2,13 +2,16 @@
 {% block content %}
 <div data-ai-note="trading"></div>
 <!-- Today on the selected broker -->
-<div class="flex flex-wrap items-center justify-between gap-3">
+<div class="collapse-empty flex flex-wrap items-center justify-between gap-3">
   {% with all_tab=False %}{% include "_broker_tabs.html" %}{% endwith %}
   <div id="halted" class="hidden"></div>
 </div>
 <div id="kpis" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3"></div>
 
-<section class="card" id="placeOrderCard">
+<div class="locked-only read-note"><i data-lucide="eye"></i><span>Read-only view: positions and P&amp;L update live. Order tickets, closing and SL / TP changes need your PIN.</span>
+  <button type="button" class="btn btn-sm btn-primary ml-auto" onclick="TB.requireEdit()"><i data-lucide="lock-open"></i>Unlock</button></div>
+
+<section class="card edit-only" id="placeOrderCard">
   <div class="card-head flex-wrap">
     <div class="card-title"><i data-lucide="zap"></i>Order ticket <span class="card-sub">market entry with SL / TP</span></div>
     <div class="flex shrink-0 bg-slate-100 rounded-md p-0.5" id="poTabs">
@@ -61,7 +64,7 @@
   </div>
 </section>
 
-<section class="card" id="optionsCard">
+<section class="card edit-only" id="optionsCard">
   <div class="card-head flex-wrap">
     <div class="card-title"><i data-lucide="git-fork"></i>Options structures <span class="card-sub">paper · defined risk · straddle, strangle, iron condor, spreads</span></div>
     <div class="flex items-center gap-3">
@@ -95,10 +98,6 @@
       <button id="osSubmit" class="btn btn-primary w-full justify-center text-sm font-semibold py-2.5 mt-auto" disabled>Place structure on paper</button>
     </div>
   </div>
-  <div class="border-t border-slate-100 px-5 py-3 flex items-center justify-between">
-    <div class="text-[12px] font-semibold text-slate-600 uppercase tracking-wide">Open structures <span id="osCount" class="badge ml-1">0</span></div>
-  </div>
-  <div id="structures" class="px-5 pb-5 space-y-4"></div>
 </section>
 
 <section class="card">
@@ -108,10 +107,18 @@
   </div>
   <div class="scroll">
     <table class="tbl">
-      <thead><tr><th class="w-6"></th><th>Symbol · notional</th><th>Side</th><th class="r">Size</th><th class="r">Entry · move</th><th class="r">Mark · liq.</th><th class="r">P&amp;L · ROE · R</th><th>SL · entry · TP</th><th class="r">TP / SL · reward / risk</th><th>Auto trail</th><th>By · held</th><th class="r">Close</th></tr></thead>
+      <thead><tr><th class="w-6"></th><th>Symbol · notional</th><th>Side</th><th class="r">Size</th><th class="r">Entry · move</th><th class="r">Mark · liq.</th><th class="r">P&amp;L · ROE · R</th><th>SL · entry · TP</th><th class="r">TP / SL · reward / risk</th><th>Auto trail</th><th>By · held</th><th class="r edit-only">Close</th></tr></thead>
       <tbody id="positions"><tr><td colspan="12"><div class="skeleton h-6"></div></td></tr></tbody>
     </table>
   </div>
+</section>
+
+<section class="card" id="structuresCard">
+  <div class="card-head flex-wrap">
+    <div class="card-title"><i data-lucide="git-fork"></i>Open structures <span id="osCount" class="badge">0</span> <span class="card-sub">options · paper</span></div>
+    <div id="osTotals" class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px]"></div>
+  </div>
+  <div id="structures" class="p-4 space-y-4"><div class="skeleton h-24"></div></div>
 </section>
 
 <section class="card">
@@ -357,7 +364,7 @@
         const trail = c ? `<div class="flex items-center gap-2">
             <label class="switch sm" title="Auto trailing for this position"><input type="checkbox" data-trail="${esc(p.symbol)}" ${c.trailing ? "checked" : ""}><span class="track"></span></label>
             <span class="font-mono text-[11px] ${c.steps >= c.max_steps ? "muted" : ""}" title="trails done / max">${c.steps}/</span>
-            <input type="number" min="0" max="50" step="1" value="${c.max_steps}" data-max="${esc(p.symbol)}" class="input font-mono !py-0.5 !px-1.5 w-12 text-[11px]" title="Max trails for this position">
+            <input type="number" min="0" max="50" step="1" value="${c.max_steps}" data-max="${esc(p.symbol)}" class="input needs-edit font-mono !py-0.5 !px-1.5 w-12 text-[11px]" title="Max trails for this position" ${TB.canEdit ? "" : "readonly"}>
           </div>` : '<span class="muted text-[11px]">starting…</span>';
         const shown = openPos.has(p.symbol);
         const d = (v) => (v == null ? "" : `<span class="muted text-[10px]">(${v > 0 ? "+" : ""}${num(v, 2)}%)</span>`);
@@ -372,7 +379,7 @@
           <td class="r font-mono">${price(p.mark_price)}<div class="text-[10px] muted" title="liquidation price">liq ${price(p.liquidation_price)} ${d(p.liq_distance_pct)}</div></td>
           <td class="r font-mono ${pnlClass(p.unrealized_pnl)}" title="margin ${money(p.margin)}">${signed(p.unrealized_pnl)}<div class="text-[10px]">${pct(p.roe_pct)} on ${money(p.margin)}</div>${p.r_now == null ? "" : `<div class="text-[10px]">${num(p.r_now, 2)}R</div>`}</td>
           <td class="min-w-[140px]">${levelsBar(p)}</td>
-          <td class="r font-mono text-xs cursor-pointer group" title="Edit SL / TP" data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}" data-entry="${p.entry_price}" data-side="${esc(p.side)}">
+          <td class="r font-mono text-xs cursor-pointer group needs-edit" title="${TB.canEdit ? "Edit SL / TP" : "Unlock to edit SL / TP"}" data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}" data-entry="${p.entry_price}" data-side="${esc(p.side)}">
              <div class="up group-hover:underline">TP ${p.take_profit ? `${price(p.take_profit)} ${d(p.tp_distance_pct)}` : "—"}${p.reward_usd == null ? "" : ` <span class="text-[10px]">${signed(p.reward_usd)}</span>`}</div>
              <div class="down group-hover:underline mt-1">SL ${p.stop_loss ? `${price(p.stop_loss)} ${d(p.sl_distance_pct)}` : "—"}${p.risk_usd == null ? "" : ` <span class="text-[10px]">${signed(p.risk_usd)}</span>`}</div>
              ${p.reward_risk == null ? "" : `<div class="text-[10px] muted mt-0.5">R:R ${num(p.reward_risk, 2)}</div>`}
@@ -380,7 +387,7 @@
           <td>${trail}</td>
           <td class="font-mono text-[11px]">${p.strategy === "manual" ? '<span class="badge badge-blue">MANUAL</span>' : p.strategy ? `<span class="badge">AUTO</span> ${esc(p.strategy)}` : "—"}
             <div class="muted mt-0.5">${p.opened_at ? duration(Date.now() / 1000 - p.opened_at) : ""}</div></td>
-          <td class="r"><button class="btn btn-sm btn-danger px-2" title="Market close on ${esc(broker)}" data-close="${esc(p.symbol)}"><i data-lucide="x"></i></button></td></tr>
+          <td class="r edit-only"><button class="btn btn-sm btn-danger px-2" title="Market close on ${esc(broker)}" aria-label="Close ${esc(p.symbol)} on ${esc(broker)}" data-close="${esc(p.symbol)}"><i data-lucide="x"></i></button></td></tr>
         <tr class="${shown ? "" : "hidden"} bg-slate-50/70"><td></td><td colspan="11" class="py-3">
           <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
             ${field("Opened", p.opened_at ? TB.dateTime(p.opened_at) : "—")}
@@ -487,10 +494,11 @@
 
   brokerTabs((b) => { broker = b; $("posBroker").textContent = `on ${b}`; load(); });
   paintSide(); paintBrokers(); setMode("pct");
-  setTimeout(() => refreshTicket(), 300);  // after the header has the symbol list
+  setTimeout(() => { if (TB.canEdit) refreshTicket(); }, 300);  // after the header has the symbol list
   TB.on(["PositionUpdate", "PositionClosed", "OrderPlaced", "OrderFailed", "ProtectionTrailed", "DailyLossHalt", "SettingsChanged"], TB.debounce(load, 200));
+  TB.on("AuthChanged", () => { load(); if (TB.canEdit) refreshTicket(false); });
   TB.every(load, 3000);
-  TB.every(() => { if (!sending) return refreshTicket(false); }, 15000);
+  TB.every(() => { if (!sending && TB.canEdit) return refreshTicket(false); }, 15000);
 })();
 </script>
 <script>
@@ -586,52 +594,56 @@
   // One open structure: what it can make or lose, where it is now, and each leg.
   function card(r) {
     const kpi = (label, value, sub = "", cls = "") =>
-      `<div class="rounded-lg border border-slate-200 px-3 py-2"><div class="text-[10.5px] uppercase tracking-wide text-slate-400 font-semibold">${label}</div>
-        <div class="font-mono text-[15px] font-semibold ${cls}">${value}</div><div class="text-[10.5px] muted">${sub}</div></div>`;
+      `<div class="rounded-lg border border-slate-200 px-3 py-2 min-w-0"><div class="stat-label">${label}</div>
+        <div class="font-mono text-[15px] font-semibold truncate ${cls}">${value}</div><div class="text-[10.5px] muted truncate" title="${esc(sub)}">${sub}</div></div>`;
     const auto = r.strategy === "auto_options";
     const pnl = r.unrealized_pnl;
-    // SL ... 0 ... TP, with the live P&L as the marker.
+    // SL ... entry ... TP, with the live P&L as the marker. The label stays inside the card at either end.
     const lo = r.stop_at, hi = r.target_at, span = hi - lo || 1;
     const at = (v) => Math.max(0, Math.min(100, ((v - lo) / span) * 100));
+    const labelAt = (v) => Math.max(8, Math.min(92, at(v)));
     const bar = `
-      <div class="relative h-2 rounded-full bg-gradient-to-r from-red-200 via-slate-200 to-emerald-200 mt-9 mb-1">
+      <div class="relative h-2 rounded-full bg-gradient-to-r from-red-200 via-slate-200 to-emerald-200 mt-8 mb-1.5" role="img"
+        aria-label="P&L ${pnl == null ? "not valued" : signed(pnl)} between stop ${signed(lo)} and target ${signed(hi)}">
         <span class="absolute -top-1 w-0.5 h-4 bg-slate-500" style="left:${at(0)}%" title="entry (P&L 0)"></span>
         ${pnl == null ? "" : `<span class="absolute -top-1.5 w-3 h-5 -ml-1.5 rounded-sm border-2 border-white shadow ${pnl >= 0 ? "bg-emerald-500" : "bg-red-500"}" style="left:${at(pnl)}%"></span>
-        <span class="absolute -top-6 -translate-x-1/2 font-mono text-[11px] font-semibold ${pnlClass(pnl)}" style="left:${at(pnl)}%">${signed(pnl)}</span>`}
+        <span class="absolute -top-6 -translate-x-1/2 font-mono text-[11px] font-semibold whitespace-nowrap ${pnlClass(pnl)}" style="left:${labelAt(pnl)}%">${pnl > 0 ? "▲" : pnl < 0 ? "▼" : ""} ${signed(pnl)}</span>`}
       </div>
-      <div class="flex justify-between font-mono text-[11px]"><span class="down">SL ${signed(lo)} <span class="muted">(${num(r.sl_pct, 0)}% of max loss)</span></span>
-        <span class="muted">entry</span><span class="up">TP ${signed(hi)} <span class="muted">(${num(r.tp_pct, 0)}% of premium)</span></span></div>
-      <div class="text-[11px] muted mt-0.5">${r.progress_pct == null ? "no fresh option prices: not valued, SL / TP waiting" : r.progress_pct >= 0 ? `${num(r.progress_pct, 0)}% of the way to target` : `${num(-r.progress_pct, 0)}% of the way to stop`}</div>`;
-    const be = r.breakevens.map((b, i) => `${price(b)} <span class="muted">(${r.breakeven_distance_pct[i] > 0 ? "+" : ""}${num(r.breakeven_distance_pct[i], 2)}%)</span>`).join(" · ");
-    const needs = r.kind === "straddle" || r.kind === "strangle"
-      ? `profits at expiry below ${price(r.breakevens[0])} or above ${price(r.breakevens[r.breakevens.length - 1])}`
-      : r.kind === "iron_condor" ? `profits at expiry between ${price(r.breakevens[0])} and ${price(r.breakevens[r.breakevens.length - 1])}`
-      : r.kind === "call_spread" ? `profits at expiry above ${price(r.breakevens[0])}` : `profits at expiry below ${price(r.breakevens[0])}`;
+      <div class="flex flex-wrap justify-between gap-x-3 font-mono text-[11px]"><span class="down">SL ${signed(lo)} <span class="muted">(${num(r.sl_pct, 0)}% of max loss)</span></span>
+        <span class="up">TP ${signed(hi)} <span class="muted">(${num(r.tp_pct, 0)}% of premium)</span></span></div>
+      <div class="text-[11px] muted mt-0.5">${r.progress_pct == null ? "No fresh option prices: not valued, SL / TP waiting" : r.progress_pct >= 0 ? `${num(r.progress_pct, 0)}% of the way to target` : `${num(-r.progress_pct, 0)}% of the way to stop`}</div>`;
+    const bes = r.breakevens || [], first = bes[0], last = bes[bes.length - 1];
+    const be = bes.map((b, i) => `${price(b)}${r.breakeven_distance_pct[i] == null ? "" : ` <span class="muted">(${r.breakeven_distance_pct[i] > 0 ? "+" : ""}${num(r.breakeven_distance_pct[i], 2)}%)</span>`}`).join(" · ");
+    const needs = !bes.length ? "" : r.kind === "straddle" || r.kind === "strangle" ? `Profits at expiry below ${price(first)} or above ${price(last)}`
+      : r.kind === "iron_condor" ? `Profits at expiry between ${price(first)} and ${price(last)}`
+      : r.kind === "call_spread" ? `Profits at expiry above ${price(first)}` : `Profits at expiry below ${price(first)}`;
     const g = r.greeks;
+    const closeIn = r.close_at - Date.now() / 1000;
     const legs = r.legs.map((l) => `<tr class="border-t border-slate-100">
-        <td class="py-1.5 font-semibold ${l.action === "buy" ? "up" : "down"}">${l.action === "buy" ? "BUY" : "SELL"} ${r.qty}</td>
-        <td class="font-mono">${esc(l.symbol)}</td>
-        <td class="r font-mono">${price(l.price)}</td>
-        <td class="r font-mono">${l.mark == null ? '<span class="muted">no quote</span>' : price(l.mark)}<div class="text-[10px] muted">${l.exit_price == null ? "" : `${l.action === "buy" ? "bid" : "ask"} ${price(l.exit_price)}`}</div></td>
-        <td class="r font-mono ${pnlClass(l.pnl)}">${l.pnl == null ? "—" : signed(l.pnl)}</td>
-        <td class="r font-mono muted">${l.iv == null ? "—" : num(l.iv * 100, 1) + "%"}</td>
+        <td class="py-1.5 pr-2 font-semibold ${l.action === "buy" ? "up" : "down"}">${l.action === "buy" ? "BUY" : "SELL"} ${r.qty}</td>
+        <td class="font-mono pr-2">${esc(l.symbol)}</td>
+        <td class="r font-mono pr-2">${price(l.price)}</td>
+        <td class="r font-mono pr-2">${l.mark == null ? '<span class="muted">no quote</span>' : price(l.mark)}<div class="text-[10px] muted">${l.exit_price == null ? "" : `${l.action === "buy" ? "bid" : "ask"} ${price(l.exit_price)}`}</div></td>
+        <td class="r font-mono pr-2 ${pnlClass(l.pnl)}">${l.pnl == null ? "—" : signed(l.pnl)}</td>
+        <td class="r font-mono pr-2 muted">${l.iv == null ? "—" : num(l.iv * 100, 1) + "%"}</td>
         <td class="r font-mono muted">${l.delta == null ? "—" : num(l.delta, 2)}</td></tr>`).join("");
-    return `<div class="rounded-xl border border-slate-200 overflow-hidden">
+    return `<article class="rounded-xl border border-slate-200 overflow-hidden" aria-label="${esc(r.name)} ${esc(r.label)}">
       <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-slate-50 border-b border-slate-200">
-        <div class="flex items-center gap-2 flex-wrap">
+        <div class="flex items-center gap-2 flex-wrap min-w-0">
           <span class="font-semibold">${esc(r.name)}</span>
           <span class="badge ${auto ? "" : "badge-blue"}">${auto ? "AUTO" : "MANUAL"}</span>
           <span class="badge">${esc(r.type)}</span>
-          <span class="font-mono text-[11px] muted">${esc(r.label)}</span>
+          <span class="font-mono text-[11px] muted truncate">${esc(r.label)}</span>
         </div>
-        <div class="flex items-center gap-3 text-[11.5px]">
-          <span class="muted">expiry <b class="font-mono text-slate-700">${esc(r.expiry_label)}</b> · ${num(r.hours_left, 1)}h left · auto-close in ${duration(r.close_at - Date.now() / 1000)}</span>
-          <span class="muted">held ${duration(r.held_seconds)}</span>
-          <button class="btn btn-sm btn-danger px-2" data-close-structure="${r.id}" title="Close every leg on paper"><i data-lucide="x"></i>Close</button>
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] muted">
+          <span>Expiry <b class="font-mono text-slate-700">${esc(r.expiry_label)}</b> · ${num(r.hours_left, 1)}h left</span>
+          <span title="Closed on its own an hour before expiry">${closeIn > 0 ? `auto-close in ${duration(closeIn)}` : "closing now"}</span>
+          <span>held ${duration(r.held_seconds)}</span>
+          <button class="edit-only btn btn-sm btn-danger" data-close-structure="${r.id}" data-name="${esc(r.name)}" title="Close every leg on paper"><i data-lucide="x"></i>Close</button>
         </div>
       </div>
       <div class="p-4 grid grid-cols-1 xl:grid-cols-5 gap-4">
-        <div class="xl:col-span-3 space-y-3">
+        <div class="xl:col-span-3 space-y-3 min-w-0">
           <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
             ${kpi("P&L (mark)", pnl == null ? "—" : signed(pnl), pnl == null ? "no fresh prices" : `${num(r.pnl_pct, 1)}% of premium · close now ${r.close_pnl == null ? "—" : signed(r.close_pnl)}`, pnlClass(pnl))}
             ${kpi(r.type === "debit" ? "Premium paid" : "Premium received", money(r.premium), `value now ${r.value_now == null ? "—" : money(Math.abs(r.value_now))}`)}
@@ -646,34 +658,60 @@
               <div class="muted mt-0.5">fees paid ${money(r.entry_fee)} · ${r.qty} × ${num(r.contract_value, 3)} ${esc(r.underlying)} per leg</div></div>
           </div>
         </div>
-        <div class="xl:col-span-2">
-          <table class="w-full text-[11.5px]"><thead><tr class="text-slate-400 text-left"><th class="pb-1">Leg</th><th>Contract</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">P&amp;L</th><th class="r">IV</th><th class="r">Δ</th></tr></thead>
-            <tbody>${legs}</tbody></table>
+        <div class="xl:col-span-2 min-w-0">
+          <div class="overflow-x-auto"><table class="w-full text-[11.5px] whitespace-nowrap"><thead><tr class="text-slate-400 text-left"><th class="pb-1 pr-2 font-medium">Leg</th><th class="pr-2 font-medium">Contract</th><th class="r pr-2 font-medium">Entry</th><th class="r pr-2 font-medium">Mark</th><th class="r pr-2 font-medium">P&amp;L</th><th class="r pr-2 font-medium">IV</th><th class="r font-medium">Δ</th></tr></thead>
+            <tbody>${legs}</tbody></table></div>
           <div class="text-[10.5px] muted mt-2">P&amp;L is at the mark, as Delta shows it, and SL / TP trigger on it. "Close now" is what you would actually get: buys sold at the bid, sells bought back at the ask, after fees.${r.chain_age_seconds == null ? "" : ` Chain ${num(r.chain_age_seconds, 0)}s old.`}</div>
         </div>
       </div>
-    </div>`;
+    </article>`;
   }
 
+  // Totals across every open structure; a structure with no fresh prices is counted as not valued.
+  function totals(rows) {
+    if (!rows.length) return "";
+    const valued = rows.filter((r) => r.unrealized_pnl != null);
+    const pnl = valued.reduce((a, r) => a + r.unrealized_pnl, 0);
+    const risk = rows.reduce((a, r) => a + (r.capital || 0), 0);
+    const item = (label, value, cls = "") => `<span><span class="muted">${label}</span> <b class="font-mono ${cls}">${value}</b></span>`;
+    return [
+      item("P&L", valued.length ? signed(pnl) : "—", valued.length ? pnlClass(pnl) : ""),
+      item("Max loss held", money(risk)),
+      valued.length < rows.length ? `<span class="text-amber-700">${rows.length - valued.length} not valued</span>` : "",
+    ].join("");
+  }
+
+  let structuresLoaded = false;
   async function load() {
-    let rows = [];
-    try { rows = await TB.get("/api/structures?broker=paper"); } catch (err) { /* paper may be inactive */ }
+    let rows;
+    try { rows = await TB.get("/api/structures?broker=paper"); }
+    catch (err) {
+      // Keep what is on screen after a blip; say so only when there is nothing to show.
+      if (!structuresLoaded) $("structures").innerHTML = `<div class="flex items-center justify-center gap-3 py-6 text-[12px]"><span class="down">Could not load structures: ${esc(err.message)}</span><button class="btn btn-sm" data-retry-structures>Retry</button></div>`;
+      $("structures").querySelector("[data-retry-structures]")?.addEventListener("click", load);
+      return;
+    }
+    structuresLoaded = true;
     $("osCount").textContent = rows.length;
-    $("structures").innerHTML = rows.length ? rows.map(card).join("") : `<div class="text-center text-[12px] muted py-6">No open option structures</div>`;
+    $("osTotals").innerHTML = totals(rows);
+    $("structures").innerHTML = rows.length ? rows.map(card).join("")
+      : `<div class="text-center text-[12px] muted py-6">No open option structures${TB.canEdit ? ' · open one from the <a href="#optionsCard" class="text-brand-600">options ticket</a>' : ""}</div>`;
     document.querySelectorAll("[data-close-structure]").forEach((b) => (b.onclick = async () => {
-      if (!await TB.ask({ title: "Close this structure on paper?", body: "Every leg is closed at the chain's bid / ask.", ok: "Close", danger: true })) return;
+      if (!await TB.ask({ title: `Close this ${esc(b.dataset.name)} on paper?`, body: "Every leg is closed at the chain's bid / ask.", ok: "Close", danger: true })) return;
       try { await TB.post(`/api/structures/paper/${b.dataset.closeStructure}/close`); TB.toast("Structure closed", "ok"); }
       catch (err) { TB.toast(err.message, "error"); }
-      load(); refresh();
+      load(); if (TB.canEdit) refresh();
     }));
     TB.icons();
   }
 
-  setTimeout(refresh, 400);
+  // The options ticket is for editors; a viewer only watches the open structures.
+  setTimeout(() => { if (TB.canEdit) refresh(); }, 400);
   load();
   TB.every(load, 5000);
-  TB.every(() => { if (!placing) return refresh(); }, 15000);
+  TB.every(() => { if (!placing && TB.canEdit) return refresh(); }, 15000);
   TB.on(["PositionClosed", "OrderPlaced"], TB.debounce(load, 300));
+  TB.on("AuthChanged", () => { load(); if (TB.canEdit) refresh(); });
 })();
 </script>
 {% endblock %}
