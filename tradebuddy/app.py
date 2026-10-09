@@ -8,17 +8,19 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import urllib.parse
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+from tradebuddy import auth
 from tradebuddy.api import Api, ApiError, RemoteApi
 from tradebuddy.settings import LIVE_CONFIRM_PHRASE
 from tradebuddy.system import Broadcaster, System
@@ -106,6 +108,16 @@ class EmailReportRequest(BaseModel):
     date: str = Field(default="", max_length=32)
 
 
+class PinLoginRequest(BaseModel):
+    pin: str = Field(min_length=6, max_length=6)
+    next: str = Field(default="/", max_length=256)
+
+
+class PinChangeRequest(BaseModel):
+    old_pin: str = Field(min_length=6, max_length=6)
+    new_pin: str = Field(min_length=6, max_length=6)
+
+
 def asset_version() -> str:
     digest = hashlib.sha256()
     for path in sorted((HERE / "static").rglob("*")):
@@ -117,20 +129,158 @@ def asset_version() -> str:
 Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 
 
-def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | None = None, api_token: str = "") -> FastAPI:
+def create_app(
+    api: Api | RemoteApi,
+    live: Broadcaster,
+    lifespan: Lifespan | None = None,
+    api_token: str = "",
+    auth_pin: str = "242425",
+    auth_secret: str = "",
+) -> FastAPI:
     app = FastAPI(title="TradeBuddy", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
     # Static URLs carry a hash of the files, so a browser never runs an old app.js against new pages.
     templates.env.globals["v"] = asset_version()
 
-    def protected(x_api_token: str = Header(default="")) -> None:
-        if api_token and not hmac.compare_digest(x_api_token, api_token):
+    if not auth_secret:
+        auth_secret = hashlib.sha256(f"tb_auth_default:{api_token}:{auth_pin}".encode()).hexdigest()
+
+    brute_force_guard = auth.BruteForceGuard()
+
+    def has_valid_session(request: Request) -> bool:
+        if not auth_pin:
+            return False
+        cookie = request.cookies.get(auth.SESSION_COOKIE_NAME)
+        return bool(cookie and auth.validate_session_token(cookie, auth_secret))
+
+    def is_authenticated(request: Request) -> bool:
+        """Check whether request carries valid 7-day session cookie or valid API token."""
+        if not auth_pin:
+            return True
+        if has_valid_session(request):
+            return True
+        token_header = request.headers.get("X-API-Token", "")
+        return bool(api_token and token_header and hmac.compare_digest(token_header, api_token))
+
+    def protected(request: Request, x_api_token: str = Header(default="")) -> None:
+        """Protect mutating actions: allowed if session is active or valid API token is supplied."""
+        if has_valid_session(request):
+            return
+        if api_token and hmac.compare_digest(x_api_token, api_token):
+            return
+        if api_token:
             raise HTTPException(401, "missing or wrong API token")
+        if auth_pin and not is_authenticated(request):
+            raise HTTPException(401, "Authentication required")
+
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next: Any) -> Response:
+        """Block unauthorized access to pages and APIs; redirect to PIN login screen."""
+        path = request.url.path
+        # Static files and auth endpoints remain publicly reachable
+        if not auth_pin or path.startswith("/static/") or path in ("/login", "/logout", "/api/auth/login", "/api/auth/status", "/favicon.ico"):
+            if path == "/login" and auth_pin and is_authenticated(request):
+                return RedirectResponse(url="/", status_code=303)
+            return await call_next(request)
+
+        if not is_authenticated(request):
+            # API requests return 401 JSON error
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "Authentication required. Please log in with PIN."}, status_code=401)
+            # Web page requests redirect to login with destination path
+            next_url = request.url.path
+            if request.url.query:
+                next_url += f"?{request.url.query}"
+            return RedirectResponse(url=f"/login?next={urllib.parse.quote(next_url)}", status_code=303)
+
+        return await call_next(request)
 
     async def call(method: str, **params: Any) -> Any:
         try:
             return await getattr(api, method)(**params)
+        except ApiError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
+
+    # -- auth routes --------------------------------------------------------
+
+    @app.get("/login", response_class=HTMLResponse, response_model=None, include_in_schema=False)
+    async def login_page(request: Request, next: str = "/") -> Response:
+        if auth_pin and is_authenticated(request):
+            return RedirectResponse(url="/", status_code=303)
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "next": next or "/",
+                "title": "Login · Security PIN",
+                "v": asset_version(),
+            },
+        )
+
+    @app.get("/logout", include_in_schema=False)
+    async def logout_page() -> RedirectResponse:
+        res = RedirectResponse(url="/login", status_code=303)
+        res.delete_cookie(auth.SESSION_COOKIE_NAME, path="/")
+        return res
+
+    @app.post("/api/auth/login")
+    async def api_auth_login(request: Request, body: PinLoginRequest, response: Response) -> dict[str, Any]:
+        """Verify 4-digit PIN, check rate-limiting, and issue 7-day session cookie."""
+        client_ip = request.client.host if request.client else "unknown"
+        locked, remaining_seconds = brute_force_guard.is_locked(client_ip)
+        if locked:
+            raise HTTPException(429, f"Too many incorrect attempts. Locked out for {remaining_seconds}s.")
+
+        pin = body.pin.strip()
+        if len(pin) != 6 or not pin.isdigit():
+            raise HTTPException(400, "PIN must be exactly 6 digits")
+
+        is_valid = await call("verify_pin", pin=pin)
+        if not is_valid:
+            remaining, lock_time = brute_force_guard.record_failure(client_ip)
+            if lock_time > 0:
+                raise HTTPException(429, f"Incorrect PIN. Locked out for {lock_time} seconds.")
+            raise HTTPException(401, f"Incorrect PIN. {remaining} attempt(s) remaining.")
+
+        brute_force_guard.record_success(client_ip)
+        # SECURITY: Create 7-day signed session token and set secure HTTP-only cookie
+        token = auth.create_session_token(auth_secret, max_age_seconds=auth.SESSION_MAX_AGE_SECONDS)
+        response.set_cookie(
+            key=auth.SESSION_COOKIE_NAME,
+            value=token,
+            max_age=auth.SESSION_MAX_AGE_SECONDS,
+            expires=auth.SESSION_MAX_AGE_SECONDS,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+            path="/",
+        )
+        return {"ok": True, "token": token, "redirect": body.next or "/"}
+
+    @app.post("/api/auth/logout")
+    async def api_auth_logout(response: Response) -> dict[str, Any]:
+        """Clear 7-day session cookie."""
+        response.delete_cookie(auth.SESSION_COOKIE_NAME, path="/")
+        return {"ok": True}
+
+    @app.get("/api/auth/status")
+    async def api_auth_status(request: Request) -> dict[str, Any]:
+        """Return current authentication state."""
+        return {
+            "authenticated": is_authenticated(request),
+            "pin_required": bool(auth_pin),
+        }
+
+    @app.post("/api/auth/change-pin")
+    async def api_auth_change_pin(request: Request, body: PinChangeRequest) -> dict[str, Any]:
+        """Update 6-digit PIN."""
+        if not is_authenticated(request):
+            raise HTTPException(401, "Authentication required")
+        if not (body.new_pin.isdigit() and len(body.new_pin) == 6):
+            raise HTTPException(400, "New PIN must be exactly 6 digits")
+        try:
+            return await call("change_pin", old_pin=body.old_pin, new_pin=body.new_pin)
         except ApiError as exc:
             raise HTTPException(exc.status, exc.detail) from exc
 
@@ -145,7 +295,11 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
                 {
                     "page": page_id,
                     "title": title,
-                    "pages": [p for p in PAGES if (p[0] != "paper" or ctx["paper_active"]) and (p[0] != "ai" or ctx.get("ai_enabled"))],
+                    "pages": [
+                        p for p in PAGES
+                        if (p[0] != "paper" or ctx["paper_active"])
+                        and (p[0] != "ai" or ctx.get("ai_enabled") or page_id == "ai")
+                    ],
                     "active_brokers": ctx["active_brokers"],
                     "live_phrase": LIVE_CONFIRM_PHRASE,
                 },
@@ -334,6 +488,20 @@ def create_app(api: Api | RemoteApi, live: Broadcaster, lifespan: Lifespan | Non
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket) -> None:
+        if auth_pin:
+            cookie = socket.cookies.get(auth.SESSION_COOKIE_NAME, "")
+            param = socket.query_params.get("token", "")
+            hdr = socket.headers.get("x-api-token", "")
+            is_authed = (
+                (cookie and auth.validate_session_token(cookie, auth_secret))
+                or (param and auth.validate_session_token(param, auth_secret))
+                or (api_token and hdr and hmac.compare_digest(hdr, api_token))
+            )
+            if not is_authed:
+                # SECURITY: Reject unauthenticated WebSocket connection attempts
+                await socket.close(code=1008, reason="Unauthorized")
+                return
+
         await socket.accept()
         live.clients.add(socket)
         try:
@@ -356,4 +524,11 @@ def local_app(system: System) -> FastAPI:
         yield
         await system.stop()
 
-    return create_app(Api(system), system.live, lifespan, system.cfg.api_token)
+    return create_app(
+        Api(system),
+        system.live,
+        lifespan,
+        system.cfg.api_token,
+        auth_pin=system.cfg.auth_pin,
+        auth_secret=system.cfg.auth_secret,
+    )

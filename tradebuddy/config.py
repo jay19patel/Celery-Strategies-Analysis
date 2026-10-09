@@ -11,6 +11,7 @@ sockets carry commands and API keys and must never face a network.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 
@@ -25,6 +26,10 @@ class Config:
     host: str
     port: int
     api_token: str
+    # 6-digit PIN for dashboard security. Set AUTH_PIN or APP_PIN in .env, defaults to 242425.
+    auth_pin: str = "242425"
+    # Secret key for HMAC session token signing. Derived if empty.
+    auth_secret: str = ""
     # Set by docker-compose for the web container: its port is published on the
     # host's 127.0.0.1 only, so binding 0.0.0.0 inside the container is not exposure.
     dashboard_loopback_only: bool = False
@@ -62,11 +67,23 @@ def load_config(environ: dict[str, str] | None = None) -> Config:
         environ = dict(os.environ)
     e = environ
 
+    api_token = e.get("API_TOKEN", "")
+    db_path = e.get("DB_PATH", "data/tradebuddy.db")
+    # SECURITY: Read PIN from AUTH_PIN or APP_PIN or default to "242425"
+    auth_pin = e.get("AUTH_PIN", e.get("APP_PIN", "242425"))
+    auth_secret = e.get("AUTH_SECRET", "")
+    if not auth_secret:
+        # PERF: Derive a deterministic secret across processes if not explicitly provided
+        derived = hashlib.sha256(f"tb_auth_seed:{api_token}:{db_path}".encode()).hexdigest()
+        auth_secret = derived
+
     return Config(
-        db_path=e.get("DB_PATH", "data/tradebuddy.db"),
+        db_path=db_path,
         host=e.get("HOST", "127.0.0.1"),
         port=int(e.get("PORT", "8080")),
-        api_token=e.get("API_TOKEN", ""),
+        api_token=api_token,
+        auth_pin=auth_pin,
+        auth_secret=auth_secret,
         dashboard_loopback_only=e.get("DASHBOARD_LOOPBACK_ONLY", "").strip().lower() in ("1", "true", "yes"),
         **{field: e[name] for field, name in ENV_FIELDS.items() if e.get(name)},
     )

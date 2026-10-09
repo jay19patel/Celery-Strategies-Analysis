@@ -153,7 +153,7 @@ def web_app(cfg: Config) -> FastAPI:
             t.cancel()
         await client.close()
 
-    return create_app(api, live, lifespan, cfg.api_token)
+    return create_app(api, live, lifespan, cfg.api_token, auth_pin=cfg.auth_pin, auth_secret=cfg.auth_secret)
 
 
 # -- analyst --------------------------------------------------------------------

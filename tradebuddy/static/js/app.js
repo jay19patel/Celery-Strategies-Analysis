@@ -71,6 +71,10 @@
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) {
+      if (data.detail && (data.detail.includes("PIN") || data.detail.includes("Authentication required") || data.detail.includes("Unauthorized"))) {
+        window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+        return;
+      }
       const entered = await ask({ title: "API token required", body: "This action is protected. Enter the API_TOKEN the server was started with.", input: "password", ok: "Save token" });
       if (entered) {
         token = entered;

@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from tradebuddy import auth
 from tradebuddy import structures as st
 from tradebuddy.analytics import collect_daily_analytics, collect_monthly_calendar_data, gather_live, get_day_bounds, parse_day
 from tradebuddy.brokers import Broker
@@ -41,6 +42,7 @@ METHODS = (
     "ai_digest", "ai_report", "ai_history", "ai_report_at", "test_ai", "send_email_report",
     "journal_summary", "journal_month",
     "option_ticket", "place_structure", "structures", "close_structure", "paper_history",
+    "verify_pin", "change_pin", "get_auth_status",
 )
 
 
@@ -575,6 +577,46 @@ class Api:
     async def paper_reset(self) -> dict[str, Any]:
         self.system.paper.reset()
         return self.system.paper.stats()
+
+    async def verify_pin(self, pin: str) -> bool:
+        """Verify 4-digit PIN against stored hash or configured fallback."""
+        pin_clean = str(pin).strip()
+        settings = self.system.store.load_settings()
+        stored_hash = settings.get("auth_pin_hash")
+        if stored_hash:
+            return auth.verify_pin(pin_clean, stored_hash)
+
+        # Fallback to configured auth_pin (or empty means auth is off)
+        expected = self.system.cfg.auth_pin
+        if not expected:
+            return True
+        if pin_clean == expected:
+            # SECURITY: Auto-hash and persist the PIN into the SQLite store
+            hashed = auth.hash_pin(pin_clean)
+            self.system.store.save_settings({"auth_pin_hash": hashed})
+            return True
+        return False
+
+    async def change_pin(self, old_pin: str, new_pin: str) -> dict[str, Any]:
+        """Verify current PIN and update to a new 6-digit PIN."""
+        if not await self.verify_pin(old_pin):
+            raise ApiError(400, "Current PIN is incorrect")
+        new_clean = str(new_pin).strip()
+        if len(new_clean) != 6 or not new_clean.isdigit():
+            raise ApiError(400, "New PIN must be exactly 6 digits")
+        hashed = auth.hash_pin(new_clean)
+        self.system.store.save_settings({"auth_pin_hash": hashed})
+        return {"ok": True, "message": "PIN updated successfully"}
+
+    async def get_auth_status(self) -> dict[str, Any]:
+        """Check whether PIN authentication is active and whether a custom PIN is configured."""
+        settings = self.system.store.load_settings()
+        has_custom = bool(settings.get("auth_pin_hash"))
+        enabled = bool(settings.get("auth_pin_hash") or self.system.cfg.auth_pin)
+        return {
+            "enabled": enabled,
+            "has_custom_pin": has_custom,
+        }
 
 
 class RemoteApi:

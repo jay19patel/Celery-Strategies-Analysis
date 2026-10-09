@@ -120,7 +120,7 @@ class IdleStream:
 
 @pytest.fixture
 def cfg(tmp_path):
-    return load_config({"DB_PATH": str(tmp_path / "t.db")})
+    return load_config({"DB_PATH": str(tmp_path / "t.db"), "AUTH_PIN": ""})
 
 
 @pytest.fixture

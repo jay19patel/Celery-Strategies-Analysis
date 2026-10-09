@@ -229,6 +229,40 @@
   </div>
 
   <section class="card">
+    <div class="card-head">
+      <div class="card-title"><i data-lucide="shield-check"></i>Terminal Security & 6-Digit PIN</div>
+      <span class="badge badge-green">Argon2id · 7-Day Session</span>
+    </div>
+    <div class="card-body grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div class="md:col-span-1 space-y-1.5">
+        <div class="font-medium text-xs text-slate-800">Change Security PIN</div>
+        <p class="text-xs text-slate-500">Update the 6-digit PIN required to unlock this TradeBuddy terminal. Authenticated using Argon2id with 7-day persistent session cookie.</p>
+        <div class="pt-2">
+          <a href="/logout" class="btn text-xs text-rose-600 hover:bg-rose-50 hover:border-rose-200">
+            <i data-lucide="lock" class="w-3.5 h-3.5"></i>Lock terminal now
+          </a>
+        </div>
+      </div>
+      <div class="md:col-span-2 bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="field-label" for="current_pin">Current 6-digit PIN</label>
+            <input id="current_pin" type="password" maxlength="6" inputmode="numeric" placeholder="••••••" class="input w-full mt-1 font-mono text-center tracking-widest" autocomplete="off">
+          </div>
+          <div>
+            <label class="field-label" for="new_pin">New 6-digit PIN</label>
+            <input id="new_pin" type="password" maxlength="6" inputmode="numeric" placeholder="••••••" class="input w-full mt-1 font-mono text-center tracking-widest" autocomplete="off">
+          </div>
+        </div>
+        <div class="flex items-center justify-between pt-1">
+          <span id="pinResult" class="text-xs"></span>
+          <button type="button" id="changePinBtn" class="btn btn-primary"><i data-lucide="key"></i>Update PIN</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
     <div class="card-head"><div class="card-title"><i data-lucide="lock"></i>Safety</div></div>
     <div class="card-body grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-600">
       <div class="flex gap-2"><i data-lucide="power" class="w-4 h-4 text-slate-400 shrink-0"></i><span>Paper trades by default. <b>Delta trading is off at every start</b> and switches off whenever the Delta account or keys change.</span></div>
@@ -397,6 +431,33 @@
   $("clearBtn").onclick = async () => {
     if (!await TB.ask({ title: "Remove Delta keys?", body: "The stored API key and secret are deleted. Trading switches off.", ok: "Remove", danger: true })) return;
     try { fill(await TB.post("/api/settings/clear-credentials")); TB.toast("Keys removed", "ok"); } catch (err) { TB.toast(err.message, "error"); }
+  };
+
+  $("changePinBtn").onclick = async () => {
+    const oldPin = $("current_pin").value.trim();
+    const newPin = $("new_pin").value.trim();
+    if (!oldPin || !newPin) {
+      TB.toast("Please enter both current PIN and new PIN", "error");
+      return;
+    }
+    if (newPin.length !== 6 || !/^\d{6}$/.test(newPin)) {
+      TB.toast("New PIN must be exactly 6 digits", "error");
+      return;
+    }
+    $("changePinBtn").disabled = true;
+    $("pinResult").innerHTML = '<span class="muted">Updating…</span>';
+    try {
+      await TB.post("/api/auth/change-pin", { old_pin: oldPin, new_pin: newPin });
+      $("pinResult").innerHTML = '<span class="up">PIN updated successfully</span>';
+      TB.toast("6-Digit PIN updated successfully", "ok");
+      $("current_pin").value = "";
+      $("new_pin").value = "";
+    } catch (err) {
+      $("pinResult").innerHTML = `<span class="down">${esc(err.message)}</span>`;
+      TB.toast(err.message, "error");
+    } finally {
+      $("changePinBtn").disabled = false;
+    }
   };
 
   TB.get("/api/settings").then(fill);

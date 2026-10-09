@@ -32,6 +32,8 @@ x-app: &app
     ZMQ_RESULTS_BIND: tcp://0.0.0.0:5558
     ZMQ_RESULTS_URL: tcp://engine:5558
     TZ: UTC
+    AUTH_PIN: ${AUTH_PIN:-242425}
+    AUTH_SECRET: ${AUTH_SECRET:-}
   logging:
     driver: json-file
     options: { max-size: "10m", max-file: "3" }

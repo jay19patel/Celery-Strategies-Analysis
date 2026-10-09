@@ -5,6 +5,7 @@ description = "Event-driven crypto strategy signals and execution on Delta Excha
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "argon2-cffi>=25.1.0",
     "celery[redis]>=5.6.3",
     "fastapi>=0.115.0",
     "httpx>=0.28.0",
