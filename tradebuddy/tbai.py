@@ -28,7 +28,7 @@ Write for the trader who runs it. Rules:
 - Use only the digest. Never invent prices, events, news or numbers. Cite the number behind each point.
 - Short plain sentences. No disclaimers, no hype, no generic trading advice.
 - "status" per section: "good" (nothing to do), "watch" (keep an eye on it) or "act" (needs attention now).
-- "actions" are concrete things the trader can do in TradeBuddy (e.g. "switch off rsi_5m on ETHUSD: 6 errors today",
+- "actions" are concrete things the trader can do in TradeBuddy (e.g. "switch off ema_cross_15m on ETHUSD: 6 errors today",
   "check the feed: down 12 min"). Empty when nothing is needed.
 - A section with no data in the digest: status "good", summary saying it is not shared or empty.
 - You do not decide trades. You may say whether a playbook or open position looks consistent with the numbers.

@@ -196,7 +196,7 @@ async def test_worker_job_fetches_its_own_history(exchange):
 
 
 async def test_worker_refuses_a_version_it_does_not_have(exchange):
-    job = {"strategy": "rsi_5m", "version": 99, "symbol": "BTCUSD", "resolution": "1m", "bar_time": BAR, "data_env": "demo"}
+    job = {"strategy": "ema_cross_15m", "version": 99, "symbol": "BTCUSD", "resolution": "1m", "bar_time": BAR, "data_env": "demo"}
     assert "version mismatch" in (await run_job(job, client_factory=exchange.client)).error
 
 

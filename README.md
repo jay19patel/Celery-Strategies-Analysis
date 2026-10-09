@@ -146,7 +146,7 @@ class MyStrategy(Strategy):
 `docker compose up` again (it rebuilds) and it appears on the Strategies page. `ctx.market` also offers
 `price(symbol)`, `candles(...)` and `option_chain(underlying)`.
 
-Included: `random_1m`, `rsi_5m`, `ema_cross_15m`, `pcr_options`.
+Included: `ema_9_15_15m`, `ema_cross_15m`, `mother_candle_15m`, `mother_candle_1h`, `pcr_options`, `tb_master_15m`.
 
 ## Safety
 

@@ -9,7 +9,6 @@ from tradebuddy.strategies.ema_cross_15m import EmaCross15m
 from tradebuddy.strategies.indicators import atr, ema, rsi
 from tradebuddy.strategies.mother_candle import MotherCandle1h, MotherCandle15m, find_mother
 from tradebuddy.strategies.pcr_options import PcrOptions
-from tradebuddy.strategies.rsi_5m import Rsi5m
 
 from .conftest import FakeExchange, bars
 
@@ -21,7 +20,7 @@ def ctx(candles, market=None, symbol="BTCUSD"):
 def test_discover_finds_every_strategy_once():
     names = [s.name for s in discover()]
     assert names == sorted(names) == [
-        "ema_9_15_15m", "ema_cross_15m", "mother_candle_15m", "mother_candle_1h", "pcr_options", "rsi_5m", "tb_master_15m",
+        "ema_9_15_15m", "ema_cross_15m", "mother_candle_15m", "mother_candle_1h", "pcr_options", "tb_master_15m",
     ]
 
 
@@ -42,13 +41,6 @@ async def test_ema_cross_up_and_down():
     down = [100.0] * 40 + [110.0] * 10 + [70.0]
     assert (await s.on_candle(ctx(bars(down)))).side == "sell"
     assert await s.on_candle(ctx(bars([100.0] * 60))) is None
-
-
-async def test_rsi_leaves_oversold():
-    s = Rsi5m()
-    falling = [100.0 - i for i in range(30)]
-    assert await s.on_candle(ctx(bars(falling))) is None
-    assert (await s.on_candle(ctx(bars([*falling, 90.0])))).side == "buy"
 
 
 @pytest.mark.parametrize(("puts", "calls", "side"), [(140, 100, "buy"), (60, 100, "sell"), (100, 100, None), (5, 0, None)])
