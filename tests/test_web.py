@@ -130,3 +130,12 @@ async def test_saved_ai_reports_open_by_id(cfg, exchange):
     assert client.get(f"/api/ai/reports/{row['id']}").json()["report"]["headline"] == "open me"
     assert client.get(f"/api/ai/reports/{row['id'] + 1}").status_code == 404
     assert 'id="day"' in client.get("/ai").text
+
+
+def test_the_risk_view_tells_the_dashboard_how_trades_are_sized(cfg, exchange):
+    """The Overview explains the sizing rules in words; it must read them, not hard-code them."""
+    _, client = make(cfg, exchange)
+    risk = client.get("/api/risk").json()
+    assert risk["sizing"]["risk_per_trade_pct"] > 0
+    assert set(risk["sizing"]) == {"risk_per_trade_pct", "trade_margin_pct", "min_edge_multiple"}
+    assert set(risk["protection"]) == {"atr_protection", "atr_stop_mult", "atr_target_mult", "stop_loss_pct", "take_profit_pct"}

@@ -1,10 +1,12 @@
 import pytest
 
 from tradebuddy.delta import Candle
+from tradebuddy.settings import RANGES
 from tradebuddy.strategies import Context, discover
 from tradebuddy.strategies.ema_9_15 import Ema9Ema15
 from tradebuddy.strategies.ema_cross_15m import EmaCross15m
-from tradebuddy.strategies.indicators import atr, ema, rsi
+from tradebuddy.strategies.indicators import atr, ema, rsi, supertrend
+from tradebuddy.strategies.levels import from_stop
 from tradebuddy.strategies.mother_candle import MotherCandle1h, MotherCandle15m, find_mother
 from tradebuddy.strategies.pcr_options import PcrOptions
 
@@ -162,3 +164,67 @@ async def test_mother_candle_needs_a_mother_of_at_least_min_atr():
 
     assert await MotherCandle1h().on_candle(ctx(mother_setup(1101.0))) is not None
     assert await Strict().on_candle(ctx(mother_setup(1101.0))) is None
+
+
+# -- Supertrend and the levels a strategy sets for itself -------------------------------
+
+
+def test_supertrend_follows_a_trend_and_flips_with_it():
+    up = flat([100 + i for i in range(40)])
+    line = supertrend([c.high for c in up], [c.low for c in up], [c.close for c in up], period=10, multiplier=3.0)
+    level, direction = line[-1]
+    assert direction == 1 and level < up[-1].close  # a long stop sits below price
+
+    down = flat([200 - i for i in range(40)])
+    level, direction = supertrend([c.high for c in down], [c.low for c in down], [c.close for c in down], 10, 3.0)[-1]
+    assert direction == -1 and level > down[-1].close
+
+
+def test_supertrend_needs_more_bars_than_its_period():
+    assert supertrend([2, 2], [1, 1], [1.5, 1.5], period=10) == []
+
+
+def test_from_stop_refuses_a_level_on_the_wrong_side():
+    assert from_stop("buy", 100.0, 101.0) is None  # a long stop above the price
+    assert from_stop("sell", 100.0, 99.0) is None
+    assert from_stop("buy", 100.0, 0.0) is None
+
+
+def test_from_stop_keeps_the_stop_outside_the_noise_and_inside_the_ranges():
+    assert from_stop("buy", 100.0, 98.0, reward=2.0) == (2.0, 4.0)
+    assert from_stop("buy", 100.0, 99.99, reward=2.0, floor_pct=0.8) == (0.8, 1.6)  # the floor wins
+    sl, tp = from_stop("sell", 100.0, 400.0, reward=3.0)  # a level far past what Settings allows
+    assert sl == RANGES["stop_loss_pct"][1] and tp == RANGES["take_profit_pct"][1]
+
+
+async def test_ema_cross_stops_on_the_supertrend_it_is_following():
+    up = [100.0] * 40 + [90.0] * 10 + [130.0]
+    signal = await EmaCross15m().on_candle(ctx(bars(up)))
+    assert signal.side == "buy" and "Supertrend" in signal.reason
+    assert signal.stop_loss_pct > 0 and signal.take_profit_pct == pytest.approx(signal.stop_loss_pct * EmaCross15m.reward)
+
+
+async def test_ema_cross_levels_pass_the_runners_own_check():
+    """is_default_sl_tp is False, so a Signal without valid levels is an error and nothing trades."""
+    from tradebuddy.runner import levels_error
+
+    for closes in ([100.0] * 40 + [90.0] * 10 + [130.0], [100.0] * 40 + [110.0] * 10 + [70.0]):
+        signal = await EmaCross15m().on_candle(ctx(bars(closes)))
+        assert levels_error(signal.stop_loss_pct, signal.take_profit_pct) == ""
+
+
+async def test_ema_9_15_stops_beyond_the_pullback_it_traded():
+    candles = [*flat([100 + i for i in range(60)]), *flat([150, 149], start=60), candle(62, 150, 160, 149.5, 158)]
+    signal = await Ema9Ema15().on_candle(ctx(candles))
+    assert signal.side == "buy" and "past the pullback" in signal.reason
+    # The stop is below the pullback low (149.3 after the wick), so at least 5% under a 158 close.
+    assert signal.stop_loss_pct >= 100 * (158 - 149.5) / 158
+    assert signal.take_profit_pct == pytest.approx(signal.stop_loss_pct * Ema9Ema15.reward)
+
+
+async def test_a_quiet_market_gives_a_tighter_stop_than_a_fast_one():
+    """The whole point of a volatility-scaled stop: the same signal, two markets, two distances."""
+    closes = [100.0] * 40 + [90.0] * 10 + [130.0]
+    tight = await EmaCross15m().on_candle(ctx(flat(closes, wick=0.2)))
+    wide = await EmaCross15m().on_candle(ctx(flat(closes, wick=8)))
+    assert tight.stop_loss_pct < wide.stop_loss_pct

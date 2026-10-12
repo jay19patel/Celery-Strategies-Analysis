@@ -12,7 +12,9 @@
   </section>
   <section class="card xl:col-span-2">
     <div class="card-head"><div class="card-title"><i data-lucide="cpu"></i>Strategy evaluation <span id="evalMode" class="badge"></span></div></div>
-    <table class="tbl"><tbody id="evaluator"></tbody></table>
+    <div class="scroll">
+      <table class="tbl"><tbody id="evaluator"></tbody></table>
+    </div>
   </section>
 </div>
 
@@ -33,7 +35,9 @@
   </div>
   <div id="dbKpis" class="grid grid-cols-2 md:grid-cols-5 gap-3 px-4 pt-3"></div>
   <div class="scroll mt-2">
-    <table class="tbl"><thead><tr><th>Table</th><th>Holds</th><th class="r">Rows</th><th class="r">Data</th><th class="r">Indexes</th><th>Oldest</th><th>Newest</th><th>Kept</th></tr></thead><tbody id="tables"></tbody></table>
+    <div class="scroll">
+      <table class="tbl"><thead><tr><th>Table</th><th>Holds</th><th class="r">Rows</th><th class="r">Data</th><th class="r">Indexes</th><th>Oldest</th><th>Newest</th><th>Kept</th></tr></thead><tbody id="tables"></tbody></table>
+    </div>
   </div>
 </section>
 
@@ -68,7 +72,9 @@
   </section>
   <section class="card xl:col-span-2">
     <div class="card-head"><div class="card-title"><i data-lucide="server"></i>Host</div></div>
-    <table class="tbl"><tbody id="host"></tbody></table>
+    <div class="scroll">
+      <table class="tbl"><tbody id="host"></tbody></table>
+    </div>
   </section>
 </div>
 {% endblock %}

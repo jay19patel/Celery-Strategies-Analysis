@@ -13,11 +13,15 @@
 <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
   <section class="card">
     <div class="card-head"><div class="card-title"><i data-lucide="info"></i>Account details</div></div>
-    <table class="tbl"><tbody id="details"></tbody></table>
+    <div class="scroll">
+      <table class="tbl"><tbody id="details"></tbody></table>
+    </div>
   </section>
   <section class="card">
     <div class="card-head"><div class="card-title"><i data-lucide="coins"></i>Assets</div></div>
-    <table class="tbl"><thead><tr><th>Asset</th><th class="r">Balance</th><th class="r">Available</th></tr></thead><tbody id="assets"></tbody></table>
+    <div class="scroll">
+      <table class="tbl"><thead><tr><th>Asset</th><th class="r">Balance</th><th class="r">Available</th></tr></thead><tbody id="assets"></tbody></table>
+    </div>
   </section>
 </div>
 
@@ -241,6 +245,8 @@
           ${isOption ? "" : field("Stop loss", t.stop_loss ? price(t.stop_loss) : "—", "down")}
           ${isOption ? "" : field("Take profit", t.take_profit ? price(t.take_profit) : "—", "up")}
           ${isOption ? "" : field("Risked at SL", t.risk_usd == null ? "—" : money(t.risk_usd, 4))}
+          ${isOption ? "" : field("Worst against (MAE)", t.mae_pct ? num(t.mae_pct, 2) + "%" : "—", "down")}
+          ${isOption ? "" : field("Best in favour (MFE)", t.mfe_pct ? num(t.mfe_pct, 2) + "%" : "—", "up")}
           ${field("Gross P&amp;L", signed(t.gross_pnl, 4), pnlClass(t.gross_pnl))}
           ${field("Fees", money(t.fees, 4))}
           ${field("Net P&amp;L", signed(t.pnl, 4), pnlClass(t.pnl))}

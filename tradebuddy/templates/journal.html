@@ -10,9 +10,9 @@
       <p class="text-xs text-slate-500 mt-0.5">Click any day for full in-depth execution analysis, dynamic trailing stop events, and system load.</p>
     </div>
     <div class="flex gap-2 items-center bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
-      <button id="prevMonth" class="p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+      <button id="prevMonth" aria-label="Previous month" class="p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
       <span id="currentMonthLabel" class="font-semibold text-sm w-36 text-center text-slate-700"></span>
-      <button id="nextMonth" class="p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+      <button id="nextMonth" aria-label="Next month" class="p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
       <button id="todayBtn" class="btn btn-sm text-xs font-semibold ml-2">Today</button>
     </div>
   </div>
@@ -51,7 +51,7 @@
         <button id="sendEmailBtn" class="edit-only btn btn-sm btn-primary flex items-center gap-2">
           <i data-lucide="mail" class="w-4 h-4"></i><span>Email This Report</span>
         </button>
-        <button id="closeModalBtn" class="p-2 rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors">
+        <button id="closeModalBtn" aria-label="Close" class="p-2 rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors">
           <i data-lucide="x" class="w-5 h-5"></i>
         </button>
       </div>

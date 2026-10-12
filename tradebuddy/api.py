@@ -559,6 +559,8 @@ class Api:
             "brokers": [self.system.guard.status.get(name, {"broker": name}) for name in s.active_brokers],
             "trailing": {k: getattr(s, k) for k in ("trailing_enabled", "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps")},
             "daily_loss_limit_pct": s.daily_loss_limit_pct, "day_timezone": s.day_timezone,
+            "sizing": {k: getattr(s, k) for k in ("risk_per_trade_pct", "trade_margin_pct", "min_edge_multiple")},
+            "protection": {k: getattr(s, k) for k in ("atr_protection", "atr_stop_mult", "atr_target_mult", "stop_loss_pct", "take_profit_pct")},
         }
 
     async def risk_resume(self, broker: str) -> dict[str, Any]:

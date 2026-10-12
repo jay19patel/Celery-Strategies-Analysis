@@ -61,11 +61,15 @@
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
   <section class="card">
     <div class="card-head"><div class="card-title"><i data-lucide="plug-zap"></i>WebSocket connection</div></div>
-    <table class="tbl"><tbody id="feed"></tbody></table>
+    <div class="scroll">
+      <table class="tbl"><tbody id="feed"></tbody></table>
+    </div>
   </section>
   <section class="card">
     <div class="card-head"><div class="card-title"><i data-lucide="rss"></i>Channels <span class="card-sub">messages received</span></div></div>
-    <table class="tbl"><thead><tr><th>Channel</th><th class="r">Messages</th><th class="r">Per min</th></tr></thead><tbody id="channels"></tbody></table>
+    <div class="scroll">
+      <table class="tbl"><thead><tr><th>Channel</th><th class="r">Messages</th><th class="r">Per min</th></tr></thead><tbody id="channels"></tbody></table>
+    </div>
   </section>
   <section class="card">
     <div class="card-head"><div class="card-title"><i data-lucide="clock"></i>Candle closes <span class="card-sub">what triggered each bar</span></div></div>
@@ -79,7 +83,9 @@
 <section class="card">
   <div class="card-head"><div class="card-title"><i data-lucide="candlestick-chart"></i>Recent candle closes</div></div>
   <div class="scroll max-h-96">
-    <table class="tbl"><thead><tr><th>Closed</th><th>Symbol</th><th>Resolution</th><th>Bar open</th><th>Source</th><th class="r">Open</th><th class="r">High</th><th class="r">Low</th><th class="r">Close</th></tr></thead><tbody id="bars"></tbody></table>
+    <div class="scroll">
+      <table class="tbl"><thead><tr><th>Closed</th><th>Symbol</th><th>Resolution</th><th>Bar open</th><th>Source</th><th class="r">Open</th><th class="r">High</th><th class="r">Low</th><th class="r">Close</th></tr></thead><tbody id="bars"></tbody></table>
+    </div>
   </div>
 </section>
 {% endblock %}

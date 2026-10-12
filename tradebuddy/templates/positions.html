@@ -36,7 +36,7 @@
           <div class="tabs" id="sizeMode"><button type="button" data-mode="pct" class="on">% of margin</button><button type="button" data-mode="contracts">Contracts</button></div>
           <div id="pctChips" class="flex gap-1.5"></div>
         </div>
-        <input id="poSize" type="number" step="any" min="0" class="input w-full font-mono text-sm">
+        <input id="poSize" aria-label="Order size" type="number" step="any" min="0" class="input w-full font-mono text-sm">
         <div id="sizeHelp" class="field-help"></div>
       </div>
       <div class="grid grid-cols-2 gap-4">
@@ -79,12 +79,12 @@
     <div class="xl:col-span-3 space-y-4">
       <div id="osKinds" class="flex flex-wrap gap-1.5"></div>
       <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <div><label class="block text-slate-500 mb-1 text-xs font-semibold">Underlying</label><select id="osSymbol" class="input w-full font-mono text-sm"></select></div>
-        <div class="md:col-span-2"><label class="block text-slate-500 mb-1 text-xs font-semibold">Expiry</label><select id="osExpiry" class="input w-full font-mono text-sm"></select></div>
-        <div><label class="block text-slate-500 mb-1 text-xs font-semibold">Contracts / leg</label><input id="osQty" type="number" min="1" max="1000" step="1" value="1" class="input w-full font-mono text-sm"></div>
+        <div><label for="osSymbol" class="block text-slate-500 mb-1 text-xs font-semibold">Underlying</label><select id="osSymbol" class="input w-full font-mono text-sm"></select></div>
+        <div class="md:col-span-2"><label for="osExpiry" class="block text-slate-500 mb-1 text-xs font-semibold">Expiry</label><select id="osExpiry" class="input w-full font-mono text-sm"></select></div>
+        <div><label for="osQty" class="block text-slate-500 mb-1 text-xs font-semibold">Contracts / leg</label><input id="osQty" type="number" min="1" max="1000" step="1" value="1" class="input w-full font-mono text-sm"></div>
         <div class="grid grid-cols-2 gap-1.5">
-          <div><label class="block text-slate-500 mb-1 text-xs font-semibold" title="Close when the loss reaches this % of the max loss">SL %</label><input id="osSl" type="number" min="5" max="100" step="5" class="input w-full font-mono text-sm"></div>
-          <div><label class="block text-slate-500 mb-1 text-xs font-semibold" title="Close when the profit reaches this % of the premium">TP %</label><input id="osTp" type="number" min="5" max="500" step="5" class="input w-full font-mono text-sm"></div>
+          <div><label class="block text-slate-500 mb-1 text-xs font-semibold" title="Close when the loss reaches this % of the max loss" for="osSl">SL %</label><input id="osSl" type="number" min="5" max="100" step="5" class="input w-full font-mono text-sm"></div>
+          <div><label class="block text-slate-500 mb-1 text-xs font-semibold" title="Close when the profit reaches this % of the premium" for="osTp">TP %</label><input id="osTp" type="number" min="5" max="500" step="5" class="input w-full font-mono text-sm"></div>
         </div>
       </div>
       <div id="osSuggest" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">Loading the options chain…</div>
@@ -364,7 +364,7 @@
         const trail = c ? `<div class="flex items-center gap-2">
             <label class="switch sm" title="Auto trailing for this position"><input type="checkbox" data-trail="${esc(p.symbol)}" ${c.trailing ? "checked" : ""}><span class="track"></span></label>
             <span class="font-mono text-[11px] ${c.steps >= c.max_steps ? "muted" : ""}" title="trails done / max">${c.steps}/</span>
-            <input type="number" min="0" max="50" step="1" value="${c.max_steps}" data-max="${esc(p.symbol)}" class="input needs-edit font-mono !py-0.5 !px-1.5 w-12 text-[11px]" title="Max trails for this position" ${TB.canEdit ? "" : "readonly"}>
+            <input type="number" aria-label="Max trails" min="0" max="50" step="1" value="${c.max_steps}" data-max="${esc(p.symbol)}" class="input needs-edit font-mono !py-0.5 !px-1.5 w-12 text-[11px]" title="Max trails for this position" ${TB.canEdit ? "" : "readonly"}>
           </div>` : '<span class="muted text-[11px]">starting…</span>';
         const shown = openPos.has(p.symbol);
         const d = (v) => (v == null ? "" : `<span class="muted text-[10px]">(${v > 0 ? "+" : ""}${num(v, 2)}%)</span>`);

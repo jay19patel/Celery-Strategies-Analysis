@@ -19,15 +19,17 @@
   <div class="card-head flex-wrap gap-2">
     <div class="card-title"><i data-lucide="history"></i>Report history <span class="card-sub" id="savedNote">every report is saved; click one to open it</span></div>
     <div class="flex flex-wrap items-center gap-1.5">
-      <button id="dayPrev" class="btn btn-sm" title="Previous day"><i data-lucide="chevron-left"></i></button>
+      <button id="dayPrev" aria-label="Previous day" class="btn btn-sm" title="Previous day"><i data-lucide="chevron-left"></i></button>
       <input id="day" type="date" class="input py-1 text-[12px] font-mono" aria-label="Day">
-      <button id="dayNext" class="btn btn-sm" title="Next day"><i data-lucide="chevron-right"></i></button>
+      <button id="dayNext" aria-label="Next day" class="btn btn-sm" title="Next day"><i data-lucide="chevron-right"></i></button>
       <button id="dayToday" class="btn btn-sm">Today</button>
       <label class="flex items-center gap-1.5 text-[12px] ml-1 cursor-pointer select-none"><input id="okOnly" type="checkbox" class="accent-violet-600">Reports only</label>
     </div>
   </div>
   <div class="px-4 pt-2 text-[11.5px] muted" id="dayNote"></div>
-  <div class="scroll max-h-[28rem]"><table class="tbl"><thead><tr><th>Time</th><th>Result</th><th>Health</th><th>Model</th><th>Headline or error</th><th></th></tr></thead><tbody id="history"></tbody></table></div>
+  <div class="scroll max-h-[28rem]"><div class="scroll">
+  <table class="tbl"><thead><tr><th>Time</th><th>Result</th><th>Health</th><th>Model</th><th>Headline or error</th><th></th></tr></thead><tbody id="history"></tbody></table>
+</div></div>
 </section>
 {% endblock %}
 

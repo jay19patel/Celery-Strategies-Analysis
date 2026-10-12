@@ -12,10 +12,12 @@
     <input id="search" class="input w-56" placeholder="Search symbol, strategy, id…">
   </div>
   <div class="scroll max-h-[72vh]">
-    <table class="tbl">
-      <thead><tr><th>Time</th><th>Broker</th><th>Strategy</th><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Price</th><th class="r">Stop loss</th><th class="r">Take profit</th><th>Status</th><th>Exchange id</th><th>Client order id</th><th>Error</th></tr></thead>
-      <tbody id="orders"></tbody>
-    </table>
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th>Time</th><th>Broker</th><th>Strategy</th><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Price</th><th class="r">Stop loss</th><th class="r">Take profit</th><th>Status</th><th>Exchange id</th><th>Client order id</th><th>Error</th></tr></thead>
+        <tbody id="orders"></tbody>
+      </table>
+    </div>
   </div>
 </section>
 {% endblock %}

@@ -6,7 +6,12 @@
           this EMA9, and EMA9 < EMA15
 
 The order goes in right after the signal candle closes, i.e. at the next candle's open.
-Stop loss and take profit come from Settings.
+
+The stop goes where the setup would be wrong: just beyond the pullback that produced the signal —
+the lowest low of the last `swing` bars for a buy, the highest high for a sell — and never nearer
+than the EMA15 the trend filter is built on, with an ATR buffer so it sits outside the wick rather
+than on it. The target is `reward` times that distance. A fixed percentage would be a different
+trade at every volatility, and would ignore the level the idea actually rests on.
 
 Backtest on Delta BTCUSD/ETHUSD, Feb - Oct 2026, 5m/15m/1h, fees and slippage 0.07% a side:
 the bare rule loses everywhere; the EMA15 filter is what turns it towards break-even, and 15m
@@ -17,17 +22,25 @@ it on paper. Requiring the close (not only the high) beyond EMA9 made it worse o
 from __future__ import annotations
 
 from tradebuddy.strategies.base import Context, Signal, Strategy
-from tradebuddy.strategies.indicators import ema
+from tradebuddy.strategies.indicators import atr, ema
+from tradebuddy.strategies.levels import from_stop
 
 
 class Ema9Ema15(Strategy):
     name = "ema_9_15_15m"
+    version = 2  # the stop moved from Settings' fixed percentage to the pullback it trades
     interval = "15m"
     symbols = ("BTCUSD", "ETHUSD")
     lookback = 100
+    is_default_sl_tp = False  # it sets its own levels
 
     fast = 9
     trend = 15
+    swing = 5  # bars of the pullback the stop goes beyond
+    atr_period = 14
+    atr_buffer_mult = 0.5  # clearance past the wick, so the stop is not sitting on it
+    min_atr_mult = 1.0
+    reward = 2.0
 
     async def on_candle(self, ctx: Context) -> Signal | None:
         bars = ctx.candles
@@ -37,7 +50,25 @@ class Ema9Ema15(Strategy):
             return None
         prev, last = bars[-2], bars[-1]
         if prev.high < fast[-2] and last.high > fast[-1] and fast[-1] > trend[-1]:
-            return Signal("buy", f"high {last.high:.2f} back above EMA{self.fast} {fast[-1]:.2f} (prev high {prev.high:.2f} < {fast[-2]:.2f}); EMA{self.fast} > EMA{self.trend} {trend[-1]:.2f}")
-        if prev.low > fast[-2] and last.low < fast[-1] and fast[-1] < trend[-1]:
-            return Signal("sell", f"low {last.low:.2f} back below EMA{self.fast} {fast[-1]:.2f} (prev low {prev.low:.2f} > {fast[-2]:.2f}); EMA{self.fast} < EMA{self.trend} {trend[-1]:.2f}")
-        return None
+            side = "buy"
+            what = (f"high {last.high:.2f} back above EMA{self.fast} {fast[-1]:.2f} (prev high {prev.high:.2f} < {fast[-2]:.2f}); "
+                    f"EMA{self.fast} > EMA{self.trend} {trend[-1]:.2f}")
+        elif prev.low > fast[-2] and last.low < fast[-1] and fast[-1] < trend[-1]:
+            side = "sell"
+            what = (f"low {last.low:.2f} back below EMA{self.fast} {fast[-1]:.2f} (prev low {prev.low:.2f} > {fast[-2]:.2f}); "
+                    f"EMA{self.fast} < EMA{self.trend} {trend[-1]:.2f}")
+        else:
+            return None
+
+        band = atr([c.high for c in bars], [c.low for c in bars], closes, self.atr_period)
+        if not band:
+            return None
+        price, buffer = closes[-1], self.atr_buffer_mult * band[-1]
+        swing = bars[-self.swing:]
+        beyond = min(min(c.low for c in swing), trend[-1]) if side == "buy" else max(max(c.high for c in swing), trend[-1])
+        stop = beyond - buffer if side == "buy" else beyond + buffer
+        levels = from_stop(side, price, stop, self.reward, floor_pct=self.min_atr_mult * 100 * band[-1] / price)
+        if levels is None:
+            return None
+        sl_pct, tp_pct = levels
+        return Signal(side, f"{what}; stop past the pullback at {stop:.2f} ({sl_pct:.2f}%), target {tp_pct:.2f}%", sl_pct, tp_pct)

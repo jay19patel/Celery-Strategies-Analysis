@@ -251,8 +251,9 @@ async def test_the_engine_sends_stored_options_history_with_the_job(cfg, exchang
         cfg, strategies=[ReadsOptions(), AlwaysBuy()], stream_factory=IdleStream, client_factory=exchange.client,
         evaluator=lambda _s: CeleryEvaluator(FakeCelery()), local_feed=False, role="engine",
     )
-    system.store.record_options({"underlying": "BTC", "ts": BAR - 3600, "pcr_oi": 1.0})
-    system.store.record_options({"underlying": "BTC", "ts": BAR, "pcr_oi": 1.4})
+    quarter = BAR // 900 * 900  # only rows on a 15-minute boundary are kept for good
+    system.store.record_options({"underlying": "BTC", "ts": quarter - 3600, "pcr_oi": 1.0})
+    system.store.record_options({"underlying": "BTC", "ts": quarter, "pcr_oi": 1.4})
     jobs = [make_job(s, CandleClosed(symbol="BTCUSD", resolution="1m", bar_time=BAR, source="clock"), {}, "demo", system.runner.options_history)
             for s in system.strategies]
     asks, others = [j for j in jobs if j["strategy"] == "reads_options"], [j for j in jobs if j["strategy"] == "always_buy"]
