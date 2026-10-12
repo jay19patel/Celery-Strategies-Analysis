@@ -120,8 +120,9 @@
         <label class="switch sm"><input type="checkbox" id="options_auto_enabled"><span class="track"></span></label>
       </div>
       <div class="card-body space-y-4">
-        <div class="grid grid-cols-3 gap-3">
-          <div><label class="field-label" for="options_auto_qty">Contracts / leg</label><input id="options_auto_qty" type="number" min="1" max="100" step="1" class="input w-full mt-1 font-mono"></div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div><label class="field-label" for="options_auto_risk_pct">Risk %</label><input id="options_auto_risk_pct" type="number" min="0.05" max="10" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">Max loss as % of equity.</div></div>
+          <div><label class="field-label" for="options_auto_qty">Max contracts / leg</label><input id="options_auto_qty" type="number" min="1" max="100" step="1" class="input w-full mt-1 font-mono"><div class="field-help">Ceiling on the size above.</div></div>
           <div><label class="field-label" for="options_auto_sl_pct">Stop loss %</label><input id="options_auto_sl_pct" type="number" min="5" max="100" step="1" class="input w-full mt-1 font-mono"></div>
           <div><label class="field-label" for="options_auto_tp_pct">Target %</label><input id="options_auto_tp_pct" type="number" min="5" max="500" step="1" class="input w-full mt-1 font-mono"></div>
         </div>
@@ -176,10 +177,24 @@
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
     <section class="card">
       <div class="card-head"><div class="card-title"><i data-lucide="shield-check"></i>Risk <span class="card-sub">every entry, both brokers</span></div></div>
-      <div class="card-body grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div><label class="field-label" for="stop_loss_pct">Stop loss %</label><input id="stop_loss_pct" name="stop_loss_pct" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">From entry price, for strategies on default levels (is_default_sl_tp). TB Master and mother candle set their own.</div></div>
-        <div><label class="field-label" for="take_profit_pct">Take profit %</label><input id="take_profit_pct" name="take_profit_pct" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">From entry price, for strategies on default levels.</div></div>
-        <div><label class="field-label" for="trade_margin_pct">Trade Margin %</label><input id="trade_margin_pct" name="trade_margin_pct" type="number" step="1.0" class="input w-full mt-1 font-mono"><div class="field-help">% of available balance to use per trade. (1-100)</div></div>
+      <div class="card-body space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div><label class="field-label" for="risk_per_trade_pct">Risk / trade %</label><input id="risk_per_trade_pct" name="risk_per_trade_pct" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">What a stop costs, as % of equity. The size follows from it: a wider stop buys a smaller position, so every trade risks the same. (0.05–10)</div></div>
+          <div><label class="field-label" for="trade_margin_pct">Margin ceiling %</label><input id="trade_margin_pct" name="trade_margin_pct" type="number" step="1.0" class="input w-full mt-1 font-mono"><div class="field-help">Never more than this % of available margin in one trade, whatever the risk calculation says. (1–100)</div></div>
+          <div><label class="field-label" for="min_edge_multiple">Minimum edge ×</label><input id="min_edge_multiple" name="min_edge_multiple" type="number" step="0.5" class="input w-full mt-1 font-mono"><div class="field-help">The target must be at least this many round trips (fees + slippage, both ways) away, or the entry is refused. 0 = off.</div></div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div><label class="field-label" for="stop_loss_pct">Stop loss %</label><input id="stop_loss_pct" name="stop_loss_pct" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">From entry price, for strategies on default levels (is_default_sl_tp). TB Master and mother candle set their own.</div></div>
+          <div><label class="field-label" for="take_profit_pct">Take profit %</label><input id="take_profit_pct" name="take_profit_pct" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">From entry price, for strategies on default levels.</div></div>
+          <div class="flex flex-col justify-center">
+            <label class="flex items-center gap-2 text-[13px]"><span class="switch sm"><input type="checkbox" id="atr_protection" name="atr_protection"><span class="track"></span></span>Scale with volatility (ATR)</label>
+            <div class="field-help mt-1">On: the stop and target are multiples of the symbol's ATR, clamped to the two percentages above. Off, or with no fresh ATR, the percentages apply as they are.</div>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div><label class="field-label" for="atr_stop_mult">Stop × ATR</label><input id="atr_stop_mult" name="atr_stop_mult" type="number" step="0.1" class="input w-full mt-1 font-mono"><div class="field-help">(0.5–10)</div></div>
+          <div><label class="field-label" for="atr_target_mult">Target × ATR</label><input id="atr_target_mult" name="atr_target_mult" type="number" step="0.1" class="input w-full mt-1 font-mono"><div class="field-help">(0.5–20)</div></div>
+        </div>
       </div>
     </section>
 
@@ -284,9 +299,10 @@
 (() => {
   const { $, esc, money } = TB;
   const PHRASE = {{ live_phrase | tojson }};
-  const NUMBERS = ["stop_loss_pct", "take_profit_pct", "trade_margin_pct", "paper_starting_balance", "paper_leverage", "paper_fee_pct", "paper_slippage_pct", "paper_max_hold_hours",
+  const NUMBERS = ["stop_loss_pct", "take_profit_pct", "trade_margin_pct", "risk_per_trade_pct", "min_edge_multiple", "atr_stop_mult", "atr_target_mult",
+    "paper_starting_balance", "paper_leverage", "paper_fee_pct", "paper_slippage_pct", "paper_max_hold_hours",
     "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct", "email_smtp_port",
-    "options_auto_qty", "options_auto_sl_pct", "options_auto_tp_pct"];
+    "options_auto_qty", "options_auto_risk_pct", "options_auto_sl_pct", "options_auto_tp_pct"];
   const HOSTS = { demo: "demo.delta.exchange", live: "www.delta.exchange" };
   let saved = null, env = "demo";
 
@@ -297,6 +313,7 @@
     document.querySelector('input[name="delta_active"]').checked = s.delta_active;
     $("market_data").value = s.market_data;
     $("trailing_enabled").checked = s.trailing_enabled;
+    $("atr_protection").checked = s.atr_protection;
     $("ai_enabled").checked = s.ai_enabled;
     $("mistral_model").value = s.mistral_model;
     $("ai_interval_minutes").value = String(s.ai_interval_minutes);
@@ -335,7 +352,8 @@
       paper_active: true,
       delta_active: document.querySelector('input[name="delta_active"]').checked,
       delta_env: env, market_data: $("market_data").value,
-      trailing_enabled: $("trailing_enabled").checked, day_timezone: $("day_timezone").value,
+      trailing_enabled: $("trailing_enabled").checked, atr_protection: $("atr_protection").checked,
+      day_timezone: $("day_timezone").value,
       ai_enabled: $("ai_enabled").checked, mistral_model: $("mistral_model").value.trim(),
       ai_interval_minutes: Number($("ai_interval_minutes").value), ai_share_account: $("ai_share_account").checked,
       options_auto_enabled: $("options_auto_enabled").checked,

@@ -85,3 +85,13 @@ class Broker(Protocol):
     async def size_for_margin(self, symbol: str, price: float, margin: float) -> int:
         """Whole contracts that `margin` pays for at `price`; 0 when it buys none. Raises BrokerError when it cannot tell."""
         ...
+
+    async def size_for_notional(self, symbol: str, price: float, notional: float) -> int:
+        """Whole contracts worth `notional` USD at `price`, whatever the leverage; 0 when it buys none.
+        This is how a position is sized from what its stop would cost. Raises BrokerError when it cannot tell."""
+        ...
+
+    def round_trip_cost_pct(self) -> float:
+        """What opening and closing costs, as a % of the notional: fees and slippage, both ways.
+        The Trader refuses a target that cannot cover a few of these."""
+        ...

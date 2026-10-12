@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -12,6 +12,8 @@ from tradebuddy import codec
 from tradebuddy.api import Api, ApiError, RemoteApi
 from tradebuddy.delta import Candle
 from tradebuddy.events import CandleClosed, FeedHeartbeat, SettingsChanged, StrategyEvaluated, Tick
+from tradebuddy.runner import make_job
+from tradebuddy.strategies import Context, Signal, Strategy
 from tradebuddy.system import RemoteFeed, System
 from tradebuddy.transport import Publisher, ResultPuller, ResultPusher, RpcClient, RpcError, RpcServer, subscribe
 from tradebuddy.worker import TASK, CeleryEvaluator, run_job
@@ -225,3 +227,51 @@ async def test_remote_feed_goes_stale_without_heartbeats():
     assert feed.status()["connected"] is True
     feed.updated_at -= 60
     assert feed.status()["connected"] is False and "no heartbeat" in feed.status()["last_error"]
+
+
+# -- options history travels with the job --------------------------------------------
+
+
+class ReadsOptions(Strategy):
+    name = "reads_options"
+    interval = "1m"
+    symbols = ("BTCUSD",)
+    options_history_hours = 8.0
+    seen: ClassVar[list] = []
+
+    async def on_candle(self, ctx: Context) -> Signal | None:
+        ReadsOptions.seen.append(await ctx.market.option_history("BTC", self.options_history_hours))
+        return None
+
+
+async def test_the_engine_sends_stored_options_history_with_the_job(cfg, exchange):
+    """A worker has no database, so a strategy comparing the options market with where it was gets
+    the engine's rows in the job. Anything it kept in memory instead would differ per worker."""
+    system = System(
+        cfg, strategies=[ReadsOptions(), AlwaysBuy()], stream_factory=IdleStream, client_factory=exchange.client,
+        evaluator=lambda _s: CeleryEvaluator(FakeCelery()), local_feed=False, role="engine",
+    )
+    system.store.record_options({"underlying": "BTC", "ts": BAR - 3600, "pcr_oi": 1.0})
+    system.store.record_options({"underlying": "BTC", "ts": BAR, "pcr_oi": 1.4})
+    jobs = [make_job(s, CandleClosed(symbol="BTCUSD", resolution="1m", bar_time=BAR, source="clock"), {}, "demo", system.runner.options_history)
+            for s in system.strategies]
+    asks, others = [j for j in jobs if j["strategy"] == "reads_options"], [j for j in jobs if j["strategy"] == "always_buy"]
+    assert [r["pcr_oi"] for r in asks[0]["options_history"]] == [1.0, 1.4]
+    assert "options_history" not in others[0]  # only a strategy that asks for it pays for it
+
+
+async def test_the_worker_serves_the_history_from_the_job(exchange):
+    rows = [{"ts": BAR - 7200, "pcr_oi": 0.9}, {"ts": BAR, "pcr_oi": 1.3}]
+    job = {"strategy": "reads_options", "version": 1, "symbol": "BTCUSD", "resolution": "1m", "bar_time": BAR,
+           "candle": None, "data_env": "demo", "prices": {}, "options_history": rows}
+    ReadsOptions.seen.clear()
+    assert (await run_job(job, exchange.client, {"reads_options": ReadsOptions()})).error == ""
+    assert ReadsOptions.seen == [rows]
+
+
+async def test_a_worker_without_history_in_the_job_sees_none(exchange):
+    job = {"strategy": "reads_options", "version": 1, "symbol": "BTCUSD", "resolution": "1m", "bar_time": BAR,
+           "candle": None, "data_env": "demo", "prices": {}}
+    ReadsOptions.seen.clear()
+    assert (await run_job(job, exchange.client, {"reads_options": ReadsOptions()})).error == ""
+    assert ReadsOptions.seen == [[]]

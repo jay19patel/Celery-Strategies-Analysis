@@ -22,6 +22,7 @@ import httpx
 log = logging.getLogger(__name__)
 
 API = "https://api.mistral.ai/v1"
+RAW_KEPT = 4000  # characters of a failed answer stored with the attempt, so a failure can be read back
 
 
 @dataclass
@@ -30,6 +31,8 @@ class MistralError(Exception):
     status: int | None = None
     retry_after: float | None = None  # seconds, when Mistral said
     limits: dict[str, str] = field(default_factory=dict)
+    raw: str = ""  # what the model actually wrote, when it answered but not in the shape asked for
+    finish_reason: str = ""  # "length" means the answer was cut off at max_tokens
 
     def __str__(self) -> str:
         return self.message
@@ -37,6 +40,11 @@ class MistralError(Exception):
     @property
     def rate_limited(self) -> bool:
         return self.status == 429
+
+    @property
+    def truncated(self) -> bool:
+        """The model ran out of output budget mid-answer. Retrying with a bigger one can fix it."""
+        return self.finish_reason == "length"
 
 
 def limit_headers(res: httpx.Response) -> dict[str, str]:
@@ -93,14 +101,23 @@ async def complete(
             await http.aclose()
     if res.status_code != 200:
         raise _error(res)
+    content, finish = "", ""
     try:
         body = res.json()
-        content = body["choices"][0]["message"]["content"]
+        choice = body["choices"][0]
+        content = choice["message"]["content"] or ""
+        finish = str(choice.get("finish_reason") or "")
         answer = json.loads(content[content.find("{") : content.rfind("}") + 1])  # small models sometimes wrap JSON in prose
     except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise MistralError("Mistral's answer was not the JSON asked for", res.status_code, limits=limit_headers(res)) from exc
+        # Keep what it wrote: without it, a parse failure says nothing about why.
+        why = "the answer was cut off at max_tokens" if finish == "length" else "it was not the JSON asked for"
+        raise MistralError(
+            f"Mistral answered, but {why}", res.status_code, limits=limit_headers(res), raw=content[:RAW_KEPT], finish_reason=finish,
+        ) from exc
     if not isinstance(answer, dict):
-        raise MistralError("Mistral's answer was not a JSON object", res.status_code, limits=limit_headers(res))
+        raise MistralError(
+            "Mistral's answer was not a JSON object", res.status_code, limits=limit_headers(res), raw=content[:RAW_KEPT], finish_reason=finish,
+        )
     meta = {"model": body.get("model", model), "usage": body.get("usage", {}), "ms": round(1000 * (time.perf_counter() - started)), "limits": limit_headers(res)}
     return answer, meta
 

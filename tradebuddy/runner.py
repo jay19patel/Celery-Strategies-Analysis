@@ -38,12 +38,23 @@ class Prices(Protocol):
     def price(self, symbol: str) -> float | None: ...
 
 
-class MarketData:
-    """What a strategy can read: live prices, history and options from REST."""
+OPTIONS_HISTORY_STEP = 900  # the 15-minute rows options_history keeps for good
 
-    def __init__(self, delta: DeltaClient, prices: Prices) -> None:
+
+class MarketData:
+    """What a strategy can read: live prices, history and options from REST, plus the options numbers
+    the engine has recorded. `options` is the engine's store (a callable) or, on a worker, the rows the
+    engine sent with the job — a worker has no database, and strategy state cannot live in a worker."""
+
+    def __init__(self, delta: DeltaClient, prices: Prices, options: Callable[[str, float], list[dict[str, Any]]] | None = None) -> None:
         self.delta = delta
         self.prices = prices
+        self.options = options
+
+    async def option_history(self, underlying: str, hours: float) -> list[dict[str, Any]]:
+        if self.options is None or hours <= 0:
+            return []
+        return await asyncio.to_thread(self.options, underlying, time.time() - hours * 3600)
 
     def price(self, symbol: str) -> float | None:
         return self.prices.price(symbol)
@@ -61,9 +72,13 @@ class MarketData:
         return summarize(underlying, await self.delta.option_tickers(underlying), None)
 
 
-def make_job(strategy: Strategy, event: CandleClosed, prices: dict[str, float], data_env: str) -> dict[str, Any]:
-    """Everything a worker needs, as plain JSON."""
-    return {
+def make_job(
+    strategy: Strategy, event: CandleClosed, prices: dict[str, float], data_env: str,
+    options_history: Callable[[str, float], list[dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    """Everything a worker needs, as plain JSON. A strategy that asks for options history gets the
+    engine's stored rows for this symbol's underlying in the job: the worker has no database."""
+    job = {
         "strategy": strategy.name,
         "version": strategy.version,
         "symbol": event.symbol,
@@ -74,6 +89,9 @@ def make_job(strategy: Strategy, event: CandleClosed, prices: dict[str, float], 
         "prices": prices,
         "dispatched_at": time.time(),
     }
+    if strategy.options_history_hours and options_history is not None:
+        job["options_history"] = options_history(event.symbol, strategy.options_history_hours)
+    return job
 
 
 async def evaluate(strategy: Strategy, job: dict[str, Any], market: Any, worker: str = "inline", timeout: float = 20.0) -> StrategyEvaluated:
@@ -181,6 +199,7 @@ class StrategyRunner:
     def __init__(
         self, bus: EventBus, store: Store, strategies: list[Strategy], evaluator: Evaluator,
         prices: Callable[[], dict[str, float]], data_env: Callable[[], str],
+        options_history: Callable[[str, float], list[dict[str, Any]]] | None = None,
     ) -> None:
         self.bus = bus
         self.store = store
@@ -189,6 +208,7 @@ class StrategyRunner:
         self.evaluator = evaluator
         self.prices = prices
         self.data_env = data_env
+        self.options_history = options_history  # (symbol, hours) -> stored options rows, for the job
         self.stats: dict[str, _Stats] = {s.name: _Stats() for s in strategies}
         self._paused: set[tuple[str, str]] = set()  # (strategy, symbol) waiting for prices to return
 
@@ -208,7 +228,7 @@ class StrategyRunner:
                     log.info("strategy_resumed strategy=%s symbol=%s", s.name, event.symbol)
                 stats.in_flight += 1
                 try:
-                    await self.evaluator.submit(s, make_job(s, event, prices, self.data_env()))
+                    await self.evaluator.submit(s, make_job(s, event, prices, self.data_env(), self.options_history))
                 except Exception as exc:
                     stats.in_flight -= 1
                     stats.errors += 1

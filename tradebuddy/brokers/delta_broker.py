@@ -9,6 +9,11 @@ from tradebuddy.brokers.base import Account, Position, protection_error
 from tradebuddy.delta import DeltaClient
 from tradebuddy.errors import BrokerError
 
+# Delta Exchange India futures, taker side (help centre, "Fees on options and futures trading").
+# Entries are market orders, so taker both ways. Slippage is an allowance, not a quoted number.
+TAKER_FEE_PCT = 0.05
+SLIPPAGE_PCT = 0.02
+
 
 def _num(value: Any, default: float = 0.0) -> float:
     try:
@@ -129,3 +134,13 @@ class DeltaBroker:
             raise BrokerError(f"delta: no contract value for {symbol}")
         leverage = await self.client.order_leverage(product["id"])
         return max(0, int((margin * leverage) / (price * cv)))
+
+    async def size_for_notional(self, symbol: str, price: float, notional: float) -> int:
+        product = await self.client.product(symbol)
+        cv = float(product.get("contract_value") or 0)
+        if cv <= 0 or price <= 0:
+            raise BrokerError(f"delta: no contract value for {symbol}")
+        return max(0, int(notional / (price * cv)))
+
+    def round_trip_cost_pct(self) -> float:
+        return 2 * (TAKER_FEE_PCT + SLIPPAGE_PCT)

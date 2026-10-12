@@ -32,6 +32,12 @@ class Market(Protocol):
     async def candles(self, symbol: str, resolution: str, count: int) -> list[Candle]: ...
     async def option_chain(self, underlying: str) -> list[OptionQuote]: ...
     async def option_summary(self, underlying: str) -> dict[str, Any] | None: ...
+    async def option_history(self, underlying: str, hours: float) -> list[dict[str, Any]]:
+        """The options numbers the engine has recorded for this underlying over the last `hours`,
+        oldest first (options_history: ATM IV, skew, put/call, OI, max pain). Empty unless the
+        strategy sets `options_history_hours`: the exchange keeps no history, so only what the
+        engine has stored since it started running exists."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -51,6 +57,10 @@ class Strategy(ABC):
     size: ClassVar[int] = 1  # contracts per trade
     lookback: ClassVar[int] = 0  # closed candles handed to on_candle
     is_default_sl_tp: ClassVar[bool] = True  # True: Settings' stop loss and take profit; False: the Signal's own
+    # Hours of stored options numbers to hand to on_candle through market.option_history. The engine
+    # reads them once and sends them with the job, so a strategy that compares the options market with
+    # where it was keeps no state of its own and gives the same answer on any worker.
+    options_history_hours: ClassVar[float] = 0.0
 
     @abstractmethod
     async def on_candle(self, ctx: Context) -> Signal | None: ...

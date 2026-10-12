@@ -80,8 +80,15 @@ async def run_job(job: dict[str, Any], client_factory=DeltaClient, registry: dic
             dispatched_at=job.get("dispatched_at", 0.0),
         )
     client = client_factory(ENVIRONMENTS[job["data_env"]][0])
+    rows = job.get("options_history") or []
+
+    def options(_underlying: str, since: float) -> list[dict[str, Any]]:
+        """The engine read these for this job's symbol; a worker has no database of its own."""
+        return [r for r in rows if float(r.get("ts") or 0) >= since]
+
     try:
-        return await evaluate(strategy, job, MarketData(client, SnapshotPrices(job.get("prices") or {})), worker=worker_name())
+        market = MarketData(client, SnapshotPrices(job.get("prices") or {}), options)
+        return await evaluate(strategy, job, market, worker=worker_name())
     finally:
         await client.aclose()
 

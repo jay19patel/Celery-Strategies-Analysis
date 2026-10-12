@@ -35,6 +35,10 @@ from tradebuddy.settings import Settings
 log = logging.getLogger(__name__)
 
 HISTORY_BARS = 700  # 7 days of 15m bars plus room: 7-day realised vol, EMA200, the forecaster's 4-day vol
+# The TB-AI schema (4 sections plus a review per symbol) does not fit in 1600 tokens: a small model
+# overruns it about half the time and the cut-off answer is not JSON. One cut-off answer is asked for
+# again with twice this; a second failure is recorded with what the model wrote.
+AI_MAX_TOKENS = 3000
 
 
 class Analyst:
@@ -174,8 +178,18 @@ class Analyst:
                 digest = {"error": f"engine digest unavailable: {exc}"[:200]}
         body = tbai.payload(digest, {sym: self._brief(r) for sym, r in results.items()})
         self.ai_calls += 1
+        attempts = 0
         try:
-            answer, meta = await complete(s.mistral_api_key, s.mistral_model, tbai.SYSTEM, body, max_tokens=1600, http=self.http)
+            for budget in (AI_MAX_TOKENS, AI_MAX_TOKENS * 2):
+                attempts += 1
+                try:
+                    answer, meta = await complete(s.mistral_api_key, s.mistral_model, tbai.SYSTEM, body, max_tokens=budget, http=self.http)
+                    break
+                except MistralError as exc:
+                    # A cut-off answer is worth asking for once more with twice the budget; nothing else is.
+                    if not exc.truncated or budget != AI_MAX_TOKENS:
+                        raise
+                    log.info("tbai_truncated retrying with max_tokens=%d", AI_MAX_TOKENS * 2)
         except MistralError as exc:
             self.ai_errors += 1
             self.last_error = str(exc)
@@ -184,9 +198,10 @@ class Analyst:
                 # Wait as long as Mistral asks, and never less than a backoff that doubles 5 -> 10 -> 20 -> 40 -> 60 min.
                 self.ai_backoff = min(3600.0, max(300.0, self.ai_backoff * 2))
                 self.ai_paused_until = now + max(exc.retry_after or 0.0, self.ai_backoff)
-            log.warning("tbai_failed status=%s error=%s paused_until=%s", exc.status, exc, self.ai_paused_until)
+            log.warning("tbai_failed status=%s finish=%s error=%s paused_until=%s", exc.status, exc.finish_reason, exc, self.ai_paused_until)
             self.publish(AIReport(
                 ok=False, model=s.mistral_model, error=str(exc), status=exc.status, limits=exc.limits,
+                raw=exc.raw, finish_reason=exc.finish_reason, attempts=attempts,
                 paused_until=self.ai_paused_until if exc.rate_limited else None, shared_account=s.ai_share_account,
             ))
             return self._stale_reviews()
@@ -194,7 +209,8 @@ class Analyst:
         self.ai_limits, self.ai_last_ok_at = meta["limits"], now
         report = tbai.clean(answer, list(results))
         self.publish(AIReport(
-            ok=True, model=meta["model"], report=report, limits=meta["limits"], usage=meta["usage"], ms=meta["ms"], shared_account=s.ai_share_account,
+            ok=True, model=meta["model"], report=report, limits=meta["limits"], usage=meta["usage"], ms=meta["ms"],
+            attempts=attempts, shared_account=s.ai_share_account,
         ))
         self._ai_symbols = {sym: {**review, "model": meta["model"], "at": now} for sym, review in report["symbols"].items()}
         return self._ai_symbols

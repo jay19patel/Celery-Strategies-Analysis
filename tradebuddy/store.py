@@ -60,7 +60,11 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     stop_loss         REAL,
     take_profit       REAL,
     liquidation_price REAL NOT NULL,
-    opened_at         REAL NOT NULL
+    opened_at         REAL NOT NULL,
+    -- How far the trade went the wrong way and the right way while it was open, as % of the entry.
+    -- Without these, a losing trade cannot say whether the signal was wrong or the stop was too tight.
+    mae_pct           REAL NOT NULL DEFAULT 0,
+    mfe_pct           REAL NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS paper_trades (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,7 +83,9 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     pnl             REAL NOT NULL,
     reason          TEXT NOT NULL,
     opened_at       REAL NOT NULL,
-    closed_at       REAL NOT NULL
+    closed_at       REAL NOT NULL,
+    mae_pct         REAL NOT NULL DEFAULT 0,   -- worst excursion against the trade, % of entry
+    mfe_pct         REAL NOT NULL DEFAULT 0    -- best excursion in its favour, % of entry
 );
 -- Open paper option structures (straddle, condor, ...). A close moves the structure to paper_trades.
 CREATE TABLE IF NOT EXISTS paper_structures (
@@ -217,6 +223,13 @@ class Store:
         if "broker" not in columns:
             self.db.execute("ALTER TABLE orders ADD COLUMN broker TEXT NOT NULL DEFAULT 'delta'")
         self.db.execute("CREATE INDEX IF NOT EXISTS orders_symbol_status ON orders(broker, symbol, status)")
+        # Databases created before trades recorded how far they went either way. Rows already closed
+        # keep 0: the excursions were never measured and cannot be reconstructed.
+        for table in ("paper_positions", "paper_trades"):
+            existing = {r["name"] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            for column in ("mae_pct", "mfe_pct"):
+                if column not in existing:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} REAL NOT NULL DEFAULT 0")
 
     def _backfill_ai_reports(self) -> None:
         # Reports written before the ai_reports table existed live only in the event log: copy them once.

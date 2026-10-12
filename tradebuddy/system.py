@@ -40,7 +40,7 @@ from tradebuddy.events import (
 from tradebuddy.guard import PositionGuard
 from tradebuddy.jobs import Jobs
 from tradebuddy.options import UNDERLYINGS, OptionsBook, OptionsFeed, history_row
-from tradebuddy.runner import Evaluator, InlineEvaluator, MarketData, StrategyRunner, pair_key, strategy_key
+from tradebuddy.runner import OPTIONS_HISTORY_STEP, Evaluator, InlineEvaluator, MarketData, StrategyRunner, pair_key, strategy_key
 from tradebuddy.settings import (
     BROKERS,
     DELTA_ROUTING_FIELDS,
@@ -55,7 +55,7 @@ from tradebuddy.settings import (
 from tradebuddy.store import Store
 from tradebuddy.strategies import Strategy, discover
 from tradebuddy.stream import BarCloser, DeltaStream, PriceBook
-from tradebuddy.trading import AUTO_EVERY, TRADING_DEFAULT, AutoStructures, Executor, Trader, trading_key
+from tradebuddy.trading import AUTO_EVERY, TRADING_DEFAULT, AutoStructures, Executor, Trader, atr_pct_from, trading_key
 
 log = logging.getLogger(__name__)
 
@@ -230,16 +230,20 @@ class System:
         self.delta = DeltaBroker(self.delta_client)
         self.brokers: dict[str, Broker] = {"paper": self.paper, "delta": self.delta}
 
-        self.market = MarketData(self.market_client, self.prices)
+        self.market = MarketData(self.market_client, self.prices, self.options_since)
         self.evaluator: Evaluator = evaluator(self) if evaluator else InlineEvaluator(self.bus, self.market)
         self.runner = StrategyRunner(
             self.bus, self.store, self.strategies, self.evaluator,
             prices=lambda: {sym: p["price"] for sym, p in self.prices.snapshot().items() if p["fresh"]},
             data_env=lambda: self.settings.data_env,
+            options_history=lambda symbol, hours: self.options_since(UNDERLYINGS.get(symbol, symbol), time.time() - hours * 3600),
         )
         self.protection_lock = asyncio.Lock()  # one SL/TP change at a time: guard trails and manual edits
         self.guard = PositionGuard(self.bus, self.store, self.brokers, lambda: self.settings, self.tick_size, self.protection_lock)
-        self.trader = Trader(self.bus, self.store, self.brokers, self.prices, lambda: self.settings, self.guard.halt_reason)
+        self.trader = Trader(
+            self.bus, self.store, self.brokers, self.prices, lambda: self.settings, self.guard.halt_reason,
+            volatility=self.atr_pct,
+        )
         self.executor = Executor(self.bus, self.store, self.brokers)
 
         self.bus.subscribe(self.prices.on_tick, Tick)
@@ -394,6 +398,16 @@ class System:
 
     async def on_analysis(self, e: MarketAnalysis) -> None:
         self.analysis_latest[e.symbol] = e.to_dict()
+
+    def options_since(self, underlying: str, since: float) -> list[dict[str, Any]]:
+        """The 15-minute options rows kept for good, from `since` on. What a strategy compares the
+        options market with: the exchange keeps no history, so this is all there is."""
+        return self.store.options_history(underlying, since, OPTIONS_HISTORY_STEP)
+
+    def atr_pct(self, symbol: str) -> float | None:
+        """How far this symbol typically moves in a bar, as a % of price, for the Trader's stop and
+        target. The analyst's latest market context, while it is recent enough to still describe now."""
+        return atr_pct_from(self.analysis_latest.get(symbol), time.time())
 
     def market_status(self) -> dict[str, Any]:
         """Is there live market data for every symbol a strategy trades? Without it strategies are

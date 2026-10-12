@@ -12,7 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from tradebuddy import structures
-from tradebuddy.brokers import Broker
+from tradebuddy.brokers import Account, Broker
 from tradebuddy.brokers.base import protection_error
 from tradebuddy.errors import BrokerError, BrokerTimeout
 from tradebuddy.events import (
@@ -27,7 +27,7 @@ from tradebuddy.events import (
 )
 from tradebuddy.jobs import NULL_JOB
 from tradebuddy.runner import pair_key, strategy_key
-from tradebuddy.settings import Settings
+from tradebuddy.settings import RANGES, Settings
 from tradebuddy.store import ACTIVE_STATUSES, Store
 from tradebuddy.stream import PriceBook
 
@@ -55,6 +55,18 @@ def client_order_id(broker: str, strategy: str, symbol: str, bar_time: int) -> s
 MANUAL = "manual"  # the strategy name orders placed from the dashboard are recorded under
 STRUCTURE_BROKERS = ("paper",)  # brokers that can hold option structures
 
+# A market context older than this says nothing about the volatility now, so the fixed percentages
+# apply instead (invariant 8: absence over staleness).
+ATR_MAX_AGE = 1800.0
+
+
+def atr_pct_from(analysis: dict[str, Any] | None, now: float, max_age: float = ATR_MAX_AGE) -> float | None:
+    """The ATR%, as a % of price, in a recent enough MarketAnalysis; None when there is none."""
+    if not analysis or now - float(analysis.get("ts") or 0.0) > max_age:
+        return None
+    atr = (analysis.get("context") or {}).get("atr_pct")
+    return float(atr) if isinstance(atr, int | float) and not isinstance(atr, bool) and atr > 0 else None
+
 
 def manual_order_id(broker: str, request_id: str) -> str:
     """The dashboard sends one request_id per order ticket, so a retried or double-clicked submit is one order."""
@@ -76,6 +88,7 @@ class Trader:
     def __init__(
         self, bus: EventBus, store: Store, brokers: dict[str, Broker], prices: PriceBook, settings: Callable[[], Settings],
         halt_reason: Callable[[str], str] = lambda _broker: "",
+        volatility: Callable[[str], float | None] = lambda _symbol: None,
     ) -> None:
         self.bus = bus
         self.halt_reason = halt_reason
@@ -83,6 +96,7 @@ class Trader:
         self.brokers = brokers
         self.prices = prices
         self.settings = settings
+        self.volatility = volatility  # symbol -> ATR as a % of price, or None when none is fresh
         # Gate -> reserve must not interleave between signals and manual orders, or both could
         # pass the "no open position" check for the same symbol.
         self._lock = asyncio.Lock()
@@ -107,18 +121,22 @@ class Trader:
 
         price = self.prices.price(e.symbol)
         assert price is not None  # checked in _blocked
-        sl_pct = e.stop_loss_pct or s.stop_loss_pct
-        tp_pct = e.take_profit_pct or s.take_profit_pct
+        sl_pct, tp_pct, _basis = self.levels(e.symbol, e.stop_loss_pct, e.take_profit_pct, s)
+        if reason := self.edge_error(broker, tp_pct, s):
+            self._skip(e, broker.name, reason)
+            return
         direction = 1 if e.side == "buy" else -1
         try:
             account = await broker.account()
-            target_margin = account.available * s.trade_margin_pct / 100.0
-            size = await broker.size_for_margin(e.symbol, price, target_margin)
+            size = await self.size_for_risk(broker, e.symbol, price, sl_pct, account, s)
         except BrokerError as exc:
             self._skip(e, broker.name, f"could not size the order: {exc}")
             return
         if size < 1:
-            self._skip(e, broker.name, f"{s.trade_margin_pct:g}% of available margin ({target_margin:.2f}) buys no whole contract")
+            self._skip(
+                e, broker.name,
+                f"risking {s.risk_per_trade_pct:g}% of {account.equity:.2f} behind a {sl_pct:.2f}% stop buys no whole contract",
+            )
             return
 
         order = {
@@ -136,6 +154,51 @@ class Trader:
             self._skip(e, broker.name, "an order for this bar was already sent")
             return
         self.bus.publish(OrderRequested(**order))
+
+    # -- how far the stop is, how big the position, and whether the trade is worth taking ----------
+
+    def levels(self, symbol: str, signal_sl: float | None, signal_tp: float | None, s: Settings) -> tuple[float, float, str]:
+        """(stop %, target %, where they came from). A strategy that sets its own levels wins; then a
+        fresh ATR, so the stop sits outside the noise in a fast market and tightens in a quiet one;
+        then Settings' fixed percentages. ATR levels are clamped to the Settings ranges."""
+        if signal_sl and signal_tp:
+            return signal_sl, signal_tp, "the strategy's own levels"
+        atr = self.volatility(symbol) if s.atr_protection else None
+        if not atr:
+            return s.stop_loss_pct, s.take_profit_pct, "Settings"
+
+        def clamp(value: float, field: str) -> float:
+            low, high = RANGES[field]
+            return min(max(value, low), high)
+
+        return (
+            clamp(atr * s.atr_stop_mult, "stop_loss_pct"),
+            clamp(atr * s.atr_target_mult, "take_profit_pct"),
+            f"ATR {atr:.3f}%",
+        )
+
+    def edge_error(self, broker: Broker, tp_pct: float, s: Settings) -> str:
+        """Why this target cannot pay for the round trip on this broker, or "". A target inside a few
+        times the fee and slippage is a losing trade whatever the signal says."""
+        if s.min_edge_multiple <= 0:
+            return ""
+        cost = broker.round_trip_cost_pct()
+        needed = cost * s.min_edge_multiple
+        if tp_pct >= needed:
+            return ""
+        return (
+            f"the {tp_pct:.2f}% target is under {s.min_edge_multiple:g}x the {cost:.3f}% round trip on "
+            f"{broker.name} ({needed:.2f}% needed): the trade cannot pay for itself"
+        )
+
+    async def size_for_risk(self, broker: Broker, symbol: str, price: float, sl_pct: float, account: Account, s: Settings) -> int:
+        """The position whose stop costs risk_per_trade_pct of equity, capped at trade_margin_pct of
+        the available margin. The stop decides the size, so every trade risks the same amount and a
+        wider stop buys a smaller position instead of a bigger loss."""
+        risk = account.equity * s.risk_per_trade_pct / 100.0
+        by_risk = await broker.size_for_notional(symbol, price, risk / (sl_pct / 100.0))
+        by_margin = await broker.size_for_margin(symbol, price, account.available * s.trade_margin_pct / 100.0)
+        return min(by_risk, by_margin)
 
     async def manual(
         self, broker: str, symbol: str, side: str, size: int | None, stop_loss: float | None, take_profit: float | None,
@@ -198,12 +261,16 @@ class Trader:
     async def manual_structure(
         self, broker: str, symbol: str, kind: str, qty: int, request_id: str, sl_pct: float = structures.DEFAULT_SL_PCT,
         tp_pct: float | None = None, expiry: float | None = None, legs: list[str] | None = None,
-        picks: list[dict[str, Any]] | None = None, strategy: str = MANUAL,
+        picks: list[dict[str, Any]] | None = None, strategy: str = MANUAL, risk_pct: float | None = None,
     ) -> dict[str, Any]:
         """An option structure from the dashboard (straddle, strangle, iron condor, spreads) on the options of
         `symbol`'s underlying. Same gate as a manual order, plus a fresh chain; the legs are rebuilt here from
         the live chain, and when they differ from `legs` (what the person reviewed) nothing is placed.
-        Paper only for now. Raises TradeRefused."""
+        Paper only for now. Raises TradeRefused.
+
+        `qty` is contracts per leg. With `risk_pct`, it is only the ceiling: the structure is sized so its
+        max loss is that % of equity, which is how a structure carries a share of the risk budget instead
+        of a fixed one or two contracts worth cents."""
 
         def refuse(reason: str) -> TradeRefused:
             self.bus.publish(TradeSkipped(strategy=strategy, symbol=symbol, side=kind, broker=broker, reason=reason))
@@ -259,6 +326,18 @@ class Trader:
                 account = await b.account()
             except BrokerError as exc:
                 raise refuse(f"could not read the account: {exc}") from exc
+
+            if risk_pct is not None:
+                # Max loss is linear in the quantity, so one build measures a lot and the rest is arithmetic.
+                per_lot = built["max_loss_usd"] / built["qty"]
+                lots = int(account.equity * risk_pct / 100.0 / per_lot) if per_lot > 0 else 0
+                sized = max(1, min(qty, lots))
+                if sized != qty:
+                    qty = sized
+                    try:
+                        built = structures.build(kind, summary, qty, cv, expiry=expiry, slippage_pct=s.paper_slippage_pct, picks=picks)
+                    except structures.StructureError as exc:
+                        raise refuse(str(exc)) from exc
 
             # One order per leg, as an exchange takes them: buys before sells, so no short leg is ever uncovered.
             orders = []
@@ -404,7 +483,8 @@ AUTO_MAX_PER_DAY = 3  # entries per symbol per trading day
 class AutoStructures:
     """Options auto-trading on paper: every minute, for each underlying with a fresh chain and nothing open,
     the structure `structures.suggest` picks from the options market (IV rank, OI, term structure) is
-    opened through the same gate as the dashboard ticket, with the small SL/TP from Settings.
+    opened through the same gate as the dashboard ticket, with the small SL/TP from Settings and sized
+    so its max loss is options_auto_risk_pct of equity (options_auto_qty contracts per leg is the ceiling).
 
     Rules only: no AI and no analyst output decides here (analysis never trades). One structure per
     underlying, a cooldown after each entry, close or refusal, and at most AUTO_MAX_PER_DAY entries a day.
@@ -474,7 +554,7 @@ class AutoStructures:
         try:
             result = await self.trader.manual_structure(
                 "paper", symbol, pick["kind"], s.options_auto_qty, request_id, s.options_auto_sl_pct, s.options_auto_tp_pct,
-                strategy=AUTO_OPTIONS,
+                strategy=AUTO_OPTIONS, risk_pct=s.options_auto_risk_pct,
             )
         except TradeRefused as exc:
             return f"refused: {exc}"

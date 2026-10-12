@@ -1,8 +1,6 @@
-from datetime import date
-
 import pytest
 
-from tradebuddy.delta import Candle, OptionQuote
+from tradebuddy.delta import Candle
 from tradebuddy.strategies import Context, discover
 from tradebuddy.strategies.ema_9_15 import Ema9Ema15
 from tradebuddy.strategies.ema_cross_15m import EmaCross15m
@@ -43,18 +41,46 @@ async def test_ema_cross_up_and_down():
     assert await s.on_candle(ctx(bars([100.0] * 60))) is None
 
 
-@pytest.mark.parametrize(("puts", "calls", "side"), [(140, 100, "buy"), (60, 100, "sell"), (100, 100, None), (5, 0, None)])
-async def test_pcr(puts, calls, side):
-    near, far = date(2026, 9, 29), date(2026, 10, 30)
+PCR_BAR = 1_700_000_000  # the bar the pcr_options tests evaluate
+
+
+def pcr_ctx(rows, bar_time=PCR_BAR):
+    """pcr_options reads the engine's stored options rows, not the live chain and not its own memory."""
     exchange = FakeExchange()
-    market = exchange.client("")
-    exchange.chain = [
-        OptionQuote("put", 90000, near, puts),
-        OptionQuote("call", 100000, near, calls),
-        OptionQuote("call", 100000, far, 10_000),  # a later expiry must not count
-    ]
-    signal = await PcrOptions().on_candle(ctx([], market))
+    exchange.options_history = rows
+    return Context("BTCUSD", "15m", bar_time, [], exchange.client(""))
+
+
+def pcr_rows(*pairs):
+    """(hours before the bar, put/call OI ratio), oldest first."""
+    return [{"ts": PCR_BAR - hours * 3600, "pcr_oi": value} for hours, value in pairs]
+
+
+@pytest.mark.parametrize(("then", "now", "side"), [(1.00, 1.30, "buy"), (1.30, 1.00, "sell"), (1.00, 1.10, None)])
+async def test_pcr_signals_on_a_shift_not_on_the_level(then, now, side):
+    rows = pcr_rows((5, then), (4, then), (0, now))
+    signal = await PcrOptions().on_candle(pcr_ctx(rows))
     assert (signal.side if signal else None) == side
+
+
+async def test_pcr_says_nothing_until_the_engine_has_recorded_the_window():
+    assert await PcrOptions().on_candle(pcr_ctx([])) is None
+    assert await PcrOptions().on_candle(pcr_ctx(pcr_rows((0, 1.3)))) is None  # one row is not a change
+    assert await PcrOptions().on_candle(pcr_ctx(pcr_rows((1, 1.0), (0, 1.5)))) is None  # window too short
+
+
+async def test_pcr_ignores_a_stale_reading():
+    """Absence over staleness: a row older than max_age does not describe the book now."""
+    stale = pcr_rows((9, 1.0), (2, 1.5))  # the latest row is two hours old
+    assert await PcrOptions().on_candle(pcr_ctx(stale)) is None
+
+
+async def test_pcr_keeps_no_state_between_bars():
+    """It runs on whichever Celery worker is free, so two instances must agree on the same job."""
+    rows = pcr_rows((5, 1.0), (0, 1.4))
+    first = await PcrOptions().on_candle(pcr_ctx(rows))
+    second = await PcrOptions().on_candle(pcr_ctx(rows))
+    assert first.side == second.side == "buy"
 
 
 def candle(i, o, h, lo, c):

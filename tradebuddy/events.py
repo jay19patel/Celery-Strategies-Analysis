@@ -125,6 +125,9 @@ class AIReport(Event):
     model: str
     report: dict[str, Any] | None = None  # tbai.clean(): headline, health, priorities, sections, symbols
     error: str = ""
+    raw: str = ""  # what the model wrote when it answered but not in the shape asked for
+    finish_reason: str = ""  # "length" = cut off at max_tokens
+    attempts: int = 1  # 2 when a cut-off answer was asked for again with a bigger budget
     status: int | None = None  # Mistral's HTTP status on failure (429 = rate limited)
     paused_until: float | None = None  # no new request before this, after a rate limit
     limits: dict[str, str] = field(default_factory=dict)  # Mistral's rate-limit headers

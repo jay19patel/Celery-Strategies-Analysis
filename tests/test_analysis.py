@@ -13,7 +13,7 @@ import httpx
 import pytest
 
 from tradebuddy import tbai
-from tradebuddy.analyst import Analyst
+from tradebuddy.analyst import AI_MAX_TOKENS, Analyst
 from tradebuddy.api import METHODS, Api
 from tradebuddy.delta import Candle
 from tradebuddy.events import AIReport, EventBus, MarketAnalysis, OptionsSnapshot
@@ -293,8 +293,22 @@ async def test_rate_limit_errors_carry_retry_after_and_limits_but_never_the_key(
     err = info.value
     assert err.rate_limited and err.retry_after == 120 and err.limits["x-ratelimit-limit-req-minute"] == "2"
     assert "secret-key" not in str(err) and "429" in str(err)
-    with pytest.raises(MistralError, match="JSON"):
+    with pytest.raises(MistralError, match="not the JSON asked for"):
         await complete("k", "m", "sys", {}, http=mistral(lambda r: httpx.Response(200, json={"choices": [{"message": {"content": "no json"}}]})))
+
+
+async def test_a_failed_answer_is_kept_so_the_failure_can_be_read_back():
+    """A parse failure that stores only "it was not JSON" teaches nothing: keep what the model wrote."""
+    cut_off = '{"headline": "Market is", "sections": {"market": {"summ'
+
+    def truncated(request):
+        return httpx.Response(200, json={"choices": [{"message": {"content": cut_off}, "finish_reason": "length"}]})
+
+    with pytest.raises(MistralError) as info:
+        await complete("k", "m", "sys", {}, http=mistral(truncated))
+    err = info.value
+    assert err.truncated and err.finish_reason == "length" and err.raw == cut_off
+    assert "cut off at max_tokens" in str(err)  # says which failure it was, not just "bad JSON"
 
 
 async def test_check_says_whether_the_model_is_available():
@@ -578,3 +592,39 @@ def test_a_model_trained_here_wins_over_the_bundled_one(tmp_path):
     assert model_path(here, "BTCUSD", bundled) == (here / "forecast_BTCUSD.joblib", "trained here")
     # the repo ships models for both symbols, with their cards
     assert {p.name for p in BUNDLED_MODELS.glob("forecast_*")} >= {f"forecast_{s}.{x}" for s in ("BTCUSD", "ETHUSD") for x in ("joblib", "json")}
+
+
+async def test_an_answer_cut_off_is_asked_for_again_with_a_bigger_budget(tmp_path):
+    """Half of TB-AI's failures in production were the answer running past max_tokens mid-object."""
+    budgets, published = [], []
+
+    def handler(request):
+        budgets.append(json.loads(request.content)["max_tokens"])
+        if len(budgets) == 1:
+            return httpx.Response(200, json={"choices": [{"message": {"content": '{"headline": "cut'}, "finish_reason": "length"}]})
+        return answer({"headline": "second time", "symbols": {"BTCUSD": {"summary": "s"}}})
+
+    settings = [apply_changes(Settings(), {"ai_enabled": True, "mistral_api_key": "mk-0123456789"})]
+    a, _ = make_analyst(tmp_path, settings, published)
+    a.http = mistral(handler)
+    results = {"BTCUSD": {"context": {}, "insights": [], "forecast": None, "playbook": None}}
+    await a._tbai(settings[0], results, now=time.time())
+    report = [e for e in published if isinstance(e, AIReport)][-1]
+    assert report.ok and report.report["headline"] == "second time" and report.attempts == 2
+    assert budgets == [AI_MAX_TOKENS, 2 * AI_MAX_TOKENS] and a.ai_errors == 0
+
+
+async def test_a_second_failure_is_recorded_with_what_the_model_wrote(tmp_path):
+    published = []
+
+    def always_cut_off(request):
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"headline": "cut'}, "finish_reason": "length"}]})
+
+    settings = [apply_changes(Settings(), {"ai_enabled": True, "mistral_api_key": "mk-0123456789"})]
+    a, _ = make_analyst(tmp_path, settings, published)
+    a.http = mistral(always_cut_off)
+    results = {"BTCUSD": {"context": {}, "insights": [], "forecast": None, "playbook": None}}
+    await a._tbai(settings[0], results, now=time.time())
+    report = [e for e in published if isinstance(e, AIReport)][-1]
+    assert not report.ok and report.attempts == 2 and report.raw == '{"headline": "cut'
+    assert report.finish_reason == "length" and report.paused_until is None  # not a rate limit: no backoff

@@ -191,7 +191,19 @@ class PaperBroker:
         size = (margin * leverage) / (price * contract_value)
         return max(0, int(size))  # a budget that buys no whole contract buys nothing
 
+    async def size_for_notional(self, symbol: str, price: float, notional: float) -> int:
+        spec = await self.specs(symbol)
+        contract_value = float(spec.get("contract_value") or 1.0)
+        if price <= 0 or contract_value <= 0:
+            raise BrokerError(f"paper: no contract value for {symbol}")
+        return max(0, int(notional / (price * contract_value)))
+
+    def round_trip_cost_pct(self) -> float:
+        s = self.settings()
+        return 2 * (s.paper_fee_pct + s.paper_slippage_pct)  # in and out, fee and slippage each way
+
     def _close(self, pos: dict[str, Any], exit_price: float, reason: str) -> None:
+        self._mark_excursion(pos, exit_price)  # the exit itself counts; the row is about to go
         gross = self._upnl(pos, exit_price)
         exit_fee = pos["size"] * pos["contract_value"] * exit_price * self.settings().paper_fee_pct / 100
         # A leveraged loss cannot exceed the margin posted.
@@ -206,10 +218,11 @@ class PaperBroker:
             )
             self.db.execute(
                 "INSERT INTO paper_trades (client_order_id, strategy, symbol, side, size, contract_value, entry_price, exit_price,"
-                " leverage, margin, gross_pnl, fees, pnl, reason, opened_at, closed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " leverage, margin, gross_pnl, fees, pnl, reason, opened_at, closed_at, mae_pct, mfe_pct)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (pos["client_order_id"], pos["strategy"], pos["symbol"], pos["side"], pos["size"], pos["contract_value"],
                  pos["entry_price"], exit_price, pos["leverage"], pos["margin"], gross, pos["entry_fee"] + exit_fee, pnl,
-                 reason, pos["opened_at"], now),
+                 reason, pos["opened_at"], now, pos["mae_pct"], pos["mfe_pct"]),
             )
         self.bus.publish(PositionUpdate(broker=self.name, symbol=pos["symbol"], size=0, entry_price=0))
         self.bus.publish(PositionClosed(
@@ -226,6 +239,7 @@ class PaperBroker:
         price, long = tick.price, pos["side"] == "long"
         sl, tp, liq = pos["stop_loss"], pos["take_profit"], pos["liquidation_price"]
         max_hold = self.settings().paper_max_hold_hours
+        self._track_excursion(pos, price)
 
         if (price <= liq) if long else (price >= liq):
             self._close(pos, liq, "liquidation")
@@ -235,6 +249,27 @@ class PaperBroker:
             self._close(pos, tp, "take profit hit")
         elif max_hold and time.time() - pos["opened_at"] >= max_hold * 3600:
             self._close(pos, price, f"max hold {max_hold:g}h reached")
+
+    @staticmethod
+    def _mark_excursion(pos: dict[str, Any], price: float) -> bool:
+        """Widen how far this position has been against (mae) and in favour (mfe), as % of the entry,
+        on `pos` itself. True when either moved. Without these a losing trade cannot say whether the
+        signal was wrong or the stop was simply too tight to survive the noise."""
+        entry = pos["entry_price"]
+        if entry <= 0:
+            return False
+        move = (price - entry) / entry * 100 * (1 if pos["side"] == "long" else -1)
+        before = (pos["mae_pct"], pos["mfe_pct"])
+        pos["mae_pct"], pos["mfe_pct"] = min(before[0], move), max(before[1], move)
+        return (pos["mae_pct"], pos["mfe_pct"]) != before
+
+    def _track_excursion(self, pos: dict[str, Any], price: float) -> None:
+        """The open position's excursions, kept on its row so a restart does not lose them."""
+        if self._mark_excursion(pos, price):
+            self.db.execute(
+                "UPDATE paper_positions SET mae_pct = ?, mfe_pct = ? WHERE symbol = ?",
+                (pos["mae_pct"], pos["mfe_pct"], pos["symbol"]),
+            )
 
     # -- paper-only controls -------------------------------------------------
 

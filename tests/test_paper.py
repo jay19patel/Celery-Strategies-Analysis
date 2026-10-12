@@ -125,3 +125,43 @@ async def test_reset_restores_starting_balance(system):
 async def test_no_price_no_fill(system):
     with pytest.raises(BrokerError, match="no fresh price"):
         await system.paper.place_order("ETHUSD", "buy", 1, "c1")
+
+
+async def test_a_closed_trade_records_how_far_it_went_each_way(system):
+    """MAE and MFE: without them a losing trade cannot say whether the signal was wrong or the stop
+    was simply too tight to survive the noise."""
+    await system.paper.place_order("BTCUSD", "buy", 1, "c1", stop_loss=98_000, take_profit=120_000, strategy="s")
+    await tick(system, "BTCUSD", 103_000)  # +3% in favour
+    await tick(system, "BTCUSD", 99_000)  # -1% against
+    await tick(system, "BTCUSD", 101_000)
+    [pos] = system.paper._rows()
+    assert (pos["mfe_pct"], pos["mae_pct"]) == (pytest.approx(3.0), pytest.approx(-1.0))
+
+    await system.paper.close_position("BTCUSD", "manual close")
+    trade = system.paper.trades()[0]
+    assert trade["mfe_pct"] == pytest.approx(3.0) and trade["mae_pct"] == pytest.approx(-1.0)
+
+
+async def test_the_excursion_of_a_short_counts_the_other_way(system):
+    await system.paper.place_order("BTCUSD", "sell", 1, "c1", stop_loss=102_000, take_profit=90_000, strategy="s")
+    await tick(system, "BTCUSD", 98_000)  # a short gains when price falls
+    await tick(system, "BTCUSD", 101_000)
+    [pos] = system.paper._rows()
+    assert (pos["mfe_pct"], pos["mae_pct"]) == (pytest.approx(2.0), pytest.approx(-1.0))
+
+
+async def test_the_exit_price_itself_counts_towards_the_excursions(system):
+    """The row is deleted on the close, so the exit has to be folded in before it goes."""
+    await system.paper.place_order("BTCUSD", "buy", 1, "c1", stop_loss=90_000, take_profit=120_000, strategy="s")
+    await system.paper.close_position("BTCUSD", "manual close", price=97_000)  # no tick in between
+    trade = system.paper.trades()[0]
+    assert trade["mae_pct"] == pytest.approx(-3.0) and trade["mfe_pct"] == 0.0
+
+
+async def test_the_excursion_follows_the_market_not_the_fill(system):
+    """A stop fills at its level, but the market went further: the excursion records where it went."""
+    await system.paper.place_order("BTCUSD", "buy", 1, "c1", stop_loss=99_000, take_profit=120_000, strategy="s")
+    await tick(system, "BTCUSD", 98_000)  # gaps straight through the stop
+    trade = system.paper.trades()[0]
+    assert trade["reason"] == "stop loss hit" and trade["exit_price"] == 99_000
+    assert trade["mae_pct"] == pytest.approx(-2.0)

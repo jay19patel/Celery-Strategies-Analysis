@@ -33,7 +33,10 @@ DELTA_ROUTING_FIELDS = ("delta_active", "delta_env", *DELTA_SECRET_FIELDS)
 # Changing any of these changes where prices come from: the stream restarts.
 STREAM_FIELDS = ("paper_active", "market_data", *DELTA_ROUTING_FIELDS)
 
-BOOL_FIELDS = ("paper_active", "delta_active", "trailing_enabled", "ai_enabled", "ai_share_account", "email_enabled", "options_auto_enabled")
+BOOL_FIELDS = (
+    "paper_active", "delta_active", "trailing_enabled", "ai_enabled", "ai_share_account", "email_enabled",
+    "options_auto_enabled", "atr_protection",
+)
 TEXT_FIELDS = ("email_to", "email_smtp_host", "email_smtp_user")
 CHOICES = {
     "market_data": ("demo", "live"), "delta_env": ("demo", "live"), "day_timezone": ("Asia/Kolkata", "UTC"),
@@ -48,6 +51,11 @@ RANGES = {
     "paper_slippage_pct": (0.0, 1.0),
     "paper_max_hold_hours": (0.0, 24 * 90),
     "trade_margin_pct": (1.0, 100.0),
+    "risk_per_trade_pct": (0.05, 10.0),
+    "atr_stop_mult": (0.5, 10.0),
+    "atr_target_mult": (0.5, 20.0),
+    "min_edge_multiple": (0.0, 20.0),
+    "options_auto_risk_pct": (0.05, 10.0),
     "trailing_trigger_pct": (50.0, 99.0),
     "trailing_extend_pct": (10.0, 300.0),
     "trailing_lock_pct": (0.0, 95.0),
@@ -78,14 +86,30 @@ class Settings:
     delta_env: str = "demo"  # Delta account: "demo" (testnet) | "live" (real money)
     delta_api_key: str = ""
     delta_api_secret: str = ""
+    # Stop loss and take profit, as a % of the entry price. Used when the strategy sets no levels of
+    # its own and no fresh ATR is known; with atr_protection and an ATR, the levels scale with it.
     stop_loss_pct: float = 1.0
     take_profit_pct: float = 2.0
+    # Volatility-scaled protection. A fixed percentage is a different trade in a quiet market than in
+    # a fast one: at ATR 0.36% a 0.5% stop is 1.4 ATR, which noise alone reaches. With this on, the
+    # stop is atr_stop_mult x ATR% and the target atr_target_mult x ATR%, both clamped to the ranges
+    # above. The ATR comes from the analyst's market context; without a fresh one the percentages apply.
+    atr_protection: bool = True
+    atr_stop_mult: float = 2.0
+    atr_target_mult: float = 3.5
     paper_starting_balance: float = 1000.0
     paper_leverage: float = 10.0
     paper_fee_pct: float = 0.05
     paper_slippage_pct: float = 0.02
     paper_max_hold_hours: float = 72.0  # 0 = no time exit
-    trade_margin_pct: float = 20.0  # % of available margin to use per trade
+    # Position size. The stop decides it: the position is the one whose stop costs risk_per_trade_pct
+    # of equity, so a wide stop buys a small position and a tight one a larger one, and every trade
+    # risks the same. trade_margin_pct is the ceiling on top of that, never the driver.
+    risk_per_trade_pct: float = 0.75
+    trade_margin_pct: float = 20.0  # ceiling: never more than this % of available margin in one trade
+    # An entry whose target cannot cover the round trip is refused. The round trip is the fee and the
+    # slippage, both ways, on the notional; at 0.14% a target under ~0.4% cannot pay for itself.
+    min_edge_multiple: float = 3.0  # target distance must be at least this many round trips. 0 = off.
     # Auto trailing: when price has covered trailing_trigger_pct of the way from entry to the target,
     # the target moves out by trailing_extend_pct of the original target distance and the stop moves
     # to lock trailing_lock_pct of the open profit. A stop only ever tightens. At most trailing_max_steps
@@ -110,7 +134,11 @@ class Settings:
     # Options auto-trading (paper only): the engine opens the structure the options-market rule suggests
     # (structures.suggest), with a small whole-structure stop and target. Off until switched on.
     options_auto_enabled: bool = False
-    options_auto_qty: int = 1  # contracts per leg
+    # Contracts per leg are sized so the structure's max loss is options_auto_risk_pct of equity,
+    # capped at options_auto_qty. At qty 1 a structure risks cents on a four-figure account and
+    # cannot move it either way, which is the same as not trading.
+    options_auto_risk_pct: float = 1.0
+    options_auto_qty: int = 50  # ceiling on contracts per leg
     options_auto_sl_pct: float = 30.0  # close when the loss reaches this % of the max loss
     options_auto_tp_pct: float = 40.0  # close when the profit reaches this % of the premium paid or received
 

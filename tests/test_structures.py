@@ -197,6 +197,47 @@ async def test_take_profit_on_a_big_move(cfg, exchange):
     assert system.paper.trades()[0]["reason"].startswith("take profit") and system.paper.trades()[0]["pnl"] > 0
 
 
+async def test_a_take_profit_fires_on_what_it_would_book_not_on_the_mark(cfg, exchange):
+    """An iron condor whose mark gain has just cleared the target has not cleared it once the
+    spread and both fees are paid. Closing there books less than the target it reported — and in
+    production, on a thinner credit, three of five condor exits were labelled "take profit" and
+    booked a loss. The trigger must read the same number the close writes."""
+    system = await with_chain(cfg, exchange)
+    base = system.options_latest["BTCUSD"]["summary"]
+    now = time.time()
+
+    await place(system, rid="near-miss", kind="iron_condor", tp_pct=40.0)
+    row = system.paper.options.rows()[0]
+    target = row["premium"] * row["tp_pct"] / 100
+    system.options_latest["BTCUSD"]["summary"] = chain(vol=0.5)  # IV halves: the condor gains
+    _, at_mark = system.paper.options._value(row, now)
+    assert at_mark >= target > system.paper.options.realisable(row, now)  # the window the bug lived in
+    assert system.paper.options.check(now) == [] and system.paper.options.count() == 1
+    system.paper.options.close_all(reason="end of case")
+
+    system.options_latest["BTCUSD"]["summary"] = base
+    await place(system, rid="real-one", kind="iron_condor", tp_pct=40.0)
+    row = system.paper.options.rows()[0]
+    target = row["premium"] * row["tp_pct"] / 100
+    system.options_latest["BTCUSD"]["summary"] = chain(vol=0.4)  # further: a real target, net of costs
+    assert len(system.paper.options.check(now)) == 1
+    [trade] = [t for t in system.paper.trades() if t["reason"].startswith("take profit")]
+    assert trade["pnl"] >= target  # it books at least what it reported
+
+
+async def test_what_the_triggers_read_is_what_the_close_books(cfg, exchange):
+    system = await with_chain(cfg, exchange)
+    await place(system)
+    row = system.paper.options.rows()[0]
+    now = time.time()
+    realisable = system.paper.options.realisable(row, now)
+    _, at_mark = system.paper.options._value(row, now)
+    assert realisable < at_mark  # the spread and both fees sit between them
+    assert system.paper.options.view(row, now)["close_pnl"] == pytest.approx(realisable, abs=1e-4)
+    system.paper.options.close(row["id"], "checking", now)
+    assert system.paper.trades()[0]["pnl"] == pytest.approx(realisable, abs=1e-4)
+
+
 async def test_closed_before_expiry_and_settled_after_it_without_prices(cfg, exchange):
     system = await with_chain(cfg, exchange)
     await place(system)
@@ -249,7 +290,8 @@ def test_auto_trade_is_off_by_default_with_a_small_stop_and_target():
     from tradebuddy.settings import Settings, SettingsError, apply_changes
 
     s = Settings()
-    assert s.options_auto_enabled is False and s.options_auto_sl_pct == 30 and s.options_auto_tp_pct == 40 and s.options_auto_qty == 1
+    assert s.options_auto_enabled is False and s.options_auto_sl_pct == 30 and s.options_auto_tp_pct == 40
+    assert s.options_auto_risk_pct == 1.0 and s.options_auto_qty == 50  # risk decides the size, qty is the ceiling
     with pytest.raises(SettingsError):
         apply_changes(s, {"options_auto_sl_pct": 1})
 
@@ -259,7 +301,11 @@ async def test_auto_opens_the_suggested_structure_with_the_settings_stop(cfg, ex
     note = await system.auto_options.check()
     row = system.paper.options.rows()[0]
     assert "opened BTC IRON CONDOR" in note and row["strategy"] == "auto_options"
-    assert (row["sl_pct"], row["tp_pct"], row["qty"]) == (30.0, 40.0, 1)
+    assert (row["sl_pct"], row["tp_pct"]) == (30.0, 40.0)
+    # Sized by risk, not by a fixed one contract: the max loss fills the 1% budget without passing it.
+    equity = (await system.paper.account()).equity
+    budget, per_lot = equity * 0.01, row["capital"] / row["qty"]
+    assert row["qty"] > 1 and row["capital"] <= budget < per_lot * (row["qty"] + 1)
     assert {o["strategy"] for o in system.store.recent_orders()} == {"auto_options"}
     assert "holding" in await system.auto_options.check()  # one per underlying
     assert system.paper.options.count() == 1

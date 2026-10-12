@@ -19,6 +19,7 @@ class FakeExchange:
         self.lookup: dict[str, Any] = {}
         self.history: list[Candle] = []
         self.chain: list[OptionQuote] = []
+        self.options_history: list[dict[str, Any]] = []  # options_history rows a strategy reads back
         self.spec: dict[str, Any] = {"id": 27, "contract_value": 0.001, "tick_size": 0.5}
         self.leverage: Any = 10.0  # an Exception raises
         self.protection: list[dict[str, Any]] = []  # update_position_protection calls
@@ -72,6 +73,9 @@ class FakeClient:
 
     async def option_chain(self, underlying):
         return self.x.chain
+
+    async def option_history(self, underlying, hours):
+        return self.x.options_history
 
     async def product(self, symbol):
         return self.x.spec

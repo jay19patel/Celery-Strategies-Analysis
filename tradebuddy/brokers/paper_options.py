@@ -8,6 +8,11 @@ daily loss limit all see it. Exits, checked by the engine every few seconds:
     expiry        one hour before settlement it is closed at the chain's prices, or, with no
                   prices, settled at intrinsic value on the spot
 
+Both triggers are tested on what closing right now would actually book: the exit fills (bid for a
+long leg, ask for a short one) less the entry and exit fees — not the mid. Tested on the mark, a
+take profit fires on a gain the spread and the fees then take back, and the trade is recorded as a
+"take profit" that lost money.
+
 A snapshot older than a minute is no price: nothing is valued or closed on it, except that a
 structure past its expiry is always settled. A close becomes a row in paper_trades, like any paper trade.
 """
@@ -102,6 +107,19 @@ class PaperOptions:
         gross = (structures.held_value(row["legs"], prices) - row["net"]) * self._units(row)
         return prices, max(gross, -row["capital"])
 
+    def _exit_fee(self, row: dict[str, Any], prices: list[float], spot: float | None = None) -> float:
+        spot = (self.snapshot(row["symbol"]) or {}).get("spot") or 0.0 if spot is None else spot
+        return sum(structures.fee(px, spot, self._units(row)) for px in prices)
+
+    def realisable(self, row: dict[str, Any], now: float) -> float | None:
+        """What closing right now would book: the exit fills less the entry and exit fees — the same
+        number `_record` writes as the trade's pnl. None without a fresh chain. The SL / TP triggers
+        read this, not the mark, so a "take profit" can never be recorded as a loss."""
+        prices, gross = self._value(row, now, at="fill")
+        if prices is None or gross is None:
+            return None
+        return gross - row["entry_fee"] - self._exit_fee(row, prices)
+
     def view(self, row: dict[str, Any], now: float | None = None) -> dict[str, Any]:
         """Everything the Positions page shows for one structure: risk, where it stands now, each leg, greeks."""
         now = time.time() if now is None else now
@@ -132,9 +150,13 @@ class PaperOptions:
         _, _, breakevens = structures.profile(row["legs"], row["net"], row["kind"])
         ref = row["premium"]
         stop_at, target_at = -row["capital"] * row["sl_pct"] / 100, ref * row["tp_pct"] / 100
+        # Progress is measured against the same number the triggers read: what closing now would book.
+        close_pnl = None if close_gross is None else close_gross - row["entry_fee"] - self._exit_fee(
+            row, fills or [], (summary or {}).get("spot") or spot or 0.0
+        )
         progress = None
-        if gross is not None:
-            progress = round(100 * gross / target_at, 1) if gross >= 0 else round(-100 * gross / stop_at, 1)
+        if close_pnl is not None:
+            progress = round(100 * close_pnl / target_at, 1) if close_pnl >= 0 else round(-100 * close_pnl / stop_at, 1)
         return {
             **{k: row[k] for k in ("id", "client_order_id", "symbol", "underlying", "kind", "label", "expiry", "qty", "contract_value",
                                    "net", "premium", "capital", "max_profit", "entry_fee", "sl_pct", "tp_pct", "strategy", "opened_at")},
@@ -149,8 +171,7 @@ class PaperOptions:
             "breakevens": [round(b, 2) for b in breakevens],
             "breakeven_distance_pct": [round(100 * (b - spot) / spot, 2) for b in breakevens] if spot else [],
             "value_now": None if prices is None else round(structures.held_value(row["legs"], prices) * units, 4),
-            "close_pnl": None if close_gross is None else round(close_gross - sum(
-                structures.fee(px, (summary or {}).get("spot") or spot or 0.0, units) for px in fills or []), 4),  # closing now, at bid / ask, after fees
+            "close_pnl": None if close_pnl is None else round(close_pnl, 4),  # closing now, at bid / ask, after every fee
             "unrealized_pnl": None if gross is None else round(gross, 4),
             "pnl_pct": None if gross is None or not ref else round(100 * gross / ref, 2),
             "pnl_of_max_loss_pct": None if gross is None else round(100 * gross / row["capital"], 2),
@@ -205,8 +226,7 @@ class PaperOptions:
             exit_fee, exit_net = 0.0, value
             reason = f"settled at expiry on spot {float(spot):,.2f}"
         else:
-            spot = (self.snapshot(row["symbol"]) or {}).get("spot") or 0.0
-            exit_fee = sum(structures.fee(px, spot, self._units(row)) for px in prices)
+            exit_fee = self._exit_fee(row, prices)
             exit_net = structures.held_value(row["legs"], prices)
         self._record(row, gross, exit_fee, exit_net, reason, now)
         return {"closed": [row["label"]], "errors": []}
@@ -250,15 +270,15 @@ class PaperOptions:
         closed = []
         for row in self.rows():
             reason = ""
-            _, gross = self._value(row, now)
+            net = self.realisable(row, now)  # what closing now books, not the mark
             if now >= row["expiry"] - EXPIRY_CLOSE_SECONDS:
                 reason = "closed an hour before expiry"
-            elif gross is None:
+            elif net is None:
                 continue  # no fresh prices: absence over staleness
-            elif gross <= -row["capital"] * row["sl_pct"] / 100:
-                reason = f"stop loss: down {-gross:.2f} ({row['sl_pct']:g}% of max loss)"
-            elif row["premium"] and gross >= row["premium"] * row["tp_pct"] / 100:
-                reason = f"take profit: up {gross:.2f} ({row['tp_pct']:g}% of premium)"
+            elif net <= -row["capital"] * row["sl_pct"] / 100:
+                reason = f"stop loss: down {-net:.2f} after costs ({row['sl_pct']:g}% of max loss)"
+            elif row["premium"] and net >= row["premium"] * row["tp_pct"] / 100:
+                reason = f"take profit: up {net:.2f} after costs ({row['tp_pct']:g}% of premium)"
             if not reason:
                 continue
             try:

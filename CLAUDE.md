@@ -46,7 +46,12 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
 - `stream.py` — the only code that talks to the Delta WebSocket.
 - `trading.py` — the only code that decides to trade (`Trader`, signals and manual
   orders alike) and sends orders (`Executor`). Dashboard actions name one broker;
-  nothing acts on "all brokers" except the kill switch.
+  nothing acts on "all brokers" except the kill switch. It also decides how far the
+  stop sits and how big the position is: `Trader.levels` (the strategy's own levels,
+  else `atr_stop_mult` x the ATR the analyst measured, else Settings' percentages),
+  `Trader.size_for_risk` (the position whose stop costs `risk_per_trade_pct` of equity,
+  capped by `trade_margin_pct`) and `Trader.edge_error` (a target inside
+  `min_edge_multiple` round trips is refused).
 - `guard.py` — `PositionGuard`, an engine loop over every active broker: the daily loss
   limit (closes that broker's positions, blocks its entries until the next day) and
   auto trailing (per-position switch and max trails in `position_controls`). It moves
@@ -60,8 +65,10 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   the live chain, and the suggestion (playbook, else IV rank + OI). Placed through `Trader.manual_structure`, on
   paper only (`STRUCTURE_BROKERS`): by a person from the ticket, or by `trading.AutoStructures` when
   `options_auto_enabled` (rules on the engine's own chain only, never the playbook or AI; one per underlying,
-  30-min cooldown, 3 a day). `brokers/paper_options.py` holds them, reserves the max loss as margin and closes on
-  whole-structure SL/TP or an hour before expiry.
+  30-min cooldown, 3 a day, sized so the max loss is `options_auto_risk_pct` of equity).
+  `brokers/paper_options.py` holds them, reserves the max loss as margin and closes on
+  whole-structure SL/TP or an hour before expiry — on `realisable()`, what closing would
+  actually book, never the mark.
 - `email_report.py` — `DailyReporter`, an engine job: the day's report by email once at `email_report_hour`.
 - `insights.py` (rules), `forecast.py` (scikit-learn, `ml` extra), `playbook.py` (options
   structure), `tbai.py` + `mistral.py` (TradeBuddy AI report; every attempt saved in full in `ai_reports`,
@@ -91,6 +98,10 @@ Enforced by tests. Breaking one should fail the build.
 7. **Protected entries.** SL/TP go with the entry (a manual order needs an SL; an SL
    edit places the new legs before cancelling the old) (Delta bracket; paper
    checks every tick, plus liquidation and max hold).
+7b. **The stop sizes the trade, and an exit books what it reported.** A position is the
+   one whose stop costs `risk_per_trade_pct` of equity, so a wider stop buys a smaller
+   position, never a bigger loss. An exit trigger reads what closing would actually
+   book, net of the spread and every fee, so a "take profit" can never record a loss.
 8. **Absence over staleness.** A WebSocket price older than 30s is no price.
 9. **Secrets stay in the process.** No endpoint returns an API key or secret;
    `Settings.public()` masks them and `SettingsChanged` carries field names only.
@@ -120,13 +131,21 @@ Enforced by tests. Breaking one should fail the build.
 One module in `tradebuddy/strategies/` with a concrete `Strategy` subclass; it
 is discovered automatically. Keep `name` stable, bump `version` when logic
 changes. Strategies return a `Signal` or `None`; they never place orders.
-`is_default_sl_tp = True` (default) takes stop loss and take profit from Settings and ignores the Signal's;
-`False` means every Signal carries both `stop_loss_pct` and `take_profit_pct` (within Settings' ranges),
-or the result is an error and nothing trades.
+`is_default_sl_tp = True` (default) leaves the levels to the Trader: the ATR when the analyst has
+measured one, otherwise Settings' percentages. `False` means every Signal carries both
+`stop_loss_pct` and `take_profit_pct` (within Settings' ranges), or the result is an error and
+nothing trades — that is how a strategy puts its stop where its own logic says (an EMA, a
+Supertrend, the mother candle's range).
+
+A strategy runs on whichever Celery worker is free, so it must keep **no state between bars**.
+To compare the options market with where it was, set `options_history_hours` and read
+`ctx.market.option_history(underlying, hours)`: the engine reads its own `options_history` and
+sends the rows with the job.
 
 ### Broker
 
-Implement `Broker` (`brokers/base.py`), register it in `System.brokers`, add
+Implement `Broker` (`brokers/base.py`) — including `size_for_notional` and
+`round_trip_cost_pct`, which the Trader sizes and gates with — register it in `System.brokers`, add
 it to `BROKERS`, a `<name>_active` field in `settings.py`, and a default in
 `TRADING_DEFAULT`. It must be idempotent on
 `client_order_id` and raise `BrokerTimeout` (not `BrokerError`) when the
