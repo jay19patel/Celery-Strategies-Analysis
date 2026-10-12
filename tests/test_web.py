@@ -1,6 +1,7 @@
 """Pages, the settings API and broker routes. The lifespan (and so the stream) stays off."""
 
 import dataclasses
+import pathlib
 import re
 
 import pytest
@@ -139,3 +140,45 @@ def test_the_risk_view_tells_the_dashboard_how_trades_are_sized(cfg, exchange):
     assert risk["sizing"]["risk_per_trade_pct"] > 0
     assert set(risk["sizing"]) == {"risk_per_trade_pct", "trade_margin_pct", "min_edge_multiple"}
     assert set(risk["protection"]) == {"atr_protection", "atr_stop_mult", "atr_target_mult", "stop_loss_pct", "take_profit_pct"}
+
+
+# -- the dashboard has to fit on a phone ---------------------------------------------
+
+TEMPLATES = pathlib.Path(__file__).resolve().parent.parent / "tradebuddy" / "templates"
+APP_CSS = pathlib.Path(__file__).resolve().parent.parent / "tradebuddy" / "static" / "css" / "app.css"
+
+
+def test_every_table_can_scroll_on_its_own():
+    """`.tbl` cells are `white-space: nowrap`, so a table with no scrolling ancestor makes the whole
+    page scroll sideways on a narrow screen. Measured at 320-1280px: every page fits."""
+    loose = []
+    for f in sorted(TEMPLATES.glob("*.html")):
+        html = f.read_text()
+        for m in re.finditer(r'<table class="tbl"', html):
+            section = html[max(0, m.start() - 600):m.start()].split("<section")[-1]
+            if 'class="scroll' not in section and "overflow-x-auto" not in section:
+                loose.append(f"{f.name}:{html[:m.start()].count(chr(10)) + 1}")
+    assert loose == [], f"tables with no scrolling ancestor: {loose}"
+
+
+def test_no_table_is_wrapped_in_two_scroll_boxes():
+    """A scroll box inside a scroll box gives two scrollbars on the same axis."""
+    nested = []
+    for f in sorted(TEMPLATES.glob("*.html")):
+        html = f.read_text()
+        for m in re.finditer(r'<div class="scroll[^"]*">', html):
+            if re.match(r'\s*<div class="scroll', html[m.end():m.end() + 120]):
+                nested.append(f"{f.name}:{html[:m.start()].count(chr(10)) + 1}")
+    assert nested == [], f"nested scroll containers: {nested}"
+
+
+def test_card_headers_cannot_force_the_page_wider():
+    """A flex item defaults to min-width:auto, so a long title, subtitle or path would set the card's
+    minimum width and push the page sideways instead of wrapping."""
+    css = APP_CSS.read_text()
+    head = next(line for line in css.splitlines() if line.startswith(".card-head {"))
+    title = next(line for line in css.splitlines() if line.startswith(".card-title {"))
+    sub = next(line for line in css.splitlines() if line.startswith(".card-sub {"))
+    assert "flex-wrap: wrap" in head and "min-width: 0" in head
+    assert "flex-wrap: wrap" in title and "min-width: 0" in title
+    assert "overflow-wrap: anywhere" in sub and "min-width: 0" in sub

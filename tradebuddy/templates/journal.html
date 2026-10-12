@@ -2,16 +2,16 @@
 {% block content %}
 <div class="h-[calc(100vh-6rem)] flex flex-col">
   <!-- Calendar Header & Navigation -->
-  <div class="flex items-center justify-between mb-4 px-2">
-    <div>
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-4 px-2">
+    <div class="min-w-0">
       <h1 class="text-xl font-bold flex items-center gap-2 text-slate-800">
         <i data-lucide="calendar-days" class="text-brand-500"></i>Trade Journal & Daily Operations Audit
       </h1>
       <p class="text-xs text-slate-500 mt-0.5">Click any day for full in-depth execution analysis, dynamic trailing stop events, and system load.</p>
     </div>
-    <div class="flex gap-2 items-center bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
+    <div class="flex flex-wrap gap-2 items-center bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
       <button id="prevMonth" aria-label="Previous month" class="p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
-      <span id="currentMonthLabel" class="font-semibold text-sm w-36 text-center text-slate-700"></span>
+      <span id="currentMonthLabel" class="font-semibold text-sm w-28 sm:w-36 text-center text-slate-700"></span>
       <button id="nextMonth" aria-label="Next month" class="p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
       <button id="todayBtn" class="btn btn-sm text-xs font-semibold ml-2">Today</button>
     </div>
