@@ -88,21 +88,21 @@ async def test_close_position_route_closes_paper(cfg, exchange):
     await system.bus.stop()
 
 
-def test_the_account_is_the_home_page(cfg, exchange):
-    """The Overview that used to sit here repeated this page, Positions and Market Data."""
+def test_market_data_is_the_home_page(cfg, exchange):
+    """The market comes before anything done about it, and Monitoring leads the sidebar."""
     _, client = make(cfg, exchange)
-    assert "Account · TradeBuddy" in client.get("/").text
-    body = client.get("/api/account?broker=paper").json()
-    assert body["currency"] == "USD" and body["equity"] > 0
+    home = client.get("/").text
+    assert "Market Data · TradeBuddy" in home
+    assert home.index("Monitoring") < home.index("Portfolio")  # groups follow the order of PAGES
+    assert "Account · TradeBuddy" in client.get("/account").text
 
 
-def test_the_old_paths_still_lead_home(cfg, exchange):
-    """Bookmarks and links from before the Overview was removed keep working."""
+def test_the_old_paths_still_lead_somewhere(cfg, exchange):
+    """Bookmarks from before Market Data moved to the root, and from before Overview was removed."""
     _, client = make(cfg, exchange)
-    for path, to in (("/account", "/"), ("/overview", "/"), ("/paper", "/?broker=paper")):
+    for path, to in (("/market", "/"), ("/overview", "/"), ("/paper", "/account?broker=paper")):
         res = client.get(path, follow_redirects=False)
         assert res.status_code in (302, 307) and res.headers["location"] == to, path
-    assert client.get("/account?broker=paper", follow_redirects=False).headers["location"] == "/?broker=paper"
 
 
 async def test_inactive_broker_is_hidden(cfg, exchange):
