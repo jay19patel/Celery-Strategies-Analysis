@@ -79,6 +79,53 @@
       <div class="h-1.5 rounded-full bg-slate-100 mt-1"><div class="h-1.5 rounded-full" style="width:${w}%;background:${color}"></div></div></div>`;
   }
 
+  // ── the forecast as one picture ────────────────────────────────────────────
+  // Across is which way the model leans, up is whether movement looks underpriced against the
+  // options. The shaded cross in the middle is where neither is far enough from the centre to act
+  // on, and the four corners name what the playbook builds there. A marker in a corner and a
+  // reason in the card are the same statement; this one can be read at a glance.
+  function quadrant(f, iv, sk) {
+    const W = 300, H = 250, L = 44, R = 10, T = 10, B = 34;  // plot box inside the labels
+    const x0 = L, x1 = W - R, y0 = T, y1 = H - B, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+    // 0.25..0.75 covers every probability these models produce, and the marker stays off the border
+    // so a pinned reading still reads as a position rather than as part of the frame.
+    const px = x0 + clamp((f.up_probability - 0.25) / 0.5, 0.04, 0.96) * (x1 - x0);
+    const ratio = iv ? f.predicted_realized_vol / iv : 1;
+    const py = y1 - clamp(Math.log(ratio || 1) / 0.8 + 0.5, 0.04, 0.96) * (y1 - y0);
+    // The bands the playbook will not act inside: 62% confidence, and a 1.15x volatility edge.
+    const bandX = ((0.62 - 0.5) / 0.5) * (x1 - x0), bandY = (Math.log(1.15) / 0.8) * (y1 - y0);
+    const corner = (x, y, anchor, title, sub) =>
+      `<text x="${x}" y="${y}" font-size="9.5" font-weight="600" text-anchor="${anchor}" fill="#475569">${esc(title)}</text>
+       <text x="${x}" y="${y + 11}" font-size="8.5" text-anchor="${anchor}" fill="#94a3b8">${esc(sub)}</text>`;
+    return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-auto" role="img"
+        aria-label="Direction across, how movement is priced against the options upward; the marker is this symbol">
+      <clipPath id="qbox"><rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}"/></clipPath>
+      <rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="#fff" stroke="#e2e8f0"/>
+      <g clip-path="url(#qbox)">
+        <rect x="${cx - bandX}" y="${y0}" width="${2 * bandX}" height="${y1 - y0}" fill="#eef2f7"/>
+        <rect x="${x0}" y="${cy - bandY}" width="${x1 - x0}" height="${2 * bandY}" fill="#eef2f7"/>
+        ${sk.direction ? "" : `<rect x="${x0}" y="${py - 8}" width="${x1 - x0}" height="16" fill="#94a3b8" fill-opacity=".18"/>`}
+      </g>
+      <line x1="${cx}" y1="${y0}" x2="${cx}" y2="${y1}" stroke="#cbd5e1" stroke-dasharray="3 3"/>
+      <line x1="${x0}" y1="${cy}" x2="${x1}" y2="${cy}" stroke="#cbd5e1" stroke-dasharray="3 3"/>
+      ${corner(x0 + 7, y0 + 14, "start", "Down, big move", "long puts")}
+      ${corner(x1 - 7, y0 + 14, "end", "Up, big move", "long calls")}
+      ${corner(x0 + 7, y1 - 19, "start", "Down, quiet", "iron condor")}
+      ${corner(x1 - 7, y1 - 19, "end", "Up, quiet", "iron condor")}
+      <circle cx="${px}" cy="${py}" r="6" fill="${sk.direction ? "#1e88e5" : "#fff"}" stroke="${sk.direction ? "#fff" : "#475569"}" stroke-width="2">
+        <title>${sk.direction ? "" : "Direction has no edge on unseen data: read the height, not the side. "}Up ${(100 * f.up_probability).toFixed(0)}%, forecast RV ${(100 * f.predicted_realized_vol).toFixed(0)}% against ATM IV ${(100 * (iv || 0)).toFixed(0)}%</title>
+      </circle>
+      <text x="${x0}" y="${H - 21}" font-size="9" fill="#64748b">Down</text>
+      <text x="${x1}" y="${H - 21}" font-size="9" text-anchor="end" fill="#64748b">Up</text>
+      <text x="${cx}" y="${H - 21}" font-size="8.5" text-anchor="middle" fill="#94a3b8">direction</text>
+      <text x="${cx}" y="${H - 7}" font-size="8.5" text-anchor="middle" fill="#94a3b8">${sk.direction ? "shaded: too near the middle to act on" : "no edge on direction — read the height, not the side"}</text>
+      <text x="12" y="${cy}" font-size="8.5" fill="#64748b" text-anchor="middle" transform="rotate(-90 12 ${cy})">movement vs options price</text>
+      <text x="26" y="${y0 + 2}" font-size="8" fill="#94a3b8" text-anchor="end" transform="rotate(-90 26 ${y0 + 2})">cheap</text>
+      <text x="26" y="${y1}" font-size="8" fill="#94a3b8" text-anchor="start" transform="rotate(-90 26 ${y1})">rich</text>
+    </svg>`;
+  }
+
   function forecast(d) {
     const a = d.analysis, f = a?.forecast, m = a?.context?.model || {}, p = a?.playbook;
     let model;
@@ -102,6 +149,7 @@
       const up = f.up_probability >= 0.5;
       const lean = up ? f.up_probability : f.down_probability ?? 1 - f.up_probability;
       model = `<div class="space-y-2.5">
+        ${quadrant(f, p?.atm_iv ?? a.context?.atm_iv, sk)}
         ${bar(`${up ? "Up" : "Down"} in ${num(f.horizon_hours, 0)}h ${flag("direction")}`, lean, !sk.direction ? grey : up ? "#12804a" : "#b42323")}
         ${bar(`Breakout ±${num(f.breakout_pct, 2)}% ${flag("breakout")}`, f.breakout_probability, sk.breakout ? "#7c3aed" : grey,
           `<span class="muted"> of ${num(f.breakout_sigma, 2)}σ</span>`)}

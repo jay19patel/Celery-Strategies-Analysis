@@ -80,8 +80,12 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   learns a rare event and another a common one and neither is comparable: a breakout is
   `breakout_sigma` x what the bar's own volatility implies over the horizon, never a fixed
   percentage. Keep the models small — a 24h crypto target is mostly noise, and capacity goes into
-  the training regime. Bump `MODEL_VERSION` whenever a target or feature changes; `load` then
-  refuses the old files and says to retrain, which is the point.
+  the training regime. Every baseline must be the best thing someone could do without the model,
+  not a coin: direction is scored against always naming the side that came up more often, which
+  over a rising quarter was 54.8% on BTC and 56.2% on ETH. Measured that way nothing predicts 24h
+  direction here — not more features, not a shorter horizon, not pooling the symbols, not agreeing
+  with a trend indicator; all were tried and all were worse. Bump `MODEL_VERSION` whenever a target
+  or feature changes; `load` then refuses the old files and says to retrain, which is the point.
 - `jobs.py` — every background loop wraps a pass in `job.tick()`; the System page shows them all.
 
 ## Invariants

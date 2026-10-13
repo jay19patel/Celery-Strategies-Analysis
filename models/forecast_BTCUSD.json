@@ -1,7 +1,7 @@
 {
   "symbol": "BTCUSD",
   "version": 2,
-  "trained_at": 1791915492.207563,
+  "trained_at": 1791916168.9658508,
   "config": {
     "horizon_bars": 96,
     "breakout_sigma": 1.5,
@@ -9,6 +9,7 @@
     "holdout": 0.25,
     "min_rows": 2000,
     "min_direction_auc": 0.56,
+    "min_direction_edge": 0.02,
     "min_breakout_auc": 0.6,
     "max_error_ratio": 0.95,
     "random_state": 42
@@ -52,12 +53,13 @@
     "realized_vol_mae": 0.08949
   },
   "baselines": {
+    "direction_accuracy": 0.54826,
     "return_mae": 0.01301,
     "abs_move_mae": 0.00998,
     "realized_vol_mae": 0.10402
   },
   "skill": {
-    "direction": true,
+    "direction": false,
     "breakout": true,
     "return": false,
     "abs_move": false,

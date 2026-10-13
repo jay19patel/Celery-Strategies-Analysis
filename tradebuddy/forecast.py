@@ -53,6 +53,13 @@ class ForecastConfig:
     min_rows: int = 2000
     # A model has skill when it beats these on the holdout.
     min_direction_auc: float = 0.56  # 0.55 is a coin with a slight bend; spreads need better than that
+    # AUC alone passed a model that was not beating the drift. Over the last quarter of a year BTC
+    # closed higher 24h later on 54.8% of bars and ETH on 56.2%, so "always up" scored 54.8% / 56.2%
+    # while the models scored 56.4% / 54.8% — one barely ahead, one behind, both with a respectable
+    # AUC. Direction must also beat the majority call by this margin, or it is the drift wearing a
+    # model's coat. The horizon overlaps 96 bars, so the holdout holds ~90 independent outcomes and
+    # anything under a couple of points is noise.
+    min_direction_edge: float = 0.02
     min_breakout_auc: float = 0.60
     max_error_ratio: float = 0.95  # model MAE / baseline MAE
     random_state: int = 42
@@ -265,12 +272,18 @@ class Forecaster:
         metrics["return_mae"] = float(mean_absolute_error(Y["return"][test], models["return"].predict(X[test])))
         metrics["abs_move_mae"] = float(mean_absolute_error(Y["abs_move"][test], models["abs_move"].predict(X[test])))
         metrics["realized_vol_mae"] = float(mean_absolute_error(Y["realized_vol"][test], models["realized_vol"].predict(X[test])))
-        # Naive baselines: no change; today's realised vol carries on (a normal move of that size).
+        # Naive baselines: always call the side that came up most; no change; today's realised vol
+        # carries on (a normal move of that size).
+        up_rate = float(Y["direction"][test].mean())
+        baselines["direction_accuracy"] = max(up_rate, 1 - up_rate)
         baselines["return_mae"] = float(np.mean(np.abs(Y["return"][test])))
         baselines["abs_move_mae"] = float(mean_absolute_error(Y["abs_move"][test], rv96[test] * horizon_scale * math.sqrt(2 / math.pi)))
         baselines["realized_vol_mae"] = float(mean_absolute_error(Y["realized_vol"][test], rv96[test]))
         skill = {
-            "direction": metrics["direction_auc"] >= cfg.min_direction_auc,
+            # Both, not either: ranking the bars well is worth nothing if the calls do not beat
+            # the side that simply came up more often.
+            "direction": metrics["direction_auc"] >= cfg.min_direction_auc
+            and metrics["direction_accuracy"] >= baselines["direction_accuracy"] + cfg.min_direction_edge,
             "breakout": metrics["breakout_auc"] >= cfg.min_breakout_auc,
             "return": metrics["return_mae"] <= cfg.max_error_ratio * baselines["return_mae"],
             "abs_move": metrics["abs_move_mae"] <= cfg.max_error_ratio * baselines["abs_move_mae"],

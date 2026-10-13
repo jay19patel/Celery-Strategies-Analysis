@@ -1,7 +1,7 @@
 {
   "symbol": "ETHUSD",
   "version": 2,
-  "trained_at": 1791915494.093893,
+  "trained_at": 1791916170.831976,
   "config": {
     "horizon_bars": 96,
     "breakout_sigma": 1.5,
@@ -9,6 +9,7 @@
     "holdout": 0.25,
     "min_rows": 2000,
     "min_direction_auc": 0.56,
+    "min_direction_edge": 0.02,
     "min_breakout_auc": 0.6,
     "max_error_ratio": 0.95,
     "random_state": 42
@@ -52,6 +53,7 @@
     "realized_vol_mae": 0.11558
   },
   "baselines": {
+    "direction_accuracy": 0.56181,
     "return_mae": 0.01672,
     "abs_move_mae": 0.01293,
     "realized_vol_mae": 0.14401

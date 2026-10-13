@@ -260,6 +260,40 @@ def test_forecaster_trains_validates_saves_and_predicts(tmp_path):
         again.predict(candles[-100:])  # not enough history for the 4-day vol
 
 
+def test_direction_needs_more_than_a_good_auc_to_count_as_skill():
+    """AUC ranks bars; it does not say the calls beat simply naming the side that came up more often.
+
+    On a year of live data BTC closed higher 24h later on 54.8% of holdout bars, so "always up"
+    scored 54.8% while the model scored 56.4% with a respectable 0.567 AUC — and ETH's model scored
+    54.8% against a 56.2% drift. Both read as skill on AUC alone. Neither is."""
+    pytest.importorskip("sklearn")
+    from tradebuddy.forecast import ForecastConfig, Forecaster
+
+    model = Forecaster.train("BTCUSD", regime_bars(4000), cfg=ForecastConfig(min_rows=1000))
+    card = model.card
+    beats_drift = card.metrics["direction_accuracy"] >= card.baselines["direction_accuracy"] + model.cfg.min_direction_edge
+    assert card.skill["direction"] == (card.metrics["direction_auc"] >= model.cfg.min_direction_auc and beats_drift)
+    # The baseline is the better of always-up and always-down, so it is never below a coin.
+    assert card.baselines["direction_accuracy"] >= 0.5
+
+
+def test_a_direction_model_that_only_rides_the_drift_has_no_skill():
+    """A series that rises on almost every bar: a model calling "up" every time looks accurate and
+    must still be marked without skill, because naming the majority needs no model."""
+    pytest.importorskip("sklearn")
+    from tradebuddy.forecast import ForecastConfig, Forecaster
+
+    rnd = random.Random(7)
+    bars, price = [], 100.0
+    for i in range(4000):  # drift up, with enough noise that nothing else is learnable
+        new = price * math.exp(0.0004 + rnd.gauss(0, 0.002))
+        bars.append(Candle(1_700_000_000 + 900 * i, price, max(price, new), min(price, new), new, 100.0))
+        price = new
+    card = Forecaster.train("BTCUSD", bars, cfg=ForecastConfig(min_rows=1000)).card
+    assert card.baselines["direction_accuracy"] > 0.9  # almost every bar closed higher
+    assert card.skill["direction"] is False
+
+
 def test_a_breakout_is_measured_against_the_bar_s_own_volatility():
     """A fixed percentage asks a different question on a quiet bar than on a wild one. Over a year of
     15m bars a fixed 4% excursion happened on 16.5% of BTC bars and 34.2% of ETH ones, so one model
