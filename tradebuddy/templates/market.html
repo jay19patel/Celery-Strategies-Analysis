@@ -55,7 +55,7 @@
   <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="scale"></i>Put / call OI <span class="card-sub">last 24h</span></div></div><div id="pcrSpark" class="card-body"></div></section>
 </div>
 
-<h2 class="text-[13px] font-semibold text-slate-500 uppercase tracking-wider pt-2">Exchange feed</h2>
+<h2 class="text-[13px] font-semibold text-slate-500 uppercase tracking-wider pt-2">Exchange feed <span class="normal-case font-normal tracking-normal text-slate-400">· the perpetual's own 24h numbers, straight from Delta</span></h2>
 <div id="priceCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
 
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
@@ -160,19 +160,36 @@
     }
     const s = p.stats || {}, last = s.last ?? p.price, chg = s.change_24h_pct;
     const stale = !seenAt[sym] || Date.now() - seenAt[sym] > 30000;
+    // Where in the day's range the price sits, what the perpetual costs against the index, and what
+    // it costs to cross the book — the depth the removed Overview page used to carry.
+    const inRange = s.high_24h > s.low_24h ? ((last - s.low_24h) / (s.high_24h - s.low_24h)) * 100 : 50;
+    const spread = s.ask && s.bid ? s.ask - s.bid : null;
+    const spreadPct = spread && last ? (spread / last) * 100 : null;
+    const basis = s.mark && s.index ? ((s.mark - s.index) / s.index) * 100 : null;
     $(`card-${sym}`).innerHTML = `
       <div class="flex justify-between items-start">
-        <div><div class="text-sm font-semibold">${esc(sym)}</div><div class="text-[11px] muted">${stale ? '<span class="badge badge-amber">STALE</span>' : `updated ${time(seenAt[sym] / 1000)}`}</div></div>
-        <span class="pill ${chg > 0 ? "up" : chg < 0 ? "down" : "flat"}">${chg == null ? "—" : pct(chg)} 24h</span>
+        <div><div class="text-sm font-semibold">${esc(sym)}</div><div class="text-[11px] muted">perpetual · ${stale ? '<span class="badge badge-amber">STALE</span>' : `updated ${time(seenAt[sym] / 1000)}`}</div></div>
+        <span class="pill ${chg > 0 ? "up" : chg < 0 ? "down" : "flat"}">${chg == null ? "—" : `${chg > 0 ? "▲" : chg < 0 ? "▼" : ""} ${pct(chg)}`} <span class="font-normal opacity-70">24h</span></span>
       </div>
       <div class="font-mono text-2xl font-semibold mt-2 ${stale ? "muted" : ""}">${price(last)}</div>
-      <div class="grid grid-cols-3 gap-2 mt-3">
-        <div><div class="stat-label">24h high</div><div class="stat-value">${price(s.high_24h)}</div></div>
-        <div><div class="stat-label">24h low</div><div class="stat-value">${price(s.low_24h)}</div></div>
-        <div><div class="stat-label">24h open</div><div class="stat-value">${price(s.open_24h)}</div></div>
+      <div class="mt-3">
+        <div class="flex justify-between text-[11px] muted mb-1.5"><span>24h low <b class="font-mono text-slate-700">${price(s.low_24h)}</b></span><span>high <b class="font-mono text-slate-700">${price(s.high_24h)}</b></span></div>
+        <div class="range"><span style="left:${Math.max(0, Math.min(100, inRange))}%"></span></div>
+      </div>
+      <div class="grid grid-cols-3 gap-2 mt-4">
         <div><div class="stat-label">Mark</div><div class="stat-value">${price(s.mark ?? p.price)}</div></div>
-        <div><div class="stat-label">Volume</div><div class="stat-value">$${compact(s.turnover_24h_usd)}</div></div>
-        <div><div class="stat-label">Funding</div><div class="stat-value ${pnlClass(-(s.funding_rate_pct || 0))}">${s.funding_rate_pct == null ? "—" : pct(s.funding_rate_pct, 4)}</div></div>
+        <div><div class="stat-label">Index</div><div class="stat-value">${price(s.index)}</div></div>
+        <div><div class="stat-label" title="Mark against the index: what the perpetual is paying over spot">Basis</div><div class="stat-value ${pnlClass(basis)}">${basis == null ? "—" : pct(basis, 3)}</div></div>
+        <div><div class="stat-label">24h open</div><div class="stat-value">${price(s.open_24h)}</div></div>
+        <div><div class="stat-label">24h volume</div><div class="stat-value">$${compact(s.turnover_24h_usd)}</div></div>
+        <div><div class="stat-label">Open interest</div><div class="stat-value">$${compact(s.oi_usd)}</div></div>
+        <div><div class="stat-label">Bid</div><div class="stat-value up">${price(s.bid)}</div></div>
+        <div><div class="stat-label">Ask</div><div class="stat-value down">${price(s.ask)}</div></div>
+        <div><div class="stat-label" title="Half of this is paid on the way in and half on the way out">Spread</div><div class="stat-value">${spread == null ? "—" : `${price(spread)}${spreadPct == null ? "" : ` <span class="muted text-[10px]">${num(spreadPct, 3)}%</span>`}`}</div></div>
+      </div>
+      <div class="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[11.5px]">
+        <span class="muted">Funding</span>
+        <span class="font-mono ${s.funding_rate_pct > 0 ? "down" : s.funding_rate_pct < 0 ? "up" : ""}">${s.funding_rate_pct == null ? "—" : pct(s.funding_rate_pct, 4)} <span class="muted">${s.funding_rate_pct == null ? "" : s.funding_rate_pct > 0 ? "longs pay" : s.funding_rate_pct < 0 ? "shorts pay" : ""}</span></span>
       </div>`;
   }
   const paintAll = () => Object.keys(TB.header?.prices || {}).sort().forEach(paintCard);
@@ -190,7 +207,7 @@
       row("Last error", esc(f.last_error || "—"), f.last_error ? "down" : "muted"),
     ].join("");
     const now = Date.now() / 1000;
-    TB.rows("channels", Object.entries(f.messages).sort(), ([k, v]) => {
+    TB.rows("channels", Object.entries(f.messages || {}).sort(), ([k, v]) => {
       const rate = prevMsgs && prevMsgs[k] !== undefined ? ((v - prevMsgs[k]) / (now - prevAt)) * 60 : null;
       return `<tr><td class="font-mono">${esc(k)}</td><td class="r font-mono">${num(v, 0)}</td><td class="r font-mono muted">${rate === null ? "—" : num(rate, 1)}</td></tr>`;
     }, "No messages yet", 3);

@@ -28,14 +28,16 @@ from tradebuddy.system import Broadcaster, System
 HERE = Path(__file__).parent
 
 # (id, path, lucide icon, title, nav group)
+# The account is the landing page. There was an Overview above it that repeated the account, the open
+# positions and the market cards from three other pages; each number now lives on the one page that
+# owns it, and the market depth it showed is on Market Data.
 PAGES = [
-    ("overview", "/", "layout-dashboard", "Overview", "Trading"),
+    ("account", "/", "wallet", "Account", "Portfolio"),
     ("ai", "/ai", "sparkles", "TradeBuddy AI", "Trading"),
     ("strategies", "/strategies", "brain-circuit", "Strategies", "Trading"),
     ("signals", "/signals", "activity", "Signals", "Trading"),
     ("positions", "/positions", "layers", "Positions", "Portfolio"),
     ("orders", "/orders", "list-checks", "Orders", "Portfolio"),
-    ("account", "/account", "wallet", "Account", "Portfolio"),
     ("journal", "/journal", "calendar-days", "Trading Journal", "Portfolio"),
     ("market", "/market", "candlestick-chart", "Market Data", "Monitoring"),
     ("system", "/system", "gauge", "System", "Monitoring"),
@@ -320,19 +322,24 @@ def create_app(
     for page_id, path, _icon, title, _group in PAGES:
         page(page_id, path, title)
 
+    @app.get("/account", include_in_schema=False)
+    async def account_redirect(request: Request) -> RedirectResponse:
+        """The account moved to the root. Old links and bookmarks keep working."""
+        return RedirectResponse(url="/" + (f"?{request.url.query}" if request.url.query else ""))
+
+    @app.get("/overview", include_in_schema=False)
+    async def overview_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/")
+
     @app.get("/paper", include_in_schema=False)
     async def paper_redirect() -> RedirectResponse:
-        return RedirectResponse(url="/account?broker=paper")
+        return RedirectResponse(url="/?broker=paper")
 
     # -- read ---------------------------------------------------------------
 
     @app.get("/api/header")
     async def header() -> dict:
         return await call("header")
-
-    @app.get("/api/overview")
-    async def overview() -> dict:
-        return await call("overview")
 
     @app.get("/api/strategies")
     async def strategies() -> list[dict]:

@@ -165,6 +165,12 @@ A template extending `base.html`, an entry in `PAGES` in `app.py`, and JSON
 routes that call `System`. State-changing routes take `Depends(protected)`.
 Live updates come from `TB.on(eventType, fn)`.
 
+Every number belongs to one page. `/` is the Account: balances, the day's risk and the paper
+record. Open positions are on Positions, the market and its options on Market Data, the event
+stream on Event Log. There was an Overview above all of them that showed a copy of each; it is
+gone, and `/overview`, `/account` and `/paper` redirect to `/`. Resist adding it back — a second
+copy of a number is a second thing to keep right.
+
 ## Commands
 
 The source is not bind-mounted into the containers. The engine is one long-lived process while Celery

@@ -88,11 +88,21 @@ async def test_close_position_route_closes_paper(cfg, exchange):
     await system.bus.stop()
 
 
-def test_overview_works_without_delta(cfg, exchange):
+def test_the_account_is_the_home_page(cfg, exchange):
+    """The Overview that used to sit here repeated this page, Positions and Market Data."""
     _, client = make(cfg, exchange)
-    body = client.get("/api/overview").json()
-    assert [a["broker"] for a in body["accounts"]] == ["paper"] and body["accounts"][0]["error"] == ""
-    assert body["strategies"][0]["name"] == "always_buy"
+    assert "Account · TradeBuddy" in client.get("/").text
+    body = client.get("/api/account?broker=paper").json()
+    assert body["currency"] == "USD" and body["equity"] > 0
+
+
+def test_the_old_paths_still_lead_home(cfg, exchange):
+    """Bookmarks and links from before the Overview was removed keep working."""
+    _, client = make(cfg, exchange)
+    for path, to in (("/account", "/"), ("/overview", "/"), ("/paper", "/?broker=paper")):
+        res = client.get(path, follow_redirects=False)
+        assert res.status_code in (302, 307) and res.headers["location"] == to, path
+    assert client.get("/account?broker=paper", follow_redirects=False).headers["location"] == "/?broker=paper"
 
 
 async def test_inactive_broker_is_hidden(cfg, exchange):

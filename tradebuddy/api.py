@@ -35,7 +35,7 @@ LEVEL_TYPES = {
 
 # Methods the engine answers over RPC. Anything else is refused.
 METHODS = (
-    "page_context", "header", "overview", "strategies", "signals", "positions", "orders", "open_orders", "account",
+    "page_context", "header", "strategies", "signals", "positions", "orders", "open_orders", "account",
     "paper_stats", "paper_trades", "metrics", "events", "settings", "update_settings", "clear_credentials",
     "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order", "order_ticket",
     "set_position_control", "risk", "risk_resume", "analysis", "options_history", "database",
@@ -82,25 +82,6 @@ class Api:
 
     async def header(self) -> dict[str, Any]:
         return self.system.header()
-
-    async def overview(self) -> dict[str, Any]:
-        day = time.time() - 86_400
-        accounts = []
-        for name, broker in self.system.active.items():
-            try:
-                accounts.append({"broker": name, "account": (await broker.account()).to_dict(), "error": ""})
-            except BrokerError as exc:
-                accounts.append({"broker": name, "account": None, "error": str(exc)})
-        store = self.system.store
-        return {
-            "header": self.system.header(),
-            "accounts": accounts,
-            "counts_24h": {t: store.count_events_since(t, day) for t in ("SignalGenerated", "TradeSkipped", "OrderPlaced", "OrderFailed", "PositionClosed")},
-            "strategies": self.system.strategies_view(),
-            "recent": store.recent_events(15, types=ACTIVITY_EVENTS),
-            "paper": self.system.paper.stats(),
-            "risk": await self.risk(),
-        }
 
     async def strategies(self) -> list[dict[str, Any]]:
         return self.system.strategies_view()

@@ -62,9 +62,9 @@ def test_read_only_without_pin(cfg, exchange):
     home = client.get("/", follow_redirects=False)
     assert home.status_code == 200
     assert " data-locked " in home.text and 'id="unlockBtn"' in home.text
-    for page in ("/positions", "/orders", "/account", "/journal", "/system", "/events"):
+    for page in ("/positions", "/orders", "/journal", "/system", "/events"):
         assert client.get(page, follow_redirects=False).status_code == 200, page
-    for url in ("/api/header", "/api/overview", "/api/positions?broker=paper", "/api/orders", "/api/structures", "/api/risk"):
+    for url in ("/api/header", "/api/account?broker=paper", "/api/positions?broker=paper", "/api/orders", "/api/structures", "/api/risk"):
         assert client.get(url).status_code == 200, url
 
 
@@ -156,7 +156,7 @@ def test_authenticated_access_granted_with_cookie(cfg, exchange):
     # Pages render unlocked, Settings included
     home_res = client.get("/")
     assert home_res.status_code == 200
-    assert "Overview · TradeBuddy" in home_res.text
+    assert "Account · TradeBuddy" in home_res.text
     assert " data-locked " not in home_res.text and 'id="lockBtn"' in home_res.text
     assert client.get("/settings", follow_redirects=False).status_code == 200
     assert client.get("/api/settings").status_code == 200
