@@ -76,6 +76,12 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   structure), `tbai.py` + `mistral.py` (TradeBuddy AI report; every attempt saved in full in `ai_reports`,
   90 days, failed 14), `analyst.py` (runs them). Analysis is advisory:
   nothing in it places an order.
+  A forecast target must ask the same question on every symbol and in every regime, or one model
+  learns a rare event and another a common one and neither is comparable: a breakout is
+  `breakout_sigma` x what the bar's own volatility implies over the horizon, never a fixed
+  percentage. Keep the models small — a 24h crypto target is mostly noise, and capacity goes into
+  the training regime. Bump `MODEL_VERSION` whenever a target or feature changes; `load` then
+  refuses the old files and says to retrain, which is the point.
 - `jobs.py` — every background loop wraps a pass in `job.tick()`; the System page shows them all.
 
 ## Invariants

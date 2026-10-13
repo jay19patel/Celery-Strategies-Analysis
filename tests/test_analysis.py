@@ -260,6 +260,46 @@ def test_forecaster_trains_validates_saves_and_predicts(tmp_path):
         again.predict(candles[-100:])  # not enough history for the 4-day vol
 
 
+def test_a_breakout_is_measured_against_the_bar_s_own_volatility():
+    """A fixed percentage asks a different question on a quiet bar than on a wild one. Over a year of
+    15m bars a fixed 4% excursion happened on 16.5% of BTC bars and 34.2% of ETH ones, so one model
+    was learning a rare event and the other a common one. A multiple of the bar's own volatility is
+    the same question everywhere, and the base rate stays where a classifier can learn it."""
+    pytest.importorskip("sklearn")
+    import numpy as np
+
+    from tradebuddy.forecast import ForecastConfig, targets
+
+    cfg = ForecastConfig()
+    out = targets(regime_bars(4000), cfg.horizon_bars, cfg)
+    thresholds, breakout = out["breakout_threshold"], out["breakout"]
+    known = ~np.isnan(breakout)
+    # The calm and wild stretches of the series get thresholds a multiple apart, not one number.
+    lo, hi = np.nanpercentile(thresholds[known], [10, 90])
+    assert hi > 3 * lo
+    assert float(np.nanmin(thresholds)) >= cfg.breakout_floor_pct / 100  # a dead-quiet window still asks something
+    assert 0.15 < breakout[known].mean() < 0.60  # balanced enough to learn, in either regime
+
+
+def test_the_live_breakout_threshold_is_the_one_the_model_was_taught(tmp_path):
+    pytest.importorskip("sklearn")
+    import math
+
+    import numpy as np
+
+    from tradebuddy.forecast import ANNUAL_BARS, FEATURES, ForecastConfig, Forecaster, features
+
+    candles = regime_bars(4000)
+    model = Forecaster.train("BTCUSD", candles, cfg=ForecastConfig(min_rows=1000))
+    f = model.predict(candles)
+    cfg = model.cfg
+    rv_96 = features(candles)[-1, FEATURES.index("rv_96")]
+    expected = max(cfg.breakout_sigma * rv_96 * math.sqrt(cfg.horizon_bars / ANNUAL_BARS), cfg.breakout_floor_pct / 100)
+    assert f["breakout_pct"] == pytest.approx(100 * expected, abs=0.01)
+    assert f["breakout_sigma"] == cfg.breakout_sigma
+    assert not np.isnan(f["breakout_probability"])
+
+
 # -- TradeBuddy AI ----------------------------------------------------------------------------
 
 

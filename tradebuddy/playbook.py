@@ -27,8 +27,12 @@ STRATEGIES = ("NO_TRADE", "LONG_CALL_SPREAD", "LONG_PUT_SPREAD", "LONG_STRADDLE"
 @dataclass(frozen=True)
 class PlaybookConfig:
     min_direction_confidence: float = 0.62
+    # Read against the breakout target's base rate, which the volatility-relative threshold holds near
+    # 33% on both symbols: 0.62 is roughly twice as likely as usual, 0.25 clearly quieter than usual.
+    # Under the old fixed 4% these sat against a base rate of 16% on BTC and 34% on ETH, so the same
+    # number meant "unusual" on one symbol and "ordinary" on the other.
     min_breakout_probability: float = 0.62
-    max_range_breakout_probability: float = 0.35
+    max_range_breakout_probability: float = 0.25
     vol_edge_ratio: float = 1.15
     min_hours: float = 20.0  # the expiry used must cover most of the 24h forecast
 

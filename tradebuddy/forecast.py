@@ -2,7 +2,8 @@
 
     candles + open interest + funding (Delta history, 15m)
         -> features      returns, realised vol, ATR, range, EMA distance, volume, OI change, funding, time of day
-        -> targets       direction, return, absolute move, realised vol, breakout (a 4% excursion)
+        -> targets       direction, return, absolute move, realised vol, breakout (an excursion of
+                         breakout_sigma times what the bar's own volatility implies over the horizon)
         -> five gradient-boosted models, validated on the most recent quarter of the data
         -> MarketForecast for the bar that just closed
 
@@ -35,13 +36,19 @@ from sklearn.metrics import mean_absolute_error, roc_auc_score
 from tradebuddy.delta import Candle
 
 ANNUAL_BARS = 365 * 96
-MODEL_VERSION = 1
+MODEL_VERSION = 2  # v2: the breakout target scales with volatility instead of a fixed 4%
 
 
 @dataclass(frozen=True)
 class ForecastConfig:
     horizon_bars: int = 96  # 24h of 15m bars
-    breakout_pct: float = 4.0  # a move this large either way within the horizon is a breakout
+    # A breakout is an excursion of this many times what the bar's own volatility implies over the
+    # horizon, not a fixed percentage. A fixed 4% was a different question on every symbol — over a
+    # year of 15m bars it happened on 16.5% of BTC bars and 34.2% of ETH ones, so the BTC model was
+    # learning a rare event and could not (holdout AUC 0.574). At 1.5 sigma both sit near 34%, the
+    # same question in any regime, and both models clear the bar (0.677 / 0.686).
+    breakout_sigma: float = 1.5
+    breakout_floor_pct: float = 0.5  # a dead-quiet window must not make the threshold meaningless
     holdout: float = 0.25
     min_rows: int = 2000
     # A model has skill when it beats these on the holdout.
@@ -135,7 +142,23 @@ def features(candles: list[Candle], oi: list[Candle] | None = None, funding: lis
     return np.column_stack([cols[name] for name in FEATURES])
 
 
-def targets(candles: list[Candle], horizon: int, breakout_pct: float) -> dict[str, np.ndarray]:
+def breakout_threshold(rv_96: np.ndarray, horizon: int, cfg: ForecastConfig) -> np.ndarray:
+    """How far price must travel, as a fraction, to count as a breakout from a bar.
+
+    `rv_96` is the annualised realised vol over the last day, the same column the model is fed.
+    Scaled down to the horizon it is what a normal move over that horizon looks like; the threshold
+    is `breakout_sigma` of those. Training and the live label read this one function, so the number
+    on the dashboard is the number the model was taught."""
+    with np.errstate(invalid="ignore"):
+        return np.maximum(cfg.breakout_sigma * rv_96 * math.sqrt(horizon / ANNUAL_BARS), cfg.breakout_floor_pct / 100)
+
+
+def _rv_96(candles: list[Candle]) -> np.ndarray:
+    """The realised-vol column, read back from the feature matrix so there is one definition of it."""
+    return features(candles)[:, FEATURES.index("rv_96")]
+
+
+def targets(candles: list[Candle], horizon: int, cfg: ForecastConfig) -> dict[str, np.ndarray]:
     """What happened over the `horizon` bars after each bar. NaN where the future is not known yet."""
     c = np.array([b.close for b in candles], dtype=float)
     h = np.array([b.high for b in candles], dtype=float)
@@ -149,25 +172,34 @@ def targets(candles: list[Candle], horizon: int, breakout_pct: float) -> dict[st
         fut_ret[i] = c[i + horizon] / c[i] - 1
         fut_rv[i] = np.std(logret[i : i + horizon], ddof=1) * math.sqrt(ANNUAL_BARS)
         excursion[i] = max(h[i + 1 : i + horizon + 1].max() / c[i] - 1, 1 - lo[i + 1 : i + horizon + 1].min() / c[i])
-    known = ~np.isnan(fut_ret)
+    threshold = breakout_threshold(_rv_96(candles), horizon, cfg)
+    known = ~np.isnan(fut_ret) & ~np.isnan(threshold)
     return {
         "direction": np.where(known, (fut_ret > 0).astype(float), np.nan),
         "return": fut_ret,
         "abs_move": np.abs(fut_ret),
         "realized_vol": fut_rv,
-        "breakout": np.where(known, (excursion >= breakout_pct / 100).astype(float), np.nan),
+        "breakout": np.where(known, (excursion >= threshold).astype(float), np.nan),
+        "breakout_threshold": threshold,
     }
 
 
 # -- the model ----------------------------------------------------------------------
 
 
+# A 24h target on a crypto perpetual is mostly noise, and a tree deep enough to fit the training
+# regime takes the noise with it: at 250 iterations and 15 leaves the direction model scored 0.513
+# AUC on BTC and 0.475 on ETH — worse than a coin on data it had not seen. The same features in a
+# model a third the size score 0.567 and 0.548, and every regressor improves too. Small on purpose.
+CAPACITY = {"max_iter": 100, "learning_rate": 0.03, "max_leaf_nodes": 5, "l2_regularization": 10.0, "min_samples_leaf": 500}
+
+
 def _classifier(cfg: ForecastConfig) -> HistGradientBoostingClassifier:
-    return HistGradientBoostingClassifier(max_iter=250, learning_rate=0.04, max_leaf_nodes=15, l2_regularization=1.0, random_state=cfg.random_state)
+    return HistGradientBoostingClassifier(random_state=cfg.random_state, **CAPACITY)
 
 
 def _regressor(cfg: ForecastConfig, loss: str = "absolute_error") -> HistGradientBoostingRegressor:
-    return HistGradientBoostingRegressor(loss=loss, max_iter=250, learning_rate=0.04, max_leaf_nodes=15, l2_regularization=1.0, random_state=cfg.random_state)
+    return HistGradientBoostingRegressor(loss=loss, random_state=cfg.random_state, **CAPACITY)
 
 
 @dataclass
@@ -201,8 +233,8 @@ class Forecaster:
     ) -> Forecaster:
         cfg = cfg or ForecastConfig()
         X = features(candles, oi, funding)
-        Y = targets(candles, cfg.horizon_bars, cfg.breakout_pct)
-        rows = np.where(~np.isnan(Y["return"]) & ~np.isnan(X[:, list(FEATURES).index("rv_384")]))[0]
+        Y = targets(candles, cfg.horizon_bars, cfg)
+        rows = np.where(~np.isnan(Y["return"]) & ~np.isnan(Y["breakout"]) & ~np.isnan(X[:, list(FEATURES).index("rv_384")]))[0]
         if len(rows) < cfg.min_rows:
             raise ValueError(f"{symbol}: {len(rows)} usable rows, need {cfg.min_rows} (about {cfg.min_rows // 96} days of 15m history)")
         # A side series that never arrived (OI, funding) is an all-NaN column: leave it out rather than fail.
@@ -228,7 +260,8 @@ class Forecaster:
         metrics["direction_auc"] = float(roc_auc_score(Y["direction"][test], p_dir))
         metrics["direction_accuracy"] = float(np.mean((p_dir > 0.5) == (Y["direction"][test] > 0.5)))
         metrics["breakout_auc"] = float(roc_auc_score(y_brk, p_brk)) if 0 < y_brk.mean() < 1 else 0.5
-        metrics["breakout_rate"] = float(y_brk.mean())
+        metrics["breakout_rate"] = float(y_brk.mean())  # near 0 or 1 means the threshold asks a question with one answer
+        metrics["breakout_threshold_pct"] = float(100 * np.median(Y["breakout_threshold"][test]))
         metrics["return_mae"] = float(mean_absolute_error(Y["return"][test], models["return"].predict(X[test])))
         metrics["abs_move_mae"] = float(mean_absolute_error(Y["abs_move"][test], models["abs_move"].predict(X[test])))
         metrics["realized_vol_mae"] = float(mean_absolute_error(Y["realized_vol"][test], models["realized_vol"].predict(X[test])))
@@ -260,8 +293,12 @@ class Forecaster:
         x = features(candles, oi, funding)[-1:]
         if np.isnan(x[0, list(FEATURES).index("rv_384")]):
             raise ValueError(f"need at least 400 bars of history, got {len(candles)}")
+        rv_96 = float(x[0, FEATURES.index("rv_96")])
         x = x[:, [FEATURES.index(name) for name in self.card.features]]
         up = float(self.models["direction"].predict_proba(x)[0, 1])
+        # The same threshold the model was trained on, at this bar's volatility, so the dashboard can
+        # say what "breakout" means right now instead of quoting a constant.
+        threshold = float(breakout_threshold(np.array([rv_96]), self.cfg.horizon_bars, self.cfg)[0])
         return {
             "bar_time": candles[-1].time,
             "horizon_hours": self.cfg.horizon_bars / 4,
@@ -271,7 +308,8 @@ class Forecaster:
             "expected_abs_move": round(max(0.0, float(self.models["abs_move"].predict(x)[0])), 5),
             "predicted_realized_vol": round(max(0.0, float(self.models["realized_vol"].predict(x)[0])), 4),
             "breakout_probability": round(float(self.models["breakout"].predict_proba(x)[0, 1]), 4),
-            "breakout_pct": self.cfg.breakout_pct,
+            "breakout_pct": round(100 * threshold, 2),
+            "breakout_sigma": self.cfg.breakout_sigma,
             "skill": self.card.skill,
             "trained_at": self.card.trained_at,
         }

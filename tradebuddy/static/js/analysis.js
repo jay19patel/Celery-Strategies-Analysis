@@ -1,4 +1,4 @@
-/* Market analysis widgets, shared by the Market Data and Overview pages.
+/* Market analysis widgets for the Market Data page.
    Data: GET /api/analysis, then live OptionsSnapshot and MarketAnalysis events. */
 (() => {
   const { esc, num, price, pct, compact, ago, time } = TB;
@@ -91,14 +91,25 @@
       model = `<div class="text-[11.5px] down">Forecast failed: ${esc(m.hint || "")}</div>`;
     } else {
       const sk = f.skill || {};
-      const flag = (k) => (sk[k] ? `<span class="up" title="beats its baseline on unseen data">✓</span>` : `<span class="muted" title="no edge over a naive baseline on unseen data: ignored by the playbook">✗</span>`);
+      // A model that did not beat a naive baseline on data it never saw is not a number to act on.
+      // It is marked, greyed and labelled, not quietly drawn like the ones that earned their place.
+      const flag = (k) => (sk[k]
+        ? `<span class="up" title="beats its baseline on unseen data">✓</span>`
+        : `<span class="badge !py-0 !px-1 !text-[9px] align-middle" title="no edge over a naive baseline on unseen data: the playbook ignores it">NO EDGE</span>`);
+      const grey = "#94a3b8";
+      // The model leans one way; show that way. "Up 43%" is the same statement as "Down 57%", and
+      // only one of them reads as what the model actually thinks.
+      const up = f.up_probability >= 0.5;
+      const lean = up ? f.up_probability : f.down_probability ?? 1 - f.up_probability;
       model = `<div class="space-y-2.5">
-        ${bar(`Up in ${num(f.horizon_hours, 0)}h ${flag("direction")}`, f.up_probability, f.up_probability >= 0.5 ? "#12804a" : "#b42323")}
-        ${bar(`Breakout ±${num(f.breakout_pct, 0)}% ${flag("breakout")}`, f.breakout_probability, "#7c3aed")}
+        ${bar(`${up ? "Up" : "Down"} in ${num(f.horizon_hours, 0)}h ${flag("direction")}`, lean, !sk.direction ? grey : up ? "#12804a" : "#b42323")}
+        ${bar(`Breakout ±${num(f.breakout_pct, 2)}% ${flag("breakout")}`, f.breakout_probability, sk.breakout ? "#7c3aed" : grey,
+          `<span class="muted"> of ${num(f.breakout_sigma, 2)}σ</span>`)}
         <div class="grid grid-cols-2 gap-2 pt-1">
-          ${tile(`Forecast RV ${flag("realized_vol")}`, ivp(f.predicted_realized_vol, 0), `vs ATM IV ${ivp(p?.atm_iv ?? a.context?.atm_iv, 0)}`)}
-          ${tile(`Abs move ${flag("abs_move")}`, `±${(100 * f.expected_abs_move).toFixed(2)}%`, `return ${sgn(100 * f.expected_return, 2)} ${sk.return ? "" : "(no skill)"}`)}
+          ${tile(`Forecast RV ${flag("realized_vol")}`, ivp(f.predicted_realized_vol, 0), `vs ATM IV ${ivp(p?.atm_iv ?? a.context?.atm_iv, 0)}`, sk.realized_vol ? "" : "text-slate-400")}
+          ${tile(`Abs move ${flag("abs_move")}`, `±${(100 * f.expected_abs_move).toFixed(2)}%`, `return ${sgn(100 * f.expected_return, 2)}${sk.return ? "" : " · no edge"}`, sk.abs_move ? "" : "text-slate-400")}
         </div>
+        ${Object.values(sk).every((v) => !v) ? `<div class="text-[11px] muted">Nothing here beat a naive baseline on unseen data, so the playbook uses none of it. The rule-based insights still apply.</div>` : ""}
         <div class="text-[10.5px] muted">Trained ${ago(m.trained_at)} on ${new Date(m.train_from * 1000).toLocaleDateString("en-GB")}–${new Date(m.train_to * 1000).toLocaleDateString("en-GB")} · holdout AUC dir ${num(m.metrics?.direction_auc, 3)} · breakout ${num(m.metrics?.breakout_auc, 3)}</div>
       </div>`;
     }

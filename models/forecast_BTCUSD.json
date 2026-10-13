@@ -1,10 +1,11 @@
 {
   "symbol": "BTCUSD",
-  "version": 1,
-  "trained_at": 1791312129.413414,
+  "version": 2,
+  "trained_at": 1791915492.207563,
   "config": {
     "horizon_bars": 96,
-    "breakout_pct": 4.0,
+    "breakout_sigma": 1.5,
+    "breakout_floor_pct": 0.5,
     "holdout": 0.25,
     "min_rows": 2000,
     "min_direction_auc": 0.56,
@@ -12,8 +13,8 @@
     "max_error_ratio": 0.95,
     "random_state": 42
   },
-  "train_from": 1760121900,
-  "train_to": 1791224100,
+  "train_from": 1760724900,
+  "train_to": 1791827100,
   "rows_train": 25823,
   "rows_test": 8640,
   "features": [
@@ -41,22 +42,23 @@
     "dow_cos"
   ],
   "metrics": {
-    "direction_auc": 0.54297,
-    "direction_accuracy": 0.54259,
-    "breakout_auc": 0.57419,
-    "breakout_rate": 0.08576,
-    "return_mae": 0.01452,
-    "abs_move_mae": 0.01032,
-    "realized_vol_mae": 0.08703
+    "direction_auc": 0.56659,
+    "direction_accuracy": 0.56424,
+    "breakout_auc": 0.65556,
+    "breakout_rate": 0.36609,
+    "breakout_threshold_pct": 2.4025,
+    "return_mae": 0.01332,
+    "abs_move_mae": 0.00953,
+    "realized_vol_mae": 0.08949
   },
   "baselines": {
-    "return_mae": 0.01338,
-    "abs_move_mae": 0.01016,
-    "realized_vol_mae": 0.10106
+    "return_mae": 0.01301,
+    "abs_move_mae": 0.00998,
+    "realized_vol_mae": 0.10402
   },
   "skill": {
-    "direction": false,
-    "breakout": false,
+    "direction": true,
+    "breakout": true,
     "return": false,
     "abs_move": false,
     "realized_vol": true
