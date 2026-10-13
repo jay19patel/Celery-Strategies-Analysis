@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import shutil
 import time
 from datetime import UTC, datetime
 
@@ -666,6 +667,39 @@ def test_a_model_trained_here_wins_over_the_bundled_one(tmp_path):
     assert model_path(here, "BTCUSD", bundled) == (here / "forecast_BTCUSD.joblib", "trained here")
     # the repo ships models for both symbols, with their cards
     assert {p.name for p in BUNDLED_MODELS.glob("forecast_*")} >= {f"forecast_{s}.{x}" for s in ("BTCUSD", "ETHUSD") for x in ("joblib", "json")}
+
+
+async def test_a_model_this_code_cannot_load_falls_back_to_the_shipped_one(cfg, exchange, tmp_path):
+    """A model trained on this server before a MODEL_VERSION bump is refused by the loader. There is a
+    working model shipped next to it, so the page gets a forecast and a note, not an error."""
+    pytest.importorskip("sklearn")
+    from tradebuddy.analyst import BUNDLED_MODELS, Analyst, model_paths
+
+    here, bundled = tmp_path / "here", tmp_path / "bundled"
+    here.mkdir(), bundled.mkdir()
+    (here / "forecast_BTCUSD.joblib").write_bytes(b"not a model")  # the stale one wins on order
+    shutil.copy(BUNDLED_MODELS / "forecast_BTCUSD.joblib", bundled / "forecast_BTCUSD.joblib")
+    assert [s for _, s in model_paths(here, "BTCUSD", bundled)] == ["trained here", "bundled"]
+
+    a = Analyst(client=lambda: None, settings=lambda: None, publish=lambda _e: None,
+                options=lambda _s: None, stats=lambda _s: None, model_dir=here, bundled_models=bundled)
+    model, info = a._model("BTCUSD")
+    assert model is not None and info["status"] == "ready" and info["source"] == "bundled"
+    assert info["skipped"] and "forecast_BTCUSD.joblib (trained here)" in info["skipped"][0]
+    a._model("BTCUSD")  # the broken file is remembered, not unpickled again every cycle
+    assert len(a._unloadable) == 1
+
+
+async def test_no_usable_model_anywhere_is_an_error_not_a_crash(tmp_path):
+    from tradebuddy.analyst import Analyst
+
+    here = tmp_path / "here"
+    here.mkdir()
+    (here / "forecast_BTCUSD.joblib").write_bytes(b"not a model")
+    a = Analyst(client=lambda: None, settings=lambda: None, publish=lambda _e: None,
+                options=lambda _s: None, stats=lambda _s: None, model_dir=here, bundled_models=tmp_path / "none")
+    model, info = a._model("BTCUSD")
+    assert model is None and info["status"] == "error" and "trained here" in info["hint"]
 
 
 async def test_an_answer_cut_off_is_asked_for_again_with_a_bigger_budget(tmp_path):

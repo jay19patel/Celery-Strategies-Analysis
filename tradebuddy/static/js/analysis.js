@@ -158,7 +158,8 @@
           ${tile(`Abs move ${flag("abs_move")}`, `±${(100 * f.expected_abs_move).toFixed(2)}%`, `return ${sgn(100 * f.expected_return, 2)}${sk.return ? "" : " · no edge"}`, sk.abs_move ? "" : "text-slate-400")}
         </div>
         ${Object.values(sk).every((v) => !v) ? `<div class="text-[11px] muted">Nothing here beat a naive baseline on unseen data, so the playbook uses none of it. The rule-based insights still apply.</div>` : ""}
-        <div class="text-[10.5px] muted">Trained ${ago(m.trained_at)} on ${new Date(m.train_from * 1000).toLocaleDateString("en-GB")}–${new Date(m.train_to * 1000).toLocaleDateString("en-GB")} · holdout AUC dir ${num(m.metrics?.direction_auc, 3)} · breakout ${num(m.metrics?.breakout_auc, 3)}</div>
+        <div class="text-[10.5px] muted">${esc(m.source || "")} · trained ${ago(m.trained_at)} on ${new Date(m.train_from * 1000).toLocaleDateString("en-GB")}–${new Date(m.train_to * 1000).toLocaleDateString("en-GB")} · holdout AUC dir ${num(m.metrics?.direction_auc, 3)} · breakout ${num(m.metrics?.breakout_auc, 3)}</div>
+        ${m.skipped?.length ? `<div class="text-[10.5px] text-amber-700">Using the shipped model: ${esc(m.skipped.join("; "))}. Retrain to replace it.</div>` : ""}
       </div>`;
     }
     let play = "";

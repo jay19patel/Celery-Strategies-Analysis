@@ -54,6 +54,7 @@ class Analyst:
         self.options, self.stats = options, stats
         self.model_dir, self.every, self.symbols, self.http = model_dir, every, symbols, http
         self._models: dict[str, tuple[Any, Any]] = {}  # symbol -> ((file, mtime), Forecaster)
+        self._unloadable: dict[tuple[str, float], str] = {}  # (file, mtime) -> why, so a bad file is read once
         self.runs = 0
         self.last_error = ""
         self.ai_calls = 0
@@ -131,25 +132,35 @@ class Analyst:
     def _model(self, symbol: str) -> tuple[Any, dict[str, Any]]:
         if self.model_dir is None:
             return None, {"status": "off"}
-        path, source = model_path(self.model_dir, symbol, self.bundled_models)
-        if path is None:
+        found = model_paths(self.model_dir, symbol, self.bundled_models)
+        if not found:
             return None, {"status": "not_trained", "hint": f"python -m tradebuddy train --symbols {symbol}"}
-        mtime = (str(path), path.stat().st_mtime)
-        cached = self._models.get(symbol)
-        if cached is None or cached[0] != mtime:
-            try:
-                from tradebuddy.forecast import Forecaster  # needs the ml extra; loaded only once a model exists
-            except ImportError:
-                return None, {"status": "unavailable", "hint": "install the ml extra (scikit-learn)"}
-            try:
-                self._models[symbol] = (mtime, Forecaster.load(path))
-            except Exception as exc:
-                return None, {"status": "error", "hint": str(exc)[:200]}
-        card = self._models[symbol][1].card
-        return self._models[symbol][1], {
-            "status": "ready", "source": source, "trained_at": card.trained_at, "train_from": card.train_from, "train_to": card.train_to,
-            "metrics": card.metrics, "baselines": card.baselines, "skill": card.skill,
-        }
+        try:
+            from tradebuddy.forecast import Forecaster  # needs the ml extra; loaded only once a model exists
+        except ImportError:
+            return None, {"status": "unavailable", "hint": "install the ml extra (scikit-learn)"}
+        errors = []
+        for path, source in found:
+            stamp = (str(path), path.stat().st_mtime)
+            if (why := self._unloadable.get(stamp)) is not None:
+                errors.append(why)  # already tried this exact file; do not unpickle it again every cycle
+                continue
+            cached = self._models.get(symbol)
+            if cached is None or cached[0] != stamp:
+                try:
+                    self._models[symbol] = (stamp, Forecaster.load(path))
+                except Exception as exc:
+                    self._unloadable[stamp] = f"{path.name} ({source}): {str(exc)[:120]}"
+                    errors.append(self._unloadable[stamp])
+                    log.warning("model_unusable symbol=%s path=%s error=%s", symbol, path, exc)
+                    continue
+            card = self._models[symbol][1].card
+            return self._models[symbol][1], {
+                "status": "ready", "source": source, "trained_at": card.trained_at, "train_from": card.train_from, "train_to": card.train_to,
+                "metrics": card.metrics, "baselines": card.baselines, "skill": card.skill,
+                "skipped": errors,  # a better file that this code could not use, so the page says which one it is on
+            }
+        return None, {"status": "error", "hint": "; ".join(errors)[:200]}
 
     async def _forecast(self, symbol: str, candles: list, oi: list, funding: list) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         model, info = self._model(symbol)
@@ -244,12 +255,19 @@ class Analyst:
 BUNDLED_MODELS = Path(__file__).resolve().parent.parent / "models"
 
 
-def model_path(model_dir: Path, symbol: str, bundled: Path = BUNDLED_MODELS) -> tuple[Path | None, str]:
+def model_paths(model_dir: Path, symbol: str, bundled: Path = BUNDLED_MODELS) -> list[tuple[Path, str]]:
+    """Every file that could serve this symbol, best first. More than one, because the better file is
+    not always the usable one: a model trained on this server before a MODEL_VERSION bump is refused
+    by the loader, and falling back to the shipped one is better than showing an error on a page that
+    has a working model sitting next to it."""
     name = f"forecast_{symbol}.joblib"
-    for path, source in ((model_dir / name, "trained here"), (bundled / name, "bundled")):
-        if path.exists():
-            return path, source
-    return None, ""
+    return [(p, s) for p, s in ((model_dir / name, "trained here"), (bundled / name, "bundled")) if p.exists()]
+
+
+def model_path(model_dir: Path, symbol: str, bundled: Path = BUNDLED_MODELS) -> tuple[Path | None, str]:
+    """The file that would be tried first, whether or not this code can load it."""
+    found = model_paths(model_dir, symbol, bundled)
+    return found[0] if found else (None, "")
 
 
 def model_dir_for(db_path: str) -> Path:
