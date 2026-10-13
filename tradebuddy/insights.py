@@ -16,6 +16,7 @@ from tradebuddy.delta import Candle
 from tradebuddy.strategies.indicators import atr, ema
 
 BARS_PER_DAY = 96  # 15-minute bars
+BAR_SECONDS = 900
 ANNUAL = math.sqrt(365 * BARS_PER_DAY)
 
 SEVERITY_RANK = {"alert": 0, "watch": 1, "info": 2}
@@ -35,6 +36,74 @@ def _rv(closes: list[float], bars: int) -> float | None:
         return None
     mean = sum(rets) / len(rets)
     return math.sqrt(sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)) * ANNUAL
+
+
+def outcome(candles: list[Candle], bar_time: int, horizon_hours: float, breakout_pct: float) -> dict[str, float | bool] | None:
+    """What the market did over one forecast's horizon, or None when the candles do not cover it.
+
+    Measured the way the model was trained: the return from the forecast bar's close to the close
+    `horizon_hours` later, the realised volatility of the closes between them, and the furthest the
+    price travelled either way against the threshold that bar's volatility implied."""
+    by_time = {c.time: c for c in candles}
+    start = by_time.get(bar_time)
+    end_time = bar_time + int(horizon_hours * 3600)
+    window = [c for c in candles if bar_time < c.time <= end_time]
+    if start is None or not window or window[-1].time < end_time - BAR_SECONDS:
+        return None  # the horizon is not covered: leave it unsettled and try again next pass
+    closes = [start.close, *(c.close for c in window)]
+    high = max(c.high for c in window)
+    low = min(c.low for c in window)
+    excursion = max(high / start.close - 1, 1 - low / start.close)
+    return {
+        "price": window[-1].close,
+        "ret": window[-1].close / start.close - 1,
+        "realized_vol": _rv(closes, len(closes) - 1) or 0.0,
+        "excursion": excursion,
+        "breakout": bool(breakout_pct) and excursion >= breakout_pct / 100,
+    }
+
+
+def score_forecasts(points: list[dict[str, Any]]) -> dict[str, Any]:
+    """How the model has actually done, over forecasts whose horizon has since passed.
+
+    Every number is read against what someone could have done without the model over the very same
+    bars: direction against always calling the side that came up more often, realised vol and the
+    absolute move against predicting their own average. A hit rate on its own says nothing — a
+    rising fortnight makes "always up" look clever too."""
+    n = len(points)
+    if not n:
+        return {"count": 0}
+
+    def mae(key: str, actual_key: str) -> dict[str, Any] | None:
+        pairs = [(p[key], p[actual_key]) for p in points if p.get(key) is not None and p.get(actual_key) is not None]
+        if len(pairs) < 2:
+            return None
+        mean = sum(a for _, a in pairs) / len(pairs)
+        return {
+            "n": len(pairs),
+            "mae": sum(abs(f - a) for f, a in pairs) / len(pairs),
+            "baseline_mae": sum(abs(mean - a) for _, a in pairs) / len(pairs),  # predict the average and nothing else
+            "bias": sum(f - a for f, a in pairs) / len(pairs),  # positive: the model reads the market high
+        }
+
+    called = [p for p in points if p.get("up_probability") is not None]
+    ups = sum(p["actual_up"] for p in called)
+    majority = max(ups, len(called) - ups) / len(called) if called else 0.0
+    hit = sum((p["up_probability"] > 0.5) == bool(p["actual_up"]) for p in called) / len(called) if called else 0.0
+    brk = [p for p in points if p.get("breakout_probability") is not None and p.get("actual_breakout") is not None]
+    return {
+        "count": n,
+        "from": points[0]["bar_time"],
+        "to": points[-1]["bar_time"],
+        "direction": {"n": len(called), "hit_rate": hit, "baseline": majority, "up_rate": ups / len(called) if called else 0.0},
+        "breakout": {
+            "n": len(brk),
+            "predicted": sum(p["breakout_probability"] for p in brk) / len(brk) if brk else 0.0,
+            "actual": sum(p["actual_breakout"] for p in brk) / len(brk) if brk else 0.0,
+        },
+        "realized_vol": mae("predicted_realized_vol", "actual_realized_vol"),
+        "abs_move": mae("expected_abs_move", "actual_abs_move"),
+    }
 
 
 def market_context(

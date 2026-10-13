@@ -427,6 +427,10 @@ def create_app(
     async def options_history(symbol: str = "BTCUSD", hours: float = 24) -> list[dict]:
         return await call("options_history", symbol=symbol, hours=hours)
 
+    @app.get("/api/forecast/record")
+    async def forecast_record(symbol: str = "BTCUSD", days: float = 14) -> dict:
+        return await call("forecast_record", symbol=symbol, days=days)
+
     @app.get("/api/database")
     async def database() -> dict:
         return await call("database")

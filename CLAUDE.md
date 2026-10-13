@@ -86,6 +86,10 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   direction here — not more features, not a shorter horizon, not pooling the symbols, not agreeing
   with a trend indicator; all were tried and all were worse. Bump `MODEL_VERSION` whenever a target
   or feature changes; `load` then refuses the old files and says to retrain, which is the point.
+- Every forecast is kept with the bar it was made on (`forecasts`), and the engine writes back what
+  the market did once the horizon passed (`System.score_forecasts`, `insights.outcome`). Market Data
+  draws the two against each other and scores them with `insights.score_forecasts` — always beside
+  the baseline that needed no model, because a hit rate alone cannot tell skill from drift.
 - `jobs.py` — every background loop wraps a pass in `job.tick()`; the System page shows them all.
 
 ## Invariants

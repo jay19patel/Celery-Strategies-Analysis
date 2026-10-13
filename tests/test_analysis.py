@@ -736,3 +736,117 @@ async def test_a_second_failure_is_recorded_with_what_the_model_wrote(tmp_path):
     report = [e for e in published if isinstance(e, AIReport)][-1]
     assert not report.ok and report.attempts == 2 and report.raw == '{"headline": "cut'
     assert report.finish_reason == "length" and report.paused_until is None  # not a rate limit: no backoff
+
+
+# -- forecasts scored against what the market did ------------------------------------------
+
+
+def bars_from(start_ts, closes):
+    """15m candles whose high and low straddle the close, so an excursion is measurable."""
+    return [
+        Candle(start_ts + 900 * i, c, c * 1.001, c * 0.999, c, 10.0)
+        for i, c in enumerate(closes)
+    ]
+
+
+def test_outcome_measures_the_window_the_forecast_covered():
+    from tradebuddy.insights import outcome
+
+    t0 = 1_700_000_000
+    closes = [100.0] * 5 + [104.0] + [102.0] * 3  # up 4% at the peak, settling at +2%
+    out = outcome(bars_from(t0, closes), t0, 8 * 900 / 3600, breakout_pct=3.0)
+    assert out is not None
+    assert out["price"] == pytest.approx(102.0)
+    assert out["ret"] == pytest.approx(0.02)
+    assert out["excursion"] == pytest.approx(104 * 1.001 / 100 - 1, rel=1e-3)  # the high, not the close
+    assert out["breakout"] is True  # it travelled past 3% even though it closed at 2%
+    assert outcome(bars_from(t0, closes), t0, 8 * 900 / 3600, breakout_pct=6.0)["breakout"] is False
+
+
+def test_outcome_waits_rather_than_guessing_when_the_window_is_short():
+    from tradebuddy.insights import outcome
+
+    t0 = 1_700_000_000
+    bars = bars_from(t0, [100.0] * 4)  # only an hour of candles
+    assert outcome(bars, t0, 24, breakout_pct=3.0) is None  # a 24h horizon is not covered
+    assert outcome(bars, t0 - 86_400, 24, breakout_pct=3.0) is None  # the forecast bar is not in them
+
+
+def test_the_score_reads_every_number_against_what_needed_no_model():
+    from tradebuddy.insights import score_forecasts
+
+    # Ten bars that all went up: calling "up" every time is right 100% of the time and worth nothing.
+    points = [
+        {"bar_time": 1000 + i, "up_probability": 0.7, "actual_up": 1,
+         "predicted_realized_vol": 0.4, "actual_realized_vol": 0.4,
+         "expected_abs_move": 0.01, "actual_abs_move": 0.01,
+         "breakout_probability": 0.3, "actual_breakout": 0}
+        for i in range(10)
+    ]
+    s = score_forecasts(points)
+    assert s["count"] == 10
+    assert s["direction"]["hit_rate"] == 1.0 and s["direction"]["baseline"] == 1.0  # no edge over the drift
+    assert s["breakout"]["predicted"] == pytest.approx(0.3) and s["breakout"]["actual"] == 0.0
+    assert s["realized_vol"]["mae"] == 0.0 and s["realized_vol"]["bias"] == 0.0
+    assert score_forecasts([]) == {"count": 0}
+
+
+def test_the_score_sees_a_model_that_reads_the_market_high():
+    from tradebuddy.insights import score_forecasts
+
+    points = [
+        {"bar_time": 1000 + i, "up_probability": 0.4, "actual_up": i % 2,
+         "predicted_realized_vol": 0.60, "actual_realized_vol": 0.40,
+         "expected_abs_move": 0.02, "actual_abs_move": 0.01,
+         "breakout_probability": 0.9, "actual_breakout": 1}
+        for i in range(10)
+    ]
+    s = score_forecasts(points)
+    assert s["realized_vol"]["bias"] == pytest.approx(0.20)  # consistently 20 points too high
+    assert s["realized_vol"]["mae"] > s["realized_vol"]["baseline_mae"]  # worse than predicting the average
+    assert s["direction"]["baseline"] == 0.5  # the bars split evenly, so there is no side to ride
+
+
+async def test_the_engine_keeps_every_forecast_and_scores_it_when_the_horizon_is_up(cfg, exchange):
+    """Recorded on the way through, settled a day later from the candles for that window."""
+    from tradebuddy.events import MarketAnalysis
+    from tradebuddy.system import System
+
+    system = System(cfg, strategies=[], stream_factory=IdleStream, client_factory=exchange.client)
+    t0 = 1_700_000_000
+    forecast = {
+        "bar_time": t0, "horizon_hours": 1.0, "up_probability": 0.7, "down_probability": 0.3,
+        "breakout_probability": 0.4, "breakout_pct": 1.0, "predicted_realized_vol": 0.5,
+        "expected_abs_move": 0.01, "expected_return": 0.004, "skill": {"realized_vol": True},
+    }
+    await system.on_analysis(MarketAnalysis(symbol="BTCUSD", context={"price": 100.0}, insights=[], forecast=forecast, playbook=None))
+    # The analyst repeats a bar every cycle; the first claim is the one it made.
+    await system.on_analysis(MarketAnalysis(symbol="BTCUSD", context={"price": 999.0}, insights=[], forecast=forecast | {"up_probability": 0.1}, playbook=None))
+    [open_row] = system.store.unsettled_forecasts(now=t0 + 7200)
+    assert open_row["price"] == 100.0 and open_row["up_probability"] == 0.7
+
+    assert await system._score_once(now=t0 + 1800) == "nothing due"  # the horizon has not passed
+
+    exchange.history = bars_from(t0, [100.0, 101.0, 102.0, 102.5, 101.5])  # +1.5% an hour later
+    note = await system._score_once(now=t0 + 7200)
+    assert note == "settled 1"
+    assert system.store.unsettled_forecasts(now=t0 + 7200) == []
+    [row] = system.store.forecast_history("BTCUSD")
+    assert row["actual_return"] == pytest.approx(0.015)
+    assert row["actual_breakout"] == 1  # it travelled past the 1% threshold
+    assert row["up_probability"] == 0.7 and row["predicted_realized_vol"] == 0.5
+
+
+async def test_a_forecast_without_candles_stays_open_for_the_next_pass(cfg, exchange):
+    from tradebuddy.events import MarketAnalysis
+    from tradebuddy.system import System
+
+    system = System(cfg, strategies=[], stream_factory=IdleStream, client_factory=exchange.client)
+    t0 = 1_700_000_000
+    await system.on_analysis(MarketAnalysis(
+        symbol="BTCUSD", context={"price": 100.0}, insights=[], playbook=None,
+        forecast={"bar_time": t0, "horizon_hours": 1.0, "breakout_pct": 1.0, "up_probability": 0.5},
+    ))
+    exchange.history = []  # the exchange has nothing for that window yet
+    assert "without candles" in await system._score_once(now=t0 + 7200)
+    assert len(system.store.unsettled_forecasts(now=t0 + 7200)) == 1  # kept, not written off

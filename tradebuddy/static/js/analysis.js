@@ -274,11 +274,81 @@
       <div class="flex justify-between text-[10.5px] muted font-mono"><span>${fmt(lo)}</span><span>now ${fmt(vs[vs.length - 1])}</span><span>${fmt(hi)}</span></div>`;
   }
 
+  // ── forecast against what happened ─────────────────────────────────────────
+  // Two lines on one scale: what the model said realised volatility would be, and what it turned
+  // out to be. A model that tracks has the lines moving together; one that does not is visibly flat
+  // while the market is not. Below it, one tick per direction call, green where it was right.
+  // A fortnight is ~1,350 settled forecasts and 1,350 points on a 480-wide chart is a smear, not a
+  // line. Average them into buckets wide enough to see: the shape is what is being read here, and
+  // the exact value of one 15-minute bar a week ago is not.
+  function buckets(rows, n) {
+    if (rows.length <= n) return rows.map((r) => [r]);
+    const size = rows.length / n;
+    return Array.from({ length: n }, (_, i) => rows.slice(Math.floor(i * size), Math.floor((i + 1) * size))).filter((b) => b.length);
+  }
+  const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+
+  function twoLines(points, forecastKey, actualKey, fmt) {
+    const rows = points.filter((p) => p[forecastKey] != null && p[actualKey] != null);
+    if (rows.length < 2) return `<div class="text-[11px] muted py-6 text-center">Nothing has matured yet — a forecast is scored a day after it is made.</div>`;
+    const W = 480, H = 130, pad = 6;
+    const bs = buckets(rows, 160).map((b) => [mean(b.map((r) => r[forecastKey])), mean(b.map((r) => r[actualKey]))]);
+    const all = bs.flat();
+    const lo = Math.min(...all), hi = Math.max(...all), span = hi - lo || 1;
+    const X = (i) => (i / (bs.length - 1)) * W;
+    const Y = (v) => H - pad - ((v - lo) / span) * (H - 2 * pad);
+    const line = (k, color, width) =>
+      `<polyline fill="none" stroke="${color}" stroke-width="${width}" stroke-linejoin="round" vector-effect="non-scaling-stroke"
+         points="${bs.map((b, i) => `${X(i)},${Y(b[k])}`).join(" ")}"/>`;
+    return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-32" preserveAspectRatio="none" role="img"
+        aria-label="Forecast against actual, oldest left">${line(0, "#7c3aed", 2.6)}${line(1, "#0f766e", 1.8)}</svg>
+      <div class="flex justify-between text-[10.5px] muted font-mono"><span>${fmt(lo)}</span><span>${rows.length} settled</span><span>${fmt(hi)}</span></div>`;
+  }
+
+  // One column per slice of time: how much of it the model called right, stacked over how much it
+  // called wrong. A per-call tick would be 1,350 hairlines; this is the same answer, legible.
+  function hitTrack(points) {
+    const rows = points.filter((p) => p.up_probability != null);
+    if (!rows.length) return `<div class="text-[11px] muted py-6 text-center">No direction calls scored yet.</div>`;
+    const W = 480, H = 130;
+    const bs = buckets(rows, 60);
+    const w = W / bs.length;
+    const bars = bs.map((b, i) => {
+      const right = b.filter((p) => (p.up_probability > 0.5) === !!p.actual_up).length / b.length;
+      const up = b.filter((p) => p.up_probability > 0.5).length / b.length;  // which way it leaned here
+      const x = i * w, bw = Math.max(1, w - 0.8);
+      return `<rect x="${x}" y="${H * (1 - right)}" width="${bw}" height="${H * right}" fill="#00b852" fill-opacity=".9"/>
+              <rect x="${x}" y="0" width="${bw}" height="${H * (1 - right)}" fill="#eb5757" fill-opacity=".75"/>
+              <rect x="${x}" y="${H - 3}" width="${bw}" height="3" fill="${up >= 0.5 ? "#12804a" : "#b42323"}"/>`;
+    }).join("");
+    const half = `<line x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}" stroke="#fff" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>`;
+    return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-32" preserveAspectRatio="none" role="img"
+        aria-label="Share of direction calls that were right, per slice of time, oldest left">${bars}${half}</svg>
+      <div class="flex justify-between text-[10.5px] muted"><span>oldest</span><span>green = share called right · dashed line is half</span><span>newest</span></div>`;
+  }
+
+  function scoreTiles(score) {
+    if (!score.count) return `<div class="col-span-full text-[11.5px] muted py-2">No forecast has matured yet. The first one is scored 24 hours after it is made.</div>`;
+    const d = score.direction, b = score.breakout, rv = score.realized_vol, am = score.abs_move;
+    const beat = (v, base) => (v > base ? "up" : "text-slate-400");
+    const ratio = (m) => (m && m.baseline_mae ? m.mae / m.baseline_mae : null);
+    return [
+      tile("Direction right", `${(100 * d.hit_rate).toFixed(1)}%`, `always the busier side: ${(100 * d.baseline).toFixed(1)}%`,
+        beat(d.hit_rate, d.baseline), "Beating this baseline is the only thing that makes a direction call worth anything"),
+      tile("Breakout expected", `${(100 * b.predicted).toFixed(0)}%`, `it happened ${(100 * b.actual).toFixed(0)}% of the time`,
+        "", "Well calibrated means these two numbers are close"),
+      tile("Realised vol error", rv ? ivp(rv.mae, 1) : "—", rv ? `${ratio(rv).toFixed(2)}x predicting the average` : "",
+        rv && ratio(rv) < 1 ? "up" : "text-slate-400"),
+      tile("Abs move error", am ? `${(100 * am.mae).toFixed(2)}%` : "—", am ? `${ratio(am).toFixed(2)}x predicting the average` : "",
+        am && ratio(am) < 1 ? "up" : "text-slate-400"),
+    ].join("");
+  }
+
   function sourceBadge(o) {
     if (!o) return `<span class="badge badge-amber">no options data</span>`;
     const age = Date.now() / 1000 - o.at;
     return `<span class="badge ${age > 90 ? "badge-amber" : o.source === "websocket" ? "badge-green" : "badge-blue"}" title="Options summary ${Math.round(age)}s old">options · ${esc(o.source)} · ${ago(o.at)}</span>`;
   }
 
-  window.TBA = { CALL, PUT, kpis, insights, ai, forecast, chain, oiChart, smileChart, termChart, spark, sourceBadge, STRAT, ivp, sgn };
+  window.TBA = { CALL, PUT, kpis, insights, ai, forecast, quadrant, chain, oiChart, smileChart, termChart, spark, sourceBadge, twoLines, hitTrack, scoreTiles, STRAT, ivp, sgn };
 })();

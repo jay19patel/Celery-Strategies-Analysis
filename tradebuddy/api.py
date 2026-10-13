@@ -20,6 +20,7 @@ from tradebuddy.brokers import Broker
 from tradebuddy.codec import EVENT_TYPES
 from tradebuddy.delta import round_to_tick
 from tradebuddy.errors import BrokerError
+from tradebuddy.insights import score_forecasts
 from tradebuddy.options import UNDERLYINGS
 from tradebuddy.settings import SettingsError
 from tradebuddy.system import System
@@ -38,7 +39,7 @@ METHODS = (
     "page_context", "header", "strategies", "signals", "positions", "orders", "open_orders", "account",
     "paper_stats", "paper_trades", "metrics", "events", "settings", "update_settings", "clear_credentials",
     "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order", "order_ticket",
-    "set_position_control", "risk", "risk_resume", "analysis", "options_history", "database",
+    "set_position_control", "risk", "risk_resume", "analysis", "options_history", "forecast_record", "database",
     "ai_digest", "ai_report", "ai_history", "ai_report_at", "test_ai", "send_email_report",
     "journal_summary", "journal_month",
     "option_ticket", "place_structure", "structures", "close_structure", "paper_history",
@@ -177,6 +178,28 @@ class Api:
         hours = min(max(hours, 1), 24 * 30)
         step = 60 if hours <= 24 else 900  # a minute apart for a day, a bar apart beyond
         return self.system.store.options_history(UNDERLYINGS[symbol], time.time() - hours * 3600, step)
+
+    async def forecast_record(self, symbol: str = "BTCUSD", days: float = 14) -> dict[str, Any]:
+        """Settled forecasts and how they did: what the model said, what the market then did.
+
+        A model card is a claim about the past; this is the running score since. The scoreboard is
+        measured against the same naive baselines the card is, so "56% right" is read next to what
+        always calling the busier side would have scored over the very same bars."""
+        days = min(max(days, 1), 180)
+        rows = self.system.store.forecast_history(symbol, time.time() - days * 86_400)
+        points = [
+            {
+                "bar_time": r["bar_time"], "price": r["price"], "actual_price": r["actual_price"],
+                "up_probability": r["up_probability"], "actual_up": int(r["actual_return"] > 0),
+                "predicted_realized_vol": r["predicted_realized_vol"], "actual_realized_vol": r["actual_realized_vol"],
+                "expected_abs_move": r["expected_abs_move"], "actual_abs_move": abs(r["actual_return"]),
+                "actual_return": r["actual_return"],
+                "breakout_probability": r["breakout_probability"], "breakout_pct": r["breakout_pct"],
+                "actual_breakout": r["actual_breakout"], "actual_excursion": r["actual_excursion"],
+            }
+            for r in rows
+        ]
+        return {"symbol": symbol, "days": days, "points": points, "score": score_forecasts(points)}
 
     async def database(self) -> dict[str, Any]:
         """Tables, row counts and sizes. Counting a large table takes a moment, so the answer is reused for 30s."""

@@ -152,6 +152,33 @@ CREATE TABLE IF NOT EXISTS options_history (
     PRIMARY KEY (underlying, ts)
 );
 CREATE INDEX IF NOT EXISTS options_history_keep ON options_history(keep, ts);
+-- Every forecast the model made, and what the market then did over its horizon. One row per symbol
+-- per bar: the analyst repeats a bar's forecast every cycle, and the first one is the one it made.
+-- A claim no one checks is not a forecast, so the actual is written back when the horizon elapses
+-- and the Market Data page draws the two against each other.
+CREATE TABLE IF NOT EXISTS forecasts (
+    symbol                 TEXT NOT NULL,
+    bar_time               INTEGER NOT NULL,
+    ts                     REAL NOT NULL,
+    horizon_hours          REAL NOT NULL,
+    price                  REAL NOT NULL,   -- spot when the claim was made
+    up_probability         REAL,
+    breakout_probability   REAL,
+    breakout_pct           REAL,            -- the threshold that bar's volatility implied
+    predicted_realized_vol REAL,
+    expected_abs_move      REAL,
+    expected_return        REAL,
+    skill                  TEXT,            -- what the card claimed skill at, as JSON
+    settled_at             REAL,            -- null until the horizon has passed
+    actual_price           REAL,
+    actual_return          REAL,
+    actual_realized_vol    REAL,
+    actual_excursion       REAL,            -- the furthest it went either way, as a fraction
+    actual_breakout        INTEGER,
+    PRIMARY KEY (symbol, bar_time)
+);
+CREATE INDEX IF NOT EXISTS forecasts_open ON forecasts(settled_at, bar_time);
+CREATE INDEX IF NOT EXISTS forecasts_settled ON forecasts(symbol, settled_at, bar_time);
 -- Every TradeBuddy AI attempt with its full written report, so any day's analysis can be read again.
 CREATE TABLE IF NOT EXISTS ai_reports (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,6 +200,7 @@ OPTIONS_COLUMNS = (
 OPTIONS_MINUTE_DAYS = 30
 AI_REPORT_DAYS = 90  # written reports; about 1.5 MB a day at one every 5 minutes
 AI_FAILED_DAYS = 14  # attempts that produced no report
+FORECAST_DAYS = 180  # forecasts and their outcomes: ~96 small rows a symbol a day, kept long enough to judge
 
 # What each table holds and keeps, for the System page.
 TABLE_INFO = {
@@ -183,6 +211,7 @@ TABLE_INFO = {
     "paper_account": ("Paper balance and totals", None, "one row"),
     "options_history": ("Options numbers per underlying per minute", "ts", f"{OPTIONS_MINUTE_DAYS} days; 15-minute rows forever"),
     "ai_reports": ("Every TradeBuddy AI report, in full", "ts", f"{AI_REPORT_DAYS} days; failed attempts {AI_FAILED_DAYS}"),
+    "forecasts": ("Every forecast and what the market then did", "ts", f"{FORECAST_DAYS} days"),
     "daily_risk": ("Start-of-day equity and halts, per broker", None, "forever (one row a day)"),
     "position_controls": ("Trailing switch and steps per open position", "updated_at", "while open"),
     "settings": ("Runtime settings (secrets included, never sent out)", None, "forever"),
@@ -372,6 +401,54 @@ class Store:
         cur = self.db.execute("DELETE FROM options_history WHERE keep = 0 AND ts < ?", (now - OPTIONS_MINUTE_DAYS * 86_400,))
         return cur.rowcount
 
+
+    # -- forecasts and what the market did ------------------------------------
+
+    FORECAST_FIELDS = (
+        "horizon_hours", "up_probability", "breakout_probability", "breakout_pct",
+        "predicted_realized_vol", "expected_abs_move", "expected_return",
+    )
+
+    def record_forecast(self, symbol: str, bar_time: int, ts: float, price: float, forecast: dict[str, Any]) -> None:
+        """The claim, as it was made. OR IGNORE: the analyst repeats a bar's forecast every cycle and
+        only the first is the one it made with what it knew then."""
+        values = [forecast.get(k) for k in self.FORECAST_FIELDS]
+        self.db.execute(
+            f"INSERT OR IGNORE INTO forecasts (symbol, bar_time, ts, price, skill, {', '.join(self.FORECAST_FIELDS)}) "  # noqa: S608 - fixed column names
+            f"VALUES (?,?,?,?,?,{','.join('?' * len(self.FORECAST_FIELDS))})",
+            (symbol, int(bar_time), ts, price, json.dumps(forecast.get("skill") or {}), *values),
+        )
+
+    def unsettled_forecasts(self, now: float | None = None, limit: int = 500) -> list[dict[str, Any]]:
+        """Forecasts whose horizon has passed and which nothing has scored yet, oldest first."""
+        now = time.time() if now is None else now
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM forecasts WHERE settled_at IS NULL AND bar_time + horizon_hours * 3600 <= ? ORDER BY bar_time LIMIT ?",
+            (now, limit),
+        )]
+
+    def settle_forecast(
+        self, symbol: str, bar_time: int, now: float, price: float, ret: float, realized_vol: float,
+        excursion: float, breakout: bool,
+    ) -> None:
+        self.db.execute(
+            "UPDATE forecasts SET settled_at = ?, actual_price = ?, actual_return = ?, actual_realized_vol = ?, "
+            "actual_excursion = ?, actual_breakout = ? WHERE symbol = ? AND bar_time = ?",
+            (now, price, ret, realized_vol, excursion, int(breakout), symbol, int(bar_time)),
+        )
+
+    def forecast_history(self, symbol: str, since: float = 0.0, limit: int = 2000) -> list[dict[str, Any]]:
+        """Settled forecasts, oldest first, so the chart reads left to right."""
+        rows = self.db.execute(
+            "SELECT * FROM forecasts WHERE symbol = ? AND settled_at IS NOT NULL AND bar_time >= ? "
+            "ORDER BY bar_time DESC LIMIT ?",
+            (symbol, since, limit),
+        )
+        return [dict(r) for r in rows][::-1]
+
+    def prune_forecasts(self, now: float | None = None) -> int:
+        now = time.time() if now is None else now
+        return self.db.execute("DELETE FROM forecasts WHERE ts < ?", (now - FORECAST_DAYS * 86_400,)).rowcount
 
     # -- TradeBuddy AI reports ------------------------------------------------
 
