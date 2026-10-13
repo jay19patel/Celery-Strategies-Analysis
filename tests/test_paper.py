@@ -111,7 +111,12 @@ async def test_manual_close_and_stats(system):
     stats = system.paper.stats()
     assert stats["overall"]["trades"] == 1 and stats["overall"]["wins"] == 1
     assert stats["by_strategy"][0]["strategy"] == "alpha"
-    assert len(stats["equity_curve"]) == 2
+    # The curve opens at the starting balance and then carries the trade behind every step, so the
+    # chart can colour each point and name what moved it.
+    opened, after = stats["equity_curve"]
+    assert len(stats["equity_curve"]) == 2 and opened[2] is None
+    assert after[2]["strategy"] == "alpha" and after[2]["symbol"] == "BTCUSD" and after[2]["pnl"] > 0
+    assert after[1] == round(opened[1] + after[2]["pnl"], 4)
 
 
 async def test_reset_restores_starting_balance(system):

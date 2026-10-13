@@ -85,7 +85,7 @@
         <select id="fStrategy" class="select text-[12px] !py-1"><option value="">All strategies</option></select>
         <div class="tabs" id="fOutcome"><button type="button" data-o="" class="on">All</button><button type="button" data-o="win">Wins</button><button type="button" data-o="loss">Losses</button></div>
         <input id="fSearch" class="input w-48 text-[12px] !py-1" placeholder="Symbol, reason, id…">
-        <select id="fPer" class="select text-[12px] !py-1"><option>10</option><option selected>25</option><option>50</option><option>100</option></select>
+        <select id="fPer" class="select text-[12px] !py-1" aria-label="Trades per page"><option selected>10</option><option>25</option><option>50</option><option>100</option></select>
       </div>
     </div>
     <div id="histSummary" class="px-5 py-2 text-[12px] border-b border-slate-100 flex flex-wrap gap-x-5 gap-y-1"></div>
@@ -171,11 +171,14 @@
         loadHistory();
         const o = stats.overall;
         $("paperKpis").innerHTML = [
-          kpi("Net realized", signed(o.pnl, 4), pnlClass(o.pnl)),
-          kpi("Trades", num(o.trades, 0), "", `${o.wins} wins`),
+          kpi("Net realized", signed(o.pnl, 4), pnlClass(o.pnl), `fees ${money(o.fees, 2)}`),
+          kpi("Trades", num(o.trades, 0), "", `${o.wins} won · ${o.losses} lost`),
           kpi("Win rate", `${num(o.win_rate, 1)}%`),
-          kpi("Profit factor", o.profit_factor === null ? "—" : num(o.profit_factor, 2)),
-          kpi("Max drawdown", `${num(o.max_drawdown_pct, 2)}%`, o.max_drawdown_pct > 10 ? "down" : "", `fees ${money(o.fees, 2)}`),
+          kpi("Profit factor", o.profit_factor === null ? "—" : num(o.profit_factor, 2), o.profit_factor !== null && o.profit_factor < 1 ? "down" : ""),
+          kpi("Expectancy", o.expectancy == null ? "—" : signed(o.expectancy, 4), pnlClass(o.expectancy), "per trade"),
+          kpi("Avg win", o.avg_win == null ? "—" : signed(o.avg_win, 4), "up", o.avg_loss == null ? "" : `avg loss ${signed(o.avg_loss, 4)}`),
+          kpi("Best trade", signed(o.best, 4), "up", `worst ${signed(o.worst, 4)}`),
+          kpi("Max drawdown", `${num(o.max_drawdown_pct, 2)}%`, o.max_drawdown_pct > 10 ? "down" : "", o.avg_hold_seconds == null ? "" : `held ${duration(o.avg_hold_seconds)} on average`),
         ].join("");
         
         TB.rows("byStrategy", stats.by_strategy, (r) => `<tr class="cursor-pointer hover:bg-slate-50 ${hist.strategy === r.strategy ? "bg-brand-50" : ""}" data-strategy="${esc(r.strategy)}">
@@ -225,16 +228,7 @@
           if (hist.strategy) $("tradesCard").scrollIntoView({ behavior: "smooth", block: "start" });
         }));
 
-        const labels = stats.equity_curve.map(([ts]) => new Date(ts * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }));
-        const values = stats.equity_curve.map(([, v]) => v);
-        if (!equityChart) {
-          equityChart = new Chart($("equityChart"), {
-            type: "line",
-            data: { labels, datasets: [{ data: values, borderColor: "#1e88e5", backgroundColor: "rgba(30,136,229,.08)", fill: true, tension: .2, pointRadius: 0, borderWidth: 2 }] },
-            options: { maintainAspectRatio: false, animation: false, plugins: { legend: { display: false } },
-              scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8, font: { size: 10 } } }, y: { grid: { color: "#f1f5f9" }, ticks: { font: { size: 10 }, callback: (v) => "$" + num(v, 0) } } } },
-          });
-        } else { equityChart.data.labels = labels; equityChart.data.datasets[0].data = values; equityChart.update("none"); }
+        drawEquity(stats.equity_curve, (stats.equity_curve[0] || [])[1]);
 
         const reasons = stats.exit_reasons || {};
         const palette = ["#1e88e5", "#00b852", "#eb5757", "#f59e0b", "#8b5cf6", "#64748b"];
@@ -248,8 +242,68 @@
     }
   }
 
+  // ── equity curve ──────────────────────────────────────────────────────────
+  // A dot per closed trade, like the term structure: the line between two dots is green where the
+  // account grew and red where it shrank, and the dot itself is the trade that moved it. Under the
+  // starting balance the fill turns red, so being below water reads before any number does.
+  function drawEquity(curve, start) {
+    const labels = curve.map(([ts]) => new Date(ts * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }));
+    const values = curve.map(([, v]) => v);
+    const trades = curve.map(([, , t]) => t || null);
+    // Green above the starting balance, red below it, in one gradient down the plot area.
+    const waterline = (ctx) => {
+      const { chartArea: a, scales: s } = ctx.chart;
+      if (!a) return "rgba(0,184,82,.10)";
+      const g = ctx.chart.ctx.createLinearGradient(0, a.top, 0, a.bottom);
+      const at = Math.min(1, Math.max(0, (s.y.getPixelForValue(start) - a.top) / (a.bottom - a.top) || 0));
+      g.addColorStop(0, "rgba(0,184,82,.18)");
+      g.addColorStop(at, "rgba(0,184,82,.02)");
+      g.addColorStop(at, "rgba(235,87,87,.02)");
+      g.addColorStop(1, "rgba(235,87,87,.18)");
+      return g;
+    };
+    const data = {
+      labels,
+      datasets: [{
+        data: values,
+        borderWidth: 2,
+        tension: 0,
+        fill: { target: { value: start }, above: waterline, below: waterline },
+        borderColor: UP,
+        segment: { borderColor: (c) => (c.p1.parsed.y >= c.p0.parsed.y ? UP : DOWN) },
+        pointRadius: (c) => (c.dataIndex === 0 ? 0 : curve.length > 120 ? 0 : 3.5),
+        pointHoverRadius: 6,
+        pointBorderColor: "#fff",
+        pointBorderWidth: 1.5,
+        pointBackgroundColor: (c) => (trades[c.dataIndex] && trades[c.dataIndex].pnl < 0 ? DOWN : UP),
+      }],
+    };
+    const options = {
+      maintainAspectRatio: false, animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (c) => `Equity ${money(c.raw)}`,
+            afterLabel: (c) => {
+              const t = trades[c.dataIndex];
+              return t ? [`${t.strategy} · ${t.symbol}`, `${signed(t.pnl, 4)} · ${t.reason}`] : "Account opened";
+            },
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 8, font: { size: 10 } } },
+        y: { grid: { color: "#f1f5f9" }, ticks: { font: { size: 10 }, callback: (v) => "$" + num(v, 0) } },
+      },
+    };
+    if (equityChart) { equityChart.data = data; equityChart.options = options; equityChart.update("none"); return; }
+    equityChart = new Chart($("equityChart"), { type: "line", data, options });
+  }
+
   // ── closed trades: server-side pages, filters, a detail row under each trade ──
-  const hist = { page: 1, per: 25, strategy: "", q: "", outcome: "" };
+  const hist = { page: 1, per: 10, strategy: "", q: "", outcome: "" };
   const open = new Set();  // trades whose detail row is showing; survives the 5s refresh
 
   async function loadHistory() {

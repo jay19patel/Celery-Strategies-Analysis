@@ -324,12 +324,17 @@ class PaperBroker:
                 "profit_factor": round(gross_win / gross_loss, 2) if gross_loss else None,
             }
 
-        equity, peak, max_dd, curve = acct["starting_balance"], acct["starting_balance"], 0.0, [[acct["created_at"], acct["starting_balance"]]]
+        # [timestamp, equity, what moved it]. Every point after the first is one closed trade, so the
+        # chart can colour and name each step instead of drawing an anonymous line.
+        equity, peak, max_dd = acct["starting_balance"], acct["starting_balance"], 0.0
+        curve: list[list[Any]] = [[acct["created_at"], acct["starting_balance"], None]]
         for t in rows:
             equity += t["pnl"]
             peak = max(peak, equity)
             max_dd = max(max_dd, (peak - equity) / peak * 100 if peak else 0.0)
-            curve.append([t["closed_at"], round(equity, 4)])
+            curve.append([t["closed_at"], round(equity, 4), {
+                "strategy": t["strategy"], "symbol": t["symbol"], "pnl": round(t["pnl"], 4), "reason": t["reason"],
+            }])
 
         by_strategy: dict[str, list[dict[str, Any]]] = {}
         for t in rows:
