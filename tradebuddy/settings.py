@@ -62,6 +62,7 @@ RANGES = {
     "trailing_max_steps": (0, 50),
     "ai_interval_minutes": (10, 60),  # 5 used too many Mistral tokens; a stored 5 falls back to the default
     "daily_loss_limit_pct": (0.0, 100.0),
+    "strategy_loss_limit_pct": (0.0, 100.0),
     "email_smtp_port": (1, 65535),
     "email_report_hour": (0, 23),
     "options_auto_qty": (1, 100),
@@ -122,6 +123,11 @@ class Settings:
     # Daily loss limit, per broker: equity down this % from the start of the trading day closes every
     # position on that broker and blocks new entries until the next day. 0 = off.
     daily_loss_limit_pct: float = 5.0
+    # Per-strategy daily loss limit: one strategy's closed trades on one broker losing this % of that
+    # broker's start-of-day equity stops that strategy entering there until the next day. The broker
+    # limit above only fires once the whole account is down, by which time one bad strategy has
+    # already spent the day's budget; this stops it at its own share. 0 = off.
+    strategy_loss_limit_pct: float = 2.0
     day_timezone: str = "Asia/Kolkata"  # when the trading day starts
     # Market analysis: rule-based insights run every 5 minutes (no tokens). With ai_enabled and a key, every ai_interval_minutes the
     # analyst also sends the computed numbers (never keys or account data) to Mistral for a written review.

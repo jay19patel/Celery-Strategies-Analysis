@@ -493,6 +493,20 @@ class Store:
     def halt_day(self, broker: str, day: str, reason: str) -> None:
         self.db.execute("UPDATE daily_risk SET halted_at = ?, halt_reason = ? WHERE broker = ? AND day = ?", (time.time(), reason, broker, day))
 
+    def realized_since(self, broker: str, since: float) -> dict[str, float]:
+        """Net realized P&L per strategy on one broker since `since`, from the PositionClosed log.
+
+        The log is the only per-strategy record every broker writes (paper_trades is the paper
+        broker's own table and Delta has none), and closed positions are kept for 90 days, far
+        longer than the day this reads."""
+        rows = self.db.execute(
+            "SELECT json_extract(data, '$.strategy') AS strategy, SUM(json_extract(data, '$.pnl')) AS pnl "
+            "FROM events WHERE type = 'PositionClosed' AND ts >= ? AND json_extract(data, '$.broker') = ? "
+            "GROUP BY strategy",
+            (since, broker),
+        )
+        return {r["strategy"]: float(r["pnl"] or 0.0) for r in rows if r["strategy"]}
+
     def resume_day(self, broker: str, day: str, equity: float) -> None:
         """Lift today's halt. The day restarts from the current equity, so the limit applies afresh."""
         self.db.execute(

@@ -50,9 +50,11 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   stop sits and how big the position is: `Trader.levels` (the strategy's own levels,
   else `atr_stop_mult` x the ATR the analyst measured, else Settings' percentages),
   `Trader.size_for_risk` (the position whose stop costs `risk_per_trade_pct` of equity,
-  capped by `trade_margin_pct`) and `Trader.edge_error` (a target inside
-  `min_edge_multiple` round trips is refused).
-- `guard.py` — `PositionGuard`, an engine loop over every active broker: the daily loss
+  capped by `trade_margin_pct`), `Trader.edge_error` (a target inside
+  `min_edge_multiple` round trips is refused) and `Trader.strategy_halt` (a strategy whose
+  closed trades have lost `strategy_loss_limit_pct` of the day's starting equity on a broker
+  opens nothing more there until tomorrow, while the others carry on).
+- `guard.py` — `PositionGuard`, an engine loop over every active broker: the broker-wide daily loss
   limit (closes that broker's positions, blocks its entries until the next day) and
   auto trailing (per-position switch and max trails in `position_controls`). It moves
   SL/TP only through `Broker.update_protection`, under `System.protection_lock`.
@@ -106,7 +108,7 @@ Enforced by tests. Breaking one should fail the build.
 9. **Secrets stay in the process.** No endpoint returns an API key or secret;
    `Settings.public()` masks them and `SettingsChanged` carries field names only.
 10. Every refusal to trade is a `TradeSkipped` event with its reason, including a
-    broker halted by its daily loss limit.
+    broker halted by its daily loss limit and a strategy halted by its own.
 11. **Late is stale.** A strategy result that finishes more than a bar after
     its bar closed is dropped; Celery tasks expire after one bar.
 12. **ZeroMQ is not durable.** Nothing that must survive a restart travels
@@ -164,6 +166,12 @@ routes that call `System`. State-changing routes take `Depends(protected)`.
 Live updates come from `TB.on(eventType, fn)`.
 
 ## Commands
+
+The source is not bind-mounted into the containers. The engine is one long-lived process while Celery
+children re-import on every respawn, so a mounted checkout lets them drift onto different strategy
+versions and every result is dropped as "version mismatch" — which is how one deploy left the engine
+dispatching a withdrawn strategy version for a day. `docker compose up` is the only way code moves,
+and it moves for every process at once.
 
 ```bash
 docker compose up          # everything: http://127.0.0.1:8080 (rebuilds on every up)

@@ -52,6 +52,16 @@
     <div id="recent" class="card-body pt-2 max-h-80 overflow-auto"></div>
   </section>
 </div>
+
+<!-- Which strategy is carrying the account and which is draining it, at a glance -->
+<section class="card">
+  <div class="card-head">
+    <div class="card-title"><i data-lucide="bar-chart-3"></i>Scoreboard <span class="card-sub">every closed paper trade, by strategy</span></div>
+    <a href="/account" class="btn btn-sm">Details<i data-lucide="arrow-right"></i></a>
+  </div>
+  <div id="scoreboard" class="card-body space-y-3"></div>
+  <div id="scoreStructures" class="px-5 pb-4"></div>
+</section>
 {% endblock %}
 
 {% block scripts %}
@@ -220,7 +230,8 @@
       row("trending-up", `Auto trailing ${t.trailing_enabled ? '<span class="badge badge-green">on for new positions</span>' : '<span class="badge">off by default</span>'}`,
         `At ${num(t.trailing_trigger_pct, 0)}% of the way to target, the target moves out ${num(t.trailing_extend_pct, 0)}% of its first distance and the stop locks ${num(t.trailing_lock_pct, 0)}% of the profit. Up to ${t.trailing_max_steps}× per position.`),
       row("octagon-x", `Daily loss limit ${r.daily_loss_limit_pct ? `<span class="badge badge-amber">${num(r.daily_loss_limit_pct, 2)}%</span>` : '<span class="badge">off</span>'}`,
-        `Per broker. Hit it and that broker's positions close and nothing new opens until the next day (${esc(r.day_timezone)}).`),
+        `Per broker. Hit it and that broker's positions close and nothing new opens until the next day (${esc(r.day_timezone)}).`
+        + (r.strategy_loss_limit_pct ? ` Each strategy is also stood down on its own after losing ${num(r.strategy_loss_limit_pct, 2)}% of the day's starting equity, so one of them cannot spend the budget for all.` : "")),
       row("percent", `Position size <span class="badge">${num(z.risk_per_trade_pct, 2)}% per trade</span>`,
         `The stop decides the size: the position is the one whose stop costs ${num(z.risk_per_trade_pct, 2)}% of equity, so a wider stop buys a smaller position and every trade risks the same. Never more than ${num(z.trade_margin_pct, 0)}% of a broker's available margin.`),
       row("ruler", `Stop and target ${pr.atr_protection ? `<span class="badge badge-green">${num(pr.atr_stop_mult, 1)}× / ${num(pr.atr_target_mult, 1)}× ATR</span>` : `<span class="badge">${num(pr.stop_loss_pct, 2)}% / ${num(pr.take_profit_pct, 2)}%</span>`}`,
@@ -246,6 +257,33 @@
     const pts = ys.map((y, i) => `${(i / (ys.length - 1)) * 300},${76 - ((y - lo) / span) * 70}`).join(" ");
     const color = ys.at(-1) >= ys[0] ? "#00b852" : "#eb5757";
     $("equity").innerHTML = `<polyline points="0,80 ${pts} 300,80" fill="${color}" fill-opacity=".08" stroke="none"/><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>`;
+  }
+  // A bar each side of a centre line: left is money lost, right is money made, every bar on the same
+  // scale. A table of numbers hides which line is the problem; this does not.
+  function renderScoreboard() {
+    const rows = data.paper.by_strategy || [], structures = data.paper.by_structure || [];
+    if (!rows.length) { $("scoreboard").innerHTML = '<div class="text-center muted text-xs py-6">No closed paper trades yet</div>'; $("scoreStructures").innerHTML = ""; return; }
+    const widest = Math.max(...rows.map((r) => Math.abs(r.pnl))) || 1;
+    $("scoreboard").innerHTML = rows.map((r) => {
+      const w = (Math.abs(r.pnl) / widest) * 50, up = r.pnl >= 0;
+      return `<div class="grid grid-cols-[minmax(0,10rem)_1fr_auto] items-center gap-3">
+        <a class="font-mono text-[12px] truncate hover:underline" href="/account" title="${esc(r.strategy)}">${esc(r.strategy)}</a>
+        <div class="relative h-4 rounded bg-slate-50 border border-slate-100">
+          <div class="absolute inset-y-0 left-1/2 w-px bg-slate-200"></div>
+          <div class="absolute inset-y-[3px] rounded-sm ${up ? "bg-bull" : "bg-bear"}" style="${up ? "left:50%" : `right:50%`};width:${w}%"></div>
+        </div>
+        <div class="text-right">
+          <div class="font-mono text-[12px] font-semibold ${pnlClass(r.pnl)}">${signed(r.pnl, 2)}</div>
+          <div class="text-[10px] muted whitespace-nowrap">${num(r.trades, 0)} trade${r.trades === 1 ? "" : "s"} · ${num(r.win_rate, 0)}% won</div>
+        </div>
+      </div>`;
+    }).join("");
+    $("scoreStructures").innerHTML = structures.length
+      ? `<div class="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px]">
+          <span class="stat-label">Option structures</span>
+          ${structures.map((s) => `<span class="whitespace-nowrap">${esc(s.name)} <b class="font-mono ${pnlClass(s.pnl)}">${signed(s.pnl, 2)}</b> <span class="muted">· ${num(s.trades, 0)}</span></span>`).join("")}
+        </div>`
+      : "";
   }
   function renderStrategies() {
     TB.rows("strategies", data.strategies, (s) => `<tr>
@@ -279,7 +317,7 @@
   async function load() {
     try {
       data = await TB.get("/api/overview");
-      renderAccounts(); renderMarkets(); renderRules(); renderPerf(); renderStrategies(); renderActivity();
+      renderAccounts(); renderMarkets(); renderRules(); renderPerf(); renderScoreboard(); renderStrategies(); renderActivity();
       await loadPositions();
     } catch (err) {
       $("accounts").innerHTML = `<section class="card p-5 text-sm down lg:col-span-2">Could not load the overview: ${esc(err.message)}</section>`;

@@ -235,6 +235,7 @@
           <div><label class="field-label" for="daily_loss_limit_pct">Max loss per day %</label><input id="daily_loss_limit_pct" name="daily_loss_limit_pct" type="number" step="0.5" class="input w-full mt-1 font-mono"><div class="field-help">Of equity at the start of the day. 0 = off.</div></div>
           <div><label class="field-label" for="day_timezone">Trading day starts</label>
             <select id="day_timezone" name="day_timezone" class="select w-full mt-1"><option value="Asia/Kolkata">00:00 IST (Asia/Kolkata)</option><option value="UTC">00:00 UTC</option></select></div>
+          <div class="col-span-2"><label class="field-label" for="strategy_loss_limit_pct">Max loss per day per strategy %</label><input id="strategy_loss_limit_pct" name="strategy_loss_limit_pct" type="number" step="0.5" class="input w-full mt-1 font-mono"><div class="field-help">Of the same start-of-day equity, counted per strategy. One strategy that keeps stopping out is stood down at its own share instead of spending the whole account's budget. 0 = off.</div></div>
         </div>
         <div class="rounded-lg bg-red-50 border border-red-100 p-3 text-[11.5px] text-red-800 leading-relaxed">
           When a broker's equity falls this far below where it started the day, <b>every position on that broker is closed at market</b> and it opens nothing more — signals or manual — until the next day. Other brokers carry on. You can resume early from the Overview page.
@@ -301,7 +302,7 @@
   const PHRASE = {{ live_phrase | tojson }};
   const NUMBERS = ["stop_loss_pct", "take_profit_pct", "trade_margin_pct", "risk_per_trade_pct", "min_edge_multiple", "atr_stop_mult", "atr_target_mult",
     "paper_starting_balance", "paper_leverage", "paper_fee_pct", "paper_slippage_pct", "paper_max_hold_hours",
-    "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct", "email_smtp_port",
+    "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct", "strategy_loss_limit_pct", "email_smtp_port",
     "options_auto_qty", "options_auto_risk_pct", "options_auto_sl_pct", "options_auto_tp_pct"];
   const HOSTS = { demo: "demo.delta.exchange", live: "www.delta.exchange" };
   let saved = null, env = "demo";

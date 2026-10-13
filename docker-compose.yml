@@ -17,9 +17,12 @@ x-app: &app
   pull_policy: build
   init: true
   restart: unless-stopped
+  # Only the database is shared with the host. The source is NOT bind-mounted: the engine is one
+  # long-lived process while Celery children re-import on every respawn, so a mounted checkout lets
+  # the two drift onto different strategy versions and every result is dropped as a version mismatch.
+  # Code changes reach both the same way: `docker compose up` rebuilds the image and restarts them.
   volumes:
     - ./data:/app/data
-    - .:/app
   environment: &env
     DB_PATH: /app/data/tradebuddy.db
     CELERY_BROKER_URL: redis://redis:6379/0

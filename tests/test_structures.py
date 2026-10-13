@@ -385,3 +385,19 @@ async def test_unrealised_is_at_the_mark_and_a_close_at_bid_after_fees(cfg, exch
     assert v["close_pnl"] < (1764 - 1836) * 0.001  # sold at the bid (882 each), and fees on top
     assert len(v["breakevens"]) == 2 and v["greeks"]["delta"] == pytest.approx(0, abs=1e-4)
     assert v["max_profit"] is None and v["progress_pct"] < 0
+
+
+def test_the_kind_is_read_back_from_a_stored_label():
+    """A closed structure keeps only its label, so that is where the Account page finds the kind."""
+    assert st.kind_of("ETH IRON CONDOR 14 Oct 2420/2460/2560/2600") == "iron_condor"
+    assert st.kind_of("BTC LONG STRADDLE 11 Oct 83000") == "straddle"
+    assert st.kind_of("ETH LONG STRANGLE 12 Oct 2400/2600") == "strangle"
+    assert st.kind_of("BTC BULL CALL SPREAD 15 Oct 80000/82000") == "call_spread"
+    assert st.kind_of("ETH BEAR PUT SPREAD 15 Oct 2400/2300") == "put_spread"
+    assert st.kind_of("BTCUSD") is None  # a perpetual is not a structure
+    assert st.kind_of("") is None
+
+
+def test_every_kind_a_structure_can_be_built_as_is_read_back():
+    for kind, name in st.KINDS.items():
+        assert st.kind_of(f"BTC {name.upper()} 15 Oct 80000") == kind

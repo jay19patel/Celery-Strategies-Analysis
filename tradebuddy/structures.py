@@ -39,6 +39,14 @@ DEFAULT_TP_PCT = {"debit": 100.0, "credit": 50.0}  # of the premium paid / recei
 EVENT_IV_RATIO = 1.15  # nearest-expiry IV this far above the day's: an event is priced in, don't sell volatility
 
 
+def kind_of(label: str) -> str | None:
+    """The structure kind behind a stored label ("ETH IRON CONDOR 14 Oct 2420/2460/..."), or None when
+    the text is not one. A closed structure keeps only its label in paper_trades, so that is where the
+    Account page reads back which kind made the money."""
+    text = f" {(label or '').upper()} "
+    return next((kind for kind, name in KINDS.items() if f" {name.upper()} " in text), None)
+
+
 def leg_order_id(structure_id: str, leg: int) -> str:
     """Each leg of a structure is its own order, with an id derived from the structure's."""
     return f"tbo{hashlib.sha256(f'{structure_id}|{leg}'.encode()).hexdigest()[:29]}"

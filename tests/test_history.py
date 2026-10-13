@@ -65,3 +65,54 @@ async def test_open_positions_show_risk_reward_and_distances(cfg, exchange):
     assert p["notional"] > 0 and p["leverage"] == pytest.approx(system.settings.paper_leverage)
     assert p["risk_usd"] < 0 < p["reward_usd"] and p["reward_risk"] > 0
     assert p["sl_distance_pct"] < 0 < p["tp_distance_pct"] and p["entry_fee"] > 0 and p["client_order_id"]
+
+
+# -- option structures as their own lines -------------------------------------------------
+
+
+def add_structure_trades(system, labels, strategy="auto_options", pnl=1.0):
+    """Closed structures the way the paper broker writes them: the label is the symbol."""
+    now = time.time()
+    with system.store.db:
+        for i, label in enumerate(labels):
+            system.store.db.execute(
+                "INSERT INTO paper_trades (client_order_id, strategy, symbol, side, size, contract_value, entry_price, exit_price,"
+                " leverage, margin, gross_pnl, fees, pnl, reason, opened_at, closed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (f"st-{i}-{label}", strategy, label, "short", 1, 0.001, 10, 8, 1, 1, pnl, 0.01, pnl,
+                 "take profit", now - 600 - i, now - i),
+            )
+
+
+async def test_structures_are_counted_by_kind_not_only_by_strategy(cfg, exchange):
+    """auto_options -0.69 says nothing about whether the condors or the straddles did it."""
+    system = await make(cfg, exchange)
+    add_structure_trades(system, [
+        "ETH IRON CONDOR 14 Oct 2420/2460/2560/2600",
+        "BTC IRON CONDOR 14 Oct 81000/82200/84400/85600",
+    ], pnl=3.0)
+    add_structure_trades(system, ["BTC LONG STRADDLE 11 Oct 83000"], pnl=-5.0)
+    add_trades(system, 2, "ema_cross_15m", pnl=1.0)  # directional: never an option structure
+
+    by_kind = {s["kind"]: s for s in system.paper.stats()["by_structure"]}
+    assert set(by_kind) == {"iron_condor", "straddle"}  # the directional trades are not in here
+    assert by_kind["iron_condor"]["trades"] == 2 and by_kind["iron_condor"]["pnl"] == 6.0
+    assert by_kind["iron_condor"]["underlyings"] == ["BTC", "ETH"]
+    assert by_kind["iron_condor"]["credit"] is True  # a condor is sold, so the premium comes in
+    assert by_kind["straddle"]["trades"] == 1 and by_kind["straddle"]["pnl"] == -5.0
+    assert by_kind["straddle"]["credit"] is False
+    assert by_kind["iron_condor"]["strategies"] == ["auto_options"]
+
+
+async def test_a_strategy_is_flagged_as_options_only_when_every_trade_is_a_structure(cfg, exchange):
+    system = await make(cfg, exchange)
+    add_structure_trades(system, ["ETH IRON CONDOR 14 Oct 2420/2460/2560/2600"])
+    add_trades(system, 1, "ema_cross_15m")
+    by_name = {s["strategy"]: s for s in system.paper.stats()["by_strategy"]}
+    assert by_name["auto_options"]["options"] is True
+    assert by_name["ema_cross_15m"]["options"] is False
+
+
+async def test_an_account_with_no_structures_has_an_empty_breakdown(cfg, exchange):
+    system = await make(cfg, exchange)
+    add_trades(system, 3, "s1")
+    assert system.paper.stats()["by_structure"] == []

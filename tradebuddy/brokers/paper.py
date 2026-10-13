@@ -331,9 +331,16 @@ class PaperBroker:
             max_dd = max(max_dd, (peak - equity) / peak * 100 if peak else 0.0)
             curve.append([t["closed_at"], round(equity, 4)])
 
-        by_strategy = {}
+        by_strategy: dict[str, list[dict[str, Any]]] = {}
         for t in rows:
             by_strategy.setdefault(t["strategy"], []).append(t)
+        # Option structures all trade under one strategy name, so "auto_options -12.40" says nothing
+        # about whether it was the condors or the straddles. A closed structure keeps its label as the
+        # symbol, which carries the kind, so the kinds are counted as their own lines.
+        by_kind: dict[str, list[dict[str, Any]]] = {}
+        for t in rows:
+            if kind := structures.kind_of(t["symbol"]):
+                by_kind.setdefault(kind, []).append(t)
         total_abs = sum(abs(t["pnl"]) for t in rows) or 1.0
         reasons: dict[str, int] = {}
         for t in rows:
@@ -341,7 +348,28 @@ class PaperBroker:
         return {
             "overall": summary(rows) | {"max_drawdown_pct": round(max_dd, 2)},
             "by_strategy": sorted(
-                ({"strategy": k, "share_pct": round(100 * sum(abs(t["pnl"]) for t in v) / total_abs, 1)} | summary(v) for k, v in by_strategy.items()),
+                (
+                    {
+                        "strategy": k,
+                        "share_pct": round(100 * sum(abs(t["pnl"]) for t in v) / total_abs, 1),
+                        "options": all(structures.kind_of(t["symbol"]) for t in v),
+                    } | summary(v)
+                    for k, v in by_strategy.items()
+                ),
+                key=lambda s: -s["pnl"],
+            ),
+            "by_structure": sorted(
+                (
+                    {
+                        "kind": k,
+                        "name": structures.KINDS[k],
+                        "credit": k in structures.CREDIT_KINDS,
+                        "underlyings": sorted({t["symbol"].split(" ", 1)[0] for t in v}),
+                        "strategies": sorted({t["strategy"] for t in v}),
+                        "share_pct": round(100 * sum(abs(t["pnl"]) for t in v) / total_abs, 1),
+                    } | summary(v)
+                    for k, v in by_kind.items()
+                ),
                 key=lambda s: -s["pnl"],
             ),
             "equity_curve": curve,

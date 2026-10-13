@@ -114,7 +114,7 @@ class Trader:
                 await self._route(e, self.brokers[name], s)
 
     async def _route(self, e: SignalGenerated, broker: Broker, s: Settings) -> None:
-        reason = await self._blocked(broker, e.symbol)
+        reason = await self._blocked(broker, e.symbol) or self.strategy_halt(broker.name, e.strategy, s)
         if reason:
             self._skip(e, broker.name, reason)
             return
@@ -175,6 +175,27 @@ class Trader:
             clamp(atr * s.atr_stop_mult, "stop_loss_pct"),
             clamp(atr * s.atr_target_mult, "take_profit_pct"),
             f"ATR {atr:.3f}%",
+        )
+
+    def strategy_halt(self, broker: str, strategy: str, s: Settings, now: float | None = None) -> str:
+        """Why this strategy may not open anything on this broker today, or "". The broker-wide daily
+        loss limit only fires once the whole account is down, by which time one strategy that keeps
+        stopping out has already spent the day's budget for all of them; this stops it at its own
+        share. Read from the PositionClosed log, so it counts what was actually booked."""
+        if s.strategy_loss_limit_pct <= 0:
+            return ""
+        now = time.time() if now is None else now
+        midnight = datetime.fromtimestamp(now, ZoneInfo(s.day_timezone)).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_equity = float((self.store.day_risk(broker, midnight.date().isoformat()) or {}).get("start_equity") or 0.0)
+        if start_equity <= 0:
+            return ""  # the guard has not opened the day on this broker yet, so nothing has closed on it
+        lost = -self.store.realized_since(broker, midnight.timestamp()).get(strategy, 0.0)
+        limit = start_equity * s.strategy_loss_limit_pct / 100
+        if lost < limit:
+            return ""
+        return (
+            f"{strategy} has lost {lost:.2f} on {broker} today, its own {s.strategy_loss_limit_pct:g}% daily "
+            f"limit ({limit:.2f} of {start_equity:.2f}); this strategy resumes tomorrow"
         )
 
     def edge_error(self, broker: Broker, tp_pct: float, s: Settings) -> str:
