@@ -466,6 +466,14 @@ def create_app(
     async def health(hours: float = 48) -> dict:
         return await call("health", hours=hours)
 
+    @app.get("/api/outlook")
+    async def outlook_route(symbol: str = "BTCUSD") -> dict:
+        return await call("outlook", symbol=symbol)
+
+    @app.get("/api/verdicts")
+    async def verdicts(symbol: str = "BTCUSD", days: float = 30) -> dict:
+        return await call("verdicts", symbol=symbol, days=days)
+
     @app.get("/api/database")
     async def database() -> dict:
         return await call("database")

@@ -90,6 +90,11 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   the market did once the horizon passed (`System.score_forecasts`, `insights.outcome`). Market Data
   draws the two against each other and scores them with `insights.score_forecasts` — always beside
   the baseline that needed no model, because a hit rate alone cannot tell skill from drift.
+- `structure.py` (swings, BOS, CHoCH, FVG, squeeze, resampling), `outlook.py` (the directional view:
+  trend on 15m/1h/1d, how far price travels by when, and direction counted over the stored bars) and
+  `verdict.py` (one short checkable claim per Market-page card). All three are pure — bars in, numbers
+  out, no clock and no network — so the dashboard, a worker and a backtest get the same answer.
+  The arithmetic is checked against simulation, not against itself (`tests/test_outlook.py`).
 - `jobs.py` — every background loop wraps a pass in `job.tick()`; the System page shows them all.
 - The market itself is kept, not just read: `bars` (closed candles with the open interest and
   funding of the same bar, `System.collect_bars` fetching only what the store is missing),
@@ -152,6 +157,13 @@ Enforced by tests. Breaking one should fail the build.
     Every stored series has a retention rule wired into `System.housekeeping` and its cost per day
     written beside it in `store.TABLE_INFO`. Counters (`EventBus`) are in-memory and report the
     last completed hour next to the lifetime total: a number that only grows is not readable.
+14b. **Every claim is written down and marked.** A card that says something stores it
+    (`predictions`: stance, horizon, what to measure, the numbers behind it) and the engine settles it
+    once that horizon passes, beside the baseline that needed no chart at all. A probability is never
+    shown without its sample size: under `outlook.MIN_SAMPLE` the page says how many it has and no
+    percentage. Direction starts at a coin and is only moved by what was counted — the forecaster has
+    no 24h direction skill and so stays out of it. A verdict badge reads the same series as the chart
+    it sits on.
 15. **Analysis never trades and never leaks.** The analyst reads market data and
     the engine's `ai_digest` and writes only events. A forecast model is used only
     for what it beat a naive baseline at on unseen data (`ModelCard.skill`).

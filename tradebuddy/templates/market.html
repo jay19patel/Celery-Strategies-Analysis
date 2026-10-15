@@ -4,15 +4,83 @@
 <div data-ai-note="market"></div>
 <section class="card">
   <div class="card-head flex-wrap gap-2">
-    <div class="card-title"><i data-lucide="radar"></i>Market analysis <span class="card-sub">options every 15s · analysis every 5 min</span></div>
+    <div class="card-title"><i data-lucide="radar"></i>Market analysis <span class="card-sub">options every 15s · analysis every 5 min</span></div><span id="v_summary"></span>
     <div class="flex flex-wrap items-center gap-2"><div id="symTabs" class="flex gap-1"></div><span id="srcBadge"></span></div>
   </div>
   <div class="card-body"><div id="kpis" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-2"></div></div>
 </section>
 
+<!-- ── Outlook ──────────────────────────────────────────────────────────────
+     Which way each timeframe leans, how far price can travel by when, and how often that has
+     actually worked out. "No clear trend on 15m" on its own is not a reading: the same 15m
+     picture inside a 1d uptrend and inside a 1d downtrend are different trades. -->
+<section class="card min-w-0">
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="compass"></i>Outlook
+      <span class="card-sub">three timeframes, counted on the bars this system stored</span></div><span id="v_outlook"></span>
+    <span id="outlookMeta" class="text-[11px] muted"></span>
+  </div>
+  <div id="outlookNote" class="px-4 pt-1"></div>
+  <div class="card-body space-y-4">
+    <div id="alignment"></div>
+    <div id="frames" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
+    <div>
+      <div class="stat-label mb-1">Every card, and how often it has been right</div>
+      <div id="verdictDetail"></div>
+      <p class="text-[10.5px] muted mt-1.5">Each verdict is written down when it is made and marked once its horizon
+      has passed. The points figure is how far it beat saying nothing at all over the same bars — a card with no gap
+      there is decoration, however confident it sounds.</p>
+    </div>
+  </div>
+</section>
+
+<div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
+  <section class="card xl:col-span-3 min-w-0">
+    <div class="card-head flex-wrap gap-2">
+      <div class="card-title"><i data-lucide="candlestick-chart"></i>Structure <span id="structSub" class="card-sub"></span></div>
+      <div id="structTabs" class="flex gap-1"></div>
+    </div>
+    <div class="card-body">
+      <div id="structChart"></div>
+      <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10.5px] muted mt-1">
+        <span><span style="color:#eb5757">▬</span> swing high</span>
+        <span><span style="color:#00b852">▬</span> swing low</span>
+        <span><span style="color:#00b852">▲</span>/<span style="color:#eb5757">▼</span> break of structure</span>
+        <span><span style="color:#d97706">▲</span> change of character</span>
+        <span><span class="text-brand-500">▨</span> next horizon, ±1σ and ±2σ</span>
+      </div>
+      <div id="breakList" class="mt-3"></div>
+    </div>
+  </section>
+  <section class="card xl:col-span-2 min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="move-horizontal"></i>How far, by when
+      <span class="card-sub">from realised volatility</span></div></div>
+    <div id="horizons" class="card-body space-y-3"></div>
+  </section>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
+  <section class="card xl:col-span-2 min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="percent"></i>Which way, counted
+      <span class="card-sub">against the base rate it has to beat</span></div></div>
+    <div id="direction" class="card-body space-y-3"></div>
+  </section>
+  <section class="card xl:col-span-3 min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="scan-search"></i>What breaks have led to
+      <span class="card-sub">every one in the stored history, and what followed</span></div></div>
+    <div id="patterns" class="card-body"></div>
+  </section>
+</div>
+
+<section class="card min-w-0">
+  <div class="card-head"><div class="card-title"><i data-lucide="message-square-text"></i>In words
+    <span class="card-sub">the same numbers as sentences — rules, not AI</span></div></div>
+  <div id="narrative" class="card-body space-y-2 text-[13px] leading-relaxed"></div>
+</section>
+
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
   <section class="card xl:col-span-2 min-w-0">
-    <div class="card-head"><div class="card-title"><i data-lucide="lightbulb"></i>Insights <span class="card-sub">rules over the numbers above: no model, no AI</span></div></div>
+    <div class="card-head"><div class="card-title"><i data-lucide="lightbulb"></i>Insights <span class="card-sub">rules over the numbers above: no model, no AI</span></div><span id="v_insights"></span></div>
     <div class="card-body">
       <div id="insights"></div>
       <div class="mt-4 rounded-lg border border-violet-100 bg-violet-50/40 p-3">
@@ -29,7 +97,7 @@
 
 <section class="card min-w-0">
   <div class="card-head flex-wrap gap-2">
-    <div class="card-title"><i data-lucide="table-2"></i>Option chain <span id="chainSub" class="card-sub"></span></div>
+    <div class="card-title"><i data-lucide="table-2"></i>Option chain <span id="chainSub" class="card-sub"></span></div><span id="v_chain_oi"></span>
     <select id="expiry" class="select" aria-label="Expiry"></select>
   </div>
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 px-4 pt-3">
@@ -79,18 +147,18 @@
 </section>
 
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
-  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="calendar-range"></i>Term structure <span class="card-sub">ATM IV by expiry</span></div></div>
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="calendar-range"></i>Term structure <span class="card-sub">ATM IV by expiry</span></div><span id="v_term_structure"></span></div>
     <div id="term" class="card-body"></div>
     <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">The price of volatility at each expiry, nearest on the left. It normally slopes
     up — more can happen in a month than in a day. When a near expiry sits <b>above</b> the ones after it, the market is
     pricing an event inside that window, and selling volatility into it is how a quiet-looking trade goes wrong.</p></section>
-  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="activity"></i>ATM IV <span class="card-sub">last 24h</span></div></div>
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="activity"></i>ATM IV <span class="card-sub">last 24h</span></div><span id="v_atm_iv"></span></div>
     <div id="ivSpark" class="card-body"></div>
     <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">What a day of movement has been costing, over the last 24 hours. Rising means
     options are getting dearer — buyers are paying up, usually into uncertainty. Falling means premium is draining out and
     the market is calming. Compare it with the <b>IV / RV</b> tile above: that says whether the price is fair against how
     much the market has actually been moving.</p></section>
-  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="scale"></i>Put / call OI <span class="card-sub">last 24h</span></div></div>
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="scale"></i>Put / call OI <span class="card-sub">last 24h</span></div><span id="v_pcr"></span></div>
     <div id="pcrSpark" class="card-body"></div>
     <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">Open interest in puts divided by calls. Above 1 means more puts are open than
     calls — hedging or bearish positioning; below 1 the other way. <b>The move matters more than the level</b>: the ratio
@@ -133,6 +201,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/chart.js?v={{ v }}"></script>
 <script src="/static/js/analysis.js?v={{ v }}"></script>
 <script>
 // ── market analysis ──────────────────────────────────────────────────────────
@@ -147,7 +216,7 @@
     if (!data) return;
     const d = data.symbols[sym] || {}, o = d.options;
     $("symTabs").innerHTML = SYMS.map((s) => `<button class="btn btn-sm ${s === sym ? "btn-primary" : ""}" data-sym="${s}">${s.replace("USD", "")}</button>`).join("");
-    $("symTabs").querySelectorAll("[data-sym]").forEach((b) => (b.onclick = () => { sym = b.dataset.sym; expiry = null; render(); loadHist(); loadScore(); }));
+    $("symTabs").querySelectorAll("[data-sym]").forEach((b) => (b.onclick = () => { sym = b.dataset.sym; expiry = null; render(); loadHist(); loadScore(); loadOutlook(); }));
     $("srcBadge").innerHTML = TBA.sourceBadge(o);
     $("kpis").innerHTML = TBA.kpis(d);
     $("insights").innerHTML = TBA.insights(d);
@@ -202,10 +271,199 @@
   TB.on("OptionsSnapshot", (e) => { if (!data) return; (data.symbols[e.symbol] ||= {}).options = { source: e.source, at: e.ts, summary: e.summary }; schedule(); });
   TB.on("MarketAnalysis", (e) => { if (!data) return; (data.symbols[e.symbol] ||= {}).analysis = e; schedule(); });
   TB.on("MarketStats", (e) => { if (!data?.symbols[e.symbol]) return; data.symbols[e.symbol].stats = e; if (e.symbol === sym) schedule(); });
-  load(); loadHist(); loadScore();
+
+  // ── outlook: three timeframes, the distances, and the counted odds ─────────
+  // A verdict badge is the point of each card: the chart explains what the thing means, the badge
+  // says what *this* one is saying, and the record under it says how often that card has been right.
+  const STANCE = {
+    bullish: ["Leans up", "bg-bull-bg text-bull-text"], bearish: ["Leans down", "bg-bear-bg text-bear-text"],
+    neutral: ["No lean", "bg-slate-100 text-slate-600"], vol_up: ["Expect movement", "bg-amber-50 text-amber-700"],
+    vol_down: ["Expect quiet", "bg-sky-50 text-sky-700"], range: ["Rangebound", "bg-slate-100 text-slate-600"],
+    unclear: ["Not enough to say", "bg-slate-50 text-slate-400"],
+  };
+  const TREND = {
+    "up": "bg-bull-bg text-bull-text", "weak up": "bg-bull-bg/60 text-bull-text",
+    "down": "bg-bear-bg text-bear-text", "weak down": "bg-bear-bg/60 text-bear-text",
+    "flat": "bg-slate-100 text-slate-600", "unknown": "bg-slate-50 text-slate-400",
+  };
+  let outlook = null, record = {}, structFrame = "15m", barsCache = {};
+
+  function verdictBadge(v, card) {
+    const [, cls] = STANCE[v.stance] || STANCE.unclear;
+    const r = (record.cards || []).find((c) => c.source === v.key);
+    const edge = r && r.n >= 20
+      ? `<span class="text-[10px] ${r.edge > 0.02 ? "up" : r.edge < -0.02 ? "down" : "muted"}" title="${r.n} marked: right ${(100 * r.hit_rate).toFixed(0)}%, saying nothing ${(100 * r.baseline).toFixed(0)}%">${r.edge >= 0 ? "+" : ""}${(100 * r.edge).toFixed(0)} pts over ${r.n}</span>`
+      : `<span class="text-[10px] muted" title="a verdict is marked once its horizon has passed">${r ? `${r.n} marked` : "no record yet"}</span>`;
+    return `<span class="inline-flex items-center gap-1.5">
+      <span class="px-1.5 py-0.5 rounded text-[11px] font-semibold ${cls}" title="${esc(v.detail)}">${esc(v.label)}</span>${edge}</span>`;
+  }
+
+  function renderVerdicts(list) {
+    for (const v of list || []) {
+      const el = $(`v_${v.key}`);
+      if (el) el.innerHTML = verdictBadge(v);
+    }
+    // The summary badge on the top card is the Outlook one: it is the reading the rest supports.
+    const head = (list || []).find((v) => v.key === "outlook");
+    if (head && $("v_summary")) $("v_summary").innerHTML = verdictBadge(head);
+    const box = $("verdictDetail");
+    if (box) {
+      box.innerHTML = (list || []).filter((v) => v.stance !== "unclear").map((v) => `
+        <div class="flex gap-2 items-start py-1.5 border-b border-slate-100 last:border-0">
+          <div style="flex:0 0 7.5rem">${verdictBadge(v)}</div>
+          <div class="text-[11.5px] text-slate-600 leading-snug">${esc(v.detail)}</div>
+        </div>`).join("") || `<div class="text-[11px] muted">No card has enough to say yet.</div>`;
+    }
+  }
+
+  function renderOutlook() {
+    const v = outlook;
+    if (!v) return;
+    if (!v.ready) {
+      $("outlookNote").innerHTML = `<div class="rounded-md bg-amber-50 text-amber-800 text-[12px] px-3 py-2">${esc(v.hint || "")}</div>`;
+      $("frames").innerHTML = ""; $("alignment").innerHTML = ""; return;
+    }
+    $("outlookNote").innerHTML = "";
+    $("outlookMeta").textContent = `${v.bars.toLocaleString()} bars · ${v.days} days · realised vol ${(100 * v.realised_vol).toFixed(0)}%`;
+
+    const a = v.alignment;
+    const tone = a.verdict.includes("up") ? "border-bull/40 bg-bull-bg/40" : a.verdict.includes("down") ? "border-bear/40 bg-bear-bg/40" : "border-slate-200 bg-slate-50";
+    $("alignment").innerHTML = `<div class="rounded-lg border ${tone} px-3 py-2">
+      <div class="text-[13px] font-semibold capitalize">${esc(a.verdict)}</div>
+      <div class="text-[12px] text-slate-600 mt-0.5 leading-snug">${esc(a.advice)}</div></div>`;
+
+    $("frames").innerHTML = v.timeframes.map((f) => {
+      const s = f.structure || {};
+      return `<div class="rounded-lg border border-slate-200 p-3">
+        <div class="flex items-center justify-between mb-1.5">
+          <div><span class="font-mono text-[12px] font-semibold">${esc(f.interval)}</span>
+            <span class="text-[10.5px] muted ml-1">${esc(f.label)}</span></div>
+          <span class="px-1.5 py-0.5 rounded text-[11px] font-semibold ${TREND[f.trend] || TREND.unknown}">${esc(f.trend)}</span>
+        </div>
+        ${f.note ? `<div class="text-[10.5px] text-amber-700 mb-1">${esc(f.note)}</div>` : ""}
+        ${TBC.rangeBar(s.swing_low, s.swing_high, f.price)}
+        <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10.5px] mt-2">
+          <div class="muted">structure</div><div class="text-right font-mono">${esc(s.bias || "—")}${s.squeeze ? " · squeeze" : ""}</div>
+          <div class="muted">EMA20 slope</div><div class="text-right font-mono ${f.slope_pct > 0 ? "up" : f.slope_pct < 0 ? "down" : ""}">${f.slope_pct == null ? "—" : `${f.slope_pct >= 0 ? "+" : ""}${f.slope_pct.toFixed(2)}%`}</div>
+          <div class="muted">realised vol</div><div class="text-right font-mono">${f.rv == null ? "—" : `${(100 * f.rv).toFixed(0)}%`}</div>
+          <div class="muted">good for</div><div class="text-right">${esc(f.sense)}</div>
+        </div></div>`;
+    }).join("");
+
+    // How far, by when.
+    $("horizons").innerHTML = v.horizons.map((h) => {
+      const bars = h.touch.map((t) => ({ name: `±${t.move_pct}%`, value: t.either, hint: `${(100 * t.probability).toFixed(0)}% each side` }));
+      return `<div>
+        <div class="flex items-baseline justify-between">
+          <div class="text-[12px] font-semibold">${esc(h.label)}</div>
+          <div class="font-mono text-[13px]">±${h.expected_move_pct.toFixed(2)}% <span class="muted text-[11px]">±${TB.num(h.expected_move_usd, 0)}</span></div>
+        </div>
+        <div class="text-[10.5px] muted mb-1">two bars in three land inside ${TB.num(h.band_68[0], 0)}–${TB.num(h.band_68[1], 0)}
+          ${h.implied ? ` · options price ±${h.implied.expected_move_pct.toFixed(2)}%` : ""}</div>
+        ${TBC.hbars(bars, { format: (x) => `${(100 * x).toFixed(0)}%`, height: 8 })}
+      </div>`;
+    }).join('<div class="border-t border-slate-100"></div>');
+
+    // Which way, counted.
+    $("direction").innerHTML = v.direction.map((d) => `<div>
+      <div class="flex items-baseline justify-between mb-1">
+        <div class="text-[12px] font-semibold">Higher in ${d.horizon_hours >= 24 ? `${d.horizon_hours / 24}d` : `${d.horizon_hours}h`}</div>
+        <div class="text-[10.5px] muted">${d.bias ? `structure: ${esc(d.bias)}` : ""}</div>
+      </div>
+      ${TBC.probBar(d.conditional ?? d.baseline, d.conditional != null ? d.baseline : null,
+        { sample: d.conditional != null ? d.conditional_sample : d.sample, minSample: v.min_sample })}
+      ${d.note ? `<div class="text-[10.5px] text-amber-700 mt-0.5">${esc(d.note)}</div>` : ""}
+    </div>`).join("") + `<div class="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] leading-snug">
+      <span class="font-semibold">Your current levels:</span> ${v.trade_odds.stop_pct}% stop / ${v.trade_odds.target_pct}% target (1:${v.trade_odds.reward_risk}).
+      Of the trades that reach a level, <span class="font-mono font-semibold">${(100 * v.trade_odds.p_stop_first).toFixed(0)}%</span> reach the stop first.
+      That is the arithmetic of the ratio, not a flaw — it pays if the win rate beats it.</div>`;
+
+    // What breaks have led to.
+    const pats = v.patterns[structFrame] || [];
+    $("patterns").innerHTML = pats.length
+      ? `<table class="tbl text-[12px]"><thead><tr><th>Break</th><th class="r">Seen</th><th>Followed through</th><th class="r">Mean move</th></tr></thead><tbody>${
+          pats.map((p) => `<tr>
+            <td><span class="font-mono">${esc(p.kind)}</span> <span class="${p.direction === "up" ? "up" : "down"}">${esc(p.direction)}</span></td>
+            <td class="r font-mono">${p.count.toLocaleString()}</td>
+            <td style="min-width:11rem">${TBC.probBar(p.followed_through, p.baseline, { sample: p.count, minSample: 20, height: 14 })}</td>
+            <td class="r font-mono">${p.mean_move_pct.toFixed(2)}%</td></tr>`).join("")}</tbody></table>
+         <p class="text-[10.5px] muted mt-2">Counted over every break in the stored ${structFrame} bars, measured
+         ${v.timeframes.find((f) => f.interval === structFrame)?.sense || ""} ahead. The bar is how often it went on the
+         way it broke; the marker is the same question asked of any bar at all. A flag with no gap over that marker is noise.</p>`
+      : `<div class="text-[11px] muted">Not enough stored history to count breaks on ${structFrame} yet — run <span class="font-mono">backfill</span>.</div>`;
+
+    // In words.
+    const n = v.narrative || {};
+    $("narrative").innerHTML = ["headline", "structure", "move", "odds", "plan"].filter((k) => n[k]).map((k) =>
+      `<p class="${k === "headline" ? "font-semibold text-[14px]" : "text-slate-600"}">${esc(n[k])}</p>`).join("");
+
+    renderStructure();
+  }
+
+  // The chart the rest of it is about: candles, the levels that matter, where the breaks were,
+  // and a cone for how far the next horizon reaches.
+  async function renderStructure() {
+    if (!outlook?.ready) return;
+    $("structTabs").innerHTML = outlook.timeframes.map((f) =>
+      `<button class="btn btn-sm ${f.interval === structFrame ? "btn-primary" : ""}" data-tf="${f.interval}">${f.interval}</button>`).join("");
+    $("structTabs").querySelectorAll("[data-tf]").forEach((b) => (b.onclick = () => { structFrame = b.dataset.tf; renderOutlook(); }));
+
+    const f = outlook.timeframes.find((x) => x.interval === structFrame);
+    const s = f?.structure || {};
+    const key = `${sym}:${structFrame}`;
+    if (!barsCache[key]) {
+      const days = structFrame === "1d" ? 180 : structFrame === "1h" ? 21 : 3;
+      barsCache[key] = (await TB.get(`/api/bars?symbol=${sym}&interval=15m&days=${days}`)).bars;
+    }
+    const raw = barsCache[key];
+    const factor = structFrame === "1d" ? 96 : structFrame === "1h" ? 4 : 1;
+    // Fold the stored 15m bars the same way the server did, so the chart is the series that was read.
+    const folded = factor === 1 ? raw : (() => {
+      const span = 900 * factor, groups = new Map();
+      for (const b of raw) {
+        const k = Math.floor(b.time / span) * span;
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(b);
+      }
+      return [...groups.entries()].sort((a, b) => a[0] - b[0]).filter(([, g]) => g.length === factor).map(([t, g]) => ({
+        time: t, open: g[0].open, high: Math.max(...g.map((x) => x.high)), low: Math.min(...g.map((x) => x.low)), close: g[g.length - 1].close,
+      }));
+    })();
+    const shown = folded.slice(-140);
+    const horizon = outlook.horizons.find((h) => h.hours === (f?.interval === "1d" ? 24 : f?.interval === "1h" ? 24 : 1)) || outlook.horizons[1];
+    $("structSub").textContent = `${shown.length} ${structFrame} bars · ${s.bias || "—"}${s.squeeze ? " · squeeze" : ""}`;
+    $("structChart").innerHTML = TBC.candles(shown, {
+      levels: [
+        { price: s.swing_high, label: `swing high ${TB.num(s.swing_high, 0)}`, color: "#eb5757" },
+        { price: s.swing_low, label: `swing low ${TB.num(s.swing_low, 0)}`, color: "#00b852" },
+      ],
+      marks: (s.breaks || []).map((b) => ({ bar_time: b.bar_time, direction: b.direction, kind: b.kind })),
+      projection: horizon ? { sigma_pct: horizon.sigma_pct, hours: horizon.hours } : null,
+      label: `${sym} ${structFrame} with structure`,
+    });
+    const recent = (s.breaks || []).slice(-4).reverse();
+    $("breakList").innerHTML = recent.length
+      ? `<div class="text-[11px] space-y-1">${recent.map((b) => `<div class="flex gap-2">
+          <span class="font-mono ${b.direction === "up" ? "up" : "down"}">${b.kind === "choch" ? "CHoCH" : "BOS"} ${b.direction}</span>
+          <span class="muted">${TB.time(b.bar_time)}</span>
+          <span>through <span class="font-mono">${TB.num(b.level, 0)}</span></span>
+          <span class="muted">bar ${b.displacement.toFixed(1)}x usual, volume ${b.volume_ratio.toFixed(1)}x</span></div>`).join("")}</div>`
+      : `<div class="text-[11px] muted">No break in the window shown.</div>`;
+  }
+
+  async function loadOutlook() {
+    outlook = await TB.get(`/api/outlook?symbol=${sym}`);
+    renderOutlook();
+    const v = await TB.get(`/api/verdicts?symbol=${sym}&days=30`);
+    record = v.record || {};
+    renderVerdicts(v.verdicts);
+  }
+
+  load(); loadHist(); loadScore(); loadOutlook();
   TB.every(load, 60000);
   TB.every(loadHist, 60000);
-  TB.every(loadScore, 300000);  // a forecast settles at most once a bar; no need to ask often
+  TB.every(loadScore, 300000);
+  TB.every(loadOutlook, 300000);  // nothing in it changes until the next 15-minute bar closes
 })();
 
 (() => {

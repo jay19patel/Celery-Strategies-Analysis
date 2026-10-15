@@ -256,6 +256,33 @@ CREATE TABLE IF NOT EXISTS process_health (
     PRIMARY KEY (role, ts)
 );
 CREATE INDEX IF NOT EXISTS process_health_ts ON process_health(ts);
+-- Every verdict any card on the Market page made, and what the market then did about it.
+-- A verdict nobody marks is decoration: this is what turns "the term structure says an event is
+-- priced" into "that card has been right 6 times out of 11, against 5 you would have got by
+-- saying nothing". One row per card per bar; the first reading of a bar is the one it made.
+CREATE TABLE IF NOT EXISTS predictions (
+    symbol        TEXT    NOT NULL,
+    source        TEXT    NOT NULL,   -- which card: term_structure, atm_iv, pcr, chain_oi, insights, outlook
+    bar_time      INTEGER NOT NULL,
+    ts            REAL    NOT NULL,
+    horizon_hours REAL    NOT NULL,
+    stance        TEXT    NOT NULL,   -- bullish | bearish | neutral | vol_up | vol_down | range | unclear
+    measure       TEXT    NOT NULL,   -- direction | volatility | range | '' when it claims nothing
+    label         TEXT    NOT NULL,
+    confidence    REAL    NOT NULL,
+    price         REAL    NOT NULL,
+    numbers       TEXT    NOT NULL,   -- JSON: the inputs, so a claim can be traced
+    settled_at      REAL,
+    actual_return   REAL,
+    actual_vol      REAL,             -- realised vol over the horizon
+    prior_vol       REAL,             -- and over the same length before it, which is what vol_up/down is judged against
+    actual_excursion REAL,
+    correct         INTEGER,          -- did the claim hold
+    baseline_correct INTEGER,         -- would saying nothing have held over the same bars
+    PRIMARY KEY (symbol, source, bar_time)
+);
+CREATE INDEX IF NOT EXISTS predictions_open ON predictions(settled_at, bar_time);
+CREATE INDEX IF NOT EXISTS predictions_scored ON predictions(symbol, source, settled_at);
 -- Every TradeBuddy AI attempt with its full written report, so any day's analysis can be read again.
 CREATE TABLE IF NOT EXISTS ai_reports (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -286,6 +313,7 @@ SNAPSHOT_COLUMNS = (
 )
 SNAPSHOT_DAYS = 30  # off-boundary rows; the 15-minute ones are kept for good
 HEALTH_DAYS = 30  # process load: 4 processes every 5 minutes is ~1,150 rows a day
+PREDICTION_DAYS = 180  # card verdicts and how they turned out: ~6 a bar a symbol, kept long enough to judge
 BAR_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14_400, "1d": 86_400}
 AI_REPORT_DAYS = 90  # written reports; about 1.5 MB a day at one every 5 minutes
 AI_FAILED_DAYS = 14  # attempts that produced no report
@@ -304,6 +332,7 @@ TABLE_INFO = {
     "process_health": ("CPU, memory and loop lag per process", "ts", f"{HEALTH_DAYS} days"),
     "ai_reports": ("Every TradeBuddy AI report, in full", "ts", f"{AI_REPORT_DAYS} days; failed attempts {AI_FAILED_DAYS}"),
     "forecasts": ("Every forecast and what the market then did", "ts", f"{FORECAST_DAYS} days"),
+    "predictions": ("Every card verdict and whether it held", "ts", f"{PREDICTION_DAYS} days"),
     "daily_risk": ("Start-of-day equity and halts, per broker", None, "forever (one row a day)"),
     "position_controls": ("Trailing switch and steps per open position", "updated_at", "while open"),
     "settings": ("Runtime settings (secrets included, never sent out)", None, "forever"),
@@ -635,6 +664,55 @@ class Store:
     def prune_forecasts(self, now: float | None = None) -> int:
         now = time.time() if now is None else now
         return self.db.execute("DELETE FROM forecasts WHERE ts < ?", (now - FORECAST_DAYS * 86_400,)).rowcount
+
+    # -- verdicts, and whether they held --------------------------------------
+
+    def record_verdict(self, symbol: str, bar_time: int, ts: float, price: float, v: dict[str, Any]) -> None:
+        """A card's claim, as it was made. OR IGNORE: the analyst re-reads the same bar every cycle
+        and the first reading is the one it made with what it knew then."""
+        self.db.execute(
+            "INSERT OR IGNORE INTO predictions (symbol, source, bar_time, ts, horizon_hours, stance, measure, label,"
+            " confidence, price, numbers) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (symbol, v["key"], int(bar_time), ts, float(v["horizon_hours"]), v["stance"], v.get("measure") or "",
+             v["label"], float(v["confidence"]), price, json.dumps(v.get("numbers") or {})),
+        )
+
+    def unsettled_verdicts(self, now: float | None = None, limit: int = 1000) -> list[dict[str, Any]]:
+        """Verdicts whose horizon has passed and which nothing has marked yet. Claims that measure
+        nothing ("not enough to say") are settled on sight — they were never a claim."""
+        now = time.time() if now is None else now
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM predictions WHERE settled_at IS NULL AND measure != '' AND bar_time + horizon_hours * 3600 <= ?"
+            " ORDER BY bar_time LIMIT ?",
+            (now, limit),
+        )]
+
+    def settle_verdict(
+        self, symbol: str, source: str, bar_time: int, now: float, ret: float, vol: float, prior_vol: float,
+        excursion: float, correct: bool, baseline_correct: bool,
+    ) -> None:
+        self.db.execute(
+            "UPDATE predictions SET settled_at = ?, actual_return = ?, actual_vol = ?, prior_vol = ?,"
+            " actual_excursion = ?, correct = ?, baseline_correct = ? WHERE symbol = ? AND source = ? AND bar_time = ?",
+            (now, ret, vol, prior_vol, excursion, int(correct), int(baseline_correct), symbol, source, int(bar_time)),
+        )
+
+    def verdict_record(self, symbol: str = "", since: float = 0.0, limit: int = 5000) -> list[dict[str, Any]]:
+        """Settled verdicts, oldest first."""
+        where = "settled_at IS NOT NULL AND bar_time >= ?"
+        params: list[Any] = [since]
+        if symbol:
+            where += " AND symbol = ?"
+            params.append(symbol)
+        rows = self.db.execute(
+            f"SELECT * FROM predictions WHERE {where} ORDER BY bar_time DESC LIMIT ?",  # noqa: S608 - fixed clauses, values bound
+            (*params, limit),
+        )
+        return [dict(r) for r in rows][::-1]
+
+    def prune_predictions(self, now: float | None = None) -> int:
+        now = time.time() if now is None else now
+        return self.db.execute("DELETE FROM predictions WHERE ts < ?", (now - PREDICTION_DAYS * 86_400,)).rowcount
 
     # -- TradeBuddy AI reports ------------------------------------------------
 

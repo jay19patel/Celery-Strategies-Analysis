@@ -117,5 +117,134 @@
       </div>`).join("")}</div>`;
   }
 
-  window.TBC = { timeLine, hbars, colorFor, niceTicks, ROLE_COLOR };
+  /**
+   * Candles, with the levels that matter drawn on them and room on the right for where price
+   * could go next.
+   *
+   * bars:  [{time, open, high, low, close}]
+   * opts:  { levels: [{price, label, color, dashed}], marks: [{bar_time, direction, kind}],
+   *          projection: {sigma_pct, hours}, height, width }
+   *
+   * The projection is the point of this chart rather than the candles: a cone of one and two
+   * standard deviations over the next horizon, drawn to the same scale as the bars behind it. It
+   * turns "expected move 1.7%" from a number into a distance you can see against the last swing.
+   */
+  function candles(bars, opts = {}) {
+    const { height = 260, width = 720, levels = [], marks = [], projection = null, format = (v) => v.toLocaleString(undefined, { maximumFractionDigits: 0 }) } = opts;
+    const rows = (bars || []).filter((b) => b && isFinite(b.close));
+    if (rows.length < 2) return empty(height, "Not enough bars stored yet — the engine keeps one every 15 minutes.");
+
+    const padL = 4, padR = 54, padT = 8, padB = 16;
+    // The cone needs horizontal room: give it a quarter of the plot, which is also roughly how
+    // much of the recent past stays readable beside it.
+    const future = projection ? 0.25 : 0;
+    const plotW = width - padL - padR;
+    const pastW = plotW * (1 - future);
+
+    const last = rows[rows.length - 1];
+    let lo = Math.min(...rows.map((b) => b.low));
+    let hi = Math.max(...rows.map((b) => b.high));
+    for (const l of levels) if (isFinite(l.price)) { lo = Math.min(lo, l.price); hi = Math.max(hi, l.price); }
+    if (projection?.sigma_pct) {
+      lo = Math.min(lo, last.close * (1 - 2.2 * projection.sigma_pct / 100));
+      hi = Math.max(hi, last.close * (1 + 2.2 * projection.sigma_pct / 100));
+    }
+    const span = (hi - lo) || 1;
+    lo -= span * 0.04; hi += span * 0.04;
+
+    const X = (i) => padL + (i / Math.max(1, rows.length - 1)) * pastW;
+    const Y = (p) => padT + (1 - (p - lo) / (hi - lo)) * (height - padT - padB);
+    const w = Math.max(1, Math.min(7, pastW / rows.length * 0.68));
+
+    const body = rows.map((b, i) => {
+      const up = b.close >= b.open;
+      const col = up ? "#00b852" : "#eb5757";
+      const x = X(i);
+      const yO = Y(b.open), yC = Y(b.close);
+      const top = Math.min(yO, yC), h = Math.max(0.8, Math.abs(yC - yO));
+      return `<line x1="${x.toFixed(1)}" y1="${Y(b.high).toFixed(1)}" x2="${x.toFixed(1)}" y2="${Y(b.low).toFixed(1)}" stroke="${col}" stroke-width="1"/>`
+        + `<rect x="${(x - w / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${col}"/>`;
+    }).join("");
+
+    const levelLines = levels.filter((l) => isFinite(l.price)).map((l) => {
+      const y = Y(l.price);
+      return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${(width - padR).toFixed(1)}" y2="${y.toFixed(1)}"
+          stroke="${l.color || AXIS}" stroke-width="1" ${l.dashed === false ? "" : 'stroke-dasharray="4 3"'}/>
+        <text x="${width - padR + 3}" y="${(y + 3.5).toFixed(1)}" font-size="9.5" fill="${l.color || AXIS}"
+          font-family="ui-monospace,monospace">${esc(l.label || format(l.price))}</text>`;
+    }).join("");
+
+    // A break is marked on the bar it happened, pointing the way it broke.
+    const byTime = new Map(rows.map((b, i) => [b.time, i]));
+    const markers = marks.filter((m) => byTime.has(m.bar_time)).map((m) => {
+      const i = byTime.get(m.bar_time), b = rows[i];
+      const up = m.direction === "up";
+      const y = up ? Y(b.high) - 6 : Y(b.low) + 6;
+      const col = m.kind === "choch" ? "#d97706" : (up ? "#00b852" : "#eb5757");
+      const pts = up ? `${X(i)},${y - 5} ${X(i) - 4},${y + 2} ${X(i) + 4},${y + 2}` : `${X(i)},${y + 5} ${X(i) - 4},${y - 2} ${X(i) + 4},${y - 2}`;
+      return `<polygon points="${pts}" fill="${col}"><title>${esc(m.kind)} ${esc(m.direction)}</title></polygon>`;
+    }).join("");
+
+    let cone = "";
+    if (projection?.sigma_pct) {
+      const x0 = X(rows.length - 1), x1 = width - padR;
+      const p = last.close, s = projection.sigma_pct / 100;
+      const wedge = (mult, fill) => `<path d="M ${x0.toFixed(1)} ${Y(p).toFixed(1)} L ${x1.toFixed(1)} ${Y(p * (1 + mult * s)).toFixed(1)}
+        L ${x1.toFixed(1)} ${Y(p * (1 - mult * s)).toFixed(1)} Z" fill="${fill}"/>`;
+      cone = wedge(2, "rgba(30,136,229,0.09)") + wedge(1, "rgba(30,136,229,0.17)")
+        + `<line x1="${x0.toFixed(1)}" y1="${padT}" x2="${x0.toFixed(1)}" y2="${height - padB}" stroke="${GRID}" stroke-dasharray="2 3"/>`
+        + `<text x="${x1}" y="${(Y(p * (1 + s)) - 3).toFixed(1)}" text-anchor="end" font-size="9" fill="${AXIS}">+1σ</text>`
+        + `<text x="${x1}" y="${(Y(p * (1 - s)) + 9).toFixed(1)}" text-anchor="end" font-size="9" fill="${AXIS}">−1σ</text>`;
+    }
+
+    return `<svg viewBox="0 0 ${width} ${height}" class="w-full" style="height:${height}px" role="img"
+      aria-label="${esc(opts.label || "price with levels")}">${cone}${levelLines}${body}${markers}</svg>`;
+  }
+
+  /**
+   * Where price sits between two levels, as a bar with a marker. Answers "am I at the top of the
+   * range or the bottom" faster than two numbers and a subtraction can.
+   */
+  function rangeBar(low, high, price, opts = {}) {
+    if (!isFinite(low) || !isFinite(high) || !(high > low)) return `<div class="text-[11px] muted">No range yet.</div>`;
+    const pos = Math.min(1, Math.max(0, (price - low) / (high - low)));
+    const fmt = opts.format || ((v) => v.toLocaleString(undefined, { maximumFractionDigits: 0 }));
+    return `<div>
+      <div class="relative bg-gradient-to-r from-bull-bg via-slate-100 to-bear-bg rounded-sm" style="height:14px">
+        <div class="absolute top-0 bottom-0" style="left:${(100 * pos).toFixed(1)}%;width:2px;background:#0f172a"></div>
+      </div>
+      <div class="flex justify-between text-[10.5px] muted font-mono mt-0.5">
+        <span>${esc(fmt(low))}</span><span class="text-slate-700">${(100 * pos).toFixed(0)}% up</span><span>${esc(fmt(high))}</span>
+      </div></div>`;
+  }
+
+  /**
+   * A probability against the baseline it has to beat. Never one without the other: a hit rate on
+   * its own cannot tell an edge from a market that simply went up all year.
+   */
+  function probBar(value, baseline, opts = {}) {
+    const { sample = null, minSample = 0, height = 18 } = opts;
+    if (value == null) {
+      return `<div class="text-[11px] muted">${esc(sample != null && minSample
+        ? `${sample.toLocaleString()} of ${minSample.toLocaleString()} outcomes needed`
+        : "not enough history")}</div>`;
+    }
+    const edge = baseline == null ? null : value - baseline;
+    const col = edge == null ? "#1e88e5" : edge > 0.01 ? "#00b852" : edge < -0.01 ? "#eb5757" : "#94a3b8";
+    return `<div>
+      <div class="relative bg-slate-100 rounded-sm overflow-hidden" style="height:${height}px">
+        <div style="width:${(100 * value).toFixed(1)}%;height:100%;background:${col};opacity:.85"></div>
+        ${baseline == null ? "" : `<div class="absolute top-0 bottom-0" style="left:${(100 * baseline).toFixed(1)}%;width:2px;background:#0f172a"
+          title="baseline ${(100 * baseline).toFixed(1)}%"></div>`}
+        <div class="absolute inset-0 flex items-center justify-between px-1.5 text-[10.5px] font-mono">
+          <span class="text-slate-800 font-semibold">${(100 * value).toFixed(1)}%</span>
+          ${baseline == null ? "" : `<span class="text-slate-600">base ${(100 * baseline).toFixed(1)}%</span>`}
+        </div>
+      </div>
+      ${edge == null ? "" : `<div class="text-[10.5px] mt-0.5 ${edge > 0.01 ? "up" : edge < -0.01 ? "down" : "muted"}">
+        ${edge >= 0 ? "+" : ""}${(100 * edge).toFixed(1)} pts vs baseline${sample ? ` · ${sample.toLocaleString()} bars` : ""}</div>`}
+    </div>`;
+  }
+
+  window.TBC = { timeLine, hbars, candles, rangeBar, probBar, colorFor, niceTicks, ROLE_COLOR };
 })();

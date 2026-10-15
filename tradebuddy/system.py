@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import socket
@@ -14,6 +15,7 @@ from typing import Any, Protocol
 import psutil
 from fastapi import WebSocket
 
+from tradebuddy import outlook, verdict
 from tradebuddy.brokers import Broker, DeltaBroker, PaperBroker
 from tradebuddy.config import Config
 from tradebuddy.delta import DeltaClient
@@ -74,6 +76,7 @@ BAR_RESOLUTION = "15m"
 BAR_COLLECT_EVERY = 900.0
 BAR_CATCHUP_MAX = 500  # one pass covers ~5 days of outage; older than that, use the backfill command
 HEALTH_EVERY = 300.0  # one row per process per 5 minutes
+OPTIONS_MINUTE_STEP = 60  # what the ATM IV and put/call cards chart, and so what their verdicts read
 
 
 class Stream(Protocol):
@@ -357,9 +360,10 @@ class System:
                     forecasts = await asyncio.to_thread(self.store.prune_forecasts)
                     snapshots = await asyncio.to_thread(self.store.prune_snapshots)
                     health = await asyncio.to_thread(self.store.prune_health)
+                    claims = await asyncio.to_thread(self.store.prune_predictions)
                     job.note = (
                         f"deleted {deleted} events, {minutes} options minutes, {reports} AI reports, "
-                        f"{forecasts} forecasts, {snapshots} snapshots, {health} health rows"
+                        f"{forecasts} forecasts, {snapshots} snapshots, {health} health rows, {claims} verdicts"
                     )
                 if deleted or minutes:
                     log.info("events_pruned deleted=%d options_minutes=%d", deleted, minutes)
@@ -451,17 +455,20 @@ class System:
     async def _score_once(self, now: float | None = None) -> str:
         now = time.time() if now is None else now
         due = await asyncio.to_thread(self.store.unsettled_forecasts, now)
-        if not due:
+        claims = await asyncio.to_thread(self.store.unsettled_verdicts, now)
+        if not due and not claims:
             return "nothing due"
-        settled, failed = 0, 0
-        for symbol in sorted({r["symbol"] for r in due}):
+        settled, failed, marked = 0, 0, 0
+        for symbol in sorted({r["symbol"] for r in due} | {r["symbol"] for r in claims}):
             rows = [r for r in due if r["symbol"] == symbol]
-            span = now - min(r["bar_time"] for r in rows)
-            try:  # one request covers every forecast of this symbol that has come due
+            mine = [r for r in claims if r["symbol"] == symbol]
+            oldest = min([r["bar_time"] for r in rows + mine], default=now)
+            span = now - oldest
+            try:  # one request covers every claim of this symbol that has come due
                 bars = await self.market_client.candles(symbol, SCORE_RESOLUTION, int(span / SCORE_BAR_SECONDS) + 8)
             except Exception as exc:
                 log.warning("forecast_scoring_no_candles symbol=%s error=%s", symbol, exc)
-                failed += len(rows)
+                failed += len(rows) + len(mine)
                 continue
             for row in rows:
                 actual = outcome(bars, int(row["bar_time"]), float(row["horizon_hours"]), float(row["breakout_pct"] or 0.0))
@@ -470,7 +477,40 @@ class System:
                     continue
                 self.store.settle_forecast(symbol, int(row["bar_time"]), now, **actual)
                 settled += 1
-        return f"settled {settled}" + (f", {failed} without candles" if failed else "")
+            marked += self._mark_verdicts(mine, bars, now)
+        note = f"settled {settled}" + (f", marked {marked} verdicts" if marked else "")
+        return note + (f", {failed} without candles" if failed else "")
+
+    def _mark_verdicts(self, rows: list[dict[str, Any]], bars: list[Any], now: float) -> int:
+        """Score each card's claim against what the market did over its horizon.
+
+        A claim about volatility needs the span *before* it as well as after, or "expect movement"
+        has nothing to be more than."""
+        marked = 0
+        for row in rows:
+            hours = float(row["horizon_hours"])
+            bar_time = int(row["bar_time"])
+            actual = outcome(bars, bar_time, hours, 0.0)
+            if actual is None:
+                continue
+            before = outcome(bars, bar_time - int(hours * 3600), hours, 0.0)
+            prior_vol = float(before["realized_vol"]) if before else float(actual["realized_vol"])
+            sigma = outlook.sigma_over(prior_vol, hours)
+            try:
+                judged = verdict.settle(row | {"numbers": json.loads(row["numbers"] or "{}")},
+                                        float(actual["ret"]), float(actual["realized_vol"]), prior_vol, sigma)
+            except (TypeError, ValueError) as exc:
+                log.warning("verdict_unreadable source=%s bar=%s error=%s", row["source"], bar_time, exc)
+                judged = None
+            if judged is None:
+                continue
+            correct, baseline = judged
+            self.store.settle_verdict(
+                row["symbol"], row["source"], bar_time, now, float(actual["ret"]), float(actual["realized_vol"]),
+                prior_vol, float(actual["excursion"]), correct, baseline,
+            )
+            marked += 1
+        return marked
 
     async def option_exits(self, every: float = 5.0) -> None:
         """Paper option structures: combined SL/TP on the latest chain, and the close before expiry."""
@@ -544,6 +584,27 @@ class System:
             ",".join(i["key"] for i in e.insights or []),
             (ctx.get("lean") or {}).get("bullish", 0.0) - (ctx.get("lean") or {}).get("bearish", 0.0),
         )
+        # Only when there is a real price: market_context carries labels and strings too, and a
+        # verdict priced off one of those would be stored and later marked as if it meant something.
+        if isinstance(price, int | float) and not isinstance(price, bool) and price > 0:
+            self.record_verdicts(e.symbol, int(bar_time), e.ts, float(price), e.insights or [], ctx.get("lean"))
+
+    def record_verdicts(
+        self, symbol: str, bar_time: int, ts: float, price: float,
+        found: list[dict[str, Any]], lean: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Each Market-page card's verdict, written down so it can be marked once its horizon passes.
+
+        Built from what the engine itself holds — the options summary and the history it recorded —
+        rather than from anything the analyst sent, so the stored claim is the one the page shows.
+        `Outlook` is deliberately not included here: it is built from the bars on request and would
+        make this handler a scan over a year of them on every analysis cycle."""
+        summary = (self.options_latest.get(symbol) or {}).get("summary")
+        history = self.store.options_history(UNDERLYINGS.get(symbol, symbol), ts - 24 * 3600, OPTIONS_MINUTE_STEP)
+        verdicts = verdict.all_for(symbol, summary, history, found, lean, None)
+        for v in verdicts:
+            self.store.record_verdict(symbol, bar_time, ts, price, v)
+        return verdicts
 
     def options_since(self, underlying: str, since: float) -> list[dict[str, Any]]:
         """The 15-minute options rows kept for good, from `since` on. What a strategy compares the

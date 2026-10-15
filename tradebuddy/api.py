@@ -13,13 +13,14 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from tradebuddy import auth
-from tradebuddy import structures as st
+from tradebuddy import auth, outlook, verdict
+from tradebuddy import structure as mkt  # market structure: swings, breaks, gaps
+from tradebuddy import structures as st  # option structures (straddles, condors)
 from tradebuddy.analytics import collect_daily_analytics, collect_monthly_calendar_data, gather_live, get_day_bounds, parse_day
 from tradebuddy.brokers import Broker
 from tradebuddy.codec import EVENT_TYPES
 from tradebuddy.config import DEFAULT_AUTH_PIN
-from tradebuddy.delta import round_to_tick
+from tradebuddy.delta import Candle, round_to_tick
 from tradebuddy.errors import BrokerError
 from tradebuddy.insights import score_forecasts
 from tradebuddy.options import UNDERLYINGS
@@ -31,6 +32,10 @@ from tradebuddy.transport import RpcClient, RpcError
 
 SIGNAL_EVENTS = ["SignalGenerated", "TradeSkipped", "StrategyError"]
 ACTIVITY_EVENTS = [*SIGNAL_EVENTS, "OrderPlaced", "OrderFailed", "OrderUnknown", "PositionClosed"]
+# The outlook reads the stored 15-minute bars and folds them up; a year is 35,040 of them.
+OUTLOOK_RESOLUTION = "15m"
+OUTLOOK_BARS = 40_000
+
 LEVEL_TYPES = {
     "error": sorted(n for n, cls in EVENT_TYPES.items() if cls.LEVEL == "error"),
     "warning": sorted(n for n, cls in EVENT_TYPES.items() if cls.LEVEL in ("warning", "error")),
@@ -43,7 +48,7 @@ METHODS = (
     "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order", "order_ticket",
     "set_position_control", "risk", "risk_resume", "analysis", "options_history", "forecast_record", "database",
     "ai_digest", "ai_report", "ai_history", "ai_report_at", "test_ai", "send_email_report",
-    "bars", "snapshots", "health",
+    "bars", "snapshots", "health", "outlook", "verdicts",
     "journal_summary", "journal_month",
     "option_ticket", "place_structure", "structures", "close_structure", "paper_history",
     "verify_pin", "change_pin", "get_auth_status",
@@ -58,6 +63,7 @@ class Api:
     def __init__(self, system: System) -> None:
         self.system = system
         self._db_stats: tuple[float, dict[str, Any]] = (0.0, {})
+        self._outlook: dict[str, tuple[int, dict[str, Any]]] = {}  # symbol -> (bar_time, view)
 
     def _broker(self, name: str | None) -> Broker:
         if name is None:
@@ -217,6 +223,99 @@ class Api:
             "symbol": symbol, "interval": interval, "days": days, "bars": rows,
             "gaps": [{"after": a, "before": b} for a, b in gaps],
         }
+
+    async def outlook(self, symbol: str = "BTCUSD") -> dict[str, Any]:
+        """Which way each timeframe leans, how far price can travel by when, and how often that has
+        actually worked out — all from the stored bars, so it is the same market the system traded.
+
+        Cached per bar: the whole thing is a scan over up to a year of history and nothing in it
+        changes until the next 15-minute bar closes."""
+        rows = await asyncio.to_thread(self.system.store.bars, symbol, OUTLOOK_RESOLUTION, 0.0, OUTLOOK_BARS)
+        if not rows:
+            return {
+                "symbol": symbol, "bars": 0, "ready": False,
+                "hint": "No bars stored yet. The engine writes one every 15 minutes; "
+                        "`docker compose run --rm analyst backfill --days 365` fills in the past.",
+            }
+        last = rows[-1]["time"]
+        cached = self._outlook.get(symbol)
+        if cached and cached[0] == last:
+            return cached[1]
+        candles = [Candle(int(r["time"]), r["open"], r["high"], r["low"], r["close"], r["volume"]) for r in rows]
+        options = (self.system.options_latest.get(symbol) or {}).get("summary")
+        result = await asyncio.to_thread(self._build_outlook, symbol, candles, options)
+        self._outlook[symbol] = (last, result)
+        return result
+
+    def _build_outlook(self, symbol: str, candles: list[Candle], options: dict[str, Any] | None) -> dict[str, Any]:
+        price = candles[-1].close
+        frames, counted, patterns = [], [], {}
+        for spec in outlook.TIMEFRAMES:
+            folded = mkt.resample(candles, spec["factor"])
+            frame = outlook.read_timeframe(folded, spec)
+            frames.append(frame)
+            # Counted on the 15-minute series, which is the one with enough outcomes to count.
+            counted.append(outlook.counted_direction(candles, spec["horizon_hours"], frame.structure.get("bias")))
+            patterns[spec["interval"]] = outlook.pattern_record(folded if spec["factor"] > 1 else candles, spec["horizon_hours"])
+
+        # One volatility for every horizon: the last day of 15-minute bars, which is what the
+        # market is doing now rather than what it averaged over a week.
+        rv = mkt.realised_vol([c.close for c in candles], 96, outlook.BAR_SECONDS) or 0.0
+        horizons = [
+            outlook.horizon_view(h["hours"], h["label"], price, rv, outlook.implied_for(h["hours"], options))
+            for h in outlook.HORIZONS
+        ]
+        s = self.system.settings
+        view = {
+            "symbol": symbol,
+            "ready": True,
+            "price": price,
+            "bar_time": candles[-1].time,
+            "bars": len(candles),
+            "days": round(len(candles) * outlook.BAR_SECONDS / 86_400, 1),
+            "realised_vol": round(rv, 4),
+            "timeframes": [f.to_dict() for f in frames],
+            "alignment": outlook.alignment(frames),
+            "horizons": horizons,
+            "direction": counted,
+            "patterns": patterns,
+            # The reward-to-risk the Trader would actually use, and what the arithmetic says
+            # about it. Volatility cancels: only the ratio of the two distances matters.
+            "trade_odds": {
+                "stop_pct": s.stop_loss_pct, "target_pct": s.take_profit_pct,
+                "p_stop_first": round(outlook.p_stop_first(s.stop_loss_pct, s.take_profit_pct) or 0, 4),
+                "reward_risk": round(s.take_profit_pct / s.stop_loss_pct, 2) if s.stop_loss_pct else None,
+            },
+            "min_sample": outlook.MIN_SAMPLE,
+        }
+        # The same figures in sentences, from rules. Always present, never costs a token, and
+        # cannot drift from the numbers above it. TB-AI's reading is separate and badged.
+        view["narrative"] = outlook.narrate(view)
+        return view
+
+    async def verdicts(self, symbol: str = "BTCUSD", days: float = 30) -> dict[str, Any]:
+        """Each card's verdict right now, and how that card has done since it started making them.
+
+        The record is the point: "the term structure says an event is priced" is worth as much as
+        the number of times that card has been right, beside the number you would have got by
+        saying nothing at all."""
+        s = self.system
+        summary = (s.options_latest.get(symbol) or {}).get("summary")
+        # The same rows the ATM IV and put/call charts draw (a minute apart, last 24h), not the
+        # 15-minute series a strategy reads: a badge that disagrees with the line above it is worse
+        # than no badge.
+        history = await asyncio.to_thread(
+            s.store.options_history, UNDERLYINGS.get(symbol, symbol), time.time() - 24 * 3600, 60,
+        )
+        analysis = s.analysis_latest.get(symbol) or {}
+        view = await self.outlook(symbol)
+        now = [
+            *verdict.all_for(symbol, summary, history, analysis.get("insights") or [], (analysis.get("context") or {}).get("lean"), None),
+            verdict.from_outlook(view).to_dict() | {"symbol": symbol},
+        ]
+        days = min(max(days, 1), 180)
+        rows = await asyncio.to_thread(s.store.verdict_record, symbol, time.time() - days * 86_400)
+        return {"symbol": symbol, "days": days, "verdicts": now, "record": verdict.score(rows)}
 
     async def snapshots(self, symbol: str = "BTCUSD", days: float = 7) -> dict[str, Any]:
         """The analyst's numbers per bar, as stored. What base rates will be counted from."""
