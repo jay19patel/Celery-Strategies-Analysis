@@ -177,6 +177,11 @@ def create_app(
 
     brute_force_guard = auth.BruteForceGuard()
 
+    # Whether anything gates this dashboard at all. Keying the gate on the PIN alone left a hole:
+    # AUTH_PIN="" with an API_TOKEN set passed require_safe_bind and then served every read to
+    # anyone, because a token-only deployment skipped the check entirely. Either credential arms it.
+    gated = bool(auth_pin or api_token)
+
     def has_valid_session(request: Request | WebSocket) -> bool:
         if not auth_pin:
             return False
@@ -186,7 +191,7 @@ def create_app(
     def is_authenticated(request: Request | WebSocket) -> bool:
         """A valid 7-day session cookie or the API token. Takes a WebSocket too: both carry
         cookies and headers, and the live stream needs the same gate as the routes."""
-        if not auth_pin:
+        if not gated:
             return True
         if has_valid_session(request):
             return True
@@ -207,7 +212,7 @@ def create_app(
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next: Any) -> Response:
         """Everything needs the PIN except the login flow and static assets."""
-        if not auth_pin or is_authenticated(request):
+        if not gated or is_authenticated(request):
             return await call_next(request)
         path = request.url.path
         if is_public(path):

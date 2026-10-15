@@ -128,8 +128,8 @@ Enforced by tests. Breaking one should fail the build.
 8. **Absence over staleness.** A WebSocket price older than 30s is no price.
 9. **Secrets stay in the process.** No endpoint returns an API key or secret;
    `Settings.public()` masks them and `SettingsChanged` carries field names only.
-9b. **The dashboard is private by default.** Everything — pages, API, `/ws` — needs the PIN unless
-    it is in `app.PUBLIC_PATHS`, so a route added later is private until someone lists it. Reads
+9b. **The dashboard is private by default.** Everything — pages, API, `/ws` — needs a credential
+    (the PIN, or the API token) unless it is in `app.PUBLIC_PATHS`, so a route added later is private until someone lists it. Reads
     were once open so a viewer could watch without unlocking; behind a reverse proxy that meant
     `/api/account` gave the balance and `/ws` streamed every `PositionClosed` with its PnL to
     anyone. `/ws` is checked in the handler, before `accept()`: the middleware never sees a

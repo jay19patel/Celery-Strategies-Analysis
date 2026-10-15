@@ -3,6 +3,7 @@
 import dataclasses
 import pathlib
 import re
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -65,8 +66,12 @@ def test_token_protects_every_write(cfg, exchange):
     ]
     for method, url, body in writes:
         assert getattr(client, method)(url, json=body).status_code == 401, url
-    assert client.put("/api/settings", json={"changes": {"stop_loss_pct": 2}}, headers={"X-API-Token": "sekret"}).status_code == 200
-    assert client.get("/api/header").status_code == 200  # reads stay open
+    token = {"X-API-Token": "sekret"}
+    assert client.put("/api/settings", json={"changes": {"stop_loss_pct": 2}}, headers=token).status_code == 200
+    # Reads need it too. Keying the gate on the PIN alone meant AUTH_PIN="" with a token set served
+    # the balance and every open position to anyone who asked.
+    assert client.get("/api/header").status_code == 401
+    assert client.get("/api/header", headers=token).status_code == 200
 
 
 def test_broker_routes(cfg, exchange):
@@ -124,6 +129,28 @@ def test_close_all_stops_every_broker(cfg, exchange):
     system, client = make(cfg, exchange)
     assert client.post("/api/close-all").json() == {"closed": [], "errors": []}
     assert system.trading_on("paper") is False and system.trading_on("delta") is False
+
+
+def test_the_system_page_draws_process_load_and_event_rates(cfg, exchange):
+    """A number stored and never drawn is a number nobody reads. The Processes table is one
+    instant; these are the same three numbers over time, from process_health."""
+    _, client = make(cfg, exchange)
+    page = client.get("/system").text
+    assert all(f'id="{c}"' in page for c in ("cpuChart", "memChart", "lagChart", "eventBars"))
+    # The kit has to be parsed before the inline script, which draws on load.
+    assert page.index("/static/js/chart.js") < page.index("loadHealth")
+    assert client.get("/static/js/chart.js").status_code == 200
+
+
+async def test_the_health_route_answers_the_system_page(cfg, exchange):
+    system, client = make(cfg, exchange)
+    now = time.time()
+    for i in range(5):
+        system.store.record_health("all", now - i * 300, 3.0 + i, 120.0, 1.5)
+        system.store.record_health("analyst", now - i * 300, 9.0, 105.0, 7.0)
+    body = client.get("/api/health?hours=48").json()
+    assert set(body["processes"]) == {"all", "analyst"}
+    assert [p["cpu_pct"] for p in body["processes"]["all"]] == [7.0, 6.0, 5.0, 4.0, 3.0]  # oldest first
 
 
 def test_static_urls_carry_a_content_version(cfg, exchange):
