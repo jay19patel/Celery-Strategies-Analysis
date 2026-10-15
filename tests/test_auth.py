@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from tests.conftest import IdleStream
 from tests.test_pipeline import AlwaysBuy
 from tradebuddy import auth
+from tradebuddy.api import Api
 from tradebuddy.app import local_app
 from tradebuddy.system import System
 
@@ -56,16 +57,37 @@ def test_session_token_validity_and_expiration():
     assert auth.validate_session_token(expired_token, secret) is False
 
 
-def test_read_only_without_pin(cfg, exchange):
-    """Without the PIN every page but Settings and every read API is open; the page renders locked."""
+def test_nothing_is_readable_without_the_pin(cfg, exchange):
+    """Private by default. Reads used to be open to anyone, which on a dashboard served to the
+    internet meant /api/account returned the balance and /api/positions the entry and liquidation
+    prices without a credential."""
     _, client = make_authed_system(cfg, exchange, pin="242425")
-    home = client.get("/", follow_redirects=False)
-    assert home.status_code == 200
-    assert " data-locked " in home.text and 'id="unlockBtn"' in home.text
-    for page in ("/account", "/positions", "/orders", "/journal", "/system", "/events"):
-        assert client.get(page, follow_redirects=False).status_code == 200, page
-    for url in ("/api/header", "/api/account?broker=paper", "/api/positions?broker=paper", "/api/orders", "/api/structures", "/api/risk"):
-        assert client.get(url).status_code == 200, url
+    for page in ("/", "/account", "/positions", "/orders", "/journal", "/system", "/events"):
+        res = client.get(page, follow_redirects=False)
+        assert res.status_code == 303, page
+        assert res.headers["location"].startswith("/login?next="), page
+    for url in ("/api/header", "/api/account?broker=paper", "/api/positions?broker=paper", "/api/orders",
+                "/api/structures", "/api/risk", "/api/paper/stats", "/api/metrics", "/api/journal/summary"):
+        res = client.get(url)
+        assert res.status_code == 401, url
+        assert "PIN" in res.json()["detail"], url
+
+
+def test_the_login_flow_and_static_assets_stay_public(cfg, exchange):
+    """Whatever is needed to log in, and nothing else. A liveness probe that needs a credential
+    is a liveness probe that fails closed, so /healthz is public and says nothing."""
+    _, client = make_authed_system(cfg, exchange, pin="242425")
+    assert client.get("/login").status_code == 200
+    assert client.get("/healthz").json() == {"status": "ok"}
+    assert client.get("/api/auth/status").json()["authenticated"] is False
+    assert client.get("/static/css/app.css").status_code == 200
+
+
+def test_a_route_added_later_is_private_by_default(cfg, exchange):
+    """The point of the allowlist: an unknown path is refused, not served."""
+    _, client = make_authed_system(cfg, exchange, pin="242425")
+    assert client.get("/api/some/route/added/next/month").status_code == 401
+    assert client.get("/a-new-page", follow_redirects=False).status_code == 303
 
 
 def test_settings_page_and_api_need_the_pin(cfg, exchange):
@@ -92,15 +114,25 @@ def test_every_change_needs_the_pin(cfg, exchange):
         res = getattr(client, method)(url, json=body) if body is not None else getattr(client, method)(url)
         assert res.status_code == 401, url
         assert "PIN" in res.json()["detail"]
+    # None of them took effect. Reading that back needs the PIN now, so unlock first.
+    client.post("/api/auth/login", json={"pin": "242425"})
     with client:
         assert client.get("/api/header").json()["brokers"][0]["trading"] is True
 
 
-def test_read_only_live_stream(cfg, exchange):
-    """The dashboard stream is read-only like the GET routes, so viewers see live updates."""
+def test_the_live_stream_needs_the_pin_too(cfg, exchange):
+    """The WebSocket is not an HTTP route, so the middleware never sees its handshake. It carries
+    PositionClosed with entry, exit and PnL: an unauthenticated viewer must not get one frame."""
+    from starlette.websockets import WebSocketDisconnect as Disconnected
+
     _, client = make_authed_system(cfg, exchange, pin="242425")
-    with client.websocket_connect("/ws"):
+    with pytest.raises(Disconnected) as caught, client.websocket_connect("/ws"):
         pass
+    assert caught.value.code == 1008
+
+    client.post("/api/auth/login", json={"pin": "242425"})
+    with client.websocket_connect("/ws"):
+        pass  # unlocked, the stream connects
 
 
 def test_login_next_stays_on_this_site(cfg, exchange):
@@ -165,6 +197,21 @@ def test_authenticated_access_granted_with_cookie(cfg, exchange):
     api_res = client.get("/api/header")
     assert api_res.status_code == 200
     assert "brokers" in api_res.json()
+
+
+async def test_auth_status_says_when_the_pin_is_still_the_published_default(cfg, exchange):
+    """The only check that can see the truth: once the PIN is changed from the dashboard it is an
+    Argon2 hash in the database, and the environment goes on saying 242425 forever."""
+    system, client = make_authed_system(cfg, exchange, pin="242425")
+    api = Api(system)
+
+    assert (await api.get_auth_status())["using_default_pin"] is True  # not yet hashed
+    client.post("/api/auth/login", json={"pin": "242425"})  # logging in hashes it as it stands
+    assert (await api.get_auth_status())["using_default_pin"] is True  # hashed, still the default
+
+    client.post("/api/auth/change-pin", json={"old_pin": "242425", "new_pin": "135790"})
+    status = await api.get_auth_status()
+    assert status["using_default_pin"] is False and status["has_custom_pin"] is True
 
 
 def test_brute_force_rate_limiting():

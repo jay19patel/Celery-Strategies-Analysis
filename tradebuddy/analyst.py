@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from tradebuddy import tbai
-from tradebuddy.delta import DeltaClient
+from tradebuddy.delta import RESOLUTION_SECONDS, DeltaClient
 from tradebuddy.events import AIReport, MarketAnalysis
 from tradebuddy.insights import insights, lean, market_context
 from tradebuddy.jobs import NULL_JOB
@@ -290,6 +290,38 @@ def _local_api(system: Any) -> Any:
     from tradebuddy.api import Api  # the API module imports the System; import it only when called
 
     return Api(system)
+
+
+async def backfill(db_path: str, symbols: list[str], days: int, interval: str = "15m", client: DeltaClient | None = None) -> dict[str, int]:
+    """Fill the bars table with `days` of history per symbol, so base rates and backtests do not
+    have to wait for the system to have been running that long.
+
+    Safe to re-run: the store ignores a bar it already has, so this only ever adds what is missing."""
+    from tradebuddy.store import Store
+
+    own = client is None
+    client = client or DeltaClient("https://api.india.delta.exchange")  # history is public
+    store = Store(db_path)
+    step = RESOLUTION_SECONDS[interval]
+    end = int(time.time()) // step * step  # the last boundary: never store a bar still forming
+    start = end - days * 86_400
+    written = {}
+    try:
+        for symbol in symbols:
+            candles = await client.history_range(symbol, interval, start, end)
+            oi = await client.history_range(f"OI:{symbol}", interval, start, end)
+            funding = await client.history_range(f"FUNDING:{symbol}", interval, start, end)
+            closed = [c for c in candles if c.time + step <= end]
+            written[symbol] = await asyncio.to_thread(
+                store.record_bars, symbol, interval, closed,
+                {int(c.time): c.close for c in oi}, {int(c.time): c.close for c in funding},
+            )
+            log.info("backfill symbol=%s fetched=%d stored=%d", symbol, len(closed), written[symbol])
+    finally:
+        store.db.close()
+        if own:
+            await client.aclose()
+    return written
 
 
 async def train(db_path: str, symbols: list[str], days: int, client: DeltaClient | None = None) -> list[dict[str, Any]]:

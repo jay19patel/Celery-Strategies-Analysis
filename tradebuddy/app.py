@@ -47,12 +47,22 @@ PAGES = [
 ]
 
 
-# Without the PIN the dashboard is read-only: every page but these, every GET but these, and the live stream.
-LOCKED_PAGES = {"/settings"}
-LOCKED_READS = {"/api/settings"}  # masked anyway, but it is the admin form
-READ_METHODS = {"GET", "HEAD", "OPTIONS"}
-PUBLIC_WRITES = {"/api/auth/login", "/api/auth/logout"}
+# The dashboard needs the PIN. Everything — pages, API, the live stream — unless it is listed here.
+#
+# It used to be the other way round: writes needed the PIN and every GET was open, so that someone
+# could watch without unlocking. That is only safe on loopback, and this dashboard is served to the
+# internet through a reverse proxy. Open reads meant /api/account returned the balance and
+# /api/positions the entry and liquidation prices to anyone who asked, and /ws — which is not under
+# /api/ and so was never even looked at — streamed every PositionClosed, PnL included.
+#
+# Private by default, so a route added later is private unless someone deliberately lists it.
+PUBLIC_PATHS = {"/login", "/logout", "/healthz", "/favicon.ico", "/api/auth/login", "/api/auth/logout", "/api/auth/status"}
+PUBLIC_PREFIXES = ("/static/",)
 LOCKED = "Locked: enter your PIN to make changes"
+
+
+def is_public(path: str) -> bool:
+    return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
 
 
 def safe_next(url: str) -> str:
@@ -167,14 +177,15 @@ def create_app(
 
     brute_force_guard = auth.BruteForceGuard()
 
-    def has_valid_session(request: Request) -> bool:
+    def has_valid_session(request: Request | WebSocket) -> bool:
         if not auth_pin:
             return False
         cookie = request.cookies.get(auth.SESSION_COOKIE_NAME)
         return bool(cookie and auth.validate_session_token(cookie, auth_secret))
 
-    def is_authenticated(request: Request) -> bool:
-        """Check whether request carries valid 7-day session cookie or valid API token."""
+    def is_authenticated(request: Request | WebSocket) -> bool:
+        """A valid 7-day session cookie or the API token. Takes a WebSocket too: both carry
+        cookies and headers, and the live stream needs the same gate as the routes."""
         if not auth_pin:
             return True
         if has_valid_session(request):
@@ -195,15 +206,15 @@ def create_app(
 
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next: Any) -> Response:
-        """Read-only is open to everyone; changing anything, and Settings, needs the PIN."""
+        """Everything needs the PIN except the login flow and static assets."""
         if not auth_pin or is_authenticated(request):
             return await call_next(request)
         path = request.url.path
-        if path in LOCKED_PAGES:
-            return RedirectResponse(url=f"/login?next={urllib.parse.quote(path)}", status_code=303)
-        if path.startswith("/api/") and path not in PUBLIC_WRITES and (request.method not in READ_METHODS or path in LOCKED_READS):
+        if is_public(path):
+            return await call_next(request)
+        if path.startswith("/api/"):
             return JSONResponse({"detail": LOCKED}, status_code=401)
-        return await call_next(request)
+        return RedirectResponse(url=f"/login?next={urllib.parse.quote(path)}", status_code=303)
 
     async def call(method: str, **params: Any) -> Any:
         try:
@@ -282,6 +293,12 @@ def create_app(
             "authenticated": is_authenticated(request),
             "pin_required": bool(auth_pin),
         }
+
+    @app.get("/healthz", include_in_schema=False)
+    async def healthz() -> dict[str, str]:
+        """Public on purpose, and says nothing: a proxy needs to know the process answers, and
+        a liveness probe that needs a credential is a liveness probe that fails closed."""
+        return {"status": "ok"}
 
     @app.post("/api/auth/change-pin")
     async def api_auth_change_pin(request: Request, body: PinChangeRequest) -> dict[str, Any]:
@@ -432,6 +449,18 @@ def create_app(
     async def forecast_record(symbol: str = "BTCUSD", days: float = 14) -> dict:
         return await call("forecast_record", symbol=symbol, days=days)
 
+    @app.get("/api/bars")
+    async def bars(symbol: str = "BTCUSD", interval: str = "15m", days: float = 7) -> dict:
+        return await call("bars", symbol=symbol, interval=interval, days=days)
+
+    @app.get("/api/snapshots")
+    async def snapshots(symbol: str = "BTCUSD", days: float = 7) -> dict:
+        return await call("snapshots", symbol=symbol, days=days)
+
+    @app.get("/api/health")
+    async def health(hours: float = 48) -> dict:
+        return await call("health", hours=hours)
+
     @app.get("/api/database")
     async def database() -> dict:
         return await call("database")
@@ -510,8 +539,14 @@ def create_app(
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket) -> None:
-        # Read-only, like the GET routes: the server only pushes, and nothing a client sends is read.
-        # Events carry no secret (SettingsChanged names fields only).
+        # The same gate as every route. The middleware never sees this handshake — it is not an
+        # HTTP route — so it is checked here, before accept(): the stream carries PositionClosed
+        # with entry, exit and PnL, and an unauthenticated viewer must not see a single frame.
+        if not is_authenticated(socket):
+            await socket.close(code=1008)  # policy violation
+            return
+        # Push-only: the server never reads what a client sends, and events carry no secret
+        # (SettingsChanged names fields only).
         await socket.accept()
         live.clients.add(socket)
         try:

@@ -66,6 +66,15 @@ SCORE_EVERY = 900.0
 SCORE_RESOLUTION = "15m"
 SCORE_BAR_SECONDS = 900
 
+# Keeping the market itself. Everything analytical used to be recomputed from a fresh REST call and
+# thrown away; one pass a bar stores it instead. The collector asks the store how far it already
+# goes and fetches only the difference, so steady state is a handful of bars and a restart after an
+# outage fills the hole by itself.
+BAR_RESOLUTION = "15m"
+BAR_COLLECT_EVERY = 900.0
+BAR_CATCHUP_MAX = 500  # one pass covers ~5 days of outage; older than that, use the backfill command
+HEALTH_EVERY = 300.0  # one row per process per 5 minutes
+
 
 class Stream(Protocol):
     async def run(self) -> None: ...
@@ -292,6 +301,8 @@ class System:
         self.reporter = DailyReporter(self)
         self.reporter.job = self.jobs.add("daily email", "Emails the day's report once, at the hour set in Settings", self.reporter.every)
         self.jobs_forecast_score = self.jobs.add("forecast scoring", "Writes back what the market did over each matured forecast's horizon", SCORE_EVERY)
+        self.jobs_bars = self.jobs.add("bar collection", "Stores every closed bar with its open interest and funding", BAR_COLLECT_EVERY)
+        self.jobs_health = self.jobs.add("process health", "Records CPU, memory and loop lag per process", HEALTH_EVERY)
         self.remote_processes: dict[str, dict[str, Any]] = {}  # role -> latest heartbeat (analyst)
 
         # Fail closed: a broker that moves real orders starts every run switched off.
@@ -344,12 +355,85 @@ class System:
                     minutes = await asyncio.to_thread(self.store.prune_options)
                     reports = await asyncio.to_thread(self.store.prune_ai_reports)
                     forecasts = await asyncio.to_thread(self.store.prune_forecasts)
-                    job.note = f"deleted {deleted} events, {minutes} options minutes, {reports} AI reports, {forecasts} forecasts"
+                    snapshots = await asyncio.to_thread(self.store.prune_snapshots)
+                    health = await asyncio.to_thread(self.store.prune_health)
+                    job.note = (
+                        f"deleted {deleted} events, {minutes} options minutes, {reports} AI reports, "
+                        f"{forecasts} forecasts, {snapshots} snapshots, {health} health rows"
+                    )
                 if deleted or minutes:
                     log.info("events_pruned deleted=%d options_minutes=%d", deleted, minutes)
             except Exception:
                 log.exception("events_prune_failed")
             await asyncio.sleep(every)
+
+    @property
+    def history_symbols(self) -> list[str]:
+        """What to keep bars for: everything a strategy trades, plus the symbols the analyst reads."""
+        return sorted({sym for s in self.strategies for sym in s.symbols} | set(UNDERLYINGS))
+
+    async def collect_bars(self, every: float = BAR_COLLECT_EVERY) -> None:
+        """One pass a bar: store the closed candles, open interest and funding this run has not got.
+
+        The engine is the only writer of the database, so this lives here rather than in the
+        analyst, which fetches the same series every five minutes but owns nothing."""
+        while True:
+            try:
+                with self.jobs_bars.tick() as job:
+                    job.note = await self._collect_bars_once()
+            except Exception:
+                log.exception("bar_collection_failed")
+            # Wake 30s after the bar closes, by which time the REST history has it.
+            await asyncio.sleep(every - (time.time() % every) + 30)
+
+    async def _collect_bars_once(self, now: float | None = None) -> str:
+        now = time.time() if now is None else now
+        written, failed = 0, []
+        for symbol in self.history_symbols:
+            last = await asyncio.to_thread(self.store.last_bar_time, symbol, BAR_RESOLUTION)
+            # Nothing stored yet: take a run-up, so the first forecast has history behind it.
+            behind = int((now - last) // SCORE_BAR_SECONDS) + 2 if last else BAR_CATCHUP_MAX
+            count = min(max(behind, 2), BAR_CATCHUP_MAX)
+            try:
+                candles, oi, funding = await asyncio.gather(
+                    self.market_client.candles(symbol, BAR_RESOLUTION, count),
+                    self.market_client.candles(f"OI:{symbol}", BAR_RESOLUTION, count),
+                    self.market_client.candles(f"FUNDING:{symbol}", BAR_RESOLUTION, count),
+                )
+            except Exception as exc:  # one symbol's outage never stops the others
+                log.warning("bar_collection_no_candles symbol=%s error=%s", symbol, exc)
+                failed.append(symbol)
+                continue
+            written += await asyncio.to_thread(
+                self.store.record_bars, symbol, BAR_RESOLUTION, candles,
+                {int(c.time): c.close for c in oi}, {int(c.time): c.close for c in funding},
+            )
+        note = f"{written} bars"
+        return f"{note}, no data for {', '.join(failed)}" if failed else note
+
+    async def record_health(self, every: float = HEALTH_EVERY) -> None:
+        """Process load, kept. The monitor has always measured it and stored none of it, so the
+        System page could only ever show right now."""
+        while True:
+            try:
+                with self.jobs_health.tick() as job:
+                    job.note = await asyncio.to_thread(self._record_health_once)
+            except Exception:
+                log.exception("health_recording_failed")
+            await asyncio.sleep(every)
+
+    def _record_health_once(self, now: float | None = None) -> str:
+        now = time.time() if now is None else now
+        processes = [
+            self.monitor.snapshot(),
+            *([self.remote_feed.process] if self.remote_feed and self.remote_feed.process else []),
+            *[b["process"] for b in self.remote_processes.values()],
+        ]
+        for p in processes:
+            self.store.record_health(
+                p.get("role") or "?", now, p.get("process_cpu_pct"), p.get("process_memory_mb"), p.get("loop_lag_max_ms"),
+            )
+        return f"{len(processes)} processes"
 
     async def score_forecasts(self, every: float = SCORE_EVERY) -> None:
         """What the market actually did over each matured forecast's horizon.
@@ -444,13 +528,22 @@ class System:
 
     async def on_analysis(self, e: MarketAnalysis) -> None:
         self.analysis_latest[e.symbol] = e.to_dict()
+        ctx = e.context or {}
+        f = e.forecast or {}
+        price = ctx.get("price")
         # Keep the claim. The analyst repeats a bar's forecast every cycle and the store keeps the
         # first; the scorer writes back what the market did once the horizon is up. Without this a
         # forecast is only ever read once and never checked.
-        f = e.forecast or {}
-        price = (e.context or {}).get("price")
         if f.get("bar_time") and f.get("horizon_hours") and price:
             self.store.record_forecast(e.symbol, int(f["bar_time"]), e.ts, float(price), f)
+        # Keep the reading too. The event log held it for three days as JSON, which is long enough
+        # to look at and far too short to count a base rate from.
+        bar_time = f.get("bar_time") or int(e.ts // SCORE_BAR_SECONDS * SCORE_BAR_SECONDS)
+        self.store.record_snapshot(
+            e.symbol, int(bar_time), e.ts, ctx,
+            ",".join(i["key"] for i in e.insights or []),
+            (ctx.get("lean") or {}).get("bullish", 0.0) - (ctx.get("lean") or {}).get("bearish", 0.0),
+        )
 
     def options_since(self, underlying: str, since: float) -> list[dict[str, Any]]:
         """The 15-minute options rows kept for good, from `since` on. What a strategy compares the
@@ -498,6 +591,8 @@ class System:
             asyncio.create_task(self.option_exits(), name="option-exits"),
             asyncio.create_task(self.auto_options.run(), name="auto-options"),
             asyncio.create_task(self.score_forecasts(), name="forecast-scoring"),
+            asyncio.create_task(self.collect_bars(), name="bar-collection"),
+            asyncio.create_task(self.record_health(), name="process-health"),
         ]
         if self.local_feed:
             self._stream_task = asyncio.create_task(self.stream.run(), name="stream")

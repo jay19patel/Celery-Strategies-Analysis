@@ -363,8 +363,29 @@ class _Subscription:
 
 @dataclass
 class _TypeStats:
+    """How often a kind of event happens, not just how many there have ever been.
+
+    "Tick: 8,640,217" is a true number that tells a person nothing; at one a second a hundred days
+    of running makes every counter on the page the same shape. What is worth reading is the rate,
+    so the lifetime count is kept (it is eight bytes of memory, it was never the storage problem)
+    and the last completed hour is counted beside it."""
+
     count: int = 0
     last_at: float = 0.0
+    hour: int = 0  # the hour bucket currently being counted
+    in_hour: int = 0
+    last_hour: int = 0  # the previous bucket, once it completed
+
+    def tick(self, at: float) -> None:
+        self.count += 1
+        self.last_at = at
+        bucket = int(at // 3600)
+        if bucket != self.hour:
+            # Only a bucket that ran straight on from the last one is a comparable hour; after a
+            # quiet gap the previous hour is zero, which is the truth.
+            self.last_hour = self.in_hour if bucket == self.hour + 1 else 0
+            self.hour, self.in_hour = bucket, 0
+        self.in_hour += 1
 
 
 class EventBus:
@@ -377,9 +398,7 @@ class EventBus:
         self._subs.append(_Subscription(getattr(handler, "__qualname__", repr(handler)), types or (Event,), handler))
 
     def publish(self, event: Event) -> None:
-        stats = self._types.setdefault(type(event).__name__, _TypeStats())
-        stats.count += 1
-        stats.last_at = event.ts
+        self._types.setdefault(type(event).__name__, _TypeStats()).tick(event.ts)
         for sub in self._subs:
             if isinstance(event, sub.types):
                 sub.pending += 1
@@ -402,7 +421,10 @@ class EventBus:
                 }
                 for s in self._subs
             ],
-            "events": {name: {"count": t.count, "last_at": t.last_at} for name, t in sorted(self._types.items())},
+            "events": {
+                name: {"count": t.count, "last_at": t.last_at, "this_hour": t.in_hour, "last_hour": t.last_hour}
+                for name, t in sorted(self._types.items())
+            },
         }
 
     def start(self) -> None:

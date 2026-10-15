@@ -18,11 +18,13 @@ from tradebuddy import structures as st
 from tradebuddy.analytics import collect_daily_analytics, collect_monthly_calendar_data, gather_live, get_day_bounds, parse_day
 from tradebuddy.brokers import Broker
 from tradebuddy.codec import EVENT_TYPES
+from tradebuddy.config import DEFAULT_AUTH_PIN
 from tradebuddy.delta import round_to_tick
 from tradebuddy.errors import BrokerError
 from tradebuddy.insights import score_forecasts
 from tradebuddy.options import UNDERLYINGS
 from tradebuddy.settings import SettingsError
+from tradebuddy.store import HEALTH_DAYS
 from tradebuddy.system import System
 from tradebuddy.trading import TradeRefused
 from tradebuddy.transport import RpcClient, RpcError
@@ -41,6 +43,7 @@ METHODS = (
     "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order", "order_ticket",
     "set_position_control", "risk", "risk_resume", "analysis", "options_history", "forecast_record", "database",
     "ai_digest", "ai_report", "ai_history", "ai_report_at", "test_ai", "send_email_report",
+    "bars", "snapshots", "health",
     "journal_summary", "journal_month",
     "option_ticket", "place_structure", "structures", "close_structure", "paper_history",
     "verify_pin", "change_pin", "get_auth_status",
@@ -200,6 +203,38 @@ class Api:
             for r in rows
         ]
         return {"symbol": symbol, "days": days, "points": points, "score": score_forecasts(points)}
+
+    async def bars(self, symbol: str = "BTCUSD", interval: str = "15m", days: float = 7) -> dict[str, Any]:
+        """Stored candles with their open interest and funding, oldest first, and where the gaps are.
+
+        Gaps are returned rather than smoothed over: a chart that joins across a missing hour draws
+        a move the market never made."""
+        days = min(max(days, 0.25), 365)
+        since = time.time() - days * 86_400
+        rows = await asyncio.to_thread(self.system.store.bars, symbol, interval, since)
+        gaps = await asyncio.to_thread(self.system.store.bar_gaps, symbol, interval, since)
+        return {
+            "symbol": symbol, "interval": interval, "days": days, "bars": rows,
+            "gaps": [{"after": a, "before": b} for a, b in gaps],
+        }
+
+    async def snapshots(self, symbol: str = "BTCUSD", days: float = 7) -> dict[str, Any]:
+        """The analyst's numbers per bar, as stored. What base rates will be counted from."""
+        days = min(max(days, 0.25), 365)
+        rows = await asyncio.to_thread(self.system.store.snapshots, symbol, time.time() - days * 86_400)
+        return {"symbol": symbol, "days": days, "points": rows}
+
+    async def health(self, hours: float = 48) -> dict[str, Any]:
+        """CPU, memory and loop lag per process over time. Until this was stored the System page
+        could only ever show the current instant."""
+        hours = min(max(hours, 1), 24 * HEALTH_DAYS)
+        rows = await asyncio.to_thread(self.system.store.health, time.time() - hours * 3600)
+        series: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            series.setdefault(r["role"], []).append(
+                {"ts": r["ts"], "cpu_pct": r["cpu_pct"], "memory_mb": r["memory_mb"], "loop_lag_max_ms": r["loop_lag_max_ms"]},
+            )
+        return {"hours": hours, "keep_days": HEALTH_DAYS, "processes": series}
 
     async def database(self) -> dict[str, Any]:
         """Tables, row counts and sizes. Counting a large table takes a moment, so the answer is reused for 30s."""
@@ -615,13 +650,22 @@ class Api:
         return {"ok": True, "message": "PIN updated successfully"}
 
     async def get_auth_status(self) -> dict[str, Any]:
-        """Check whether PIN authentication is active and whether a custom PIN is configured."""
+        """Whether the PIN is active, custom, and — the one that matters — still the published default.
+
+        `config.require_safe_bind` can only guess at this: when the PIN is changed from the Settings
+        page it lives here as an Argon2 hash and never reaches the environment. This is the only
+        place that can answer it, so this is where it is answered."""
         settings = self.system.store.load_settings()
-        has_custom = bool(settings.get("auth_pin_hash"))
-        enabled = bool(settings.get("auth_pin_hash") or self.system.cfg.auth_pin)
+        stored_hash = settings.get("auth_pin_hash")
+        enabled = bool(stored_hash or self.system.cfg.auth_pin)
+        if stored_hash:
+            default = await asyncio.to_thread(auth.verify_pin, DEFAULT_AUTH_PIN, stored_hash)
+        else:
+            default = self.system.cfg.auth_pin == DEFAULT_AUTH_PIN
         return {
             "enabled": enabled,
-            "has_custom_pin": has_custom,
+            "has_custom_pin": bool(stored_hash),
+            "using_default_pin": bool(enabled and default),
         }
 
 

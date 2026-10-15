@@ -91,6 +91,13 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   draws the two against each other and scores them with `insights.score_forecasts` — always beside
   the baseline that needed no model, because a hit rate alone cannot tell skill from drift.
 - `jobs.py` — every background loop wraps a pass in `job.tick()`; the System page shows them all.
+- The market itself is kept, not just read: `bars` (closed candles with the open interest and
+  funding of the same bar, `System.collect_bars` fetching only what the store is missing),
+  `market_snapshots` (the analyst's numbers per bar as typed columns, because base rates are
+  counted with SQL and JSON cannot be scanned) and `process_health` (CPU, memory and loop lag per
+  process, which the monitor had always measured and never stored). A bar already stored is never
+  rewritten — a silently revised past is worse for a base rate than a missing one — and
+  `Store.bar_gaps` reports the holes rather than smoothing over them.
 
 ## Invariants
 
@@ -121,6 +128,16 @@ Enforced by tests. Breaking one should fail the build.
 8. **Absence over staleness.** A WebSocket price older than 30s is no price.
 9. **Secrets stay in the process.** No endpoint returns an API key or secret;
    `Settings.public()` masks them and `SettingsChanged` carries field names only.
+9b. **The dashboard is private by default.** Everything — pages, API, `/ws` — needs the PIN unless
+    it is in `app.PUBLIC_PATHS`, so a route added later is private until someone lists it. Reads
+    were once open so a viewer could watch without unlocking; behind a reverse proxy that meant
+    `/api/account` gave the balance and `/ws` streamed every `PositionClosed` with its PnL to
+    anyone. `/ws` is checked in the handler, before `accept()`: the middleware never sees a
+    WebSocket handshake. Off loopback, `require_safe_bind` needs a PIN or a token;
+    `dashboard_loopback_only` excuses the bind address and nothing else, because nothing in the
+    process can see what was put in front of the published port. `Api.get_auth_status` is the only
+    thing that can tell whether the PIN is still the published default — once changed from the
+    dashboard it is a hash in the database and the environment goes on saying 242425 forever.
 10. Every refusal to trade is a `TradeSkipped` event with its reason, including a
     broker halted by its daily loss limit and a strategy halted by its own.
 11. **Late is stale.** A strategy result that finishes more than a bar after
@@ -132,6 +149,9 @@ Enforced by tests. Breaking one should fail the build.
 14. **Bounded for a year.** Ticks, heartbeats and `StrategyEvaluated` are never
     stored; the event log is pruned by `RETENTION_DAYS`; state changes, not
     retries, become events. The orders and paper tables are the permanent record.
+    Every stored series has a retention rule wired into `System.housekeeping` and its cost per day
+    written beside it in `store.TABLE_INFO`. Counters (`EventBus`) are in-memory and report the
+    last completed hour next to the lifetime total: a number that only grows is not readable.
 15. **Analysis never trades and never leaks.** The analyst reads market data and
     the engine's `ai_digest` and writes only events. A forecast model is used only
     for what it beat a naive baseline at on unseen data (`ModelCard.skill`).
@@ -176,8 +196,9 @@ Add a field to `Settings`, a range or choice in `settings.py`, and an input on
 ### Page
 
 A template extending `base.html`, an entry in `PAGES` in `app.py`, and JSON
-routes that call `System`. State-changing routes take `Depends(protected)`.
-Live updates come from `TB.on(eventType, fn)`.
+routes that call `System`. State-changing routes take `Depends(protected)`; every route, read
+included, is already behind the PIN by the middleware (invariant 9b), so a new read needs nothing
+added to stay private. Live updates come from `TB.on(eventType, fn)`.
 
 Every number belongs to one page. `/` is Market Data: the market, its options and how the forecast
 has been doing. Balances and the paper record are on Account, open positions on Positions, the event
@@ -197,6 +218,7 @@ and it moves for every process at once.
 docker compose up          # everything: http://127.0.0.1:8080 (rebuilds on every up)
 make install && make check # local lint + tests
 make token                 # an API_TOKEN for .env
+docker compose run --rm analyst backfill --days 365   # fill `bars` with past candles, OI and funding
 docker compose run --rm analyst train --symbols BTCUSD ETHUSD --days 365   # fit the forecaster (data/models)
 cp data/models/forecast_* models/   # ship them: models/ is in git and the image, used when data/models has none
 ```

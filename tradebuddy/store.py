@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import sqlite3
 import time
 from pathlib import Path
 from typing import Any
+
+
+def _number(value: Any) -> float | None:
+    """A REAL column takes a number or nothing. market_context carries strings and labels too
+    (implied_move_label), and SQLite would happily store one in a REAL column and hand it back as
+    text to whatever later tries arithmetic on it."""
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -179,6 +187,75 @@ CREATE TABLE IF NOT EXISTS forecasts (
 );
 CREATE INDEX IF NOT EXISTS forecasts_open ON forecasts(settled_at, bar_time);
 CREATE INDEX IF NOT EXISTS forecasts_settled ON forecasts(symbol, settled_at, bar_time);
+-- The market itself, kept. Everything analytical used to be recomputed from a fresh Delta REST
+-- call and thrown away, so nothing could be backtested, no base rate could be counted, and an
+-- outage erased that window for good. One row per symbol per closed bar, with the open interest
+-- and funding of the same bar carried alongside. Small (~80 bytes), so it is kept for good.
+CREATE TABLE IF NOT EXISTS bars (
+    symbol   TEXT    NOT NULL,
+    interval TEXT    NOT NULL,
+    time     INTEGER NOT NULL,   -- bar open, epoch seconds
+    open     REAL    NOT NULL,
+    high     REAL    NOT NULL,
+    low      REAL    NOT NULL,
+    close    REAL    NOT NULL,
+    volume   REAL    NOT NULL,
+    oi       REAL,
+    funding  REAL,
+    PRIMARY KEY (symbol, interval, time)
+);
+-- The analyst's reading of one bar, as typed columns rather than the JSON blob the event log kept
+-- for three days. Typed because the whole point is to count base rates over a year of it
+-- ("how often did price rise from here when IV was this rich"), and JSON extraction cannot be
+-- scanned. Rows on a 15-minute boundary are kept for good; the rest for SNAPSHOT_DAYS.
+CREATE TABLE IF NOT EXISTS market_snapshots (
+    symbol          TEXT    NOT NULL,
+    bar_time        INTEGER NOT NULL,
+    ts              REAL    NOT NULL,
+    keep            INTEGER NOT NULL DEFAULT 0,
+    price           REAL,
+    change_1h_pct   REAL,
+    change_4h_pct   REAL,
+    change_24h_pct  REAL,
+    rv_24h          REAL,
+    rv_7d           REAL,
+    atr_pct         REAL,
+    range_pos_24h   REAL,
+    ema20           REAL,
+    ema50           REAL,
+    ema200          REAL,
+    volume_z_1h     REAL,
+    oi_change_1h_pct   REAL,
+    oi_change_24h_pct  REAL,
+    funding_avg_24h_pct REAL,
+    basis_pct       REAL,
+    atm_iv          REAL,
+    iv_rv_ratio     REAL,
+    skew_25d        REAL,
+    pcr_oi          REAL,
+    pcr_volume      REAL,
+    implied_move_pct REAL,
+    max_pain_gap_pct REAL,
+    call_wall_gap_pct REAL,
+    put_wall_gap_pct REAL,
+    term_slope      REAL,
+    insight_keys    TEXT NOT NULL DEFAULT '',  -- 'iv_rich,funding_high,trend': short and greppable
+    lean            REAL,                      -- bullish weight - bearish weight
+    PRIMARY KEY (symbol, bar_time, ts)
+);
+CREATE INDEX IF NOT EXISTS market_snapshots_keep ON market_snapshots(keep, ts);
+-- Process load over time. The monitor has always measured CPU, memory and loop lag every two
+-- seconds and stored none of it, so "how did it look yesterday" had no answer. One row per
+-- process every few minutes is 90 bytes and answers it.
+CREATE TABLE IF NOT EXISTS process_health (
+    role            TEXT NOT NULL,
+    ts              REAL NOT NULL,
+    cpu_pct         REAL,
+    memory_mb       REAL,
+    loop_lag_max_ms REAL,
+    PRIMARY KEY (role, ts)
+);
+CREATE INDEX IF NOT EXISTS process_health_ts ON process_health(ts);
 -- Every TradeBuddy AI attempt with its full written report, so any day's analysis can be read again.
 CREATE TABLE IF NOT EXISTS ai_reports (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -198,6 +275,18 @@ OPTIONS_COLUMNS = (
     "max_pain", "implied_move_pct",
 )
 OPTIONS_MINUTE_DAYS = 30
+
+# The analysis numbers kept per bar. Order is the column order in market_snapshots; a name here
+# is read straight out of insights.market_context, so the two stay in step by construction.
+SNAPSHOT_COLUMNS = (
+    "price", "change_1h_pct", "change_4h_pct", "change_24h_pct", "rv_24h", "rv_7d", "atr_pct", "range_pos_24h",
+    "ema20", "ema50", "ema200", "volume_z_1h", "oi_change_1h_pct", "oi_change_24h_pct", "funding_avg_24h_pct",
+    "basis_pct", "atm_iv", "iv_rv_ratio", "skew_25d", "pcr_oi", "pcr_volume", "implied_move_pct",
+    "max_pain_gap_pct", "call_wall_gap_pct", "put_wall_gap_pct", "term_slope",
+)
+SNAPSHOT_DAYS = 30  # off-boundary rows; the 15-minute ones are kept for good
+HEALTH_DAYS = 30  # process load: 4 processes every 5 minutes is ~1,150 rows a day
+BAR_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14_400, "1d": 86_400}
 AI_REPORT_DAYS = 90  # written reports; about 1.5 MB a day at one every 5 minutes
 AI_FAILED_DAYS = 14  # attempts that produced no report
 FORECAST_DAYS = 180  # forecasts and their outcomes: ~96 small rows a symbol a day, kept long enough to judge
@@ -210,6 +299,9 @@ TABLE_INFO = {
     "paper_positions": ("Open paper positions", "opened_at", "while open"),
     "paper_account": ("Paper balance and totals", None, "one row"),
     "options_history": ("Options numbers per underlying per minute", "ts", f"{OPTIONS_MINUTE_DAYS} days; 15-minute rows forever"),
+    "bars": ("Closed candles with their open interest and funding", "time", "forever"),
+    "market_snapshots": ("The analyst's numbers per bar, for base rates", "ts", f"{SNAPSHOT_DAYS} days; 15-minute rows forever"),
+    "process_health": ("CPU, memory and loop lag per process", "ts", f"{HEALTH_DAYS} days"),
     "ai_reports": ("Every TradeBuddy AI report, in full", "ts", f"{AI_REPORT_DAYS} days; failed attempts {AI_FAILED_DAYS}"),
     "forecasts": ("Every forecast and what the market then did", "ts", f"{FORECAST_DAYS} days"),
     "daily_risk": ("Start-of-day equity and halts, per broker", None, "forever (one row a day)"),
@@ -401,6 +493,100 @@ class Store:
         cur = self.db.execute("DELETE FROM options_history WHERE keep = 0 AND ts < ?", (now - OPTIONS_MINUTE_DAYS * 86_400,))
         return cur.rowcount
 
+
+    # -- bars -----------------------------------------------------------------------
+
+    def record_bars(
+        self, symbol: str, interval: str, candles: list[Any],
+        oi: dict[int, float] | None = None, funding: dict[int, float] | None = None,
+    ) -> int:
+        """Closed candles, with the open interest and funding of the same bar where they are known.
+
+        OR IGNORE, not REPLACE: a bar that is already stored was stored when it closed, and a later
+        REST read of the same bar can only be the same numbers or a revision of them — and a
+        silently revised past is worse for a base rate than a missing one. Returns rows written."""
+        oi, funding = oi or {}, funding or {}
+        rows = [
+            (symbol, interval, int(c.time), c.open, c.high, c.low, c.close, c.volume,
+             oi.get(int(c.time)), funding.get(int(c.time)))
+            for c in candles
+        ]
+        if not rows:
+            return 0
+        before = self.db.total_changes
+        self.db.executemany(
+            "INSERT OR IGNORE INTO bars (symbol, interval, time, open, high, low, close, volume, oi, funding)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            rows,
+        )
+        return self.db.total_changes - before
+
+    def last_bar_time(self, symbol: str, interval: str) -> int:
+        """The newest bar stored, or 0. What a collector asks before deciding how far back to fetch."""
+        row = self.db.execute("SELECT MAX(time) AS t FROM bars WHERE symbol = ? AND interval = ?", (symbol, interval)).fetchone()
+        return int(row["t"] or 0)
+
+    def bars(self, symbol: str, interval: str, since: float = 0.0, limit: int = 5000) -> list[dict[str, Any]]:
+        """Stored bars, oldest first. `limit` applies to the newest, so a chart reads left to right."""
+        rows = self.db.execute(
+            "SELECT * FROM bars WHERE symbol = ? AND interval = ? AND time >= ? ORDER BY time DESC LIMIT ?",
+            (symbol, interval, since, limit),
+        )
+        return [dict(r) for r in rows][::-1]
+
+    def bar_gaps(self, symbol: str, interval: str, since: float = 0.0) -> list[tuple[int, int]]:
+        """(after, before) pairs where consecutive stored bars are more than one bar apart.
+
+        A gap is not a bug to hide: it is a window the feed or the exchange did not cover, and
+        anything measured across it is measured across missing market."""
+        step = BAR_SECONDS.get(interval, 900)
+        times = [int(r["time"]) for r in self.db.execute(
+            "SELECT time FROM bars WHERE symbol = ? AND interval = ? AND time >= ? ORDER BY time", (symbol, interval, since),
+        )]
+        return [(a, b) for a, b in itertools.pairwise(times) if b - a > step]
+
+    # -- the analysis, kept ---------------------------------------------------------
+
+    def record_snapshot(self, symbol: str, bar_time: int, ts: float, ctx: dict[str, Any], insight_keys: str, lean: float | None) -> None:
+        """One analysis cycle's numbers. OR IGNORE on (symbol, bar_time, ts): the analyst may run
+        twice within a second on a restart, and the first reading is the one it made."""
+        self.db.execute(
+            f"INSERT OR IGNORE INTO market_snapshots (symbol, bar_time, ts, keep, insight_keys, lean, {', '.join(SNAPSHOT_COLUMNS)}) "  # noqa: S608 - fixed column names
+            f"VALUES (?,?,?,?,?,?,{','.join('?' * len(SNAPSHOT_COLUMNS))})",
+            (symbol, int(bar_time), ts, int(int(bar_time) % 900 == 0), insight_keys, lean,
+             *(_number(ctx.get(c)) for c in SNAPSHOT_COLUMNS)),
+        )
+
+    def snapshots(self, symbol: str, since: float = 0.0, limit: int = 5000) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            "SELECT * FROM market_snapshots WHERE symbol = ? AND bar_time >= ? ORDER BY bar_time DESC, ts DESC LIMIT ?",
+            (symbol, since, limit),
+        )
+        return [dict(r) for r in rows][::-1]
+
+    def prune_snapshots(self, now: float | None = None) -> int:
+        now = time.time() if now is None else now
+        return self.db.execute(
+            "DELETE FROM market_snapshots WHERE keep = 0 AND ts < ?", (now - SNAPSHOT_DAYS * 86_400,),
+        ).rowcount
+
+    # -- process load ---------------------------------------------------------------
+
+    def record_health(self, role: str, ts: float, cpu_pct: float | None, memory_mb: float | None, loop_lag_max_ms: float | None) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO process_health (role, ts, cpu_pct, memory_mb, loop_lag_max_ms) VALUES (?,?,?,?,?)",
+            (role, ts, _number(cpu_pct), _number(memory_mb), _number(loop_lag_max_ms)),
+        )
+
+    def health(self, since: float = 0.0, limit: int = 20_000) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            "SELECT * FROM process_health WHERE ts >= ? ORDER BY ts DESC LIMIT ?", (since, limit),
+        )
+        return [dict(r) for r in rows][::-1]
+
+    def prune_health(self, now: float | None = None) -> int:
+        now = time.time() if now is None else now
+        return self.db.execute("DELETE FROM process_health WHERE ts < ?", (now - HEALTH_DAYS * 86_400,)).rowcount
 
     # -- forecasts and what the market did ------------------------------------
 

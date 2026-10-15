@@ -1,11 +1,13 @@
-"""python -m tradebuddy {feed|engine|web|worker|analyst|train} — normally started by docker-compose.
+"""python -m tradebuddy {feed|engine|web|worker|analyst|train|backfill} — normally started by docker-compose.
 
-    train   download history and fit the market forecaster: python -m tradebuddy train --symbols BTCUSD ETHUSD --days 365
+    backfill  fill the bars table with past candles, OI and funding: python -m tradebuddy backfill --days 365
+    train     download history and fit the market forecaster: python -m tradebuddy train --symbols BTCUSD ETHUSD --days 365
 """
 
 import argparse
 import asyncio
 import logging
+import os
 
 from tradebuddy import roles
 from tradebuddy.config import load_config
@@ -13,13 +15,19 @@ from tradebuddy.config import load_config
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="tradebuddy", description=roles.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("role", choices=["feed", "engine", "web", "worker", "analyst", "train"])
+    parser.add_argument("role", choices=["feed", "engine", "web", "worker", "analyst", "train", "backfill"])
     parser.add_argument("--concurrency", type=int, default=4, help="Celery worker processes (worker)")
-    parser.add_argument("--symbols", nargs="+", default=["BTCUSD", "ETHUSD"], help="symbols to train (train)")
-    parser.add_argument("--days", type=int, default=365, help="days of 15m history to train on (train)")
+    parser.add_argument("--symbols", nargs="+", default=["BTCUSD", "ETHUSD"], help="symbols (train, backfill)")
+    parser.add_argument("--days", type=int, default=365, help="days of 15m history (train, backfill)")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format=f"%(asctime)s %(levelname)s [{args.role}] %(name)s %(message)s")
+    # Stdout only: Docker rotates it (10 MB x 3) and nothing here writes a log file. LOG_LEVEL=WARNING
+    # on a long-running server; INFO while watching a deploy.
+    level = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+    logging.basicConfig(
+        level=getattr(logging, level, logging.INFO),
+        format=f"%(asctime)s %(levelname)s [{args.role}] %(name)s %(message)s",
+    )
     cfg = load_config()
 
     if args.role == "feed":
@@ -30,6 +38,11 @@ def main() -> None:
         roles.serve(roles.web_app(cfg), cfg)
     elif args.role == "analyst":
         asyncio.run(roles.analyst(cfg))
+    elif args.role == "backfill":
+        from tradebuddy.analyst import backfill
+
+        for symbol, n in asyncio.run(backfill(cfg.db_path, args.symbols, args.days)).items():
+            print(f"{symbol}: {n} new bars")
     elif args.role == "train":
         from tradebuddy.analyst import train
 

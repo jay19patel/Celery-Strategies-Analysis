@@ -8,14 +8,26 @@ def test_defaults_bind_to_loopback():
     assert (cfg.host, cfg.port, cfg.db_path, cfg.api_token) == ("127.0.0.1", 8080, "data/tradebuddy.db", "")
 
 
-def test_serving_beyond_loopback_needs_token():
+def test_serving_beyond_loopback_needs_a_credential():
+    """Off loopback, either the API token or a dashboard PIN has to be there. Nothing at all is
+    refused outright — including when DASHBOARD_LOOPBACK_ONLY claims the port is not published,
+    because nothing in this process can see what was put in front of it later."""
     with pytest.raises(RuntimeError):
-        require_safe_bind(load_config({"HOST": "0.0.0.0"}))
-    require_safe_bind(load_config({"HOST": "0.0.0.0", "API_TOKEN": "t"}))
+        require_safe_bind(load_config({"HOST": "0.0.0.0", "AUTH_PIN": ""}))
+    with pytest.raises(RuntimeError):
+        require_safe_bind(load_config({"HOST": "0.0.0.0", "AUTH_PIN": "", "DASHBOARD_LOOPBACK_ONLY": "true"}))
+    require_safe_bind(load_config({"HOST": "0.0.0.0", "API_TOKEN": "t", "AUTH_PIN": ""}))
+    require_safe_bind(load_config({"HOST": "0.0.0.0", "AUTH_PIN": "135790"}))
 
 
-def test_loopback_published_container_needs_no_token():
-    require_safe_bind(load_config({"HOST": "0.0.0.0", "DASHBOARD_LOOPBACK_ONLY": "true"}))
+def test_the_published_default_pin_warns_off_loopback(caplog):
+    """It cannot refuse: the PIN may have been changed from the Settings page, where it lives in
+    the database as a hash this process never reads. Api.get_auth_status makes the real check."""
+    require_safe_bind(load_config({"HOST": "0.0.0.0"}))
+    assert "dashboard_default_pin" in caplog.text
+    caplog.clear()
+    require_safe_bind(load_config({"HOST": "127.0.0.1"}))
+    assert caplog.text == ""
 
 
 def test_non_serving_roles_load_without_token():

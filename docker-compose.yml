@@ -35,6 +35,7 @@ x-app: &app
     ZMQ_RESULTS_BIND: tcp://0.0.0.0:5558
     ZMQ_RESULTS_URL: tcp://engine:5558
     TZ: UTC
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
     AUTH_PIN: ${AUTH_PIN:-242425}
     AUTH_SECRET: ${AUTH_SECRET:-}
   logging:
@@ -82,8 +83,11 @@ services:
     environment:
       <<: *env
       HOST: 0.0.0.0
-      DASHBOARD_LOOPBACK_ONLY: "true"  # matches the ports line below; remove it if you publish more widely
-      API_TOKEN: ${API_TOKEN:-}  # optional; put it in .env to protect every change
+      # Says "the ports line below publishes on the host's loopback only", nothing more. It cannot
+      # see a reverse proxy put in front of that port later — if you add one, the dashboard is on
+      # the internet and AUTH_PIN is the only thing between it and your positions. Change the PIN.
+      DASHBOARD_LOOPBACK_ONLY: "true"
+      API_TOKEN: ${API_TOKEN:-}  # optional; a header token for scripts, alongside the PIN session
     ports:
       - "127.0.0.1:8080:8080"
     depends_on: [engine]

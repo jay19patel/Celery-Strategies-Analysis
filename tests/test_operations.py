@@ -67,6 +67,36 @@ async def test_event_log_can_show_only_warnings_and_errors(cfg, exchange):
     assert len(await api.events()) == 3
 
 
+def test_event_counters_report_a_rate_not_just_a_lifetime_total():
+    """"Tick: 8,640,217" is true and tells a person nothing — at one a second every counter on the
+    page ends up the same shape. The lifetime count stays (it is eight bytes, it was never the
+    storage problem); what is worth reading is counted beside it."""
+    from tradebuddy.events import EventBus, Tick
+
+    bus = EventBus()
+    hour = 1_700_000_000 // 3600 * 3600
+    for i in range(3):
+        bus.publish(Tick(ts=hour + i, symbol="BTCUSD", price=1.0))
+    for i in range(5):
+        bus.publish(Tick(ts=hour + 3600 + i, symbol="BTCUSD", price=1.0))
+
+    stats = bus.stats()["events"]["Tick"]
+    assert stats["count"] == 8  # the lifetime total is still there
+    assert stats["last_hour"] == 3  # the hour that completed
+    assert stats["this_hour"] == 5
+
+
+def test_a_quiet_gap_does_not_fake_a_busy_previous_hour():
+    """Only a bucket that ran straight on from the last one is a comparable hour."""
+    from tradebuddy.events import EventBus, Tick
+
+    bus = EventBus()
+    hour = 1_700_000_000 // 3600 * 3600
+    bus.publish(Tick(ts=hour, symbol="BTCUSD", price=1.0))
+    bus.publish(Tick(ts=hour + 5 * 3600, symbol="BTCUSD", price=1.0))  # nothing for four hours
+    assert bus.stats()["events"]["Tick"]["last_hour"] == 0
+
+
 def test_a_refused_handshake_is_one_short_line():
     response = SimpleNamespace(status_code=403, reason_phrase="Forbidden", headers={"Via": "cloudfront"}, body=b"<HTML>" * 100)
     assert describe(TimeoutError("timed out during opening handshake")) == "TimeoutError: timed out during opening handshake"

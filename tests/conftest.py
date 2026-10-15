@@ -18,6 +18,9 @@ class FakeExchange:
         self.placed: list[dict[str, Any]] = []
         self.lookup: dict[str, Any] = {}
         self.history: list[Candle] = []
+        # Per-series candles, for tests that care that OI:BTCUSD is not the same as BTCUSD.
+        # Anything not listed falls back to `history`, which is what most tests set.
+        self.series: dict[str, list[Candle]] = {}
         self.chain: list[OptionQuote] = []
         self.options_history: list[dict[str, Any]] = []  # options_history rows a strategy reads back
         self.spec: dict[str, Any] = {"id": 27, "contract_value": 0.001, "tick_size": 0.5}
@@ -69,7 +72,7 @@ class FakeClient:
         return value
 
     async def candles(self, symbol, resolution, count):
-        return self.x.history[-count:]
+        return self.x.series.get(symbol, self.x.history)[-count:]
 
     async def option_chain(self, underlying):
         return self.x.chain
