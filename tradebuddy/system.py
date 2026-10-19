@@ -15,7 +15,7 @@ from typing import Any, Protocol
 import psutil
 from fastapi import WebSocket
 
-from tradebuddy import outlook, verdict
+from tradebuddy import outlook, reading, verdict
 from tradebuddy.brokers import Broker, DeltaBroker, PaperBroker
 from tradebuddy.config import Config
 from tradebuddy.delta import Candle, DeltaClient
@@ -487,8 +487,18 @@ class System:
     def _mark_verdicts(self, rows: list[dict[str, Any]], bars: list[Any], now: float) -> int:
         """Score each card's claim against what the market did over its horizon.
 
+        A directional claim is marked on what a bracketed trade would have done — target before
+        stop, net of costs, at the Trader's own levels — because that is what this system does with
+        a direction. Scoring it on "did the close end higher" marked a question nobody trades.
+
         A claim about volatility needs the span *before* it as well as after, or "expect movement"
-        has nothing to be more than."""
+        has nothing to be more than.
+        """
+        if not rows:
+            return 0
+        s = self.settings
+        cost = 2 * (s.paper_fee_pct + s.paper_slippage_pct)  # in and out, fee and slippage
+        by_time = {int(c.time): i for i, c in enumerate(bars)}
         marked = 0
         for row in rows:
             hours = float(row["horizon_hours"])
@@ -499,9 +509,23 @@ class System:
             before = outcome(bars, bar_time - int(hours * 3600), hours, 0.0)
             prior_vol = float(before["realized_vol"]) if before else float(actual["realized_vol"])
             sigma = outlook.sigma_over(prior_vol, hours)
+
+            # What a trade on this claim would have done, and what always going long would have —
+            # the same bars, the same brackets, so the comparison is fair.
+            claimed = naive = None
+            index = by_time.get(bar_time)
+            if index is not None and row["stance"] in ("bullish", "bearish"):
+                ahead = max(1, round(hours * 3600 / SCORE_BAR_SECONDS))
+                side = "buy" if row["stance"] == "bullish" else "sell"
+                claimed = reading.barrier_outcome(bars, index, side, s.stop_loss_pct, s.take_profit_pct, ahead, cost)
+                naive = reading.barrier_outcome(bars, index, "buy", s.stop_loss_pct, s.take_profit_pct, ahead, cost)
+                if claimed is None or naive is None:
+                    claimed = naive = None  # the bars do not cover it; fall back to the close
             try:
-                judged = verdict.settle(row | {"numbers": json.loads(row["numbers"] or "{}")},
-                                        float(actual["ret"]), float(actual["realized_vol"]), prior_vol, sigma)
+                judged = verdict.settle(
+                    row | {"numbers": json.loads(row["numbers"] or "{}")},
+                    float(actual["ret"]), float(actual["realized_vol"]), prior_vol, sigma, claimed, naive,
+                )
             except (TypeError, ValueError) as exc:
                 log.warning("verdict_unreadable source=%s bar=%s error=%s", row["source"], bar_time, exc)
                 judged = None
@@ -511,6 +535,9 @@ class System:
             self.store.settle_verdict(
                 row["symbol"], row["source"], bar_time, now, float(actual["ret"]), float(actual["realized_vol"]),
                 prior_vol, float(actual["excursion"]), correct, baseline,
+                regime=reading.regime_at(bars, index) if index is not None else "unknown",
+                exit_reason=claimed.exit if claimed else "",
+                r_multiple=claimed.r_multiple if claimed else None,
             )
             marked += 1
         return marked

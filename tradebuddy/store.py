@@ -277,6 +277,9 @@ CREATE TABLE IF NOT EXISTS predictions (
     actual_vol      REAL,             -- realised vol over the horizon
     prior_vol       REAL,             -- and over the same length before it, which is what vol_up/down is judged against
     actual_excursion REAL,
+    regime          TEXT,             -- the market it was made in, so the record can be read per regime
+    exit_reason     TEXT,             -- tp | sl | timeout: what a bracketed trade would have done
+    r_multiple      REAL,             -- that trade's result in units of the risk it took
     correct         INTEGER,          -- did the claim hold
     baseline_correct INTEGER,         -- would saying nothing have held over the same bars
     PRIMARY KEY (symbol, source, bar_time)
@@ -373,6 +376,12 @@ class Store:
         if "broker" not in columns:
             self.db.execute("ALTER TABLE orders ADD COLUMN broker TEXT NOT NULL DEFAULT 'delta'")
         self.db.execute("CREATE INDEX IF NOT EXISTS orders_symbol_status ON orders(broker, symbol, status)")
+        # Predictions settled before the outcome became a bracketed trade: the new columns stay
+        # NULL on them, and the scorecard says so rather than assuming.
+        existing = {r["name"] for r in self.db.execute("PRAGMA table_info(predictions)")}
+        for column, kind in (("regime", "TEXT"), ("exit_reason", "TEXT"), ("r_multiple", "REAL")):
+            if column not in existing:
+                self.db.execute(f"ALTER TABLE predictions ADD COLUMN {column} {kind}")
         # Databases created before trades recorded how far they went either way. Rows already closed
         # keep 0: the excursions were never measured and cannot be reconstructed.
         for table in ("paper_positions", "paper_trades"):
@@ -690,11 +699,14 @@ class Store:
     def settle_verdict(
         self, symbol: str, source: str, bar_time: int, now: float, ret: float, vol: float, prior_vol: float,
         excursion: float, correct: bool, baseline_correct: bool,
+        regime: str = "", exit_reason: str = "", r_multiple: float | None = None,
     ) -> None:
         self.db.execute(
             "UPDATE predictions SET settled_at = ?, actual_return = ?, actual_vol = ?, prior_vol = ?,"
-            " actual_excursion = ?, correct = ?, baseline_correct = ? WHERE symbol = ? AND source = ? AND bar_time = ?",
-            (now, ret, vol, prior_vol, excursion, int(correct), int(baseline_correct), symbol, source, int(bar_time)),
+            " actual_excursion = ?, regime = ?, exit_reason = ?, r_multiple = ?, correct = ?, baseline_correct = ?"
+            " WHERE symbol = ? AND source = ? AND bar_time = ?",
+            (now, ret, vol, prior_vol, excursion, regime, exit_reason, r_multiple,
+             int(correct), int(baseline_correct), symbol, source, int(bar_time)),
         )
 
     def verdict_record(self, symbol: str = "", since: float = 0.0, limit: int = 5000) -> list[dict[str, Any]]:
@@ -723,7 +735,8 @@ class Store:
             params.append(source)
         rows = self.db.execute(
             f"SELECT symbol, source, bar_time, ts, horizon_hours, stance, measure, label, confidence, price,"  # noqa: S608 - fixed clauses, values bound
-            f" settled_at, actual_return, correct, baseline_correct FROM predictions WHERE {where}"
+            f" settled_at, actual_return, regime, exit_reason, r_multiple, correct, baseline_correct"
+            f" FROM predictions WHERE {where}"
             f" ORDER BY bar_time DESC LIMIT ?",
             (*params, limit),
         )

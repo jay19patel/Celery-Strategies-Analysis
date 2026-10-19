@@ -32,7 +32,7 @@ import random
 import time
 from typing import Any
 
-from tradebuddy import outlook, verdict
+from tradebuddy import outlook, reading, verdict
 from tradebuddy import structure as mkt
 from tradebuddy.delta import Candle
 from tradebuddy.store import Store
@@ -70,11 +70,16 @@ def _regimes(rng: random.Random, bars: int) -> list[tuple[float, float]]:
 
 
 def candles(symbol: str, bars: int, end: int, seed: int) -> list[Candle]:
-    """A walk through several regimes, with the occasional outsized bar.
+    """A walk through several regimes, with outsized bars and rejection wicks in it.
 
     The big bars matter: a break of structure on an ordinary candle and one on a bar three times
     the usual size are different events, and the strategy and the pattern scoreboard both read
-    that difference. A market with no large bars in it would never exercise either."""
+    that difference. A market with no large bars in it would never exercise either.
+
+    The wicks matter for the same reason. Drawing them symmetrically — the obvious thing — produces
+    a market with no hammers and no shooting stars in it at all, so the two shapes anyone looks for
+    first were missing from the demo entirely. A rejection is a bar that travelled one way and
+    closed back: a long wick on one side with the body at the other end."""
     rng = random.Random(seed)
     price = START.get(symbol, 1_000.0)
     plan = _regimes(rng, bars)
@@ -85,9 +90,23 @@ def candles(symbol: str, bars: int, end: int, seed: int) -> list[Candle]:
         step = rng.gauss(drift, vol * (3.2 if shock else 1.0))
         o = price
         price = max(1.0, price * (1 + step))
-        wick = abs(rng.gauss(0, vol / 2.2))
         volume = abs(rng.gauss(140, 40)) * (3.5 if shock else 1.0)
-        out.append(Candle(start + i * BAR, o, max(o, price) * (1 + wick), min(o, price) * (1 - wick), price, round(volume, 2)))
+        top, bottom = max(o, price), min(o, price)
+        upper = abs(rng.gauss(0, vol / 2.2))
+        lower = abs(rng.gauss(0, vol / 2.2))
+        if rng.random() < 0.05:
+            # A rejection: price pushed one way, failed, and closed back. The body shrinks towards
+            # the far end, which is exactly what makes a hammer a hammer.
+            reach = abs(rng.gauss(0, vol * 2.2)) + vol
+            if rng.random() < 0.5:
+                lower, upper = reach, upper * 0.2
+                price = max(1.0, bottom + (top - bottom) * 0.8) if top > bottom else price
+            else:
+                upper, lower = reach, lower * 0.2
+                price = max(1.0, top - (top - bottom) * 0.8) if top > bottom else price
+            top, bottom = max(o, price), min(o, price)
+            volume *= 1.8  # someone was defending the level
+        out.append(Candle(start + i * BAR, o, top * (1 + upper), bottom * (1 - lower), price, round(volume, 2)))
     return out
 
 
@@ -153,10 +172,16 @@ def summary_for(symbol: str, bars: list[Candle], rows: list[dict[str, Any]]) -> 
     }
 
 
-def _settle(store: Store, symbol: str, bars: list[Candle], now: float) -> int:
-    """Mark every verdict whose horizon has passed, the same way the engine does."""
+def _settle(store: Store, symbol: str, bars: list[Candle], now: float,
+            stop_pct: float = 1.0, target_pct: float = 2.0, cost_pct: float = 0.14) -> int:
+    """Mark every verdict whose horizon has passed, the way the engine does.
+
+    Including the bracket: a directional claim is marked on what a trade from that bar would have
+    done, not on where the close ended. Settling it any other way would leave the Scorecard's exit
+    reasons and R multiples empty on a demo whose whole job is to show them."""
     from tradebuddy.insights import outcome
 
+    by_time = {int(c.time): i for i, c in enumerate(bars)}
     marked = 0
     for row in store.unsettled_verdicts(now, limit=100_000):
         hours, bar_time = float(row["horizon_hours"]), int(row["bar_time"])
@@ -165,14 +190,29 @@ def _settle(store: Store, symbol: str, bars: list[Candle], now: float) -> int:
             continue
         before = outcome(bars, bar_time - int(hours * 3600), hours, 0.0)
         prior = float(before["realized_vol"]) if before else float(actual["realized_vol"])
+
+        claimed = naive = None
+        index = by_time.get(bar_time)
+        if index is not None and row["stance"] in ("bullish", "bearish"):
+            ahead = max(1, round(hours * 3600 / BAR))
+            side = "buy" if row["stance"] == "bullish" else "sell"
+            claimed = reading.barrier_outcome(bars, index, side, stop_pct, target_pct, ahead, cost_pct)
+            naive = reading.barrier_outcome(bars, index, "buy", stop_pct, target_pct, ahead, cost_pct)
+            if claimed is None or naive is None:
+                claimed = naive = None
         judged = verdict.settle(
             row | {"numbers": {}}, float(actual["ret"]), float(actual["realized_vol"]), prior,
-            outlook.sigma_over(prior, hours),
+            outlook.sigma_over(prior, hours), claimed, naive,
         )
         if judged is None:
             continue
-        store.settle_verdict(symbol, row["source"], bar_time, now, float(actual["ret"]),
-                             float(actual["realized_vol"]), prior, float(actual["excursion"]), *judged)
+        store.settle_verdict(
+            symbol, row["source"], bar_time, now, float(actual["ret"]), float(actual["realized_vol"]),
+            prior, float(actual["excursion"]), *judged,
+            regime=reading.regime_at(bars, index) if index is not None else "unknown",
+            exit_reason=claimed.exit if claimed else "",
+            r_multiple=claimed.r_multiple if claimed else None,
+        )
         marked += 1
     return marked
 

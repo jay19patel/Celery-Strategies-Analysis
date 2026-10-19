@@ -200,3 +200,79 @@ async def test_the_verdicts_route_survives_an_empty_database(cfg, exchange):
     assert {v["key"] for v in body["verdicts"]} >= {"term_structure", "chain_oi", "insights"}
     assert all(v["label"] for v in body["verdicts"])
     assert body["record"]["cards"] == [] and body["history"] == []
+
+
+# -- the outcome the broker would actually have had ------------------------------------
+
+
+def seq(*bars):
+    return [Candle(T + i * STEP, o, h, lo, c, 10.0) for i, (o, h, lo, c) in enumerate(bars)]
+
+
+def test_a_trade_is_marked_on_its_bracket_not_on_the_close():
+    """Everything was scored on "did the close go up", but the Trader places a stop and a target.
+    A call can be right while the trade it implies was stopped out hours earlier."""
+    # Closes higher, but only after trading through the stop first.
+    bars = seq((99, 99, 99, 99), (100, 100.2, 98.0, 98.5), (98.5, 103, 98.4, 102))
+    out = reading.barrier_outcome(bars, 0, "buy", stop_pct=1.0, target_pct=1.5, lookahead=5)
+    assert out.exit == "sl" and out.net_pct < 0
+    assert bars[-1].close > bars[1].open, "the close did end higher — and the trade still lost"
+
+
+def test_the_stop_wins_a_tie_inside_one_candle():
+    """Intrabar order is unknown. Optimism here is how a backtest doubles its win rate."""
+    both = seq((99, 99, 99, 99), (100, 103, 98, 99))
+    assert reading.barrier_outcome(both, 0, "buy", 1.0, 1.5, 5).exit == "sl"
+
+
+def test_entry_is_the_next_open_and_costs_come_off():
+    hit = seq((99, 99, 99, 99), (100, 103, 99.6, 102))
+    out = reading.barrier_outcome(hit, 0, "buy", 1.0, 1.5, 5, cost_pct=0.2)
+    assert out.exit == "tp"
+    assert out.net_pct == pytest.approx(1.5 - 0.2)  # the target, less the round trip
+    assert out.r_multiple == pytest.approx(1.3)  # in units of the 1% risked
+
+
+def test_an_uncovered_horizon_is_unsettled_not_flat():
+    short = seq((99, 99, 99, 99), (100, 100.1, 99.9, 100))
+    assert reading.barrier_outcome(short, 0, "buy", 1.0, 1.5, lookahead=50) is None
+
+
+def test_a_short_is_the_mirror_of_a_long():
+    down = seq((101, 101, 101, 101), (100, 100.2, 98.0, 98.5))
+    assert reading.barrier_outcome(down, 0, "sell", 1.0, 1.5, 5).exit == "tp"
+    assert reading.barrier_outcome(down, 0, "buy", 1.0, 1.5, 5).exit == "sl"
+
+
+def test_the_regime_separates_a_trend_from_a_range():
+    """A card useless on average can be good in one regime; the average buries both."""
+    bars = walk(2_000, seed=71)
+    assert reading.regime_at(bars, len(bars) - 1) in ("trending", "trending fast", "ranging", "ranging fast")
+    assert reading.regime_at(bars, 5) == "unknown"  # too early to say, and it says so
+
+
+# -- the same readings on every timeframe ----------------------------------------------
+
+
+def test_indicators_are_read_on_every_timeframe():
+    """Reading RSI on a 15-minute chart alone is how a pullback inside a daily uptrend gets traded
+    as a reversal."""
+    by = reading.indicators_by_timeframe(walk(20_000, seed=72))
+    assert set(by) == {"15m", "1h", "1d"}
+    for tf, b in by.items():
+        assert b["ready"], tf
+        assert b["supertrend"]["level"] and b["supertrend"]["state"] in ("above price", "below price")
+        for key in ("rsi_series", "adx_series", "macd_series"):
+            assert b[key], f"{tf} has no {key} to draw"
+            assert b[key][0]["time"] < b[key][-1]["time"]  # oldest first, or the chart reads backwards
+
+
+def test_agreement_counts_one_vote_per_reading_and_gates_on_adx():
+    by = reading.indicators_by_timeframe(walk(20_000, seed=73, drift=0.00004))
+    a = reading.indicator_agreement(by)
+    assert a["agreement"] in ("aligned up", "aligned down", "conflicting", "mixed")
+    for row in a["rows"]:
+        assert row["of"] == 4 and -4 <= row["votes"] <= 4
+        assert set(row["detail"]) == {"ema", "macd", "rsi", "supertrend"}
+        # ADX is reported but is not one of the votes: it says whether the others mean anything.
+        assert "adx" not in row["detail"]

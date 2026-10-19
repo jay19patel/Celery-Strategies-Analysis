@@ -27,6 +27,15 @@
   const empty = (height, text) =>
     `<div class="flex items-center justify-center text-[11px] muted text-center px-3" style="height:${height}px">${esc(text)}</div>`;
 
+  // How much time the chart covers, said once in the middle of the axis. Two timestamps alone
+  // leave the reader to subtract them, and they usually do not.
+  const spanLabel = (seconds) => {
+    const h = seconds / 3600;
+    if (h < 1) return `${Math.round(seconds / 60)} min`;
+    if (h < 48) return `${Math.round(h)} hours`;
+    return `${Math.round(h / 24)} days`;
+  };
+
   // Round a span out to readable ticks instead of labelling the raw min and max.
   function niceTicks(lo, hi, count = 4) {
     if (!(hi > lo)) return [lo];
@@ -38,20 +47,27 @@
     return out.length ? out : [lo, hi];
   }
 
-  const shortTime = (ts) =>
-    new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  // HH:MM alone made a 24-hour window read backwards — "22:30" on the left and "22:15" on the
+  // right are a day apart, not fifteen minutes. Past a few hours the label carries the date.
+  const axisTime = (ts, spanSeconds) => {
+    const d = new Date(ts * 1000);
+    const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    if (spanSeconds < 6 * 3600) return hm;
+    const day = d.toLocaleDateString([], { day: "2-digit", month: "short" });
+    return spanSeconds > 6 * 86400 ? day : `${day} ${hm}`;
+  };
 
   /**
    * Several series against time on one scale.
    *
    * series: [{ name, points: [{x: epochSeconds, y: number}], color? }]
-   * opts:   { height, width, format, gapSeconds, label, hideLegend }
+   * opts:   { height, width, format, gapSeconds, label, hideLegend, guides: [{at, label, color}] }
    *
    * `gapSeconds` matters: a line drawn straight across a window with no samples shows a smooth
    * trend through time the process was not running. Past that spacing the line is broken instead.
    */
   function timeLine(series, opts = {}) {
-    const { height = 150, width = 520, format = (v) => String(Math.round(v)), gapSeconds = 0, label = "", hideLegend = false } = opts;
+    const { height = 150, width = 520, format = (v) => String(Math.round(v)), gapSeconds = 0, label = "", hideLegend = false, guides = [] } = opts;
     const live = (series || [])
       .map((s, i) => ({ ...s, color: s.color || colorFor(s.name, i), points: (s.points || []).filter((p) => p && p.y != null && isFinite(p.y)) }))
       .filter((s) => s.points.length);
@@ -61,6 +77,9 @@
     const xs = all.map((p) => p.x), ys = all.map((p) => p.y);
     const x0 = Math.min(...xs), x1 = Math.max(...xs);
     let lo = Math.min(...ys), hi = Math.max(...ys);
+    // A caption saying "30 and 70 marked" on a chart scaled 40–60 marks nothing. Pull the range
+    // out to include every guide so the line it promises is actually on it.
+    for (const g of guides) if (isFinite(g.at)) { lo = Math.min(lo, g.at); hi = Math.max(hi, g.at); }
     if (hi === lo) { hi = lo + Math.abs(lo || 1) * 0.1; lo -= Math.abs(lo || 1) * 0.1; }
     // A load chart that does not include zero makes 2% CPU look like a spike.
     if (lo > 0 && lo < (hi - lo)) lo = 0;
@@ -92,9 +111,18 @@
       return lines + dots + `<circle cx="${X(last.x).toFixed(1)}" cy="${Y(last.y).toFixed(1)}" r="2.6" fill="${s.color}"/>`;
     }).join("");
 
+    const guideLines = guides.filter((g) => isFinite(g.at)).map((g) => {
+      const y = Y(g.at);
+      return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${width - padR}" y2="${y.toFixed(1)}"
+          stroke="${g.color || "#cbd5e1"}" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="${width - padR - 2}" y="${(y - 2).toFixed(1)}" text-anchor="end" font-size="8.5"
+          fill="${g.color || AXIS}">${esc(g.label ?? g.at)}</text>`;
+    }).join("");
+
     const axis = `<line x1="${padL}" y1="${height - padB}" x2="${width - padR}" y2="${height - padB}" stroke="${GRID}"/>
-      <text x="${padL}" y="${height - 5}" font-size="9.5" fill="${AXIS}" font-family="ui-monospace,monospace">${esc(shortTime(x0))}</text>
-      <text x="${width - padR}" y="${height - 5}" text-anchor="end" font-size="9.5" fill="${AXIS}" font-family="ui-monospace,monospace">${esc(shortTime(x1))}</text>`;
+      <text x="${padL}" y="${height - 5}" font-size="9.5" fill="${AXIS}" font-family="ui-monospace,monospace">${esc(axisTime(x0, x1 - x0))}</text>
+      <text x="${(padL + width - padR) / 2}" y="${height - 5}" text-anchor="middle" font-size="9" fill="${AXIS}">${esc(spanLabel(x1 - x0))}</text>
+      <text x="${width - padR}" y="${height - 5}" text-anchor="end" font-size="9.5" fill="${AXIS}" font-family="ui-monospace,monospace">${esc(axisTime(x1, x1 - x0))}</text>`;
 
     const legend = hideLegend ? "" : `<div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[10.5px] muted mt-0.5">${
       live.map((s) => {
@@ -103,7 +131,7 @@
       }).join("")}</div>`;
 
     return `<svg viewBox="0 0 ${width} ${height}" class="w-full" style="height:${height}px" role="img"
-        aria-label="${esc(label || "time series")}">${grid}${axis}${paths}</svg>${legend}`;
+        aria-label="${esc(label || "time series")}">${grid}${guideLines}${axis}${paths}</svg>${legend}`;
   }
 
   /**
@@ -274,5 +302,48 @@
     </div>`;
   }
 
-  window.TBC = { timeLine, hbars, candles, rangeBar, probBar, colorFor, niceTicks, ROLE_COLOR };
+  /**
+   * Volume by price — the one chart here whose vertical axis is price and whose bars run sideways.
+   *
+   * levels: [{price, volume, share, in_value, poc}]
+   * opts:   { price, vwap, bands, height, format }
+   *
+   * Drawn this way because that is the question it answers: not "when did size trade" but "at what
+   * price". The point of control and the edges of the value area are levels a trade goes against,
+   * so they are labelled rather than left to be read off a bar.
+   */
+  function volumeProfile(levels, opts = {}) {
+    const rows = (levels || []).filter((l) => l && isFinite(l.volume));
+    const { height = 260, width = 300, price = null, vwap = null, format = (v) => Math.round(v).toLocaleString() } = opts;
+    if (rows.length < 4) return empty(height, "Not enough bars to build a profile yet.");
+    const max = Math.max(...rows.map((l) => l.volume), 1);
+    const lo = Math.min(...rows.map((l) => l.price));
+    const hi = Math.max(...rows.map((l) => l.price));
+    const padR = 62, plot = width - padR;
+    const Y = (p) => height - 6 - ((p - lo) / (hi - lo || 1)) * (height - 12);
+    const bandH = Math.max(1.5, (height - 12) / rows.length - 1);
+
+    const bars = rows.map((l) => {
+      const w = (l.volume / max) * plot;
+      const fill = l.poc ? "#d97706" : l.in_value ? "#1e88e5" : "#cbd5e1";
+      return `<rect x="${(plot - w).toFixed(1)}" y="${(Y(l.price) - bandH / 2).toFixed(1)}" width="${w.toFixed(1)}"
+        height="${bandH.toFixed(1)}" fill="${fill}" opacity="${l.poc ? 0.95 : l.in_value ? 0.65 : 0.5}">
+        <title>${esc(format(l.price))} — ${(100 * (l.share || 0)).toFixed(1)}% of the window's volume</title></rect>`;
+    }).join("");
+
+    const mark = (p, colour, label, dashed) => (p == null || p < lo || p > hi) ? "" :
+      `<line x1="0" y1="${Y(p).toFixed(1)}" x2="${plot}" y2="${Y(p).toFixed(1)}" stroke="${colour}" stroke-width="1.4"
+         ${dashed ? 'stroke-dasharray="4 3"' : ""}/>
+       <text x="${plot + 4}" y="${(Y(p) + 3.5).toFixed(1)}" font-size="9.5" fill="${colour}"
+         font-family="ui-monospace,monospace">${esc(label)}</text>`;
+    const poc = rows.find((l) => l.poc);
+    return `<svg viewBox="0 0 ${width} ${height}" class="w-full" style="height:${height}px" role="img"
+        aria-label="Volume traded at each price">${bars}
+      ${poc ? mark(poc.price, "#d97706", `POC ${format(poc.price)}`, false) : ""}
+      ${mark(vwap, "#7c3aed", `VWAP ${format(vwap)}`, true)}
+      ${mark(price, "#0f172a", `now ${format(price)}`, false)}
+    </svg>`;
+  }
+
+  window.TBC = { timeLine, hbars, candles, rangeBar, probBar, volumeProfile, colorFor, niceTicks, ROLE_COLOR };
 })();

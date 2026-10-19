@@ -259,13 +259,46 @@ def test_a_verdict_is_marked_against_what_happened_and_against_saying_nothing():
     assert verdict.settle(walls, ret=0.05, vol=0.5, prior_vol=0.5, sigma=0.005) == (False, False)
 
 
-def test_the_scoreboard_reports_the_edge_over_saying_nothing(tmp_path):
-    rows = [{"source": "pcr", "stance": "bullish", "measure": "direction", "bar_time": i,
-             "correct": int(i % 10 < 7), "baseline_correct": int(i % 10 < 5)} for i in range(100)]
-    [card] = verdict.score(rows)["cards"]
-    assert card["n"] == 100 and card["hit_rate"] == 0.7 and card["baseline"] == 0.5
-    assert card["edge"] == pytest.approx(0.2)
+def test_the_scoreboard_measures_against_the_best_call_needing_no_card():
+    """The baseline is the best CONSTANT call over the same outcomes, not the raw event rate.
+
+    Getting that wrong produced the worst number this page has shown: over a stretch where
+    volatility fell in 66 of 68 windows, a card that said "calm" every time scored 65/68 and was
+    reported as +91 points of edge. Against "always say it falls" it is behind."""
+    calm = [{"source": "term_structure", "stance": "vol_down", "measure": "volatility", "bar_time": i,
+             "correct": int(i < 65), "baseline_correct": int(i < 2)} for i in range(68)]
+    [card] = verdict.score(calm)["cards"]
+    assert card["hit_rate"] == pytest.approx(65 / 68, abs=1e-4)
+    assert card["baseline"] == pytest.approx(66 / 68, abs=1e-4)  # always say it falls
+    assert card["edge"] < 0, "a card that only ever says the common thing has no edge"
+    assert card["reliable"] is False
+
+    good = [{"source": "insights", "stance": "bullish", "measure": "direction", "bar_time": i,
+             "correct": int(i % 10 < 8), "baseline_correct": int(i % 2 == 0)} for i in range(100)]
+    [c] = verdict.score(good)["cards"]
+    assert c["baseline"] == pytest.approx(0.5) and c["edge"] == pytest.approx(0.3)
+    assert c["reliable"] is True and c["better_than_chance"] is True
     assert verdict.score([])["cards"] == []
+
+
+def test_no_edge_is_claimed_from_too_few_outcomes():
+    """"+91 pts over 34" is a coin that landed the same way twice, in a bigger font."""
+    few = [{"source": "pcr", "stance": "bullish", "measure": "direction", "bar_time": i,
+            "correct": 1, "baseline_correct": 0} for i in range(10)]
+    [card] = verdict.score(few)["cards"]
+    assert card["n"] == 10 and card["enough"] is False
+    assert card["edge"] is None and card["reliable"] is False
+    assert card["min_marked"] == verdict.MIN_MARKED
+
+
+def test_the_scoreboard_reports_where_the_two_disagreed():
+    """Both are measured on the same rows, so the comparison is paired and the disagreements are
+    what carry the information."""
+    rows = [{"source": "pcr", "stance": "bullish", "measure": "direction", "bar_time": i,
+             "correct": int(i % 4 != 0), "baseline_correct": int(i % 3 != 0)} for i in range(60)]
+    [card] = verdict.score(rows)["cards"]
+    assert card["disagreed"] == card["card_won"] + card["naive_won"]
+    assert card["card_won"] == sum(1 for r in rows if r["correct"] and not r["baseline_correct"])
 
 
 async def test_verdicts_are_stored_when_the_analyst_speaks_and_marked_when_the_horizon_passes(cfg, exchange):
@@ -311,7 +344,8 @@ async def test_the_verdicts_route_gives_the_page_what_it_draws(cfg, exchange):
     # One per tab on the Market page: four from the books, and one each for the outlook, the rule
     # findings, volume, the indicators and the candle shapes.
     assert {v["key"] for v in body["verdicts"]} == {
-        "term_structure", "atm_iv", "pcr", "chain_oi", "insights", "outlook", "volume", "indicators", "shapes",
+        "term_structure", "atm_iv", "pcr", "chain_oi", "insights", "outlook",
+        "volume", "indicators", "shapes", "where", "levels",
     }
     for v in body["verdicts"]:
         assert {"key", "stance", "label", "detail", "confidence", "horizon_hours", "measure", "scorable"} <= v.keys()
@@ -402,3 +436,34 @@ async def test_one_reading_per_bar_reaches_the_chart(cfg, exchange):
     assert [r["bar_time"] for r in out] == [100]  # the volatility claim has no side to draw
     assert out[0]["source"] == "outlook" and out[0]["settled"] is True and out[0]["correct"] is True
     assert "_rank" not in out[0]
+
+
+def test_asking_nine_questions_at_95_percent_needs_a_correction():
+    """Nine cards each judged at 95% means one clears by luck about every other reading. Without a
+    correction this page would celebrate a new discovery most weeks."""
+    rows = []
+    # Eight cards that are exactly the baseline, and one that is genuinely ahead.
+    for card in range(8):
+        rows += [{"source": f"c{card}", "stance": "bullish", "measure": "direction", "bar_time": i,
+                  "correct": int(i % 2 == 0), "baseline_correct": int(i % 2 == 0)} for i in range(60)]
+    rows += [{"source": "real", "stance": "bullish", "measure": "direction", "bar_time": i,
+              "correct": int(i % 10 < 8), "baseline_correct": int(i % 2 == 0)} for i in range(200)]
+    out = verdict.score(rows)
+    reliable = {c["source"] for c in out["cards"] if c["reliable"]}
+    assert reliable == {"real"}, f"only the real edge should survive, got {reliable}"
+    assert out["tests"] == 9
+    assert all(c["bh_threshold"] <= 0.05 for c in out["cards"] if c.get("bh_threshold") is not None)
+
+
+def test_a_directional_claim_is_marked_on_its_bracket_when_the_bars_are_there():
+    """The settle path takes the bracketed outcome and uses it in place of the close."""
+    from tradebuddy.reading import Outcome
+
+    row = {"measure": "direction", "stance": "bullish"}
+    won = Outcome("tp", 3, 1.36, 1.36)
+    lost = Outcome("sl", 1, -1.14, -1.14)
+    # The close ended higher, but the trade was stopped out: the claim did not hold.
+    assert verdict.settle(row, ret=0.02, vol=0.5, prior_vol=0.5, sigma=0.01, claimed=lost, naive=won) == (False, True)
+    assert verdict.settle(row, ret=-0.01, vol=0.5, prior_vol=0.5, sigma=0.01, claimed=won, naive=lost) == (True, False)
+    # Without the bars it falls back to the close rather than guessing.
+    assert verdict.settle(row, ret=0.02, vol=0.5, prior_vol=0.5, sigma=0.01) == (True, True)

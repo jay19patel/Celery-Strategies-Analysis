@@ -17,6 +17,7 @@ is badged separately — it may disagree, and that is useful.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -260,14 +261,21 @@ def from_insights(found: list[dict[str, Any]], lean: dict[str, Any] | None) -> V
 # -- marking them ---------------------------------------------------------------------
 
 
-def settle(row: dict[str, Any], ret: float, vol: float, prior_vol: float, sigma: float) -> tuple[bool, bool] | None:
+def settle(
+    row: dict[str, Any], ret: float, vol: float, prior_vol: float, sigma: float,
+    claimed: Any = None, naive: Any = None,
+) -> tuple[bool, bool] | None:
     """Did the claim hold, and did the null claim hold over the same bars?
 
     `correct` is the card's claim. `baseline_correct` is what happened with no reading at all, so
     the scoreboard can divide the two: a card that is right 56% of the time in a quarter where
     price rose 56% of the time has told you nothing.
 
-      direction   bullish holds if price ended higher; the null is "price ended higher"
+      direction   when a bracketed outcome is given, the claim holds if a trade taken on it
+                  reached its target before its stop, net of costs — the thing the Trader
+                  actually does. Scoring direction on "did the close end higher" marked a
+                  question nobody trades: a call can be right while its trade was stopped out
+                  hours earlier. Without the bars to walk, it falls back to the close.
       volatility  vol_up holds if realised vol over the horizon beat the same span before it;
                   the null is "volatility rose"
       range       the card names its own band (the option walls); the null is the ±1 sigma band
@@ -276,6 +284,8 @@ def settle(row: dict[str, Any], ret: float, vol: float, prior_vol: float, sigma:
     """
     measure, stance = row.get("measure"), row.get("stance")
     if measure == "direction":
+        if stance in ("bullish", "bearish") and claimed is not None and naive is not None:
+            return bool(claimed.won), bool(naive.won)
         if stance == "bullish":
             return ret > 0, ret > 0
         if stance == "bearish":
@@ -305,32 +315,87 @@ def settle(row: dict[str, Any], ret: float, vol: float, prior_vol: float, sigma:
     return None
 
 
-def score(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Per card: how often it held, against how often the null claim did.
+MIN_MARKED = 30  # fewer settled claims than this and no edge is reported, however large it looks
 
-    Both, never one. And `edge`, which is the only number on the scoreboard worth acting on."""
+
+def _normal_cdf(x: float) -> float:
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def score(rows: list[dict[str, Any]], min_marked: int = MIN_MARKED) -> dict[str, Any]:
+    """Per card: how often it held, against the best anyone could do without it.
+
+    The baseline is the best CONSTANT call over the same outcomes — always say the thing that
+    happened more often — not the raw event rate. Getting that wrong produced the worst number
+    this page has shown: over a stretch where volatility fell in 66 of 68 windows, a card that
+    said "calm" every time scored 65/68 and was reported as **+91 points of edge**. Against
+    "always say it falls", which needs no card at all, it is a point and a half behind.
+
+    The two outcomes are measured on the same rows, so the comparison is paired and the
+    disagreements are what carry the information: of the times the card and the naive call
+    differed, how often was the card the one that was right. That is reported too.
+
+    Below `min_marked` settled claims nothing is called an edge. A 91-point lead over 34 outcomes
+    is a coin that landed the same way twice in a row, written in a bigger font.
+    """
     by_source: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
-        if r.get("correct") is not None:
+        if r.get("correct") is not None and r.get("baseline_correct") is not None:
             by_source.setdefault(r["source"], []).append(r)
     out = []
     for source, group in sorted(by_source.items()):
         n = len(group)
         hit = sum(r["correct"] for r in group) / n
-        base = sum(r["baseline_correct"] for r in group) / n
+        # How often the thing the claim is about actually happened, and so the best you could do
+        # by always calling the commoner side.
+        happened = sum(r["baseline_correct"] for r in group) / n
+        baseline = max(happened, 1 - happened)
+        edge = hit - baseline
+        # Paired: where the card and the naive call disagreed, who was right.
+        card_won = sum(1 for r in group if r["correct"] and not r["baseline_correct"])
+        naive_won = sum(1 for r in group if not r["correct"] and r["baseline_correct"])
+        # Is the hit rate above the baseline by more than sampling noise would give?
+        spread = (baseline * (1 - baseline) / n) ** 0.5
+        z = edge / spread if spread else 0.0
+        enough = n >= min_marked
         stances: dict[str, dict[str, Any]] = {}
         for r in group:
-            s = stances.setdefault(r["stance"], {"stance": r["stance"], "n": 0, "hit": 0})
-            s["n"] += 1
-            s["hit"] += r["correct"]
+            st_ = stances.setdefault(r["stance"], {"stance": r["stance"], "n": 0, "hit": 0})
+            st_["n"] += 1
+            st_["hit"] += r["correct"]
         out.append({
-            "source": source, "n": n,
-            "hit_rate": round(hit, 4), "baseline": round(base, 4), "edge": round(hit - base, 4),
+            "source": source, "n": n, "enough": enough, "min_marked": min_marked,
+            "hit_rate": round(hit, 4),
+            "baseline": round(baseline, 4),
+            "always": "the commoner outcome",
+            "edge": round(edge, 4) if enough else None,
+            "z": round(z, 2) if enough else None,
+            # A rate that clears sampling noise. Not proof — a reason to keep watching.
+            "reliable": bool(enough and abs(z) >= 1.96),
+            "better_than_chance": bool(enough and z >= 1.96),
+            "p_value": round(2 * (1 - _normal_cdf(abs(z))), 4) if enough else None,
+            "disagreed": card_won + naive_won,
+            "card_won": card_won,
+            "naive_won": naive_won,
             "measure": group[0].get("measure"),
             "by_stance": [s | {"hit_rate": round(s["hit"] / s["n"], 4)} for s in sorted(stances.values(), key=lambda x: -x["n"])],
             "from": group[0]["bar_time"], "to": group[-1]["bar_time"],
         })
-    return {"cards": sorted(out, key=lambda c: -abs(c["edge"])), "total": sum(c["n"] for c in out)}
+    # Nine cards, each asked at 95%, means one of them clears by luck about every other reading.
+    # Benjamini-Hochberg keeps the share of false finds among those called reliable near 5%
+    # instead of near 100% — without it this page would celebrate a new discovery most weeks.
+    tested = [c for c in out if c["p_value"] is not None]
+    for rank, card in enumerate(sorted(tested, key=lambda c: c["p_value"]), start=1):
+        card["bh_threshold"] = round(0.05 * rank / len(tested), 4)
+    survivors = [c for c in sorted(tested, key=lambda c: c["p_value"]) if c["p_value"] <= c["bh_threshold"]]
+    cutoff = max((c["p_value"] for c in survivors), default=0.0)
+    for card in out:
+        card["tests"] = len(tested)
+        card["reliable"] = bool(card.get("p_value") is not None and card["p_value"] <= cutoff)
+        card["better_than_chance"] = bool(card["reliable"] and (card["z"] or 0) > 0)
+    # Worth looking at first: the ones that survive, then the biggest samples.
+    out.sort(key=lambda c: (not c["reliable"], -abs(c["edge"] or 0), -c["n"]))
+    return {"cards": out, "total": sum(c["n"] for c in out), "min_marked": min_marked, "tests": len(tested)}
 
 
 def all_for(symbol: str, options: dict[str, Any] | None, options_history: list[dict[str, Any]],
@@ -352,6 +417,10 @@ def all_for(symbol: str, options: dict[str, Any] | None, options_history: list[d
         shaped = view.get("shapes") or {}
         if shaped.get("latest") is not None:
             verdicts.append(shapes(shaped["latest"], shaped.get("record") or []))
+        if view.get("vwap") and view.get("profile"):
+            verdicts.append(where_it_traded(view["vwap"], view["profile"], view.get("anatomy") or {}))
+        if view.get("levels"):
+            verdicts.append(levels(view["levels"]))
     return [v.to_dict() | {"symbol": symbol} for v in verdicts]
 
 
@@ -463,3 +532,92 @@ def shapes(found: list[dict[str, Any]], record: list[dict[str, Any]], hours: flo
     return _v("shapes", stance, f"{label}, {100 * edge:+.0f} pts",
               f"A {label.lower()}. Over {rec['count']:,} of them it {rec['asks']} {100 * rec['followed_through']:.0f}% of "
               f"the time against {100 * rec['baseline']:.0f}% for any bar.", min(1.0, abs(edge) * 10), hours, nums)
+
+
+def where_it_traded(vwap: dict[str, Any], profile: dict[str, Any], shape: dict[str, Any], hours: float = 4.0) -> Verdict:
+    """Price against the levels the money itself made: VWAP and the point of control.
+
+    Both are prices rather than states, which is what makes them worth a verdict — they are levels
+    a trade can be placed against. Everything else on the Volume tab is a ratio.
+
+    Read together on purpose: price far from VWAP *and* outside the value area is stretched on
+    both measures and tends to come back; stretched on one and not the other is a market that has
+    moved its own centre, which is what a trend is.
+    """
+    if not vwap.get("ready") or not profile.get("ready"):
+        return nothing("where", "Not enough bars to build a profile yet.", hours)
+    z = float(vwap.get("z") or 0)
+    inside = bool(profile.get("inside_value"))
+    poc_gap = float(profile.get("poc_distance_pct") or 0)
+    nums = {"vwap": vwap["vwap"], "vwap_z": z, "poc": profile["poc"],
+            "value_low": profile["value_low"], "value_high": profile["value_high"],
+            "inside_value": inside, "poc_distance_pct": poc_gap}
+    if shape.get("ready"):
+        nums |= {"body_pct": shape["body_pct"], "buy_pressure": shape["buy_pressure"]}
+
+    levels = f"VWAP {vwap['vwap']:,.0f}, point of control {profile['poc']:,.0f}, value {profile['value_low']:,.0f}-{profile['value_high']:,.0f}."
+    if abs(z) >= 2 and not inside:
+        side = "bullish" if z < 0 else "bearish"
+        return _v("where", side, f"Stretched {'below' if z < 0 else 'above'} where it traded",
+                  f"Price is {abs(z):.1f} volume-weighted deviations {'below' if z < 0 else 'above'} VWAP and outside the "
+                  f"value area — stretched on both measures at once, which usually comes back. {levels}",
+                  min(1.0, abs(z) / 3), hours, nums)
+    if abs(z) >= 1.5 and inside:
+        return _v("where", "neutral", "Moved its own centre",
+                  f"Price is {abs(z):.1f} deviations from VWAP but still inside the value area: the market is carrying its "
+                  f"own volume with it rather than stretching away from it, which is what a trend looks like here. {levels}",
+                  0.4, hours, nums)
+    if inside and abs(poc_gap) <= 0.4:
+        return _v("where", "range", f"Pinned at the point of control {profile['poc']:,.0f}",
+                  f"Price is sitting on the price the most size changed hands at, inside the value area. This is where a "
+                  f"market goes to agree; the edges of the value area are the levels worth trading against. {levels}",
+                  0.5, hours, nums)
+    return _v("where", "neutral", "Inside value" if inside else "Outside value",
+              f"Price is {abs(z):.1f} deviations from VWAP and {'inside' if inside else 'outside'} the value area. {levels}",
+              0.2, hours, nums)
+
+
+def levels(block: dict[str, Any], hours: float = 24.0) -> Verdict:
+    """Price against the highs and lows everyone can see.
+
+    A fresh extreme and a price sitting just under an old one are opposite situations and look
+    identical in a number: the first is a market with nothing above it, the second is a market
+    being held down by orders at a known price. Which one it is comes first."""
+    windows = (block or {}).get("windows") or []
+    if not windows:
+        return nothing("levels", "Not enough bars to mark a range yet.", hours)
+    nums = {w["key"]: {"high": w["high"], "low": w["low"], "position": w["position"]} for w in windows}
+
+    fresh = [w for w in windows if w["fresh_high"] or w["fresh_low"]]
+    if fresh:
+        widest = max(fresh, key=lambda w: w["bars"])
+        up = widest["fresh_high"]
+        return _v("levels", "bullish" if up else "bearish",
+                  f"New {widest['label'].lower()} {'high' if up else 'low'}",
+                  f"Price has just made a new {'high' if up else 'low'} for {widest['label'].lower()} at "
+                  f"{(widest['high'] if up else widest['low']):,.0f}. There is nothing overhead from this window to sell "
+                  f"into — the levels above are from longer ones." if up else
+                  f"Price has just made a new low for {widest['label'].lower()} at {widest['low']:,.0f}. Nothing from this "
+                  f"window is holding it up; the next level down is from a longer one.",
+                  min(1.0, widest["bars"] / 3000), hours, nums)
+
+    live = [w for w in windows if w["high_in_play"] or w["low_in_play"]]
+    if live:
+        widest = max(live, key=lambda w: w["bars"])
+        at_high = widest["high_in_play"]
+        level = widest["high"] if at_high else widest["low"]
+        gap = widest["to_high_pct"] if at_high else widest["to_low_pct"]
+        return _v("levels", "bearish" if at_high else "bullish",
+                  f"{gap:.1f}% under the {widest['label'].lower()} high" if at_high
+                  else f"{gap:.1f}% above the {widest['label'].lower()} low",
+                  f"Price is within {gap:.1f}% of the {widest['label'].lower()} "
+                  f"{'high' if at_high else 'low'} at {level:,.0f}, set {widest['high_hours_ago' if at_high else 'low_hours_ago']:.0f}h ago. "
+                  f"A level this well known is where the orders are: it either holds and turns price, or it breaks and "
+                  f"the stops behind it go.", 0.6, hours, nums)
+
+    day = next((w for w in windows if w["key"] == "1d"), windows[0])
+    pos = day["position"]
+    where = "the top of" if pos and pos > 0.7 else "the bottom of" if pos and pos < 0.3 else "the middle of"
+    return _v("levels", "neutral", "Mid-range on every window",
+              f"Price is in {where} today's {day['low']:,.0f}-{day['high']:,.0f} range and not near any longer window's "
+              f"extreme. Nothing well-known is in play, which is when breakout rules misfire most.", 0.2, hours, nums)

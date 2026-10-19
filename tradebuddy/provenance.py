@@ -104,6 +104,8 @@ CARD_SOURCE = {
     "volume": COUNTED,
     "indicators": MATH,  # transforms of price; nothing fitted and nothing counted
     "shapes": COUNTED,
+    "where": COUNTED,  # levels the traded size itself made
+    "levels": MATH,  # the highs and lows themselves; nothing fitted
     "outlook": COUNTED,
     "forecast": MODEL,
     "playbook": MODEL,

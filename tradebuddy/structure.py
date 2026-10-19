@@ -302,7 +302,7 @@ class Shape:
         return asdict(self) | {"label": CANDLE_NAMES.get(self.name, self.name)}
 
 
-def _anatomy(c: Candle) -> tuple[float, float, float, float]:
+def anatomy_of(c: Candle) -> tuple[float, float, float, float]:
     """(body, range, upper wick, lower wick). Everything below is a ratio of these."""
     rng = c.high - c.low
     body = abs(c.close - c.open)
@@ -321,7 +321,7 @@ def find_shapes(candles: list[Candle], limit: int = 200) -> list[Shape]:
     offset = len(candles) - len(window)
     out: list[Shape] = []
     for i, c in enumerate(window):
-        body, rng, upper, lower = _anatomy(c)
+        body, rng, upper, lower = anatomy_of(c)
         if rng <= 0:
             continue
         found: list[tuple[str, str, float]] = []

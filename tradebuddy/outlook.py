@@ -371,6 +371,8 @@ def build(
             "timeframes": [], "alignment": {"verdict": "unknown", "score": 0, "advice": ""},
             "horizons": [], "summary": [], "direction": [], "patterns": {},
             "volume": dict(empty), "indicators": dict(empty),
+            "vwap": dict(empty), "profile": dict(empty), "anatomy": dict(empty), "levels": dict(empty),
+            "indicators_by_tf": {}, "indicator_agreement": {"rows": [], "agreement": "unknown"},
             "shapes": {"latest": [], "record": []},
             "narrative": {}, "sources": prov.legend(), "min_sample": MIN_SAMPLE,
             "trade_odds": {},
@@ -389,6 +391,7 @@ def build(
     # doing now rather than what it averaged over a week.
     rv = st.realised_vol([c.close for c in candles], min(96, len(candles) - 1), BAR_SECONDS) or 0.0
     horizons = [horizon_view(h["hours"], h["label"], price, rv, implied_for(h["hours"], options)) for h in HORIZONS]
+    by_tf = reading.indicators_by_timeframe(candles)
     view = {
         "symbol": symbol,
         "ready": True,
@@ -416,7 +419,16 @@ def build(
         # One block per tab, each a self-contained reading of the same bars. Built here because the
         # candles are already in hand and the whole view is cached per bar.
         "volume": reading.volume_block(candles),
+        # Functions of price rather than of time: where the size actually changed hands.
+        "vwap": reading.vwap_block(candles),
+        "profile": reading.volume_profile(candles),
+        "anatomy": reading.anatomy(candles),
+        "levels": reading.levels_block(candles, BAR_SECONDS),
         "indicators": reading.indicator_block(candles),
+        # The same readings on 15m, 1h and 1d. Reading RSI on one chart alone is how a pullback
+        # inside a daily uptrend gets traded as a reversal.
+        "indicators_by_tf": by_tf,
+        "indicator_agreement": reading.indicator_agreement(by_tf),
         "shapes": {
             "latest": [s.to_dict() for s in st.find_shapes(candles, limit=6)],
             "record": reading.shape_record(candles, 1.0, BAR_SECONDS),

@@ -331,3 +331,36 @@ def test_the_shadowing_check_catches_the_bug_it_was_written_for():
         "for (const [tab, key] of Object.entries(TAB_VERDICT)) {",
     ):
         assert not BROWSER_GLOBALS & declared_names(innocent), innocent
+
+
+def page_locals(script: str) -> tuple[set[str], set[str]]:
+    """(defined, called) for the page's own `render*` / `load*` helpers.
+
+    Narrow on purpose. Those two prefixes are the convention for a page's own functions, so a call
+    to one that nothing defines is always a bug — and it is the bug that actually happened: an edit
+    that replaced one block silently took `renderSummary` with it, the page threw on first paint,
+    and every panel stayed empty.
+    """
+    defined = set(re.findall(r"\bfunction\s+((?:render|load)[A-Za-z0-9_]*)", script))
+    defined |= set(re.findall(r"\b(?:const|let|var)\s+((?:render|load)[A-Za-z0-9_]*)\s*=", script))
+    # Not `TB.loadHeader()`: a method on the shared object is someone else's to define.
+    called = set(re.findall(r"(?<![.\w])((?:render|load)[A-Za-z0-9_]*)\s*\(", script))
+    return defined, called - defined
+
+
+@pytest.mark.parametrize("name", sorted(page_scripts()))
+def test_every_render_and_load_helper_a_page_calls_is_defined(name):
+    _, missing = page_locals(page_scripts()[name])
+    assert not missing, f"{name} calls {sorted(missing)}, which nothing defines"
+
+
+def test_the_missing_helper_check_catches_the_bug_it_was_written_for():
+    """The detector, against the shape of the edit that caused it."""
+    broken = "function renderOutlook() { renderSummary(v); }"
+    assert page_locals(broken)[1] == {"renderSummary"}
+    whole = "function renderSummary(v) {} function renderOutlook() { renderSummary(v); }"
+    assert page_locals(whole)[1] == set()
+    # An arrow function assigned to a const counts as defined.
+    assert page_locals("const loadThing = async () => {}; loadThing();")[1] == set()
+    # A method on the shared TB object is someone else's to define, and is not a page helper.
+    assert page_locals("await TB.loadHeader();")[1] == set()

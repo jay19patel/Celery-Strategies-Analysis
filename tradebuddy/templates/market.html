@@ -34,9 +34,10 @@
     <div>
       <div class="stat-label mb-1">Every card, and how often it has been right</div>
       <div id="verdictDetail"></div>
-      <p class="text-[10.5px] muted mt-1.5">Each verdict is written down when it is made and marked once its horizon
-      has passed. The points figure is how far it beat saying nothing at all over the same bars — a card with no gap
-      there is decoration, however confident it sounds.</p>
+      <p class="text-[10.5px] muted mt-1.5">The bar is how often the card held; the black line is the best anyone could do
+      without it — always calling whichever outcome came up more often. The gap between them is the only thing here worth
+      acting on, and it is only coloured once it is bigger than sampling noise would give. Saying "volatility falls" every
+      day through a calm month scores 96%, and is worth nothing.</p>
     </div>
   </div>
 </section>
@@ -82,6 +83,14 @@
   </section>
 </div>
 <section class="card min-w-0">
+  <div class="card-head"><div class="card-title"><i data-lucide="ruler"></i>Key levels
+    <span class="card-sub">the highs and lows other people are watching</span></div><span id="src_levels"></span><span id="v_levels"></span></div>
+  <div class="card-body space-y-3">
+    <div id="levelsTable"></div>
+  </div>
+</section>
+
+<section class="card min-w-0">
   <div class="card-head"><div class="card-title"><i data-lucide="shapes"></i>Candle shapes
     <span class="card-sub">named shapes on the latest bars, and the record of each</span></div><span id="src_shapes"></span><span id="v_shapes"></span></div>
   <div class="card-body space-y-3">
@@ -106,20 +115,57 @@
     <div id="volumeDetail"></div>
   </div>
 </section>
+
+<div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
+  <section class="card xl:col-span-2 min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="align-horizontal-distribute-center"></i>Volume by price
+      <span class="card-sub">two days</span></div><span id="src_where"></span></div>
+    <div class="card-body">
+      <div id="profileChart"></div>
+      <div class="flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] muted mt-1">
+        <span><span style="color:#d97706">▬</span> point of control</span>
+        <span><span style="color:#7c3aed">▬</span> VWAP</span>
+        <span><span style="color:#0f172a">▬</span> now</span>
+        <span><span style="color:#1e88e5">■</span> value area</span>
+      </div>
+    </div>
+  </section>
+  <section class="card xl:col-span-3 min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="crosshair"></i>Where it traded
+      <span class="card-sub">VWAP and the point of control — levels the size itself made</span></div><span id="v_where"></span></div>
+    <div id="whereBody" class="card-body space-y-3"></div>
+  </section>
+</div>
 </div>
 
 <div data-view-panel="indicators" class="space-y-5">
 <section class="card min-w-0">
-  <div class="card-head"><div class="card-title"><i data-lucide="gauge"></i>Indicators
-    <span class="card-sub">ADX decides whether the rest of them mean anything</span></div><span id="src_indicators"></span><span id="v_indicators"></span></div>
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="layers"></i>Where the timeframes agree
+      <span class="card-sub">one vote per reading, per timeframe</span></div><span id="src_agreement"></span>
+  </div>
+  <div id="tfAgreement" class="card-body"></div>
+</section>
+
+<section class="card min-w-0">
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="gauge"></i>Indicators
+      <span class="card-sub">ADX decides whether the rest of them mean anything</span></div>
+    <div class="flex items-center gap-2">
+      <span id="src_indicators"></span><span id="v_indicators"></span>
+      <div id="indTabs" class="flex gap-1"></div>
+    </div>
+  </div>
   <div class="card-body space-y-4">
-    <div id="indKpis" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2"></div>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div><div class="stat-label mb-1">RSI(14) <span class="muted">· 30 and 70 marked</span></div><div id="rsiChart"></div></div>
-      <div><div class="stat-label mb-1">ADX(14) <span class="muted">· 20 and 25 marked</span></div><div id="adxChart"></div></div>
+    <div id="indKpis" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2"></div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div><div class="stat-label mb-1">RSI(14)</div><div id="rsiChart"></div></div>
+      <div><div class="stat-label mb-1">MACD histogram</div><div id="macdChart"></div></div>
+      <div><div class="stat-label mb-1">ADX(14)</div><div id="adxChart"></div></div>
     </div>
   </div>
 </section>
+
 <section class="card xl:col-span-2 min-w-0">
   <div class="card-head"><div class="card-title"><i data-lucide="move-horizontal"></i>How far, by when
     <span class="card-sub">from realised volatility</span></div><span id="src_horizons"></span></div>
@@ -380,37 +426,155 @@
       Everything here is a ratio to what this market normally does, because 400 contracts means nothing on its own.</p>`;
   }
 
-  // ── indicators ─────────────────────────────────────────────────────────────
-  function renderIndicators(b) {
+  // ── indicators, per timeframe ──────────────────────────────────────────────
+  // The same readings on 15m, 1h and 1d disagree most of the time, and which ones agree is worth
+  // more than any single value: an overbought 15m inside a daily uptrend is a pullback, not a top.
+  let indTf = "15m";
+
+  function renderAgreement(a) {
+    const rows = (a && a.rows) || [];
+    if (!rows.length) { $("tfAgreement").innerHTML = `<div class="text-[11px] muted">Not enough bars yet.</div>`; return; }
+    const lean = (l) => (l === "up" ? "up" : l === "down" ? "down" : "muted");
+    const vote = (v) => (v > 0 ? `<span class="up">▲</span>` : v < 0 ? `<span class="down">▼</span>` : `<span class="muted">·</span>`);
+    const tone = a.agreement.includes("up") ? "border-bull/40 bg-bull-bg/40"
+      : a.agreement.includes("down") ? "border-bear/40 bg-bear-bg/40" : "border-slate-200 bg-slate-50";
+    $("tfAgreement").innerHTML = `
+      <div class="rounded-lg border ${tone} px-3 py-2 mb-3">
+        <span class="text-[13px] font-semibold capitalize">${esc(a.agreement)}</span>
+        <span class="text-[11.5px] muted ml-2">${a.agreement === "conflicting"
+          ? "one timeframe points the other way — take the shorter one with a tight stop, or wait"
+          : a.agreement.startsWith("aligned") ? "every reading on every timeframe agrees"
+          : "the readings do not line up; mixed is a real answer, not a missing one"}</span>
+      </div>
+      <table class="tbl text-[12px]"><thead><tr><th>Timeframe</th><th>Lean</th><th class="text-center">EMA</th>
+        <th class="text-center">MACD</th><th class="text-center">RSI</th><th class="text-center">Supertrend</th>
+        <th class="r">ADX</th><th>Regime</th></tr></thead><tbody>${
+        rows.map((r) => r.lean === "unknown"
+          ? `<tr><td class="font-mono">${esc(r.interval)}</td><td colspan="7" class="muted text-[11px]">${esc(r.note || "not enough bars")}</td></tr>`
+          : `<tr>
+            <td class="font-mono font-semibold">${esc(r.interval)}<div class="text-[10px] muted font-sans">${esc(r.label || "")}</div></td>
+            <td class="${lean(r.lean)} font-semibold">${esc(r.lean)} <span class="muted text-[10px]">${r.votes >= 0 ? "+" : ""}${r.votes}/${r.of}</span></td>
+            <td class="text-center">${vote(r.detail.ema)}</td><td class="text-center">${vote(r.detail.macd)}</td>
+            <td class="text-center">${vote(r.detail.rsi)}</td><td class="text-center">${vote(r.detail.supertrend)}</td>
+            <td class="r font-mono">${r.adx ?? "—"}</td>
+            <td class="text-[11px] ${r.trending ? "" : "muted"}">${r.trending ? "trending" : "no trend to follow"}</td></tr>`).join("")}
+      </tbody></table>
+      <p class="text-[10.5px] muted mt-2">A vote each from the EMA stack, the MACD histogram, RSI either side of 50, and which
+      side of price the Supertrend sits. ADX is not a vote — it says whether a trend reading means anything at all on that
+      timeframe, and below 20 none of the others do.</p>`;
+  }
+
+  function renderIndicators(_block) {
+    const byTf = (outlook && outlook.indicators_by_tf) || {};
+    const tfs = Object.keys(byTf);
+    const b = byTf[indTf] || byTf[tfs[0]] || _block;
+    $("indTabs").innerHTML = tfs.map((tf) =>
+      `<button class="btn btn-sm ${tf === indTf ? "btn-primary" : ""}" data-indtf="${tf}">${esc(tf)}</button>`).join("");
+    $("indTabs").querySelectorAll("[data-indtf]").forEach((el) => (el.onclick = () => { indTf = el.dataset.indtf; renderIndicators(_block); }));
+
     if (!b || !b.ready) {
-      $("indKpis").innerHTML = `<div class="text-[11px] muted">${esc(b?.note || "Not enough bars yet.")}</div>`;
-      $("rsiChart").innerHTML = ""; $("adxChart").innerHTML = "";
+      $("indKpis").innerHTML = `<div class="text-[11px] muted">${esc((b && b.note) || "Not enough bars yet.")}</div>`;
+      ["rsiChart", "macdChart", "adxChart"].forEach((id) => ($(id).innerHTML = ""));
       return;
     }
     const STATE = { overbought: "down", oversold: "up", trending: "up", ranging: "muted", forming: "",
-                    rising: "up", falling: "down", neutral: "" };
+                    rising: "up", falling: "down", neutral: "", "above price": "down", "below price": "up" };
     const tile = (label, value, hint, cls = "") =>
       `<div class="bg-slate-50 rounded-lg p-2.5"><div class="text-[10.5px] uppercase tracking-wide muted">${label}</div>
        <div class="text-[16px] font-semibold font-mono ${cls}">${value}</div>
        <div class="text-[10.5px] muted leading-snug">${hint}</div></div>`;
-    const ema = b.ema;
+    const e = b.ema, st = b.supertrend;
     $("indKpis").innerHTML = [
       tile("ADX(14)", b.adx.value ?? "—", esc(b.adx.state), STATE[b.adx.state] || ""),
       tile("RSI(14)", b.rsi.value ?? "—", esc(b.rsi.state), STATE[b.rsi.state] || ""),
       tile("MACD hist", b.macd.hist ?? "—", esc(b.macd.state), STATE[b.macd.state] || ""),
+      tile("Supertrend", st.level == null ? "—" : TB.num(st.level, 0),
+           st.distance_pct == null ? esc(st.state) : `${esc(st.state)} · ${st.distance_pct}%`, STATE[st.state] || ""),
       tile("Band width", b.bollinger.width_pct == null ? "—" : `${b.bollinger.width_pct}%`,
            b.bollinger.squeeze ? "squeezed" : "normal", b.bollinger.squeeze ? "down" : ""),
       tile("ATR(14)", b.atr.pct == null ? "—" : `${b.atr.pct}%`, `${TB.num(b.atr.value, 0)} a bar`),
-      tile("EMA stack", ema.stacked_up ? "20>50>200" : ema.stacked_down ? "20<50<200" : "mixed",
-           `50 at ${TB.num(ema.ema50, 0)}`, ema.stacked_up ? "up" : ema.stacked_down ? "down" : ""),
+      tile("EMA stack", e.stacked_up ? "20>50>200" : e.stacked_down ? "20<50<200" : "mixed",
+           `50 at ${TB.num(e.ema50, 0)}`, e.stacked_up ? "up" : e.stacked_down ? "down" : ""),
     ].join("");
 
-    const line = (rows, lines, fmt) => TBC.timeLine(
-      [{ name: "", points: rows.map((r) => ({ x: r.time, y: r.value })) }],
-      { height: 130, format: fmt, hideLegend: true, gapSeconds: 3600 },
-    ) + `<div class="text-[10px] muted mt-0.5">${lines}</div>`;
-    $("rsiChart").innerHTML = line(b.rsi_series, "Above 70 is stretched, below 30 is washed out — in a trend both can stay there for days.", (v) => v.toFixed(0));
-    $("adxChart").innerHTML = line(b.adx_series, "Below 20 there is no trend to follow, and trend readings misfire. Above 25 one is worth following.", (v) => v.toFixed(0));
+    const chart = (id, rows, guides, note, fmt) => {
+      $(id).innerHTML = TBC.timeLine([{ name: "", points: rows.map((r) => ({ x: r.time, y: r.value })) }],
+        { height: 130, format: fmt, hideLegend: true, gapSeconds: 0, guides })
+        + `<div class="text-[10px] muted mt-0.5">${note}</div>`;
+    };
+    chart("rsiChart", b.rsi_series, [{ at: 30, label: "30" }, { at: 50, label: "50", color: "#e2e8f0" }, { at: 70, label: "70" }],
+      "Above 70 is stretched, below 30 washed out — in a trend both can stay there for days.", (v) => v.toFixed(0));
+    chart("macdChart", b.macd_series, [{ at: 0, label: "0" }],
+      "Momentum, not direction. It crosses zero when the pace of the move turns, which is earlier than the lines crossing.",
+      (v) => TB.num(v, 0));
+    chart("adxChart", b.adx_series, [{ at: 20, label: "20" }, { at: 25, label: "25" }],
+      "Below 20 there is no trend to follow and trend readings misfire. Above 25 one is worth following.", (v) => v.toFixed(0));
+  }
+
+
+  // ── where the size traded: VWAP, the profile, and the bar itself ───────────
+  function renderWhere(v) {
+    const w = v.vwap || {}, p = v.profile || {}, a = v.anatomy || {};
+    $("profileChart").innerHTML = p.ready
+      ? TBC.volumeProfile(p.levels, { price: p.price, vwap: w.ready ? w.vwap : null, height: 300,
+                                      format: (x) => TB.num(x, 0) })
+      : `<div class="text-[11px] muted">${esc(p.note || "No profile yet.")}</div>`;
+
+    if (!w.ready || !p.ready) { $("whereBody").innerHTML = `<div class="text-[11px] muted">Not enough bars yet.</div>`; return; }
+    const tile = (label, value, hint, cls = "") =>
+      `<div class="bg-slate-50 rounded-lg p-2.5"><div class="text-[10.5px] uppercase tracking-wide muted">${label}</div>
+       <div class="text-[16px] font-semibold font-mono ${cls}">${value}</div>
+       <div class="text-[10.5px] muted leading-snug">${hint}</div></div>`;
+    const stretched = Math.abs(w.z) >= 2;
+    $("whereBody").innerHTML = `
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+        ${tile("VWAP", TB.num(w.vwap, 0), `price is ${w.side} by ${w.distance_pct >= 0 ? "+" : ""}${w.distance_pct}%`,
+               w.side === "above" ? "up" : w.side === "below" ? "down" : "")}
+        ${tile("Distance", `${w.z >= 0 ? "+" : ""}${w.z}σ`, stretched ? "stretched" : "ordinary", stretched ? "down" : "")}
+        ${tile("Point of control", TB.num(p.poc, 0), `${p.poc_distance_pct >= 0 ? "+" : ""}${p.poc_distance_pct}% away`)}
+        ${tile("Value area", `${TB.num(p.value_low, 0)}–${TB.num(p.value_high, 0)}`,
+               p.inside_value ? "price is inside it" : "price is outside it", p.inside_value ? "" : "down")}
+      </div>
+      ${TBC.rangeBar(p.value_low, p.value_high, p.price, { format: (x) => TB.num(x, 0) })}
+      <p class="text-[10.5px] muted">VWAP weights by size where a moving average weights by time, so it is the price the money
+      actually paid. The point of control is where the most of it changed hands, and the value area is the band holding 70% —
+      its edges are where price has been pushed back inside. Both are prices, which is why a trade can be placed against them
+      and not against an oscillator.</p>
+      ${a.ready ? `<div class="rounded-md bg-slate-50 px-3 py-2">
+        <div class="stat-label mb-1.5">The last bar</div>
+        <div class="flex h-3 rounded-sm overflow-hidden" title="upper wick ${a.upper_wick_pct}% · body ${a.body_pct}% · lower wick ${a.lower_wick_pct}%">
+          <div style="width:${a.upper_wick_pct}%;background:#eb5757;opacity:.45"></div>
+          <div style="width:${a.body_pct}%;background:${a.direction === "up" ? "#00b852" : "#eb5757"}"></div>
+          <div style="width:${a.lower_wick_pct}%;background:#00b852;opacity:.45"></div>
+        </div>
+        <div class="text-[10.5px] muted mt-1">${a.body_pct}% body, ${a.vs_normal}x a normal bar, closed
+        ${Math.round(100 * a.buy_pressure)}% of the way up its own range.
+        ${a.wick_imbalance > 0.25 ? "Rejected from above." : a.wick_imbalance < -0.25 ? "Rejected from below." : "No clear rejection."}</div>
+      </div>` : ""}`;
+  }
+
+  // ── the levels other people are watching ───────────────────────────────────
+  function renderLevels(block) {
+    const windows = (block && block.windows) || [];
+    if (!windows.length) { $("levelsTable").innerHTML = `<div class="text-[11px] muted">Not enough bars yet.</div>`; return; }
+    $("levelsTable").innerHTML = `<table class="tbl text-[12px]">
+      <thead><tr><th>Window</th><th class="r">Low</th><th>Where price sits</th><th class="r">High</th><th>In play</th></tr></thead>
+      <tbody>${windows.map((w) => {
+        const flag = w.fresh_high ? `<span class="up font-semibold">new high</span>`
+          : w.fresh_low ? `<span class="down font-semibold">new low</span>`
+          : w.high_in_play ? `<span class="down">${w.to_high_pct}% under the high</span>`
+          : w.low_in_play ? `<span class="up">${w.to_low_pct}% above the low</span>`
+          : `<span class="muted">—</span>`;
+        return `<tr>
+          <td><span class="font-semibold">${esc(w.label)}</span>${w.complete ? "" : `<div class="text-[10px] text-amber-700">only ${TB.count(w.bars)} bars</div>`}</td>
+          <td class="r font-mono">${TB.num(w.low, 0)}<div class="text-[10px] muted">${w.to_low_pct}% away</div></td>
+          <td style="min-width:10rem">${TBC.rangeBar(w.low, w.high, block.price, { format: (x) => TB.num(x, 0) })}</td>
+          <td class="r font-mono">${TB.num(w.high, 0)}<div class="text-[10px] muted">${w.to_high_pct}% away</div></td>
+          <td class="text-[11px]">${flag}</td></tr>`;
+      }).join("")}</tbody></table>
+      <p class="text-[10.5px] muted mt-2">These are not predictions — they are prices a great many orders are parked around,
+      which is most of why they matter. A fresh extreme and a price sitting just under an old one look identical in a number
+      and are opposite situations: the first has nothing overhead, the second is being held down by orders at a known price.</p>`;
   }
 
   // ── candle shapes ──────────────────────────────────────────────────────────
@@ -459,7 +623,8 @@
     for (const [card, key] of Object.entries({
       term_structure: "implied", atm_iv: "implied", pcr: "implied", chain_oi: "implied",
       insights: "counted", outlook: "counted", summary: "counted", forecast: "model",
-      volume: "counted", indicators: "math", shapes: "counted", horizons: "math",
+      volume: "counted", indicators: "math", shapes: "counted", horizons: "math", agreement: "math",
+      where: "counted", levels: "math",
     })) {
       const el = $(`src_${card}`);
       if (el) el.innerHTML = srcBadgeFor(key);
@@ -502,16 +667,71 @@
     // The summary badge on the top card is the Outlook one: it is the reading the rest supports.
     const head = (list || []).find((v) => v.key === "outlook");
     if (head && $("v_summary")) $("v_summary").innerHTML = verdictBadge(head);
-    const box = $("verdictDetail");
-    if (box) {
-      box.innerHTML = (list || []).filter((v) => v.stance !== "unclear").map((v) => `
-        <div class="flex gap-2 items-start py-1.5 border-b border-slate-100 last:border-0">
-          <div style="flex:0 0 7.5rem">${verdictBadge(v)}</div>
-          <div class="text-[11.5px] text-slate-600 leading-snug">${esc(v.detail)}</div>
-        </div>`).join("") || `<div class="text-[11px] muted">No card has enough to say yet.</div>`;
-    }
+    renderRecord(list);
   }
 
+  // Each card's record, drawn. A wall of sentences is the one thing nobody reads on a page they
+  // open to make a decision, and the numbers in it were the most important on the page.
+  const CARD_NAME = {
+    term_structure: "Term structure", atm_iv: "ATM implied vol", pcr: "Put/call open interest",
+    chain_oi: "Option walls", insights: "Rule findings", outlook: "Timeframe outlook",
+    volume: "Volume", indicators: "Indicators", shapes: "Candle shapes",
+  };
+
+  function renderRecord(list) {
+    const box = $("verdictDetail");
+    if (!box) return;
+    const cards = (record.cards || []);
+    const byKey = Object.fromEntries((list || []).map((v) => [v.key, v]));
+    const scored = Object.fromEntries(cards.map((c) => [c.source, c]));
+    const keys = [...new Set([...cards.map((c) => c.source), ...(list || []).map((v) => v.key)])];
+
+    box.innerHTML = keys.map((key) => {
+      const v = byKey[key], c = scored[key];
+      const [word, cls] = STANCE[v?.stance] || STANCE.unclear;
+      const name = CARD_NAME[key] || key;
+
+      // No record yet, or too few to call anything.
+      if (!c || !c.enough) {
+        const have = c ? c.n : 0;
+        return `<div class="flex items-center gap-2 py-2 border-b border-slate-100 last:border-0">
+          <div style="flex:0 0 9.5rem" class="text-[12px] font-semibold">${esc(name)}</div>
+          <div style="flex:0 0 6.5rem"><span class="px-1.5 py-0.5 rounded text-[10.5px] font-semibold ${v && v.stance !== "unclear" ? cls : "bg-slate-100 text-slate-400"}">${esc(v && v.stance !== "unclear" ? word : "nothing to say")}</span></div>
+          <div class="flex-1 h-2 rounded-sm bg-[repeating-linear-gradient(45deg,#f1f5f9,#f1f5f9_4px,#e2e8f0_4px,#e2e8f0_8px)]"></div>
+          <div style="flex:0 0 11rem" class="text-[10.5px] muted text-right">${have}/${record.min_marked || 30} marked — no edge claimed yet</div>
+        </div>`;
+      }
+
+      // Hit rate as the bar, the baseline as a line on it. The gap between them is the only thing
+      // on this row worth acting on, and it is only coloured once it clears sampling noise.
+      const tone = !c.reliable ? "#94a3b8" : c.edge > 0 ? "#00b852" : "#eb5757";
+      const won = c.disagreed ? Math.round((100 * c.card_won) / c.disagreed) : null;
+      return `<div class="flex items-center gap-2 py-2 border-b border-slate-100 last:border-0">
+        <div style="flex:0 0 9.5rem">
+          <div class="text-[12px] font-semibold">${esc(name)}</div>
+          <div class="text-[10px] muted">${c.n.toLocaleString()} marked${c.measure ? ` · ${esc(c.measure)}` : ""}</div>
+        </div>
+        <div style="flex:0 0 6.5rem"><span class="px-1.5 py-0.5 rounded text-[10.5px] font-semibold ${v && v.stance !== "unclear" ? cls : "bg-slate-100 text-slate-400"}"
+          title="${esc(v ? v.detail : "")}">${esc(v && v.stance !== "unclear" ? word : "—")}</span></div>
+        <div class="flex-1 min-w-0">
+          <div class="relative bg-slate-100 rounded-sm overflow-hidden" style="height:16px"
+               title="right ${(100 * c.hit_rate).toFixed(0)}% of ${c.n}; always calling ${esc(c.always)} gives ${(100 * c.baseline).toFixed(0)}%">
+            <div style="width:${(100 * c.hit_rate).toFixed(1)}%;height:100%;background:${tone};opacity:.8"></div>
+            <div class="absolute top-0 bottom-0" style="left:${(100 * c.baseline).toFixed(1)}%;width:2px;background:#0f172a"></div>
+            <div class="absolute inset-0 flex items-center justify-between px-1.5 text-[10px] font-mono">
+              <span class="text-slate-800 font-semibold">${(100 * c.hit_rate).toFixed(0)}%</span>
+              <span class="text-slate-600">no card: ${(100 * c.baseline).toFixed(0)}%</span>
+            </div>
+          </div>
+          ${won == null ? "" : `<div class="text-[10px] muted mt-0.5">won ${c.card_won} of the ${c.disagreed} times it disagreed with that</div>`}
+        </div>
+        <div style="flex:0 0 7rem" class="text-right">
+          <div class="font-mono text-[13px] font-semibold" style="color:${tone}">${c.edge >= 0 ? "+" : ""}${(100 * c.edge).toFixed(1)} pts</div>
+          <div class="text-[10px] ${c.reliable ? "" : "muted"}">${c.reliable ? "clears noise" : "within noise"}</div>
+        </div>
+      </div>`;
+    }).join("") || `<div class="text-[11px] muted">No card has made a claim yet.</div>`;
+  }
 
   // One row per timescale: which way, how far, how likely. The page used to spread those three
   // across three cards and leave the reader to join them up, which is how it managed to say "up"
@@ -641,7 +861,10 @@
     renderStructure();
     renderVolume(v.volume);
     renderIndicators(v.indicators);
+    renderAgreement(v.indicator_agreement);
     renderShapes(v.shapes);
+    renderWhere(v);
+    renderLevels(v.levels);
   }
 
   // The chart the rest of it is about: candles, the levels that matter, where the breaks were,
