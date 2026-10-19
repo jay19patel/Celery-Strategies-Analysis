@@ -3,6 +3,11 @@
 {% block content %}
 <div data-ai-note="market"></div>
 
+<!-- Price first: it is what the page is about, and it was below six cards of analysis of it.
+     The socket, its channels and what closed each bar are plumbing and live on System. -->
+<div id="priceCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+
+
 <!-- The page's one answer, above everything. The tabs below are the evidence for it, split by what
      each reading is MADE of — volume, shapes, arithmetic, the books, the model — because that is the
      only line along which they differ in how much they can be trusted. Reading a model's guess and a
@@ -46,8 +51,7 @@
 </nav>
 
 <div data-view-panel="patterns" class="space-y-5">
-<div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
-  <section class="card xl:col-span-3 min-w-0">
+<section class="card min-w-0">
     <div class="card-head flex-wrap gap-2">
       <div class="card-title"><i data-lucide="candlestick-chart"></i>Structure <span id="structSub" class="card-sub"></span></div>
       <div id="structTabs" class="flex gap-1"></div>
@@ -64,8 +68,7 @@
       </div>
       <div id="breakList" class="mt-3"></div>
     </div>
-  </section>
-</div>
+</section>
 <div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
   <section class="card xl:col-span-2 min-w-0">
     <div class="card-head"><div class="card-title"><i data-lucide="percent"></i>Which way, counted
@@ -217,14 +220,7 @@
 </section>
 </div>
 
-<section class="card">
-  <div class="card-head"><div class="card-title"><i data-lucide="layers-3"></i>What this page is built on
-    <span class="card-sub">every number is badged with where it came from</span></div></div>
-  <div id="sources" class="card-body grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-2"></div>
-</section>
 
-<h2 class="text-[13px] font-semibold text-slate-500 uppercase tracking-wider pt-2">Exchange feed <span class="normal-case font-normal tracking-normal text-slate-400">· the perpetual's own 24h numbers, straight from Delta. The socket itself, its channels and what closed each bar are plumbing, and live on <a href="/system" class="text-brand-600">System</a>.</span></h2>
-<div id="priceCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
 
 {% endblock %}
 
@@ -451,19 +447,14 @@
   function srcBadgeFor(key) {
     const s = SOURCES[key];
     if (!s) return "";
-    return `<span class="px-1 py-px rounded text-[9px] font-semibold tracking-wide align-middle"
-      style="background:${s.colour}1a;color:${s.colour}" title="${esc(s.label)} — ${esc(s.depends_on)}">${esc(s.badge)}</span>`;
+    // The tooltip carries what the legend card used to say. A badge nobody can expand is a code.
+    return `<span class="px-1 py-px rounded text-[9px] font-semibold tracking-wide align-middle cursor-help"
+      style="background:${s.colour}1a;color:${s.colour}"
+      title="${esc(s.label)} — ${esc(s.depends_on)}\n\n${esc(s.detail)}">${esc(s.badge)}</span>`;
   }
 
   function renderSources(list) {
     SOURCES = Object.fromEntries((list || []).map((s) => [s.key, s]));
-    $("sources").innerHTML = (list || []).map((s) => `
-      <div class="rounded-lg border border-slate-200 p-2.5" style="border-left:3px solid ${s.colour}">
-        <div class="flex items-center gap-1.5 mb-1">${srcBadgeFor(s.key)}
-          <span class="text-[12px] font-semibold">${esc(s.label)}</span></div>
-        <div class="text-[10.5px] muted leading-snug">${esc(s.depends_on)}</div>
-        <div class="text-[10.5px] text-slate-500 leading-snug mt-1">${esc(s.detail)}</div>
-      </div>`).join("");
     // Put the badge on every card whose source is fixed.
     for (const [card, key] of Object.entries({
       term_structure: "implied", atm_iv: "implied", pcr: "implied", chain_oi: "implied",
@@ -564,8 +555,13 @@
     const v = outlook;
     if (!v) return;
     if (!v.ready) {
+      // Not an early return: every tab below reads this payload, and bailing here left all of them
+      // blank with nothing to explain it. Say it once at the top and let each panel say its own.
       $("outlookNote").innerHTML = `<div class="rounded-md bg-amber-50 text-amber-800 text-[12px] px-3 py-2">${esc(v.hint || "")}</div>`;
-      $("frames").innerHTML = ""; $("alignment").innerHTML = ""; $("summaryBand").innerHTML = ""; return;
+      $("frames").innerHTML = ""; $("alignment").innerHTML = ""; $("summaryBand").innerHTML = "";
+      $("outlookMeta").textContent = "";
+      renderVolume(v.volume); renderIndicators(v.indicators); renderShapes(v.shapes);
+      return;
     }
     $("outlookNote").innerHTML = "";
     renderSummary(v);
@@ -714,9 +710,17 @@
     renderStructure();
   }
 
-  document.querySelectorAll("#viewTabs [data-view]").forEach((b) => (b.onclick = () => showView(b.dataset.view)));
-  showView(new URLSearchParams(location.search).get("view"));
-  load(); loadHist(); loadScore(); loadOutlook();
+  // Each on its own. These used to run as one statement sequence, so when showView threw — a
+  // local named `history` had shadowed window.history — every loader after it was skipped and the
+  // whole page came up empty with one console line to explain it.
+  const safely = (name, fn) => { try { return fn(); } catch (e) { console.error(`${name} failed:`, e); } };
+  safely("tabs", () => {
+    document.querySelectorAll("#viewTabs [data-view]").forEach((b) => (b.onclick = () => safely("showView", () => showView(b.dataset.view))));
+    showView(new URLSearchParams(location.search).get("view"));
+  });
+  for (const [name, fn] of [["header", load], ["options history", loadHist], ["scorecard", loadScore], ["outlook", loadOutlook]]) {
+    safely(name, fn);
+  }
   TB.every(load, 60000);
   TB.every(loadHist, 60000);
   TB.every(loadScore, 300000);

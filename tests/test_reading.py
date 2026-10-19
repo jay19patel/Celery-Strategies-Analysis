@@ -173,3 +173,30 @@ def test_the_volume_verdict_never_claims_a_direction_from_size_alone():
     assert v.stance in ("bullish", "bearish", "neutral", "range")
     assert v.measure in ("direction", "range")
     assert "volume" in v.detail.lower() or "size" in v.detail.lower()
+
+
+# -- an empty database must not make the page silent ------------------------------------
+
+
+async def test_the_payload_carries_every_tabs_block_even_with_no_bars(cfg, exchange):
+    """A short dict here left four panels with no data and nothing to say, which is how the whole
+    page came up blank. An empty database and a quiet market take the same path through the page."""
+    system = await make(cfg, exchange)
+    view = await Api(system).outlook("BTCUSD")
+
+    assert view["ready"] is False and "backfill" in view["hint"]
+    for key in ("volume", "indicators", "shapes", "summary", "horizons", "timeframes", "sources", "alignment"):
+        assert key in view, f"{key} missing when there are no bars"
+    assert view["volume"]["ready"] is False and view["volume"]["note"]
+    assert view["indicators"]["ready"] is False
+    assert view["shapes"] == {"latest": [], "record": []}
+    assert view["sources"]  # the legend still renders
+
+
+async def test_the_verdicts_route_survives_an_empty_database(cfg, exchange):
+    """Every tab still gets a verdict; they just say there is nothing to say."""
+    system = await make(cfg, exchange)
+    body = await Api(system).verdicts("BTCUSD")
+    assert {v["key"] for v in body["verdicts"]} >= {"term_structure", "chain_oi", "insights"}
+    assert all(v["label"] for v in body["verdicts"])
+    assert body["record"]["cards"] == [] and body["history"] == []

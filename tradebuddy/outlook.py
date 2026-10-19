@@ -361,10 +361,19 @@ def build(
     """The whole view for one symbol, from stored bars. Pure, so the engine, the dashboard and a
     strategy on a worker all read the identical reading rather than three versions of it."""
     if not candles:
+        # Every key a tab reads, so an empty database and a quiet market take the same path through
+        # the page. Returning a short dict here left four panels with no data and nothing to say.
+        empty = {"ready": False, "note": "No bars stored yet."}
         return {
-            "symbol": symbol, "bars": 0, "ready": False,
+            "symbol": symbol, "bars": 0, "days": 0.0, "ready": False,
             "hint": "No bars stored yet. The engine writes one every 15 minutes; "
                     "`docker compose run --rm analyst backfill --days 365` fills in the past.",
+            "timeframes": [], "alignment": {"verdict": "unknown", "score": 0, "advice": ""},
+            "horizons": [], "summary": [], "direction": [], "patterns": {},
+            "volume": dict(empty), "indicators": dict(empty),
+            "shapes": {"latest": [], "record": []},
+            "narrative": {}, "sources": prov.legend(), "min_sample": MIN_SAMPLE,
+            "trade_odds": {},
         }
     price = candles[-1].close
     frames, counted, patterns = [], [], {}
