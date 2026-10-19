@@ -2,6 +2,14 @@
 {% block head %}{% endblock %}
 {% block content %}
 <div data-ai-note="market"></div>
+<!-- Every figure below comes from one of these, and they are not equally dependable. The badge on
+     each card says which, so "the options book says X" is never read with the same weight as
+     "this is what the arithmetic gives". -->
+<section class="card">
+  <div class="card-head"><div class="card-title"><i data-lucide="layers-3"></i>What this page is built on
+    <span class="card-sub">every number is badged with where it came from</span></div></div>
+  <div id="sources" class="card-body grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-2"></div>
+</section>
 <section class="card">
   <div class="card-head flex-wrap gap-2">
     <div class="card-title"><i data-lucide="radar"></i>Market analysis <span class="card-sub">options every 15s · analysis every 5 min</span></div><span id="v_summary"></span>
@@ -14,14 +22,15 @@
      Which way each timeframe leans, how far price can travel by when, and how often that has
      actually worked out. "No clear trend on 15m" on its own is not a reading: the same 15m
      picture inside a 1d uptrend and inside a 1d downtrend are different trades. -->
-<section class="card min-w-0">
+<section class="card min-w-0" id="outlookCard">
   <div class="card-head flex-wrap gap-2">
     <div class="card-title"><i data-lucide="compass"></i>Outlook
-      <span class="card-sub">three timeframes, counted on the bars this system stored</span></div><span id="v_outlook"></span>
+      <span class="card-sub">three timeframes, counted on the bars this system stored</span></div><span id="src_outlook" class="mr-1"></span><span id="v_outlook"></span>
     <span id="outlookMeta" class="text-[11px] muted"></span>
   </div>
   <div id="outlookNote" class="px-4 pt-1"></div>
   <div class="card-body space-y-4">
+    <div id="summaryBand"></div>
     <div id="alignment"></div>
     <div id="frames" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
     <div>
@@ -48,6 +57,7 @@
         <span><span style="color:#00b852">▲</span>/<span style="color:#eb5757">▼</span> break of structure</span>
         <span><span style="color:#d97706">▲</span> change of character</span>
         <span><span class="text-brand-500">▨</span> next horizon, ±1σ and ±2σ</span>
+        <span class="opacity-60"><span style="color:#00b852">⌃</span>/<span style="color:#eb5757">⌄</span> past readings — filled green where they held, red where they did not, grey while still open</span>
       </div>
       <div id="breakList" class="mt-3"></div>
     </div>
@@ -80,7 +90,7 @@
 
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
   <section class="card xl:col-span-2 min-w-0">
-    <div class="card-head"><div class="card-title"><i data-lucide="lightbulb"></i>Insights <span class="card-sub">rules over the numbers above: no model, no AI</span></div><span id="v_insights"></span></div>
+    <div class="card-head"><div class="card-title"><i data-lucide="lightbulb"></i>Insights <span class="card-sub">rules over the numbers above: no model, no AI</span></div><span id="src_insights" class="mr-1"></span><span id="v_insights"></span></div>
     <div class="card-body">
       <div id="insights"></div>
       <div class="mt-4 rounded-lg border border-violet-100 bg-violet-50/40 p-3">
@@ -90,14 +100,14 @@
     </div>
   </section>
   <section class="card min-w-0">
-    <div class="card-head"><div class="card-title"><i data-lucide="brain-circuit"></i>Forecast &amp; playbook <span class="card-sub">next 24h</span></div></div>
+    <div class="card-head"><div class="card-title"><i data-lucide="brain-circuit"></i>Forecast &amp; playbook <span class="card-sub">next 24h</span></div><span id="src_forecast"></span></div>
     <div id="forecast" class="card-body"></div>
   </section>
 </div>
 
 <section class="card min-w-0">
   <div class="card-head flex-wrap gap-2">
-    <div class="card-title"><i data-lucide="table-2"></i>Option chain <span id="chainSub" class="card-sub"></span></div><span id="v_chain_oi"></span>
+    <div class="card-title"><i data-lucide="table-2"></i>Option chain <span id="chainSub" class="card-sub"></span></div><span id="src_chain_oi" class="mr-1"></span><span id="v_chain_oi"></span>
     <select id="expiry" class="select" aria-label="Expiry"></select>
   </div>
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 px-4 pt-3">
@@ -147,18 +157,18 @@
 </section>
 
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
-  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="calendar-range"></i>Term structure <span class="card-sub">ATM IV by expiry</span></div><span id="v_term_structure"></span></div>
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="calendar-range"></i>Term structure <span class="card-sub">ATM IV by expiry</span></div><span id="src_term_structure" class="mr-1"></span><span id="v_term_structure"></span></div>
     <div id="term" class="card-body"></div>
     <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">The price of volatility at each expiry, nearest on the left. It normally slopes
     up — more can happen in a month than in a day. When a near expiry sits <b>above</b> the ones after it, the market is
     pricing an event inside that window, and selling volatility into it is how a quiet-looking trade goes wrong.</p></section>
-  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="activity"></i>ATM IV <span class="card-sub">last 24h</span></div><span id="v_atm_iv"></span></div>
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="activity"></i>ATM IV <span class="card-sub">last 24h</span></div><span id="src_atm_iv" class="mr-1"></span><span id="v_atm_iv"></span></div>
     <div id="ivSpark" class="card-body"></div>
     <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">What a day of movement has been costing, over the last 24 hours. Rising means
     options are getting dearer — buyers are paying up, usually into uncertainty. Falling means premium is draining out and
     the market is calming. Compare it with the <b>IV / RV</b> tile above: that says whether the price is fair against how
     much the market has actually been moving.</p></section>
-  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="scale"></i>Put / call OI <span class="card-sub">last 24h</span></div><span id="v_pcr"></span></div>
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="scale"></i>Put / call OI <span class="card-sub">last 24h</span></div><span id="src_pcr" class="mr-1"></span><span id="v_pcr"></span></div>
     <div id="pcrSpark" class="card-body"></div>
     <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">Open interest in puts divided by calls. Above 1 means more puts are open than
     calls — hedging or bearish positioning; below 1 the other way. <b>The move matters more than the level</b>: the ratio
@@ -166,38 +176,9 @@
     switched sides.</p></section>
 </div>
 
-<h2 class="text-[13px] font-semibold text-slate-500 uppercase tracking-wider pt-2">Exchange feed <span class="normal-case font-normal tracking-normal text-slate-400">· the perpetual's own 24h numbers, straight from Delta</span></h2>
+<h2 class="text-[13px] font-semibold text-slate-500 uppercase tracking-wider pt-2">Exchange feed <span class="normal-case font-normal tracking-normal text-slate-400">· the perpetual's own 24h numbers, straight from Delta. The socket itself, its channels and what closed each bar are plumbing, and live on <a href="/system" class="text-brand-600">System</a>.</span></h2>
 <div id="priceCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
 
-<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
-  <section class="card">
-    <div class="card-head"><div class="card-title"><i data-lucide="plug-zap"></i>WebSocket connection</div></div>
-    <div class="scroll">
-      <table class="tbl"><tbody id="feed"></tbody></table>
-    </div>
-  </section>
-  <section class="card">
-    <div class="card-head"><div class="card-title"><i data-lucide="rss"></i>Channels <span class="card-sub">messages received</span></div></div>
-    <div class="scroll">
-      <table class="tbl"><thead><tr><th>Channel</th><th class="r">Messages</th><th class="r">Per min</th></tr></thead><tbody id="channels"></tbody></table>
-    </div>
-  </section>
-  <section class="card">
-    <div class="card-head"><div class="card-title"><i data-lucide="clock"></i>Candle closes <span class="card-sub">what triggered each bar</span></div></div>
-    <div class="card-body space-y-3">
-      <div id="closedBy" class="grid grid-cols-2 gap-3"></div>
-      <p class="text-[11px] muted">A bar closes when the stream shows the next bar (<b>websocket</b>) or when the clock passes its end first (<b>clock</b>, 3s grace). Each bar is emitted once, whichever comes first.</p>
-    </div>
-  </section>
-</div>
-
-<section class="card">
-  <div class="card-head"><div class="card-title"><i data-lucide="candlestick-chart"></i>Recent candle closes</div></div>
-  <div class="scroll max-h-96">
-          <table class="tbl"><thead><tr><th>Closed</th><th>Symbol</th><th>Resolution</th><th>Bar open</th><th>Source</th><th class="r">Open</th><th class="r">High</th><th class="r">Low</th><th class="r">Close</th></tr></thead><tbody id="bars"></tbody></table>
-    
-  </div>
-</section>
 {% endblock %}
 
 {% block scripts %}
@@ -272,6 +253,40 @@
   TB.on("MarketAnalysis", (e) => { if (!data) return; (data.symbols[e.symbol] ||= {}).analysis = e; schedule(); });
   TB.on("MarketStats", (e) => { if (!data?.symbols[e.symbol]) return; data.symbols[e.symbol].stats = e; if (e.symbol === sym) schedule(); });
 
+
+  // ── provenance ─────────────────────────────────────────────────────────────
+  // A badge is not decoration here. Arithmetic holds given its inputs; a counted rate holds if the
+  // future resembles the past; an implied vol is a fact about what someone paid, not a forecast;
+  // a model is worth what it beat its baseline by. Showing them identically was the page's worst
+  // habit — it is how "Outlook: up" and a skill-less "Down 57%" ended up side by side.
+  let SOURCES = {};
+
+  function srcBadgeFor(key) {
+    const s = SOURCES[key];
+    if (!s) return "";
+    return `<span class="px-1 py-px rounded text-[9px] font-semibold tracking-wide align-middle"
+      style="background:${s.colour}1a;color:${s.colour}" title="${esc(s.label)} — ${esc(s.depends_on)}">${esc(s.badge)}</span>`;
+  }
+
+  function renderSources(list) {
+    SOURCES = Object.fromEntries((list || []).map((s) => [s.key, s]));
+    $("sources").innerHTML = (list || []).map((s) => `
+      <div class="rounded-lg border border-slate-200 p-2.5" style="border-left:3px solid ${s.colour}">
+        <div class="flex items-center gap-1.5 mb-1">${srcBadgeFor(s.key)}
+          <span class="text-[12px] font-semibold">${esc(s.label)}</span></div>
+        <div class="text-[10.5px] muted leading-snug">${esc(s.depends_on)}</div>
+        <div class="text-[10.5px] text-slate-500 leading-snug mt-1">${esc(s.detail)}</div>
+      </div>`).join("");
+    // Put the badge on every card whose source is fixed.
+    for (const [card, key] of Object.entries({
+      term_structure: "implied", atm_iv: "implied", pcr: "implied", chain_oi: "implied",
+      insights: "counted", outlook: "counted", summary: "counted", forecast: "model",
+    })) {
+      const el = $(`src_${card}`);
+      if (el) el.innerHTML = srcBadgeFor(key);
+    }
+  }
+
   // ── outlook: three timeframes, the distances, and the counted odds ─────────
   // A verdict badge is the point of each card: the chart explains what the thing means, the badge
   // says what *this* one is saying, and the record under it says how often that card has been right.
@@ -286,7 +301,7 @@
     "down": "bg-bear-bg text-bear-text", "weak down": "bg-bear-bg/60 text-bear-text",
     "flat": "bg-slate-100 text-slate-600", "unknown": "bg-slate-50 text-slate-400",
   };
-  let outlook = null, record = {}, structFrame = "15m", barsCache = {};
+  let outlook = null, record = {}, history = [], structFrame = "15m", barsCache = {};
 
   function verdictBadge(v, card) {
     const [, cls] = STANCE[v.stance] || STANCE.unclear;
@@ -316,14 +331,54 @@
     }
   }
 
+
+  // One row per timescale: which way, how far, how likely. The page used to spread those three
+  // across three cards and leave the reader to join them up, which is how it managed to say "up"
+  // in one place and "down" in another. This is the single answer; everything below explains it.
+  const ARROW = { 1: ["▲", "up", "text-bull-text bg-bull-bg"], "-1": ["▼", "down", "text-bear-text bg-bear-bg"], 0: ["▬", "flat", "text-slate-600 bg-slate-100"] };
+
+  function renderSummary(v) {
+    $("summaryBand").innerHTML = `<div class="rounded-lg border border-slate-200 overflow-hidden">
+      <div class="grid grid-cols-[5.5rem_7rem_1fr_1fr] gap-2 px-3 py-1.5 bg-slate-50 text-[10.5px] uppercase tracking-wide muted">
+        <div>Timescale</div><div>Direction ${srcBadgeFor("counted")}</div><div>Typical move ${srcBadgeFor("math")}</div><div>Chance it goes that way ${srcBadgeFor("counted")}</div>
+      </div>
+      ${v.summary.map((r) => {
+        const [glyph, word, cls] = ARROW[String(r.direction)] || ARROW["0"];
+        const prob = r.probability == null
+          ? `<span class="text-[11px] muted">not enough counted history yet${r.sample ? ` · ${r.sample.toLocaleString()} outcomes` : ""}</span>`
+          : `<div class="flex items-baseline gap-1.5">
+               <span class="font-mono text-[13px] font-semibold">${(100 * r.probability).toFixed(0)}%</span>
+               <span class="text-[10.5px] muted">base ${(100 * r.baseline).toFixed(0)}%</span>
+               <span class="text-[10.5px] ${r.edge > 0.01 ? "up" : r.edge < -0.01 ? "down" : "muted"}">${r.edge >= 0 ? "+" : ""}${(100 * r.edge).toFixed(1)} pts</span>
+               <span class="text-[10px] muted">n=${r.sample.toLocaleString()}</span>
+             </div>`;
+        return `<div class="grid grid-cols-[5.5rem_7rem_1fr_1fr] gap-2 px-3 py-2 border-t border-slate-100 items-center">
+          <div><div class="text-[12px] font-semibold">${esc(r.scale)}</div>
+            <div class="text-[10px] muted font-mono">${esc(r.interval)} · ${esc(r.good_for)}</div></div>
+          <div><span class="px-1.5 py-0.5 rounded text-[11.5px] font-semibold ${cls}">${glyph} ${esc(word)}</span>
+            <div class="text-[10px] muted mt-0.5">${esc(r.trend)}</div></div>
+          <div><span class="font-mono text-[13px]">±${r.move_pct == null ? "—" : r.move_pct.toFixed(2)}%</span>
+            <span class="text-[10.5px] muted">${r.move_usd == null ? "" : `±${TB.num(r.move_usd, 0)}`}</span>
+            <div class="text-[10px] muted">over ${esc(r.horizon_label.toLowerCase())}</div></div>
+          <div>${prob}</div>
+        </div>`;
+      }).join("")}
+    </div>
+    <p class="text-[10.5px] muted mt-1.5">Direction is read from trend and structure — what the market is doing — never from the
+    forecast model, which has been measured to have no skill at calling direction over these horizons. The move is what this
+    volatility implies, not a target. The chance is counted over the stored bars and is shown beside the base rate it has to
+    beat: a 56% that sits on a 56% base rate is the market drifting, not a reading.</p>`;
+  }
+
   function renderOutlook() {
     const v = outlook;
     if (!v) return;
     if (!v.ready) {
       $("outlookNote").innerHTML = `<div class="rounded-md bg-amber-50 text-amber-800 text-[12px] px-3 py-2">${esc(v.hint || "")}</div>`;
-      $("frames").innerHTML = ""; $("alignment").innerHTML = ""; return;
+      $("frames").innerHTML = ""; $("alignment").innerHTML = ""; $("summaryBand").innerHTML = ""; return;
     }
     $("outlookNote").innerHTML = "";
+    renderSummary(v);
     $("outlookMeta").textContent = `${v.bars.toLocaleString()} bars · ${v.days} days · realised vol ${(100 * v.realised_vol).toFixed(0)}%`;
 
     const a = v.alignment;
@@ -438,6 +493,9 @@
         { price: s.swing_low, label: `swing low ${TB.num(s.swing_low, 0)}`, color: "#00b852" },
       ],
       marks: (s.breaks || []).map((b) => ({ bar_time: b.bar_time, direction: b.direction, kind: b.kind })),
+      // Only on the 15-minute chart: a verdict is made on a 15m bar, and plotting it against a
+      // folded hourly or daily candle would put it on a bar it was never about.
+      predictions: structFrame === "15m" ? history : [],
       projection: horizon ? { sigma_pct: horizon.sigma_pct, hours: horizon.hours } : null,
       label: `${sym} ${structFrame} with structure`,
     });
@@ -453,10 +511,13 @@
 
   async function loadOutlook() {
     outlook = await TB.get(`/api/outlook?symbol=${sym}`);
+    renderSources(outlook.sources);
     renderOutlook();
     const v = await TB.get(`/api/verdicts?symbol=${sym}&days=30`);
     record = v.record || {};
+    history = v.history || [];
     renderVerdicts(v.verdicts);
+    renderStructure();
   }
 
   load(); loadHist(); loadScore(); loadOutlook();
@@ -469,7 +530,6 @@
 (() => {
   const { $, esc, num, price, time, ago, pct, compact, pnlClass } = TB;
   const cards = {}, seenAt = {};
-  let prevMsgs = null, prevAt = 0;
 
   // One card per symbol, from the exchange's own rolling 24h numbers.
   function paintCard(sym) {
@@ -515,34 +575,6 @@
   }
   const paintAll = () => Object.keys(TB.header?.prices || {}).sort().forEach(paintCard);
 
-  async function loadMetrics() {
-    const m = await TB.get("/api/metrics"), f = m.feed;
-    const row = (k, v, cls = "") => `<tr><td class="muted w-40">${k}</td><td class="font-mono ${cls} wrap">${v}</td></tr>`;
-    $("feed").innerHTML = [
-      row("Status", f.connected ? "connected" : "disconnected", f.connected ? "up" : "down"),
-      row("URL", esc(f.url)),
-      row("Connected since", f.connected_since ? `${time(f.connected_since)} (${ago(f.connected_since)})` : "—"),
-      row("Last message", f.seconds_since_message === null ? "never" : `${f.seconds_since_message}s ago`, f.seconds_since_message > 30 ? "down" : ""),
-      row("Private channels", f.authenticated ? "authenticated" : "off", f.authenticated ? "up" : "muted"),
-      row("Reconnects", f.reconnects),
-      row("Last error", esc(f.last_error || "—"), f.last_error ? "down" : "muted"),
-    ].join("");
-    const now = Date.now() / 1000;
-    TB.rows("channels", Object.entries(f.messages || {}).sort(), ([k, v]) => {
-      const rate = prevMsgs && prevMsgs[k] !== undefined ? ((v - prevMsgs[k]) / (now - prevAt)) * 60 : null;
-      return `<tr><td class="font-mono">${esc(k)}</td><td class="r font-mono">${num(v, 0)}</td><td class="r font-mono muted">${rate === null ? "—" : num(rate, 1)}</td></tr>`;
-    }, "No messages yet", 3);
-    prevMsgs = { ...f.messages }; prevAt = now;
-    const by = f.bars_closed_by || {};
-    $("closedBy").innerHTML = ["websocket", "clock"].map((k) => `<div class="bg-slate-50 rounded-lg p-3"><div class="text-[11px] muted">${k}</div><div class="font-mono text-xl font-semibold">${num(by[k] || 0, 0)}</div></div>`).join("");
-  }
-
-  const barRow = (e) => `<tr><td class="font-mono text-slate-500">${time(e.ts)}</td><td class="font-semibold">${esc(e.symbol)}</td><td><span class="badge">${esc(e.resolution)}</span></td>
-    <td class="font-mono">${time(e.bar_time)}</td><td><span class="badge ${e.source === "websocket" ? "badge-blue" : ""}">${esc(e.source)}</span></td>
-    <td class="r font-mono">${price(e.candle?.open)}</td><td class="r font-mono">${price(e.candle?.high)}</td><td class="r font-mono">${price(e.candle?.low)}</td><td class="r font-mono">${price(e.candle?.close)}</td></tr>`;
-  let bars = [];
-  async function loadBars() { bars = await TB.get("/api/events?type=CandleClosed&limit=100"); TB.rows("bars", bars, barRow, "No candle has closed since start", 9); }
-
   (async () => {
     const h = await TB.get("/api/header");
     for (const [sym, p] of Object.entries(h.prices)) if (p.fresh) seenAt[sym] = Date.now() - p.age_seconds * 1000;
@@ -552,9 +584,6 @@
   })();
   TB.on(["Tick", "MarketStats"], (e) => { seenAt[e.symbol] = Date.now(); setTimeout(() => paintCard(e.symbol), 0); });
   setInterval(paintAll, 5000);
-  TB.on("CandleClosed", (e) => { bars.unshift(e); bars = bars.slice(0, 100); TB.rows("bars", bars, barRow, "", 9); });
-  loadMetrics(); loadBars();
-  TB.every(loadMetrics, 3000);
 })();
 </script>
 {% endblock %}

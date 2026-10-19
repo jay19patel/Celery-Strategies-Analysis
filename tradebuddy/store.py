@@ -710,6 +710,25 @@ class Store:
         )
         return [dict(r) for r in rows][::-1]
 
+    def verdicts_between(self, symbol: str, since: float, source: str = "", limit: int = 4000) -> list[dict[str, Any]]:
+        """Every verdict made over a window, settled or not, oldest first.
+
+        `verdict_record` keeps only the marked ones, which is right for a scoreboard and wrong for
+        a chart: the claims still waiting on their horizon are the ones at the right-hand edge,
+        and leaving them out would make the most recent stretch look like nothing was said."""
+        where = "symbol = ? AND bar_time >= ?"
+        params: list[Any] = [symbol, since]
+        if source:
+            where += " AND source = ?"
+            params.append(source)
+        rows = self.db.execute(
+            f"SELECT symbol, source, bar_time, ts, horizon_hours, stance, measure, label, confidence, price,"  # noqa: S608 - fixed clauses, values bound
+            f" settled_at, actual_return, correct, baseline_correct FROM predictions WHERE {where}"
+            f" ORDER BY bar_time DESC LIMIT ?",
+            (*params, limit),
+        )
+        return [dict(r) for r in rows][::-1]
+
     def prune_predictions(self, now: float | None = None) -> int:
         now = time.time() if now is None else now
         return self.db.execute("DELETE FROM predictions WHERE ts < ?", (now - PREDICTION_DAYS * 86_400,)).rowcount

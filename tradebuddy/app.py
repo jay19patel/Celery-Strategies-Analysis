@@ -337,6 +337,7 @@ def create_app(
                     "live_phrase": LIVE_CONFIRM_PHRASE,
                     "can_edit": is_authenticated(request),
                     "pin_required": bool(auth_pin),
+                    "demo_data": ctx.get("demo_data", False),
                 },
             )
 

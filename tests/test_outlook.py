@@ -332,3 +332,69 @@ def test_stored_verdicts_are_pruned(tmp_path):
     store.record_verdict("BTCUSD", 1, now - (PREDICTION_DAYS + 1) * 86_400, 100.0, v)
     store.record_verdict("BTCUSD", 2, now, 100.0, v)
     assert store.prune_predictions(now) == 1
+
+
+# -- provenance ----------------------------------------------------------------------
+
+
+def test_every_source_says_what_it_depends_on():
+    """A badge that does not explain itself is decoration. Each one has to name its dependency,
+    because that is the whole point of separating them."""
+    from tradebuddy import provenance as prov
+
+    assert [s["key"] for s in prov.legend()] == list(prov.ORDER)
+    for s in prov.legend():
+        assert s["badge"] and s["colour"].startswith("#")
+        assert s["depends_on"].endswith(".") and len(s["detail"]) > 80
+    # Every card the page draws resolves to one, and the options cards never claim to be counted.
+    for card in ("term_structure", "atm_iv", "pcr", "chain_oi"):
+        assert prov.of(card)["key"] == prov.IMPLIED
+    assert prov.of("forecast")["key"] == prov.MODEL
+    assert prov.of("outlook")["key"] == prov.COUNTED
+    assert prov.of("something new")["key"] == prov.COUNTED  # falls back without claiming more
+
+
+async def test_the_view_separates_arithmetic_from_counted_history(cfg, exchange):
+    """Which way is counted; how far is arithmetic. One row, two kinds of claim, and the row says
+    so — a reader should never have to guess which half rests on a fit."""
+    from tradebuddy import provenance as prov
+
+    system = await make(cfg, exchange)
+    system.store.record_bars("BTCUSD", "15m", walk(20_000, seed=21))
+    view = await Api(system).outlook("BTCUSD")
+
+    assert [s["key"] for s in view["sources"]] == list(prov.ORDER)
+    for row in view["summary"]:
+        assert row["direction_source"] == prov.COUNTED
+        assert row["move_source"] == prov.MATH
+    assert all(h["source"] == prov.MATH for h in view["horizons"])
+
+
+async def test_a_verdict_carries_the_kind_of_evidence_behind_it(cfg, exchange):
+    from tradebuddy import provenance as prov
+
+    system = await make(cfg, exchange)
+    system.store.record_bars("BTCUSD", "15m", walk(3_000, seed=22))
+    body = await Api(system).verdicts("BTCUSD")
+    by_key = {v["key"]: v for v in body["verdicts"]}
+    assert by_key["pcr"]["source"] == prov.IMPLIED
+    assert by_key["outlook"]["source"] == prov.COUNTED
+
+
+async def test_one_reading_per_bar_reaches_the_chart(cfg, exchange):
+    """Several cards speak on the same bar; stacking their markers on one candle is a smear, not a
+    record. Outlook wins where it spoke, because it is the page's direction."""
+    from tradebuddy.api import _one_claim_per_bar
+
+    rows = [
+        {"bar_time": 100, "source": "pcr", "stance": "bullish", "confidence": 0.9, "label": "a", "price": 1.0,
+         "horizon_hours": 4, "settled_at": None, "correct": None, "actual_return": None},
+        {"bar_time": 100, "source": "outlook", "stance": "bearish", "confidence": 0.2, "label": "b", "price": 1.0,
+         "horizon_hours": 1, "settled_at": 5.0, "correct": 1, "actual_return": -0.01},
+        {"bar_time": 200, "source": "atm_iv", "stance": "vol_up", "confidence": 0.9, "label": "c", "price": 1.0,
+         "horizon_hours": 24, "settled_at": None, "correct": None, "actual_return": None},
+    ]
+    out = _one_claim_per_bar(rows)
+    assert [r["bar_time"] for r in out] == [100]  # the volatility claim has no side to draw
+    assert out[0]["source"] == "outlook" and out[0]["settled"] is True and out[0]["correct"] is True
+    assert "_rank" not in out[0]

@@ -148,9 +148,21 @@
       // only one of them reads as what the model actually thinks.
       const up = f.up_probability >= 0.5;
       const lean = up ? f.up_probability : f.down_probability ?? 1 - f.up_probability;
+      // Without skill it does not get to name a side. A greyed bar still reading "Down 57%" was
+      // read as "down" next to an Outlook saying "up", and the NO EDGE badge beside it did not
+      // stop that — a number on a page is a claim, whatever is printed next to it. There is one
+      // direction on this page and Outlook owns it.
+      const directionRow = sk.direction
+        ? bar(`${up ? "Up" : "Down"} in ${num(f.horizon_hours, 0)}h ${flag("direction")}`, lean, up ? "#12804a" : "#b42323")
+        : `<div class="rounded-md bg-slate-50 px-2.5 py-2 text-[11.5px] leading-snug">
+             <span class="badge !py-0 !px-1 !text-[9px] align-middle">NO EDGE</span>
+             <span class="muted">This model cannot call direction over ${num(f.horizon_hours, 0)}h — on bars it had never
+             seen it did no better than always naming the side that came up more often. It is not shown a side here.
+             The direction on this page is <a href="#outlookCard" class="text-brand-600">Outlook</a>, read from trend
+             and structure.</span></div>`;
       model = `<div class="space-y-2.5">
         ${quadrant(f, p?.atm_iv ?? a.context?.atm_iv, sk)}
-        ${bar(`${up ? "Up" : "Down"} in ${num(f.horizon_hours, 0)}h ${flag("direction")}`, lean, !sk.direction ? grey : up ? "#12804a" : "#b42323")}
+        ${directionRow}
         ${bar(`Breakout ±${num(f.breakout_pct, 2)}% ${flag("breakout")}`, f.breakout_probability, sk.breakout ? "#7c3aed" : grey,
           `<span class="muted"> of ${num(f.breakout_sigma, 2)}σ</span>`)}
         <div class="grid grid-cols-2 gap-2 pt-1">

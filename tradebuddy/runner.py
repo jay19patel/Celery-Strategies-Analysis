@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from typing import Any, Protocol
 
@@ -75,6 +75,7 @@ class MarketData:
 def make_job(
     strategy: Strategy, event: CandleClosed, prices: dict[str, float], data_env: str,
     options_history: Callable[[str, float], list[dict[str, Any]]] | None = None,
+    outlook: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Everything a worker needs, as plain JSON. A strategy that asks for options history gets the
     engine's stored rows for this symbol's underlying in the job: the worker has no database."""
@@ -91,6 +92,8 @@ def make_job(
     }
     if strategy.options_history_hours and options_history is not None:
         job["options_history"] = options_history(event.symbol, strategy.options_history_hours)
+    if strategy.wants_outlook and outlook is not None:
+        job["outlook"] = outlook
     return job
 
 
@@ -121,7 +124,8 @@ async def evaluate(strategy: Strategy, job: dict[str, Any], market: Any, worker:
             return result(error="the bar that just closed is not in the history yet")
 
     try:
-        signal = await asyncio.wait_for(strategy.on_candle(Context(symbol, resolution, bar_time, candles, market)), timeout)
+        ctx = Context(symbol, resolution, bar_time, candles, market, job.get("outlook") or {})
+        signal = await asyncio.wait_for(strategy.on_candle(ctx), timeout)
     except Exception as exc:
         return result(error=repr(exc))
     if signal is None:
@@ -200,6 +204,7 @@ class StrategyRunner:
         self, bus: EventBus, store: Store, strategies: list[Strategy], evaluator: Evaluator,
         prices: Callable[[], dict[str, float]], data_env: Callable[[], str],
         options_history: Callable[[str, float], list[dict[str, Any]]] | None = None,
+        outlook: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         self.bus = bus
         self.store = store
@@ -209,6 +214,7 @@ class StrategyRunner:
         self.prices = prices
         self.data_env = data_env
         self.options_history = options_history  # (symbol, hours) -> stored options rows, for the job
+        self.outlook = outlook  # symbol -> the engine's directional view, for the job
         self.stats: dict[str, _Stats] = {s.name: _Stats() for s in strategies}
         self._paused: set[tuple[str, str]] = set()  # (strategy, symbol) waiting for prices to return
 
@@ -228,7 +234,8 @@ class StrategyRunner:
                     log.info("strategy_resumed strategy=%s symbol=%s", s.name, event.symbol)
                 stats.in_flight += 1
                 try:
-                    await self.evaluator.submit(s, make_job(s, event, prices, self.data_env(), self.options_history))
+                    view = await self.outlook(event.symbol) if (s.wants_outlook and self.outlook) else None
+                    await self.evaluator.submit(s, make_job(s, event, prices, self.data_env(), self.options_history, view))
                 except Exception as exc:
                     stats.in_flight -= 1
                     stats.errors += 1

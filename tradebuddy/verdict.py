@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from tradebuddy import provenance as prov
+
 # What a verdict is a claim about, and so how it gets marked.
 #   direction   price higher or lower after the horizon
 #   volatility  realised volatility over the horizon, against what came before
@@ -58,8 +60,14 @@ class Verdict:
     def scorable(self) -> bool:
         return bool(self.measure)
 
+    @property
+    def source(self) -> dict[str, Any]:
+        """Which kind of evidence this card rests on. An options card and a counted card can reach
+        the same verdict and still not deserve the same weight."""
+        return prov.of(self.key)
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self) | {"measure": self.measure, "scorable": self.scorable}
+        return asdict(self) | {"measure": self.measure, "scorable": self.scorable, "source": self.source["key"]}
 
 
 # `numbers` is an explicit dict, not **kwargs: the inputs it carries are whatever the card

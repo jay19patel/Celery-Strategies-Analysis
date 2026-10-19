@@ -33,6 +33,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from tradebuddy import provenance as prov
 from tradebuddy import structure as st
 from tradebuddy.delta import Candle
 from tradebuddy.strategies.indicators import ema
@@ -264,6 +265,7 @@ def horizon_view(hours: float, label: str, price: float, rv: float, implied: dic
     return {
         "hours": hours,
         "label": label,
+        "source": prov.MATH,
         "sigma_pct": round(100 * sigma, 3),
         "expected_move_pct": round(100 * typical, 3),
         "expected_move_usd": round(price * typical, 2),
@@ -298,7 +300,8 @@ def implied_for(hours: float, options: dict[str, Any] | None) -> dict[str, Any] 
     if not iv:
         return None
     sigma = sigma_over(float(iv), hours)
-    return {"atm_iv": round(float(iv), 4), "sigma_pct": round(100 * sigma, 3), "expected_move_pct": round(100 * expected_abs_move(sigma), 3)}
+    return {"source": prov.IMPLIED, "atm_iv": round(float(iv), 4), "sigma_pct": round(100 * sigma, 3),
+            "expected_move_pct": round(100 * expected_abs_move(sigma), 3)}
 
 
 # -- which way, counted ----------------------------------------------------------------
@@ -348,6 +351,146 @@ def counted_direction(candles: list[Candle], hours: float, bias: str | None, loo
     else:
         out["note"] = f"only {len(matched)} bars in this structure — needs {MIN_SAMPLE}"
     return out
+
+
+def build(
+    symbol: str, candles: list[Candle], options: dict[str, Any] | None = None,
+    stop_pct: float = 1.0, target_pct: float = 2.0,
+) -> dict[str, Any]:
+    """The whole view for one symbol, from stored bars. Pure, so the engine, the dashboard and a
+    strategy on a worker all read the identical reading rather than three versions of it."""
+    if not candles:
+        return {
+            "symbol": symbol, "bars": 0, "ready": False,
+            "hint": "No bars stored yet. The engine writes one every 15 minutes; "
+                    "`docker compose run --rm analyst backfill --days 365` fills in the past.",
+        }
+    price = candles[-1].close
+    frames, counted, patterns = [], [], {}
+    for spec in TIMEFRAMES:
+        folded = st.resample(candles, spec["factor"])
+        frame = read_timeframe(folded, spec)
+        frames.append(frame)
+        # Counted on the 15-minute series, which is the one with enough outcomes to count.
+        counted.append(counted_direction(candles, spec["horizon_hours"], frame.structure.get("bias")))
+        patterns[spec["interval"]] = pattern_record(folded if spec["factor"] > 1 else candles, spec["horizon_hours"])
+
+    # One volatility for every horizon: the last day of 15-minute bars, which is what the market is
+    # doing now rather than what it averaged over a week.
+    rv = st.realised_vol([c.close for c in candles], min(96, len(candles) - 1), BAR_SECONDS) or 0.0
+    horizons = [horizon_view(h["hours"], h["label"], price, rv, implied_for(h["hours"], options)) for h in HORIZONS]
+    view = {
+        "symbol": symbol,
+        "ready": True,
+        "price": price,
+        "bar_time": candles[-1].time,
+        "bars": len(candles),
+        "days": round(len(candles) * BAR_SECONDS / 86_400, 1),
+        "realised_vol": round(rv, 4),
+        "timeframes": [f.to_dict() for f in frames],
+        "alignment": alignment(frames),
+        "horizons": horizons,
+        # The one place a direction per timescale is decided. Everything else renders this.
+        "summary": summarise(frames, horizons, counted),
+        "direction": counted,
+        "patterns": patterns,
+        # The reward-to-risk the Trader would actually use, and what the arithmetic says about it.
+        # Volatility cancels: only the ratio of the two distances matters.
+        "trade_odds": {
+            "stop_pct": stop_pct, "target_pct": target_pct,
+            "p_stop_first": round(p_stop_first(stop_pct, target_pct) or 0, 4),
+            "reward_risk": round(target_pct / stop_pct, 2) if stop_pct else None,
+        },
+        "min_sample": MIN_SAMPLE,
+        "sources": prov.legend(),
+    }
+    # The same figures in sentences, from rules. Always present, never costs a token, and cannot
+    # drift from the numbers above it. TB-AI's reading is separate and badged.
+    view["narrative"] = narrate(view)
+    return view
+
+
+def summarise(frames: list[Timeframe], horizons: list[dict[str, Any]], counted: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per timescale: which way, how far it could go, and how likely that is.
+
+    The page had the three answers in three different cards and let the reader join them up, which
+    is how it ended up saying "up" in one place and "down" in another. There is one direction per
+    timescale and this is where it is decided; everything else on the page either renders this or
+    says why it cannot.
+
+    Direction comes from trend and structure — what the market is doing — never from the forecast
+    model, which has been measured to have no skill at calling 24-hour direction. "How likely" is
+    counted over the stored bars and carries the baseline it has to beat; where there are too few
+    outcomes it is None and the row says so rather than showing a number.
+    """
+    by_hours = {h["hours"]: h for h in horizons}
+    by_horizon = {c["horizon_hours"]: c for c in counted}
+    scales = [("Short", "a scalp"), ("Medium", "a day trade"), ("Long", "a position")]
+    out = []
+    for frame, spec, (scale, _) in zip(frames, TIMEFRAMES, scales, strict=False):
+        hours = spec["horizon_hours"]
+        # The distance is quoted over a horizon that exists on the page; a week has no card of its
+        # own, so the long row borrows the day's and says it is per day.
+        horizon = by_hours.get(hours) or by_hours.get(24.0) or (horizons[-1] if horizons else {})
+        row = by_horizon.get(hours) or {}
+        probability = row.get("conditional")
+        baseline = row.get("baseline")
+        # A probability is about a side. "Higher 46% of the time" is the down case at 54%.
+        if probability is not None and frame.direction < 0:
+            probability, baseline = 1 - probability, (1 - baseline if baseline is not None else None)
+        out.append({
+            "scale": scale,
+            "interval": frame.interval,
+            "label": frame.label,
+            "good_for": frame.sense,
+            "direction": frame.direction,
+            "trend": frame.trend,
+            "horizon_hours": hours,
+            "horizon_label": horizon.get("label", ""),
+            "move_pct": horizon.get("expected_move_pct"),
+            "move_usd": horizon.get("expected_move_usd"),
+            "band": horizon.get("band_68"),
+            "probability": probability,
+            "baseline": baseline,
+            # Three different kinds of claim in one row, and they are not equally dependable: which
+            # way is counted, how far is arithmetic. Saying so is the difference between a reading
+            # and a number.
+            "direction_source": prov.COUNTED,
+            "move_source": prov.MATH,
+            "sample": row.get("conditional_sample") or row.get("sample") or 0,
+            "edge": None if probability is None or baseline is None else round(probability - baseline, 4),
+            "note": row.get("note", "") or frame.note,
+        })
+    return out
+
+
+def pattern_edge(view: dict[str, Any], interval: str, kind: str, direction: str) -> dict[str, Any] | None:
+    """How often this exact break has gone on the way it broke, against how often any bar did.
+
+    The closest counted answer to the question a breakout trade actually asks. The structure-bias
+    rate in `counted_edge` is a weaker proxy — it describes the market the break happened in, not
+    the break — so this is what a break should be judged on when the history has enough of them."""
+    for row in view.get("patterns", {}).get(interval) or []:
+        if row["kind"] == kind and row["direction"] == direction and row.get("followed_through") is not None:
+            return {
+                "edge": row["edge"], "conditional": row["followed_through"], "baseline": row["baseline"],
+                "sample": row["count"], "source": f"{kind} {direction} on {interval}",
+            }
+    return None
+
+
+def counted_edge(view: dict[str, Any], side: str, hours: float) -> dict[str, Any] | None:
+    """How far the counted odds favour `side` over the baseline at this horizon, or None when
+    there is not enough history to say. The sign is flipped for a short: "higher 46% of the time"
+    is a 4-point edge to the downside, not a 4-point deficit."""
+    row = next((d for d in view.get("direction") or [] if d["horizon_hours"] == hours), None)
+    if not row or row.get("conditional") is None or row.get("baseline") is None:
+        return None
+    edge = row["conditional"] - row["baseline"]
+    return {
+        "edge": round(edge if side == "buy" else -edge, 4),
+        "conditional": row["conditional"], "baseline": row["baseline"], "sample": row["conditional_sample"],
+    }
 
 
 def narrate(view: dict[str, Any]) -> dict[str, str]:

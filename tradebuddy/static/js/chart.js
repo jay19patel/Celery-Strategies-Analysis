@@ -14,6 +14,14 @@
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const colorFor = (name, i) => ROLE_COLOR[name] || PALETTE[i % PALETTE.length];
 
+  // A `format` callback is code the caller wrote, not data a viewer typed, and several of the
+  // app's formatters return markup on purpose — TB.count renders 8,640,217 as a compact "8.6M"
+  // wrapped in a span carrying the exact figure as a tooltip. Escaping that put the tags on the
+  // screen. So formatter output is inserted as markup where the surround is HTML, and flattened to
+  // text where it is SVG, because an SVG <text> element cannot hold a span and would render empty.
+  // Names, hints and anything else that came from data stay escaped.
+  const flat = (v) => esc(String(v).replace(/<[^>]*>/g, ""));
+
   // "Nothing to draw" is a sentence, not an empty box: a chart that renders blank looks broken,
   // and the usual reason here is simply that the system has not been running long enough yet.
   const empty = (height, text) =>
@@ -64,7 +72,7 @@
     const ticks = niceTicks(lo, hi).filter((t) => t >= lo && t <= hi);
     const grid = ticks.map((t) =>
       `<line x1="${padL}" y1="${Y(t).toFixed(1)}" x2="${width - padR}" y2="${Y(t).toFixed(1)}" stroke="${GRID}" stroke-width="1"/>` +
-      `<text x="${padL - 5}" y="${(Y(t) + 3.5).toFixed(1)}" text-anchor="end" font-size="9.5" fill="${AXIS}" font-family="ui-monospace,monospace">${esc(format(t))}</text>`,
+      `<text x="${padL - 5}" y="${(Y(t) + 3.5).toFixed(1)}" text-anchor="end" font-size="9.5" fill="${AXIS}" font-family="ui-monospace,monospace">${flat(format(t))}</text>`,
     ).join("");
 
     const paths = live.map((s) => {
@@ -91,7 +99,7 @@
     const legend = hideLegend ? "" : `<div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[10.5px] muted mt-0.5">${
       live.map((s) => {
         const last = [...s.points].sort((a, b) => a.x - b.x).pop();
-        return `<span><span style="color:${s.color}">■</span> ${esc(s.name)} <span class="font-mono">${esc(format(last.y))}</span></span>`;
+        return `<span><span style="color:${s.color}">■</span> ${esc(s.name)} <span class="font-mono">${format(last.y)}</span></span>`;
       }).join("")}</div>`;
 
     return `<svg viewBox="0 0 ${width} ${height}" class="w-full" style="height:${height}px" role="img"
@@ -113,7 +121,7 @@
         <div class="flex-1 bg-slate-100 rounded-sm overflow-hidden" style="height:${height}px">
           <div style="width:${(100 * Math.abs(r.value) / max).toFixed(1)}%;height:100%;background:${r.color || colorFor(r.name, i)}"></div>
         </div>
-        <div class="text-[11px] font-mono r" style="flex:0 0 3.5rem;text-align:right">${esc(format(r.value))}</div>
+        <div class="text-[11px] font-mono r" style="flex:0 0 3.5rem;text-align:right">${format(r.value)}</div>
       </div>`).join("")}</div>`;
   }
 
@@ -123,6 +131,7 @@
    *
    * bars:  [{time, open, high, low, close}]
    * opts:  { levels: [{price, label, color, dashed}], marks: [{bar_time, direction, kind}],
+   *          predictions: [{bar_time, stance, price, settled, correct}],
    *          projection: {sigma_pct, hours}, height, width }
    *
    * The projection is the point of this chart rather than the candles: a cone of one and two
@@ -185,6 +194,25 @@
       return `<polygon points="${pts}" fill="${col}"><title>${esc(m.kind)} ${esc(m.direction)}</title></polygon>`;
     }).join("");
 
+    // What was said, drawn where it was said, faint enough to stay behind the price. A reading is
+    // cheap to make and easy to forget; seeing a fortnight of them against what the market then did
+    // is the only way to know whether to believe the one at the right-hand edge. Still open: hollow
+    // and grey, because it has not earned a colour yet.
+    const claims = (opts.predictions || []).filter((p) => byTime.has(p.bar_time)).map((p) => {
+      const i = byTime.get(p.bar_time), b = rows[i];
+      const bull = p.stance === "bullish";
+      const y = bull ? Y(b.low) + 9 : Y(b.high) - 9;
+      const col = !p.settled ? "#94a3b8" : p.correct ? "#00b852" : "#eb5757";
+      const open = !p.settled;
+      const d = bull
+        ? `M ${X(i) - 3.5} ${y + 3} L ${X(i)} ${y - 2} L ${X(i) + 3.5} ${y + 3}`
+        : `M ${X(i) - 3.5} ${y - 3} L ${X(i)} ${y + 2} L ${X(i) + 3.5} ${y - 3}`;
+      const title = `${esc(p.label || (bull ? "leaned up" : "leaned down"))} — `
+        + (p.settled ? (p.correct ? "held" : "did not hold") : "still open");
+      return `<path d="${d}" fill="none" stroke="${col}" stroke-width="1.4" stroke-linecap="round"
+        opacity="${open ? 0.45 : 0.55}"><title>${title}</title></path>`;
+    }).join("");
+
     let cone = "";
     if (projection?.sigma_pct) {
       const x0 = X(rows.length - 1), x1 = width - padR;
@@ -198,7 +226,7 @@
     }
 
     return `<svg viewBox="0 0 ${width} ${height}" class="w-full" style="height:${height}px" role="img"
-      aria-label="${esc(opts.label || "price with levels")}">${cone}${levelLines}${body}${markers}</svg>`;
+      aria-label="${esc(opts.label || "price with levels")}">${cone}${levelLines}${claims}${body}${markers}</svg>`;
   }
 
   /**
@@ -214,7 +242,7 @@
         <div class="absolute top-0 bottom-0" style="left:${(100 * pos).toFixed(1)}%;width:2px;background:#0f172a"></div>
       </div>
       <div class="flex justify-between text-[10.5px] muted font-mono mt-0.5">
-        <span>${esc(fmt(low))}</span><span class="text-slate-700">${(100 * pos).toFixed(0)}% up</span><span>${esc(fmt(high))}</span>
+        <span>${fmt(low)}</span><span class="text-slate-700">${(100 * pos).toFixed(0)}% up</span><span>${fmt(high)}</span>
       </div></div>`;
   }
 

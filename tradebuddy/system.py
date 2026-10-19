@@ -18,7 +18,7 @@ from fastapi import WebSocket
 from tradebuddy import outlook, verdict
 from tradebuddy.brokers import Broker, DeltaBroker, PaperBroker
 from tradebuddy.config import Config
-from tradebuddy.delta import DeltaClient
+from tradebuddy.delta import Candle, DeltaClient
 from tradebuddy.email_report import DailyReporter
 from tradebuddy.errors import BrokerError
 from tradebuddy.events import (
@@ -77,6 +77,7 @@ BAR_COLLECT_EVERY = 900.0
 BAR_CATCHUP_MAX = 500  # one pass covers ~5 days of outage; older than that, use the backfill command
 HEALTH_EVERY = 300.0  # one row per process per 5 minutes
 OPTIONS_MINUTE_STEP = 60  # what the ATM IV and put/call cards chart, and so what their verdicts read
+OUTLOOK_BARS = 40_000  # a year of 15-minute bars is 35,040
 
 
 class Stream(Protocol):
@@ -225,6 +226,7 @@ class System:
         # Options and analysis, for the dashboard: the latest per symbol, wherever it was made.
         self.options_latest: dict[str, dict[str, Any]] = {}
         self.analysis_latest: dict[str, dict[str, Any]] = {}
+        self._outlook: dict[str, tuple[int, dict[str, Any]]] = {}  # symbol -> (bar_time, view); rebuilt once a bar
         for e in self.store.recent_events(20, types=["MarketAnalysis"]):  # survive a restart
             self.analysis_latest.setdefault(e["symbol"], e)
         reports = self.store.recent_events(50, types=["AIReport"])
@@ -256,6 +258,7 @@ class System:
             prices=lambda: {sym: p["price"] for sym, p in self.prices.snapshot().items() if p["fresh"]},
             data_env=lambda: self.settings.data_env,
             options_history=lambda symbol, hours: self.options_since(UNDERLYINGS.get(symbol, symbol), time.time() - hours * 3600),
+            outlook=self.outlook,
         )
         self.protection_lock = asyncio.Lock()  # one SL/TP change at a time: guard trails and manual edits
         self.guard = PositionGuard(self.bus, self.store, self.brokers, lambda: self.settings, self.tick_size, self.protection_lock)
@@ -605,6 +608,27 @@ class System:
         for v in verdicts:
             self.store.record_verdict(symbol, bar_time, ts, price, v)
         return verdicts
+
+    async def outlook(self, symbol: str) -> dict[str, Any]:
+        """The directional view for one symbol, from the stored bars.
+
+        The engine owns it because two things read it — the dashboard and any strategy with
+        `wants_outlook` — and two readings that drift apart is exactly the failure this was built
+        to avoid. Cached per bar: the whole thing is a scan over up to a year of bars and nothing
+        in it changes until the next 15-minute bar closes."""
+        rows = await asyncio.to_thread(self.store.bars, symbol, BAR_RESOLUTION, 0.0, OUTLOOK_BARS)
+        if not rows:
+            return outlook.build(symbol, [])
+        last = int(rows[-1]["time"])
+        cached = self._outlook.get(symbol)
+        if cached and cached[0] == last:
+            return cached[1]
+        candles = [Candle(int(r["time"]), r["open"], r["high"], r["low"], r["close"], r["volume"]) for r in rows]
+        summary = (self.options_latest.get(symbol) or {}).get("summary")
+        s = self.settings
+        view = await asyncio.to_thread(outlook.build, symbol, candles, summary, s.stop_loss_pct, s.take_profit_pct)
+        self._outlook[symbol] = (last, view)
+        return view
 
     def options_since(self, underlying: str, since: float) -> list[dict[str, Any]]:
         """The 15-minute options rows kept for good, from `since` on. What a strategy compares the

@@ -82,6 +82,39 @@
   </section>
 </div>
 
+<h2 class="text-[13px] font-semibold text-slate-500 uppercase tracking-wider pt-2">Market feed <span class="normal-case font-normal tracking-normal text-slate-400">· the socket the prices arrive on. The numbers it carries are on <a href="/" class="text-brand-600">Market Data</a>.</span></h2>
+
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="plug-zap"></i>WebSocket connection</div></div>
+    <div class="scroll">
+      <table class="tbl"><tbody id="feed"></tbody></table>
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="rss"></i>Channels <span class="card-sub">messages received</span></div></div>
+    <div class="scroll">
+      <table class="tbl"><thead><tr><th>Channel</th><th class="r">Messages</th><th class="r">Per min</th></tr></thead><tbody id="channels"></tbody></table>
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-head"><div class="card-title"><i data-lucide="clock"></i>Candle closes <span class="card-sub">what triggered each bar</span></div></div>
+    <div class="card-body space-y-3">
+      <div id="closedBy" class="grid grid-cols-2 gap-3"></div>
+      <p class="text-[11px] muted">A bar closes when the stream shows the next bar (<b>websocket</b>) or when the clock passes its end first (<b>clock</b>, 3s grace). Each bar is emitted once, whichever comes first.</p>
+    </div>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><div class="card-title"><i data-lucide="candlestick-chart"></i>Recent candle closes</div></div>
+  <div class="scroll max-h-96">
+          <table class="tbl"><thead><tr><th>Closed</th><th>Symbol</th><th>Resolution</th><th>Bar open</th><th>Source</th><th class="r">Open</th><th class="r">High</th><th class="r">Low</th><th class="r">Close</th></tr></thead><tbody id="bars"></tbody></table>
+    
+  </div>
+</section>
+
 <div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
   <section class="card xl:col-span-3">
     <div class="card-head"><div class="card-title"><i data-lucide="globe"></i>Delta REST <span class="card-sub">market = public data · account = your Delta account</span></div></div>
@@ -102,7 +135,7 @@
 <script src="/static/js/chart.js?v={{ v }}"></script>
 <script>
 (() => {
-  const { $, esc, num, ago, duration, count, ms, compact } = TB;
+  const { $, esc, num, ago, duration, count, ms, compact, time, price } = TB;
   // Rates come from the last minute of samples; until there is a minute of them, from the average since start.
   const WINDOW = 60, history = [];
   const rate = (now, current, base, uptime) => (base && now - base.at >= 20
@@ -185,6 +218,7 @@
       <td class="r font-mono muted" title="since this process started">${count(e.count)}</td>
       <td class="muted">${ago(e.last_at)}</td></tr>`, "No events yet", 4);
 
+    renderFeed(m);
     TB.rows("rest", Object.entries(m.rest), ([k, r]) => `<tr>
       <td class="font-mono">${esc(k)}</td><td class="r font-mono">${count(r.count)}</td><td class="r font-mono ${r.errors ? "down" : "muted"}">${count(r.errors)}</td>
       <td class="r font-mono">${ms(r.last_ms)}</td><td class="muted">${ago(r.last_at)}</td><td class="wrap down">${esc(r.last_error)}</td></tr>`, "No REST calls yet", 6);
@@ -237,6 +271,39 @@
       <td class="muted">${day(t.oldest)}</td><td class="muted">${day(t.newest)}</td><td class="text-[11.5px]">${esc(t.keep)}</td></tr>`, "", 8);
   }
 
+  // ── the socket the prices arrive on ────────────────────────────────────────
+  // Plumbing, so it lives here rather than on Market Data: that page is the numbers the
+  // feed carries, this one is whether the feed is carrying them.
+  let prevMsgs = null, prevAt = 0;
+  function renderFeed(m) {
+    const f = m.feed || {};
+    const row = (k, v, cls = "") => `<tr><td class="muted w-40">${k}</td><td class="font-mono ${cls} wrap">${v}</td></tr>`;
+    $("feed").innerHTML = [
+      row("Status", f.connected ? "connected" : "disconnected", f.connected ? "up" : "down"),
+      row("URL", esc(f.url)),
+      row("Connected since", f.connected_since ? `${time(f.connected_since)} (${ago(f.connected_since)})` : "—"),
+      row("Last message", f.seconds_since_message === null ? "never" : `${f.seconds_since_message}s ago`, f.seconds_since_message > 30 ? "down" : ""),
+      row("Private channels", f.authenticated ? "authenticated" : "off", f.authenticated ? "up" : "muted"),
+      row("Reconnects", f.reconnects),
+      row("Last error", esc(f.last_error || "—"), f.last_error ? "down" : "muted"),
+    ].join("");
+    const now = Date.now() / 1000;
+    TB.rows("channels", Object.entries(f.messages || {}).sort(), ([k, v]) => {
+      const rate = prevMsgs && prevMsgs[k] !== undefined ? ((v - prevMsgs[k]) / (now - prevAt)) * 60 : null;
+      return `<tr><td class="font-mono">${esc(k)}</td><td class="r font-mono">${num(v, 0)}</td><td class="r font-mono muted">${rate === null ? "—" : num(rate, 1)}</td></tr>`;
+    }, "No messages yet", 3);
+    prevMsgs = { ...f.messages }; prevAt = now;
+    const by = f.bars_closed_by || {};
+    $("closedBy").innerHTML = ["websocket", "clock"].map((k) => `<div class="bg-slate-50 rounded-lg p-3"><div class="text-[11px] muted">${k}</div><div class="font-mono text-xl font-semibold">${num(by[k] || 0, 0)}</div></div>`).join("");
+  }
+
+  const barRow = (e) => `<tr><td class="font-mono text-slate-500">${time(e.ts)}</td><td class="font-semibold">${esc(e.symbol)}</td><td><span class="badge">${esc(e.resolution)}</span></td>
+    <td class="font-mono">${time(e.bar_time)}</td><td><span class="badge ${e.source === "websocket" ? "badge-blue" : ""}">${esc(e.source)}</span></td>
+    <td class="r font-mono">${price(e.candle?.open)}</td><td class="r font-mono">${price(e.candle?.high)}</td><td class="r font-mono">${price(e.candle?.low)}</td><td class="r font-mono">${price(e.candle?.close)}</td></tr>`;
+  let bars = [];
+  async function loadBars() { bars = await TB.get("/api/events?type=CandleClosed&limit=100"); TB.rows("bars", bars, barRow, "No candle has closed since start", 9); }
+
+
   // ── process load over time ─────────────────────────────────────────────────
   // The Processes table above is a snapshot: it can say CPU is 4% now and nothing about whether
   // that is normal. This is the same three numbers, kept (process_health) and drawn.
@@ -263,8 +330,10 @@
   load();
   loadDb();
   loadHealth();
+  loadBars();
   TB.every(loadDb, 30000);
   TB.every(loadHealth, 60000);
+  TB.on("CandleClosed", (e) => { bars.unshift(e); bars = bars.slice(0, 100); TB.rows("bars", bars, barRow, "", 9); });
   TB.every(load, 3000);
 })();
 </script>

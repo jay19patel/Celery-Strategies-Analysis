@@ -90,6 +90,18 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   the market did once the horizon passed (`System.score_forecasts`, `insights.outcome`). Market Data
   draws the two against each other and scores them with `insights.score_forecasts` — always beside
   the baseline that needed no model, because a hit rate alone cannot tell skill from drift.
+- `provenance.py` — where every figure came from (arithmetic, counted history, what traders paid, a
+  trained model, TB-AI), ordered by how little has to be true for it to hold. The page badges each
+  one: showing them identically is how an Outlook reading "up" ended up beside a skill-less model
+  reading "Down 57%". A model without skill is not shown a side at all.
+- `demo.py` — `python -m tradebuddy demo` writes a market that never happened into its own database
+  (`data/demo.db`), so the pages can be read before real history exists. It refuses a database that
+  has ever held an order, and sets `demo_data`, which puts a banner on every page.
+- `strategies/trade_buddy_manager.py` — trades the break the Market page shows: a fresh BOS on a bar
+  bigger and busier than usual, no higher timeframe against it, and a counted record saying this kind
+  of break pays. It reads `ctx.outlook` (the engine's own view, `wants_outlook`) rather than working
+  one out, so the strategy and the page can never disagree. Fail closed: without counted history it
+  refuses and says to run `backfill`.
 - `structure.py` (swings, BOS, CHoCH, FVG, squeeze, resampling), `outlook.py` (the directional view:
   trend on 15m/1h/1d, how far price travels by when, and direction counted over the stored bars) and
   `verdict.py` (one short checkable claim per Market-page card). All three are pure — bars in, numbers

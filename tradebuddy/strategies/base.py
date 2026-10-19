@@ -13,7 +13,7 @@ stop_loss_pct and take_profit_pct, or the result is an error and nothing is trad
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar, Protocol
 
 from tradebuddy.delta import Candle, OptionQuote
@@ -47,6 +47,12 @@ class Context:
     bar_time: int
     candles: list[Candle]  # closed bars, oldest first; the last one just closed. Empty when lookback == 0.
     market: Market
+    # The engine's directional view for this symbol (outlook.build): trend on 15m/1h/1d, how far
+    # price travels by when, and direction counted over every stored bar. Empty unless the strategy
+    # sets `wants_outlook`. It arrives with the job rather than being computed here, because it is a
+    # scan over a year of bars and because the strategy must read the same reading the dashboard
+    # shows — two versions of "which way is this market going" is how a system stops being trusted.
+    outlook: dict[str, Any] = field(default_factory=dict)
 
 
 class Strategy(ABC):
@@ -61,6 +67,9 @@ class Strategy(ABC):
     # reads them once and sends them with the job, so a strategy that compares the options market with
     # where it was keeps no state of its own and gives the same answer on any worker.
     options_history_hours: ClassVar[float] = 0.0
+    # Hand the engine's directional view to on_candle through ctx.outlook. Same reasoning as
+    # options_history_hours: the worker has no database, and the reading must be the shared one.
+    wants_outlook: ClassVar[bool] = False
 
     @abstractmethod
     async def on_candle(self, ctx: Context) -> Signal | None: ...
