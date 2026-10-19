@@ -424,23 +424,35 @@ class System:
         while True:
             try:
                 with self.jobs_health.tick() as job:
-                    job.note = await asyncio.to_thread(self._record_health_once)
+                    # The reading is taken here and only the writing goes to a thread. Monitor
+                    # counts the loop's own tasks, and asyncio.all_tasks() raises off the loop —
+                    # taking the whole snapshot in the thread made this job fail every five
+                    # minutes with "no running event loop" and record nothing at all.
+                    processes = self._health_snapshot()
+                    job.note = await asyncio.to_thread(self._write_health, processes, time.time())
             except Exception:
                 log.exception("health_recording_failed")
             await asyncio.sleep(every)
 
-    def _record_health_once(self, now: float | None = None) -> str:
-        now = time.time() if now is None else now
-        processes = [
+    def _health_snapshot(self) -> list[dict[str, Any]]:
+        """Every process's load, as of now. Must run on the event loop."""
+        return [
             self.monitor.snapshot(),
             *([self.remote_feed.process] if self.remote_feed and self.remote_feed.process else []),
             *[b["process"] for b in self.remote_processes.values()],
         ]
+
+    def _write_health(self, processes: list[dict[str, Any]], now: float) -> str:
+        """Store what was measured. Pure SQLite, safe on a thread."""
         for p in processes:
             self.store.record_health(
                 p.get("role") or "?", now, p.get("process_cpu_pct"), p.get("process_memory_mb"), p.get("loop_lag_max_ms"),
             )
         return f"{len(processes)} processes"
+
+    def _record_health_once(self, now: float | None = None) -> str:
+        """One pass, for tests and for a manual run."""
+        return self._write_health(self._health_snapshot(), time.time() if now is None else now)
 
     async def score_forecasts(self, every: float = SCORE_EVERY) -> None:
         """What the market actually did over each matured forecast's horizon.

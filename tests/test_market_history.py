@@ -214,3 +214,27 @@ async def test_the_reads_clamp_their_window(cfg, exchange, days, expected):
     system = await make(cfg, exchange)
     assert (await Api(system).bars("BTCUSD", "15m", days=days))["days"] == expected
     assert (await Api(system).snapshots("BTCUSD", days=days))["days"] == expected
+
+
+async def test_the_health_job_survives_running_off_the_event_loop(cfg, exchange):
+    """The reading is taken on the loop and only the writing goes to a thread.
+
+    Monitor counts the loop's own tasks, and asyncio.all_tasks() raises when there is no running
+    loop — so taking the whole snapshot inside asyncio.to_thread made this job fail every five
+    minutes with "no running event loop" and record nothing. It reached production because the
+    test called the sync helper directly, from a test that had a loop.
+    """
+    import asyncio
+
+    system = await make(cfg, exchange)
+    processes = system._health_snapshot()
+    assert processes and processes[0]["role"]
+
+    # Exactly how the job runs it: the write, on a worker thread, with no loop of its own.
+    note = await asyncio.to_thread(system._write_health, processes, time.time())
+    assert note.endswith("processes")
+    assert system.store.health(0), "nothing was recorded"
+
+    # And the snapshot itself must still be taken where a loop exists.
+    with pytest.raises(RuntimeError, match="no running event loop"):
+        await asyncio.to_thread(system._health_snapshot)
