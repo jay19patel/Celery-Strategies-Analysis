@@ -17,6 +17,11 @@
     </div>
   </div>
 
+  <!-- The month in one line, and the account since it opened in another. The calendar below
+       answers neither: a day's P&L says nothing about whether the month is up, and +40 on a 1,000
+       account is not the same month as +40 on a 10,000 one. -->
+  <div id="monthSummary" class="mb-4"></div>
+
   <!-- Calendar Container Grid -->
   <div class="card flex-1 flex flex-col overflow-hidden shadow-sm">
     <div class="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
@@ -288,11 +293,46 @@
 
   async function fetchMonthData(year, month) {
     try {
-      monthDataCache = await TB.get(`/api/journal/month?year=${year}&month=${month}`);
+      const body = await TB.get(`/api/journal/month?year=${year}&month=${month}`);
+      monthDataCache = body.days || {};
+      renderMonthSummary(body.month);
     } catch (e) {
       console.warn("Could not load month stats:", e);
       monthDataCache = {};
+      renderMonthSummary(null);
     }
+  }
+
+
+  // ── the month, and the account ─────────────────────────────────────────────
+  function renderMonthSummary(m) {
+    if (!m) { $("monthSummary").innerHTML = ""; return; }
+    const { money, num } = TB;
+    const sign = (v) => (v > 0 ? "up" : v < 0 ? "down" : "muted");
+    const pct = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`);
+    const a = m.all_time;
+    const tile = (label, value, hint, cls = "") => `
+      <div class="px-3 py-2">
+        <div class="text-[10.5px] uppercase tracking-wide muted">${label}</div>
+        <div class="text-[17px] font-semibold font-mono ${cls}">${value}</div>
+        <div class="text-[10.5px] muted leading-snug">${hint}</div>
+      </div>`;
+    $("monthSummary").innerHTML = `
+      <div class="card grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 divide-x divide-slate-100">
+        ${tile(`${esc(m.label)} P&L`, `${m.change >= 0 ? "+" : ""}${money(m.change)}`,
+               `${pct(m.change_pct)} on the month`, sign(m.change))}
+        ${tile("Started the month at", money(m.start_equity), esc(m.start_source))}
+        ${tile(m.is_current ? "Worth now" : "Closed at", money(m.equity),
+               m.open_pnl ? `${m.open_pnl >= 0 ? "+" : ""}${money(m.open_pnl)} of it still open` : "all of it booked")}
+        ${tile("Originally put in", money(a.invested),
+               a.opened_at ? `opened ${TB.dateTime(a.opened_at).split(",")[0]}` : "the paper account")}
+        ${tile("Grown to", money(a.equity), `${pct(a.change_pct)} all time`, sign(a.change))}
+        ${tile("This month", `${m.trades} trade${m.trades === 1 ? "" : "s"}`,
+               `${m.green_days} green · ${m.red_days} red · ${m.trading_days} active day${m.trading_days === 1 ? "" : "s"}`)}
+      </div>
+      <p class="text-[10.5px] muted px-3 pt-1.5">P&L is realised — closed trades. What the account is worth also carries
+      anything still open, which is why the two differ while a position is live; the month's percentage is taken from
+      equity, not from the trades alone.</p>`;
   }
 
   async function renderCalendar() {

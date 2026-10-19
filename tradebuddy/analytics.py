@@ -398,6 +398,99 @@ async def gather_live(system: Any) -> dict[str, Any]:
     return {"accounts": accounts, "positions": positions, "metrics": system.metrics()}
 
 
+def collect_month_summary(
+    store: Store, year: int, month: int, days: dict[str, dict[str, Any]],
+    tz_name: str = "Asia/Kolkata", equity_now: float | None = None, open_pnl: float = 0.0, broker: str = "paper",
+) -> dict[str, Any]:
+    """The month in one line, and the account since it opened in another.
+
+    Two different questions, and the calendar below answers neither on its own:
+
+      this month   what the account was worth on the 1st, what it is worth now, and the gap — the
+                   only honest way to read a month, because a +40 on a 1,000 account and a +40 on a
+                   10,000 one are not the same month.
+      all time     the money originally put in against what it is worth today.
+
+    PnL here is realised: closed trades. Equity also carries what is still open, so the two differ
+    whenever a position is live — which is why the open figure is reported rather than hidden, and
+    why the month's percentage is computed from equity rather than from the trades alone.
+
+    The open figure comes from the broker, never from `equity - realised`. That subtraction looks
+    equivalent and is not: it silently absorbs any disagreement between the balance and the trade
+    record into a number labelled "still open", so a reconciliation problem would be displayed as a
+    position that does not exist.
+    """
+    tz = ZoneInfo(tz_name)
+    start = datetime(year, month, 1, tzinfo=tz)
+    end = datetime(year + month // 12, month % 12 + 1, 1, tzinfo=tz)
+    start_ts, end_ts = start.timestamp(), end.timestamp()
+    now = time.time()
+    is_current = start_ts <= now < end_ts
+
+    account = store.db.execute("SELECT starting_balance, created_at FROM paper_account WHERE id = 1").fetchone()
+    opening = float(account["starting_balance"]) if account else 0.0
+    opened_at = float(account["created_at"]) if account else 0.0
+
+    realised_before = store.db.execute(
+        "SELECT COALESCE(SUM(pnl), 0) AS p FROM paper_trades WHERE closed_at < ?", (start_ts,),
+    ).fetchone()["p"]
+    # The engine writes start-of-day equity every day it runs, which is the exact figure if it was
+    # running on the 1st. Without it, fall back to what had been booked by then — right whenever no
+    # position was open across midnight, and labelled so nobody reads it as measured.
+    row = store.db.execute(
+        "SELECT day, start_equity FROM daily_risk WHERE broker = ? AND day >= ? AND day < ? ORDER BY day LIMIT 1",
+        (broker, start.date().isoformat(), end.date().isoformat()),
+    ).fetchone()
+    if row and row["day"] == start.date().isoformat():
+        start_equity, source = float(row["start_equity"]), f"measured at the start of {start:%d %b}"
+    elif opened_at >= start_ts:
+        start_equity, source = opening, f"the account opened {datetime.fromtimestamp(opened_at, tz):%d %b}"
+    else:
+        start_equity, source = opening + float(realised_before), "from what had been booked by then"
+
+    rows = [d for key, d in sorted(days.items()) if start.date().isoformat() <= key < end.date().isoformat()]
+    realised = round(sum(d["pnl"] for d in rows), 4)
+    trades = sum(d["trades"] for d in rows)
+    green = [d for d in rows if d["pnl"] > 0]
+    red = [d for d in rows if d["pnl"] < 0]
+    best = max(days.items(), key=lambda kv: kv[1]["pnl"], default=None)
+    worst = min(days.items(), key=lambda kv: kv[1]["pnl"], default=None)
+
+    # A finished month closed where it closed; this one is worth what it is worth right now.
+    closing = equity_now if (is_current and equity_now is not None) else start_equity + realised
+    grew = closing - start_equity
+    all_time = closing - opening
+
+    def pct(part: float, whole: float) -> float | None:
+        return round(100 * part / whole, 2) if whole else None
+
+    return {
+        "label": f"{start:%B %Y}",
+        "is_current": is_current,
+        "start_equity": round(start_equity, 2),
+        "start_source": source,
+        "equity": round(closing, 2),
+        "change": round(grew, 2),
+        "change_pct": pct(grew, start_equity),
+        "realised_pnl": realised,
+        "open_pnl": round(open_pnl, 2) if is_current else 0.0,
+        "trades": trades,
+        "orders": sum(d["orders"] for d in rows),
+        "trading_days": len(rows),
+        "green_days": len(green),
+        "red_days": len(red),
+        "best_day": {"day": best[0], "pnl": round(best[1]["pnl"], 2)} if best and best[1]["pnl"] > 0 else None,
+        "worst_day": {"day": worst[0], "pnl": round(worst[1]["pnl"], 2)} if worst and worst[1]["pnl"] < 0 else None,
+        "all_time": {
+            "invested": round(opening, 2),
+            "opened_at": opened_at or None,
+            "equity": round(closing, 2),
+            "change": round(all_time, 2),
+            "change_pct": pct(all_time, opening),
+        },
+    }
+
+
 def collect_monthly_calendar_data(store: Store, year: int, month: int, tz_name: str = "Asia/Kolkata") -> dict[str, dict[str, Any]]:
     """PnL, trades and orders for every day of a month that had any."""
     tz = ZoneInfo(tz_name)

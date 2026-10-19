@@ -116,3 +116,119 @@ async def test_an_account_with_no_structures_has_an_empty_breakdown(cfg, exchang
     system = await make(cfg, exchange)
     add_trades(system, 3, "s1")
     assert system.paper.stats()["by_structure"] == []
+
+
+# -- the month, at the top of the Journal ---------------------------------------------
+
+
+def month_of(system, when, pnls, start_equity=None):
+    """Book closed trades through the month `when` falls in, optionally with a measured 1st."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(system.settings.day_timezone)
+    first = datetime(when.year, when.month, 1, tzinfo=tz)
+    if start_equity is not None:
+        system.store.start_day("paper", first.date().isoformat(), start_equity)
+    with system.store.db:
+        for i, pnl in enumerate(pnls):
+            t = first.timestamp() + i * 86_400 + 3600
+            system.store.db.execute(
+                "INSERT INTO paper_trades (client_order_id, strategy, symbol, side, size, contract_value,"
+                " entry_price, exit_price, leverage, margin, gross_pnl, fees, pnl, reason, opened_at, closed_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (f"m{i}", "s1", "BTCUSD", "long", 1, 0.001, 100, 101, 10, 10, pnl, 0.1, pnl, "take profit hit", t - 600, t),
+            )
+    return first
+
+
+async def test_the_month_header_reads_the_month_and_the_account(cfg, exchange):
+    """A day's P&L says nothing about whether the month is up, and +40 on a 1,000 account is not
+    the same month as +40 on a 10,000 one."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    system = await make(cfg, exchange)
+    now = datetime.now(ZoneInfo(system.settings.day_timezone))
+    month_of(system, now, [12.5, -4.0, 30.0], start_equity=1000.0)
+
+    body = await Api(system).journal_month(now.year, now.month)
+    m = body["month"]
+    assert set(body) == {"days", "month"}
+    assert m["is_current"] is True and m["label"] == f"{now:%B %Y}"
+    assert m["start_equity"] == 1000.0 and "measured" in m["start_source"]
+    assert m["realised_pnl"] == 38.5
+    assert m["trades"] == 3 and m["green_days"] == 2 and m["red_days"] == 1
+    assert m["best_day"]["pnl"] == 30.0 and m["worst_day"]["pnl"] == -4.0
+    assert m["all_time"]["invested"] == 1000.0
+
+
+async def test_the_month_percentage_is_taken_from_equity_not_the_trades(cfg, exchange):
+    """What the account is worth also carries what is still open. Reporting the trade total as the
+    month's return would under-report a month with a position running."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from tradebuddy.analytics import collect_month_summary, collect_monthly_calendar_data
+
+    system = await make(cfg, exchange)
+    tz = system.settings.day_timezone
+    now = datetime.now(ZoneInfo(tz))
+    month_of(system, now, [40.0], start_equity=1000.0)
+    days = collect_monthly_calendar_data(system.store, now.year, now.month, tz)
+
+    m = collect_month_summary(system.store, now.year, now.month, days, tz, equity_now=1055.0, open_pnl=15.0)
+    assert m["change"] == 55.0 and m["change_pct"] == 5.5  # equity, not the 40 booked
+    assert (m["realised_pnl"], m["open_pnl"]) == (40.0, 15.0)
+    assert m["realised_pnl"] + m["open_pnl"] == m["change"]  # the three reconcile
+
+
+async def test_the_open_figure_comes_from_the_broker_not_a_subtraction(cfg, exchange):
+    """`equity - realised` looks equivalent and is not: it absorbs any disagreement between the
+    balance and the trade record into a number labelled "still open", showing a reconciliation
+    problem as a position that does not exist."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from tradebuddy.analytics import collect_month_summary, collect_monthly_calendar_data
+
+    system = await make(cfg, exchange)
+    tz = system.settings.day_timezone
+    now = datetime.now(ZoneInfo(tz))
+    month_of(system, now, [48.0], start_equity=1000.0)  # booked, but the balance never moved
+    days = collect_monthly_calendar_data(system.store, now.year, now.month, tz)
+
+    m = collect_month_summary(system.store, now.year, now.month, days, tz, equity_now=1000.0, open_pnl=0.0)
+    assert m["open_pnl"] == 0.0  # nothing is open, and it does not claim -48 is
+    assert m["realised_pnl"] == 48.0 and m["change"] == 0.0  # the disagreement stays visible
+
+
+async def test_a_month_with_no_measured_first_day_says_where_its_opening_came_from(cfg, exchange):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    system = await make(cfg, exchange)
+    now = datetime.now(ZoneInfo(system.settings.day_timezone))
+    month_of(system, now, [10.0])  # no start_day row for the 1st
+
+    m = (await Api(system).journal_month(now.year, now.month))["month"]
+    assert "booked" in m["start_source"] or "opened" in m["start_source"]
+    assert m["start_equity"] > 0
+
+
+async def test_a_finished_month_closed_where_it_closed(cfg, exchange):
+    """A past month must not be marked to today's equity."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from tradebuddy.analytics import collect_month_summary, collect_monthly_calendar_data
+
+    system = await make(cfg, exchange)
+    tz = system.settings.day_timezone
+    past = datetime.now(ZoneInfo(tz)).replace(year=datetime.now(ZoneInfo(tz)).year - 1)
+    month_of(system, past, [25.0], start_equity=800.0)
+    days = collect_monthly_calendar_data(system.store, past.year, past.month, tz)
+
+    m = collect_month_summary(system.store, past.year, past.month, days, tz, equity_now=99_999.0, open_pnl=0.0)
+    assert m["is_current"] is False
+    assert m["equity"] == 825.0 and m["open_pnl"] == 0.0  # 800 + 25, not today's number

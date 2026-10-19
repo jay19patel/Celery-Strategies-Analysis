@@ -15,7 +15,14 @@ from zoneinfo import ZoneInfo
 
 from tradebuddy import auth, verdict
 from tradebuddy import structures as st  # option structures (straddles, condors)
-from tradebuddy.analytics import collect_daily_analytics, collect_monthly_calendar_data, gather_live, get_day_bounds, parse_day
+from tradebuddy.analytics import (
+    collect_daily_analytics,
+    collect_month_summary,
+    collect_monthly_calendar_data,
+    gather_live,
+    get_day_bounds,
+    parse_day,
+)
 from tradebuddy.brokers import Broker
 from tradebuddy.codec import EVENT_TYPES
 from tradebuddy.config import DEFAULT_AUTH_PIN
@@ -458,7 +465,21 @@ class Api:
             year, month = now.year, now.month
         if not 2000 <= int(year) <= 2100 or not 1 <= int(month) <= 12:
             raise ApiError(400, "year or month out of range")
-        return await asyncio.to_thread(collect_monthly_calendar_data, self.system.store, int(year), int(month), tz)
+        store = self.system.store
+        days = await asyncio.to_thread(collect_monthly_calendar_data, store, int(year), int(month), tz)
+        # Live equity for the month in progress; a finished month closed where it closed. The
+        # open figure comes from the broker rather than being inferred, so a balance that disagrees
+        # with the trade record shows up as itself instead of as a phantom position.
+        equity, open_pnl = None, 0.0
+        try:
+            account = await self._broker("paper").account()
+            equity, open_pnl = account.equity, account.unrealized_pnl
+        except BrokerError:
+            pass
+        summary = await asyncio.to_thread(
+            collect_month_summary, store, int(year), int(month), days, tz, equity, open_pnl,
+        )
+        return {"days": days, "month": summary}
 
     async def ai_report_at(self, report_id: int) -> dict[str, Any]:
         """One saved TB-AI attempt in full."""
