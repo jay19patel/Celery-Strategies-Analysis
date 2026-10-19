@@ -345,4 +345,121 @@ def all_for(symbol: str, options: dict[str, Any] | None, options_history: list[d
     ]
     if view:
         verdicts.append(from_outlook(view))
+        if view.get("volume"):
+            verdicts.append(volume(view["volume"]))
+        if view.get("indicators"):
+            verdicts.append(indicators(view["indicators"]))
+        shaped = view.get("shapes") or {}
+        if shaped.get("latest") is not None:
+            verdicts.append(shapes(shaped["latest"], shaped.get("record") or []))
     return [v.to_dict() | {"symbol": symbol} for v in verdicts]
+
+
+def volume(block: dict[str, Any], hours: float = 1.0) -> Verdict:
+    """Is anyone behind the move. Volume never says which way — only whether to believe the way."""
+    if not block.get("ready"):
+        return nothing("volume", block.get("note", "Not enough bars yet."), hours)
+    ratio = block.get("hour_ratio") or 0
+    up, down = block.get("up_share"), block.get("down_share")
+    obv_slope = block.get("obv_slope_20")
+    nums = {"hour_ratio": ratio, "last_ratio": block.get("last_ratio"), "z": block.get("z"),
+            "up_share": up, "obv_slope_20": obv_slope}
+    lean = None
+    if up is not None and abs(up - 0.5) >= 0.06:
+        lean = "bullish" if up > 0.5 else "bearish"
+    if ratio >= 1.8:
+        side = lean or "neutral"
+        who = f"{100 * up:.0f}% of it on up closes" if up is not None else "no clear side"
+        return _v("volume", side, "Heavy, and someone is paying",
+                  f"The last hour traded {ratio:.1f}x a normal hour, {who}. Moves made on volume like this follow "
+                  f"through more often than quiet ones — it is the difference between a level being taken and brushed.",
+                  min(1.0, ratio / 3), hours, nums)
+    if ratio <= 0.5:
+        return _v("volume", "range", "Nobody is here",
+                  f"The last hour traded {ratio:.1f}x a normal hour. Breaks made on volume this thin are the ones that "
+                  f"get given back; ranges hold until somebody turns up.", min(1.0, (0.5 - ratio) * 2), hours, nums)
+    if lean and obv_slope is not None and (obv_slope > 0) == (lean == "bullish"):
+        return _v("volume", lean, f"Size is leaning {'up' if lean == 'bullish' else 'down'}",
+                  f"Volume is ordinary ({ratio:.1f}x), but {100 * (up if lean == 'bullish' else down):.0f}% of the last "
+                  f"day's size went through on {'up' if lean == 'bullish' else 'down'} closes and on-balance volume agrees. "
+                  f"Quiet accumulation reads like this.", 0.45, hours, nums)
+    return _v("volume", "neutral", "Ordinary volume",
+              f"The last hour traded {ratio:.1f}x normal with size split {100 * (up or 0.5):.0f}/{100 * (down or 0.5):.0f} "
+              f"between up and down closes. Nothing here argues for or against a move.", 0.2, hours, nums)
+
+
+def indicators(block: dict[str, Any], hours: float = 4.0) -> Verdict:
+    """The classical readings, added up — with ADX deciding whether any of them count.
+
+    Trend readings in a range are the most reliably wrong thing on a chart, so the regime is read
+    first and everything else is reported inside it."""
+    if not block.get("ready"):
+        return nothing("indicators", block.get("note", "Not enough bars yet."), hours)
+    adx_v, adx_state = block["adx"]["value"], block["adx"]["state"]
+    rsi_v, rsi_state = block["rsi"]["value"], block["rsi"]["state"]
+    hist = block["macd"]["hist"]
+    ema_up, ema_down = block["ema"]["stacked_up"], block["ema"]["stacked_down"]
+    pos = block["bollinger"]["position"]
+    nums = {"adx": adx_v, "rsi": rsi_v, "macd_hist": hist, "bb_position": pos,
+            "stacked_up": ema_up, "stacked_down": ema_down, "squeeze": block["bollinger"]["squeeze"]}
+
+    if adx_state == "ranging":
+        if block["bollinger"]["squeeze"]:
+            return _v("indicators", "vol_up", "Coiled inside a range",
+                      f"ADX {adx_v:.0f} says there is no trend, and the bands are tighter than they have been. "
+                      f"Ranges like this end in an expansion; which way it goes is not something these readings know.",
+                      0.5, hours, nums)
+        edge = "" if pos is None else (" Price is at the top of its band." if pos > 0.85 else
+                                       " Price is at the bottom of its band." if pos < 0.15 else "")
+        return _v("indicators", "range", "No trend to follow",
+                  f"ADX {adx_v:.0f} is below 20: this is a range, and trend readings misfire in one.{edge} "
+                  f"RSI {rsi_v:.0f} ({rsi_state}), MACD histogram {hist:+.2f}.", 0.4, hours, nums)
+
+    votes = sum([1 if ema_up else -1 if ema_down else 0,
+                 1 if (hist or 0) > 0 else -1 if (hist or 0) < 0 else 0,
+                 1 if (rsi_v or 50) > 55 else -1 if (rsi_v or 50) < 45 else 0])
+    if votes >= 2:
+        return _v("indicators", "bullish", f"Trending up, ADX {adx_v:.0f}",
+                  f"The EMA stack, MACD and RSI {rsi_v:.0f} agree, inside a market ADX calls {adx_state}. "
+                  f"This is the regime trend rules are built for.", min(1.0, votes / 3), hours, nums)
+    if votes <= -2:
+        return _v("indicators", "bearish", f"Trending down, ADX {adx_v:.0f}",
+                  f"The EMA stack, MACD and RSI {rsi_v:.0f} agree to the downside, inside a market ADX calls {adx_state}.",
+                  min(1.0, -votes / 3), hours, nums)
+    return _v("indicators", "neutral", "Trending, but not together",
+              f"ADX {adx_v:.0f} says something is moving, but the readings disagree: RSI {rsi_v:.0f} ({rsi_state}), "
+              f"MACD histogram {hist:+.2f}, EMA stack {'up' if ema_up else 'down' if ema_down else 'mixed'}.",
+              0.25, hours, nums)
+
+
+def shapes(found: list[dict[str, Any]], record: list[dict[str, Any]], hours: float = 1.0) -> Verdict:
+    """The candle shapes on the latest bars, weighed by what each has actually led to.
+
+    A hammer is a shape, not a signal. The only thing that earns it a mention is its own record,
+    so a shape with no measured edge is reported as what it is: a shape."""
+    if not found:
+        return nothing("shapes", "No named shape on the last few bars.", hours)
+    by_name = {r["name"]: r for r in record}
+    scored = [(s, by_name.get(s["name"])) for s in found]
+    best = max(scored, key=lambda pair: abs((pair[1] or {}).get("edge") or 0))
+    shape, rec = best
+    label = shape.get("label", shape["name"])
+    nums = {"shapes": [s["name"] for s in found], "strength": shape.get("strength")}
+    if rec:
+        nums |= {"count": rec["count"], "followed_through": rec["followed_through"], "edge": rec["edge"]}
+    if not rec or rec.get("edge") is None:
+        return _v("shapes", "unclear", f"{label}, unmeasured",
+                  f"A {label.lower()} on the latest bars, but there are too few of them in the stored history to say "
+                  f"whether it has ever led anywhere. Run backfill and it will have a record.", 0.1, hours, nums)
+    edge = rec["edge"]
+    if abs(edge) < 0.02:
+        return _v("shapes", "neutral", f"{label}, no edge",
+                  f"A {label.lower()}. Over {rec['count']:,} of them it {rec['asks']} {100 * rec['followed_through']:.0f}% "
+                  f"of the time against {100 * rec['baseline']:.0f}% for any bar — which is to say it is a shape, not a signal.",
+                  0.15, hours, nums)
+    direction = shape["direction"]
+    stance = "bullish" if (direction == "bull") == (edge > 0) and direction != "neutral" else (
+        "bearish" if direction != "neutral" else "vol_up")
+    return _v("shapes", stance, f"{label}, {100 * edge:+.0f} pts",
+              f"A {label.lower()}. Over {rec['count']:,} of them it {rec['asks']} {100 * rec['followed_through']:.0f}% of "
+              f"the time against {100 * rec['baseline']:.0f}% for any bar.", min(1.0, abs(edge) * 10), hours, nums)

@@ -2,14 +2,11 @@
 {% block head %}{% endblock %}
 {% block content %}
 <div data-ai-note="market"></div>
-<!-- Every figure below comes from one of these, and they are not equally dependable. The badge on
-     each card says which, so "the options book says X" is never read with the same weight as
-     "this is what the arithmetic gives". -->
-<section class="card">
-  <div class="card-head"><div class="card-title"><i data-lucide="layers-3"></i>What this page is built on
-    <span class="card-sub">every number is badged with where it came from</span></div></div>
-  <div id="sources" class="card-body grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-2"></div>
-</section>
+
+<!-- The page's one answer, above everything. The tabs below are the evidence for it, split by what
+     each reading is MADE of — volume, shapes, arithmetic, the books, the model — because that is the
+     only line along which they differ in how much they can be trusted. Reading a model's guess and a
+     counted rate as the same kind of claim is what made this page confusing. -->
 <section class="card">
   <div class="card-head flex-wrap gap-2">
     <div class="card-title"><i data-lucide="radar"></i>Market analysis <span class="card-sub">options every 15s · analysis every 5 min</span></div><span id="v_summary"></span>
@@ -18,10 +15,6 @@
   <div class="card-body"><div id="kpis" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-2"></div></div>
 </section>
 
-<!-- ── Outlook ──────────────────────────────────────────────────────────────
-     Which way each timeframe leans, how far price can travel by when, and how often that has
-     actually worked out. "No clear trend on 15m" on its own is not a reading: the same 15m
-     picture inside a 1d uptrend and inside a 1d downtrend are different trades. -->
 <section class="card min-w-0" id="outlookCard">
   <div class="card-head flex-wrap gap-2">
     <div class="card-title"><i data-lucide="compass"></i>Outlook
@@ -43,6 +36,16 @@
   </div>
 </section>
 
+<nav id="viewTabs" class="flex flex-wrap gap-1.5 border-b border-slate-200 pb-0 -mb-px">
+    <button data-view="patterns" class="viewtab" title="Structure and candle shapes, each with what it has actually led to"><i data-lucide="shapes" class="w-3.5 h-3.5"></i><span>Patterns</span><span id="tv_patterns" class="tabverdict"></span></button>
+    <button data-view="volume" class="viewtab" title="Who is behind the move, from traded size alone"><i data-lucide="bar-chart-4" class="w-3.5 h-3.5"></i><span>Volume</span><span id="tv_volume" class="tabverdict"></span></button>
+    <button data-view="indicators" class="viewtab" title="The classical readings, and how far price can travel"><i data-lucide="gauge" class="w-3.5 h-3.5"></i><span>Indicators</span><span id="tv_indicators" class="tabverdict"></span></button>
+    <button data-view="oi" class="viewtab" title="What the options and futures books are positioned for"><i data-lucide="scale" class="w-3.5 h-3.5"></i><span>Open interest</span><span id="tv_oi" class="tabverdict"></span></button>
+    <button data-view="model" class="viewtab" title="The forecaster, used only where it beat its baseline"><i data-lucide="brain-circuit" class="w-3.5 h-3.5"></i><span>Model & AI</span><span id="tv_model" class="tabverdict"></span></button>
+    <button data-view="scorecard" class="viewtab" title="What every card claimed, against what happened"><i data-lucide="target" class="w-3.5 h-3.5"></i><span>Scorecard</span><span id="tv_scorecard" class="tabverdict"></span></button>
+</nav>
+
+<div data-view-panel="patterns" class="space-y-5">
 <div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
   <section class="card xl:col-span-3 min-w-0">
     <div class="card-head flex-wrap gap-2">
@@ -62,13 +65,7 @@
       <div id="breakList" class="mt-3"></div>
     </div>
   </section>
-  <section class="card xl:col-span-2 min-w-0">
-    <div class="card-head"><div class="card-title"><i data-lucide="move-horizontal"></i>How far, by when
-      <span class="card-sub">from realised volatility</span></div></div>
-    <div id="horizons" class="card-body space-y-3"></div>
-  </section>
 </div>
-
 <div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
   <section class="card xl:col-span-2 min-w-0">
     <div class="card-head"><div class="card-title"><i data-lucide="percent"></i>Which way, counted
@@ -81,30 +78,53 @@
     <div id="patterns" class="card-body"></div>
   </section>
 </div>
-
+<section class="card min-w-0">
+  <div class="card-head"><div class="card-title"><i data-lucide="shapes"></i>Candle shapes
+    <span class="card-sub">named shapes on the latest bars, and the record of each</span></div><span id="src_shapes"></span><span id="v_shapes"></span></div>
+  <div class="card-body space-y-3">
+    <div id="shapesLatest"></div>
+    <div id="shapesRecord"></div>
+  </div>
+</section>
 <section class="card min-w-0">
   <div class="card-head"><div class="card-title"><i data-lucide="message-square-text"></i>In words
     <span class="card-sub">the same numbers as sentences — rules, not AI</span></div></div>
   <div id="narrative" class="card-body space-y-2 text-[13px] leading-relaxed"></div>
 </section>
-
-<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
-  <section class="card xl:col-span-2 min-w-0">
-    <div class="card-head"><div class="card-title"><i data-lucide="lightbulb"></i>Insights <span class="card-sub">rules over the numbers above: no model, no AI</span></div><span id="src_insights" class="mr-1"></span><span id="v_insights"></span></div>
-    <div class="card-body">
-      <div id="insights"></div>
-      <div class="mt-4 rounded-lg border border-violet-100 bg-violet-50/40 p-3">
-        <div class="flex items-center gap-2 mb-1.5"><span class="badge badge-ai" title="Written by TradeBuddy AI (Mistral) from the numbers above">TB-AI</span><span class="text-[12px] font-semibold">Review</span><span id="aiModel" class="text-[10.5px] muted"></span><a href="/ai" class="ml-auto text-[11px] text-brand-600">Full report →</a></div>
-        <div id="ai"></div>
-      </div>
-    </div>
-  </section>
-  <section class="card min-w-0">
-    <div class="card-head"><div class="card-title"><i data-lucide="brain-circuit"></i>Forecast &amp; playbook <span class="card-sub">next 24h</span></div><span id="src_forecast"></span></div>
-    <div id="forecast" class="card-body"></div>
-  </section>
 </div>
 
+<div data-view-panel="volume" class="space-y-5">
+<section class="card min-w-0">
+  <div class="card-head"><div class="card-title"><i data-lucide="bar-chart-4"></i>Volume
+    <span class="card-sub">everything as a ratio to what this market normally does</span></div><span id="src_volume"></span><span id="v_volume"></span></div>
+  <div class="card-body space-y-4">
+    <div id="volumeKpis" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
+    <div><div class="stat-label mb-1">Last 24 hours <span class="up">■ up close</span> <span class="down">■ down close</span></div><div id="volumeChart"></div></div>
+    <div id="volumeDetail"></div>
+  </div>
+</section>
+</div>
+
+<div data-view-panel="indicators" class="space-y-5">
+<section class="card min-w-0">
+  <div class="card-head"><div class="card-title"><i data-lucide="gauge"></i>Indicators
+    <span class="card-sub">ADX decides whether the rest of them mean anything</span></div><span id="src_indicators"></span><span id="v_indicators"></span></div>
+  <div class="card-body space-y-4">
+    <div id="indKpis" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2"></div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div><div class="stat-label mb-1">RSI(14) <span class="muted">· 30 and 70 marked</span></div><div id="rsiChart"></div></div>
+      <div><div class="stat-label mb-1">ADX(14) <span class="muted">· 20 and 25 marked</span></div><div id="adxChart"></div></div>
+    </div>
+  </div>
+</section>
+<section class="card xl:col-span-2 min-w-0">
+  <div class="card-head"><div class="card-title"><i data-lucide="move-horizontal"></i>How far, by when
+    <span class="card-sub">from realised volatility</span></div><span id="src_horizons"></span></div>
+  <div id="horizons" class="card-body space-y-3"></div>
+</section>
+</div>
+
+<div data-view-panel="oi" class="space-y-5">
 <section class="card min-w-0">
   <div class="card-head flex-wrap gap-2">
     <div class="card-title"><i data-lucide="table-2"></i>Option chain <span id="chainSub" class="card-sub"></span></div><span id="src_chain_oi" class="mr-1"></span><span id="v_chain_oi"></span>
@@ -132,7 +152,47 @@
   </div>
   <p class="text-[10.5px] muted px-4 py-2">OI and volume in the underlying (BTC or ETH). Prices per 1 underlying, at Delta's mark. Shaded row: at the money.</p>
 </section>
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="calendar-range"></i>Term structure <span class="card-sub">ATM IV by expiry</span></div><span id="src_term_structure" class="mr-1"></span><span id="v_term_structure"></span></div>
+    <div id="term" class="card-body"></div>
+    <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">The price of volatility at each expiry, nearest on the left. It normally slopes
+    up — more can happen in a month than in a day. When a near expiry sits <b>above</b> the ones after it, the market is
+    pricing an event inside that window, and selling volatility into it is how a quiet-looking trade goes wrong.</p></section>
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="activity"></i>ATM IV <span class="card-sub">last 24h</span></div><span id="src_atm_iv" class="mr-1"></span><span id="v_atm_iv"></span></div>
+    <div id="ivSpark" class="card-body"></div>
+    <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">What a day of movement has been costing, over the last 24 hours. Rising means
+    options are getting dearer — buyers are paying up, usually into uncertainty. Falling means premium is draining out and
+    the market is calming. Compare it with the <b>IV / RV</b> tile above: that says whether the price is fair against how
+    much the market has actually been moving.</p></section>
+  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="scale"></i>Put / call OI <span class="card-sub">last 24h</span></div><span id="src_pcr" class="mr-1"></span><span id="v_pcr"></span></div>
+    <div id="pcrSpark" class="card-body"></div>
+    <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">Open interest in puts divided by calls. Above 1 means more puts are open than
+    calls — hedging or bearish positioning; below 1 the other way. <b>The move matters more than the level</b>: the ratio
+    can sit wherever the book happens to sit for hours, so it is a rise or a fall over a few hours that says writers have
+    switched sides.</p></section>
+</div>
+</div>
 
+<div data-view-panel="model" class="space-y-5">
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
+  <section class="card xl:col-span-2 min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="lightbulb"></i>Insights <span class="card-sub">rules over the numbers above: no model, no AI</span></div><span id="src_insights" class="mr-1"></span><span id="v_insights"></span></div>
+    <div class="card-body">
+      <div id="insights"></div>
+      <div class="mt-4 rounded-lg border border-violet-100 bg-violet-50/40 p-3">
+        <div class="flex items-center gap-2 mb-1.5"><span class="badge badge-ai" title="Written by TradeBuddy AI (Mistral) from the numbers above">TB-AI</span><span class="text-[12px] font-semibold">Review</span><span id="aiModel" class="text-[10.5px] muted"></span><a href="/ai" class="ml-auto text-[11px] text-brand-600">Full report →</a></div>
+        <div id="ai"></div>
+      </div>
+    </div>
+  </section>
+  <section class="card min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="brain-circuit"></i>Forecast &amp; playbook <span class="card-sub">next 24h</span></div><span id="src_forecast"></span></div>
+    <div id="forecast" class="card-body"></div>
+  </section>
+</div>
+</div>
+
+<div data-view-panel="scorecard" class="space-y-5">
 <section class="card min-w-0">
   <div class="card-head flex-wrap gap-2">
     <div class="card-title"><i data-lucide="target"></i>Forecast vs actual
@@ -155,31 +215,19 @@
   </div>
   <p id="scoreNote" class="text-[10.5px] muted px-4 pb-3"></p>
 </section>
-
-<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
-  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="calendar-range"></i>Term structure <span class="card-sub">ATM IV by expiry</span></div><span id="src_term_structure" class="mr-1"></span><span id="v_term_structure"></span></div>
-    <div id="term" class="card-body"></div>
-    <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">The price of volatility at each expiry, nearest on the left. It normally slopes
-    up — more can happen in a month than in a day. When a near expiry sits <b>above</b> the ones after it, the market is
-    pricing an event inside that window, and selling volatility into it is how a quiet-looking trade goes wrong.</p></section>
-  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="activity"></i>ATM IV <span class="card-sub">last 24h</span></div><span id="src_atm_iv" class="mr-1"></span><span id="v_atm_iv"></span></div>
-    <div id="ivSpark" class="card-body"></div>
-    <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">What a day of movement has been costing, over the last 24 hours. Rising means
-    options are getting dearer — buyers are paying up, usually into uncertainty. Falling means premium is draining out and
-    the market is calming. Compare it with the <b>IV / RV</b> tile above: that says whether the price is fair against how
-    much the market has actually been moving.</p></section>
-  <section class="card"><div class="card-head"><div class="card-title"><i data-lucide="scale"></i>Put / call OI <span class="card-sub">last 24h</span></div><span id="src_pcr" class="mr-1"></span><span id="v_pcr"></span></div>
-    <div id="pcrSpark" class="card-body"></div>
-    <p class="text-[10.5px] muted leading-snug mt-1.5" style="padding:0 1rem 0.9rem">Open interest in puts divided by calls. Above 1 means more puts are open than
-    calls — hedging or bearish positioning; below 1 the other way. <b>The move matters more than the level</b>: the ratio
-    can sit wherever the book happens to sit for hours, so it is a rise or a fall over a few hours that says writers have
-    switched sides.</p></section>
 </div>
+
+<section class="card">
+  <div class="card-head"><div class="card-title"><i data-lucide="layers-3"></i>What this page is built on
+    <span class="card-sub">every number is badged with where it came from</span></div></div>
+  <div id="sources" class="card-body grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-2"></div>
+</section>
 
 <h2 class="text-[13px] font-semibold text-slate-500 uppercase tracking-wider pt-2">Exchange feed <span class="normal-case font-normal tracking-normal text-slate-400">· the perpetual's own 24h numbers, straight from Delta. The socket itself, its channels and what closed each bar are plumbing, and live on <a href="/system" class="text-brand-600">System</a>.</span></h2>
 <div id="priceCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
 
 {% endblock %}
+
 
 {% block scripts %}
 <script src="/static/js/chart.js?v={{ v }}"></script>
@@ -254,6 +302,145 @@
   TB.on("MarketStats", (e) => { if (!data?.symbols[e.symbol]) return; data.symbols[e.symbol].stats = e; if (e.symbol === sym) schedule(); });
 
 
+
+  // ── tabs ───────────────────────────────────────────────────────────────────
+  // Split by what each reading is made of, not by topic. Volume, shapes, arithmetic, the books and
+  // the model differ in how much they can be trusted, and showing them in one scroll is what let a
+  // counted trend reading and a skill-less model's direction sit side by side saying opposite
+  // things. The headline above the tabs is the page's one answer; a tab is the evidence for it.
+  const VIEWS = ["patterns", "volume", "indicators", "oi", "model", "scorecard"];
+  const TAB_VERDICT = { patterns: "shapes", volume: "volume", indicators: "indicators",
+                        oi: "chain_oi", model: "forecast", scorecard: "outlook" };
+  let view = VIEWS[0];
+
+  function showView(next) {
+    view = VIEWS.includes(next) ? next : VIEWS[0];
+    document.querySelectorAll("[data-view-panel]").forEach((el) =>
+      el.classList.toggle("hidden", el.dataset.viewPanel !== view));
+    document.querySelectorAll("#viewTabs [data-view]").forEach((b) =>
+      b.classList.toggle("on", b.dataset.view === view));
+    const url = new URL(location.href);
+    url.searchParams.set("view", view);
+    history.replaceState(null, "", url);
+    TB.icons();
+  }
+
+  // The stance of each tab's own verdict, on its tab, so the shape of the market is readable
+  // without opening any of them.
+  function paintTabVerdicts(list) {
+    const by = Object.fromEntries((list || []).map((v) => [v.key, v]));
+    for (const [tab, key] of Object.entries(TAB_VERDICT)) {
+      const el = $(`tv_${tab}`), v = by[key];
+      if (!el) continue;
+      const [, cls] = STANCE[v?.stance] || STANCE.unclear;
+      el.className = `tabverdict ${v && v.stance !== "unclear" ? cls : "bg-slate-100 text-slate-400"}`;
+      el.textContent = v && v.stance !== "unclear" ? (STANCE[v.stance] || [])[0] : "—";
+      el.title = v ? `${v.label} — ${v.detail}` : "";
+    }
+  }
+
+  // ── volume ─────────────────────────────────────────────────────────────────
+  function renderVolume(b) {
+    if (!b || !b.ready) {
+      $("volumeKpis").innerHTML = `<div class="text-[11px] muted">${esc(b?.note || "No volume history yet.")}</div>`;
+      $("volumeChart").innerHTML = ""; $("volumeDetail").innerHTML = "";
+      return;
+    }
+    const tile = (label, value, hint, cls = "") =>
+      `<div class="bg-slate-50 rounded-lg p-2.5"><div class="text-[10.5px] uppercase tracking-wide muted">${label}</div>
+       <div class="text-[17px] font-semibold font-mono ${cls}">${value}</div>
+       <div class="text-[10.5px] muted leading-snug">${hint}</div></div>`;
+    const heavy = (r) => (r >= 1.8 ? "up" : r <= 0.5 ? "down" : "");
+    $("volumeKpis").innerHTML = [
+      tile("Last hour", `${b.hour_ratio}x`, "of a normal hour", heavy(b.hour_ratio)),
+      tile("Last bar", `${b.last_ratio}x`, `z-score ${b.z ?? "—"}`, heavy(b.last_ratio)),
+      tile("Bought vs sold", `${Math.round(100 * (b.up_share ?? 0.5))}/${Math.round(100 * (b.down_share ?? 0.5))}`,
+           "day's size on up / down closes", (b.up_share ?? 0.5) > 0.56 ? "up" : (b.up_share ?? 0.5) < 0.44 ? "down" : ""),
+      tile("On-balance volume", b.obv_slope_20 == null ? "—" : `${b.obv_slope_20 >= 0 ? "+" : ""}${b.obv_slope_20}`,
+           "20 bars, as days of volume", (b.obv_slope_20 ?? 0) > 0 ? "up" : (b.obv_slope_20 ?? 0) < 0 ? "down" : ""),
+    ].join("");
+
+    const max = Math.max(...b.series.map((s) => s.volume), 1);
+    $("volumeChart").innerHTML = `<svg viewBox="0 0 480 90" class="w-full" style="height:90px" role="img"
+        aria-label="Volume over the last day, coloured by whether the bar closed up">
+      ${b.series.map((s, i) => {
+        const w = 480 / b.series.length, h = (s.volume / max) * 78;
+        return `<rect x="${(i * w).toFixed(2)}" y="${(84 - h).toFixed(2)}" width="${Math.max(0.8, w - 0.6).toFixed(2)}"
+          height="${h.toFixed(2)}" fill="${s.up ? "#00b852" : "#eb5757"}" opacity="0.8"/>`;
+      }).join("")}
+      <line x1="0" y1="84" x2="480" y2="84" stroke="#e2e8f0"/>
+    </svg>`;
+
+    const lb = b.last_break;
+    $("volumeDetail").innerHTML = `
+      <div class="rounded-md bg-slate-50 px-3 py-2 text-[11.5px] leading-snug">
+        ${lb ? `The last ${esc(lb.kind === "choch" ? "change of character" : "break of structure")}
+          (${esc(lb.direction)}, ${lb.bars_ago} bar${lb.bars_ago === 1 ? "" : "s"} ago) came on
+          <span class="font-mono font-semibold ${heavy(lb.volume_ratio)}">${lb.volume_ratio}x</span> normal volume on a bar
+          ${lb.displacement}x the usual size. A break on thin volume is the one that gets given back.`
+        : "No break of structure in the stored window."}
+      </div>
+      <p class="text-[10.5px] muted mt-1.5">Volume cannot say which way price goes — only whether anyone turned up for the move.
+      Everything here is a ratio to what this market normally does, because 400 contracts means nothing on its own.</p>`;
+  }
+
+  // ── indicators ─────────────────────────────────────────────────────────────
+  function renderIndicators(b) {
+    if (!b || !b.ready) {
+      $("indKpis").innerHTML = `<div class="text-[11px] muted">${esc(b?.note || "Not enough bars yet.")}</div>`;
+      $("rsiChart").innerHTML = ""; $("adxChart").innerHTML = "";
+      return;
+    }
+    const STATE = { overbought: "down", oversold: "up", trending: "up", ranging: "muted", forming: "",
+                    rising: "up", falling: "down", neutral: "" };
+    const tile = (label, value, hint, cls = "") =>
+      `<div class="bg-slate-50 rounded-lg p-2.5"><div class="text-[10.5px] uppercase tracking-wide muted">${label}</div>
+       <div class="text-[16px] font-semibold font-mono ${cls}">${value}</div>
+       <div class="text-[10.5px] muted leading-snug">${hint}</div></div>`;
+    const ema = b.ema;
+    $("indKpis").innerHTML = [
+      tile("ADX(14)", b.adx.value ?? "—", esc(b.adx.state), STATE[b.adx.state] || ""),
+      tile("RSI(14)", b.rsi.value ?? "—", esc(b.rsi.state), STATE[b.rsi.state] || ""),
+      tile("MACD hist", b.macd.hist ?? "—", esc(b.macd.state), STATE[b.macd.state] || ""),
+      tile("Band width", b.bollinger.width_pct == null ? "—" : `${b.bollinger.width_pct}%`,
+           b.bollinger.squeeze ? "squeezed" : "normal", b.bollinger.squeeze ? "down" : ""),
+      tile("ATR(14)", b.atr.pct == null ? "—" : `${b.atr.pct}%`, `${TB.num(b.atr.value, 0)} a bar`),
+      tile("EMA stack", ema.stacked_up ? "20>50>200" : ema.stacked_down ? "20<50<200" : "mixed",
+           `50 at ${TB.num(ema.ema50, 0)}`, ema.stacked_up ? "up" : ema.stacked_down ? "down" : ""),
+    ].join("");
+
+    const line = (rows, lines, fmt) => TBC.timeLine(
+      [{ name: "", points: rows.map((r) => ({ x: r.time, y: r.value })) }],
+      { height: 130, format: fmt, hideLegend: true, gapSeconds: 3600 },
+    ) + `<div class="text-[10px] muted mt-0.5">${lines}</div>`;
+    $("rsiChart").innerHTML = line(b.rsi_series, "Above 70 is stretched, below 30 is washed out — in a trend both can stay there for days.", (v) => v.toFixed(0));
+    $("adxChart").innerHTML = line(b.adx_series, "Below 20 there is no trend to follow, and trend readings misfire. Above 25 one is worth following.", (v) => v.toFixed(0));
+  }
+
+  // ── candle shapes ──────────────────────────────────────────────────────────
+  function renderShapes(s) {
+    const latest = (s && s.latest) || [], record = (s && s.record) || [];
+    const col = (d) => (d === "bull" ? "up" : d === "bear" ? "down" : "muted");
+    $("shapesLatest").innerHTML = latest.length
+      ? `<div class="flex flex-wrap gap-1.5">${latest.slice().reverse().map((x) => `
+          <span class="px-2 py-1 rounded border border-slate-200 text-[11.5px]">
+            <span class="${col(x.direction)} font-semibold">${esc(x.label)}</span>
+            <span class="muted ml-1">${TB.time(x.bar_time)}</span></span>`).join("")}</div>`
+      : `<div class="text-[11px] muted">No named shape on the last few bars.</div>`;
+    $("shapesRecord").innerHTML = record.length
+      ? `<table class="tbl text-[12px]"><thead><tr><th>Shape</th><th>Asks</th><th class="r">Seen</th><th>How often it held</th><th class="r">Mean move</th></tr></thead><tbody>${
+          record.map((r) => `<tr>
+            <td class="${col(r.direction)} font-semibold">${esc(r.label)}</td>
+            <td class="muted text-[11px]">${esc(r.asks)}</td>
+            <td class="r font-mono">${r.count.toLocaleString()}</td>
+            <td style="min-width:11rem">${TBC.probBar(r.followed_through, r.baseline, { sample: r.count, minSample: 20, height: 14 })}</td>
+            <td class="r font-mono">${r.mean_move_pct}%</td></tr>`).join("")}</tbody></table>
+         <p class="text-[10.5px] muted mt-2">A shape is not a signal. The bar is how often it was followed by what it is
+         supposed to promise; the marker is the same question asked of any bar at all. Most shapes sit on their marker,
+         which is the useful finding.</p>`
+      : `<div class="text-[11px] muted">Not enough stored history to score shapes yet — run <span class="font-mono">backfill</span>.</div>`;
+  }
+
   // ── provenance ─────────────────────────────────────────────────────────────
   // A badge is not decoration here. Arithmetic holds given its inputs; a counted rate holds if the
   // future resembles the past; an implied vol is a fact about what someone paid, not a forecast;
@@ -281,6 +468,7 @@
     for (const [card, key] of Object.entries({
       term_structure: "implied", atm_iv: "implied", pcr: "implied", chain_oi: "implied",
       insights: "counted", outlook: "counted", summary: "counted", forecast: "model",
+      volume: "counted", indicators: "math", shapes: "counted", horizons: "math",
     })) {
       const el = $(`src_${card}`);
       if (el) el.innerHTML = srcBadgeFor(key);
@@ -453,6 +641,9 @@
       `<p class="${k === "headline" ? "font-semibold text-[14px]" : "text-slate-600"}">${esc(n[k])}</p>`).join("");
 
     renderStructure();
+    renderVolume(v.volume);
+    renderIndicators(v.indicators);
+    renderShapes(v.shapes);
   }
 
   // The chart the rest of it is about: candles, the levels that matter, where the breaks were,
@@ -517,9 +708,12 @@
     record = v.record || {};
     history = v.history || [];
     renderVerdicts(v.verdicts);
+    paintTabVerdicts(v.verdicts);
     renderStructure();
   }
 
+  document.querySelectorAll("#viewTabs [data-view]").forEach((b) => (b.onclick = () => showView(b.dataset.view)));
+  showView(new URLSearchParams(location.search).get("view"));
   load(); loadHist(); loadScore(); loadOutlook();
   TB.every(load, 60000);
   TB.every(loadHist, 60000);

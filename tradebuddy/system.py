@@ -590,21 +590,22 @@ class System:
         # Only when there is a real price: market_context carries labels and strings too, and a
         # verdict priced off one of those would be stored and later marked as if it meant something.
         if isinstance(price, int | float) and not isinstance(price, bool) and price > 0:
-            self.record_verdicts(e.symbol, int(bar_time), e.ts, float(price), e.insights or [], ctx.get("lean"))
+            await self.record_verdicts(e.symbol, int(bar_time), e.ts, float(price), e.insights or [], ctx.get("lean"))
 
-    def record_verdicts(
+    async def record_verdicts(
         self, symbol: str, bar_time: int, ts: float, price: float,
         found: list[dict[str, Any]], lean: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
         """Each Market-page card's verdict, written down so it can be marked once its horizon passes.
 
-        Built from what the engine itself holds — the options summary and the history it recorded —
-        rather than from anything the analyst sent, so the stored claim is the one the page shows.
-        `Outlook` is deliberately not included here: it is built from the bars on request and would
-        make this handler a scan over a year of them on every analysis cycle."""
+        Built from what the engine itself holds — the options summary, the history it recorded and
+        its own directional view — so the stored claim is the one the page shows. The view is the
+        expensive part, but it is cached per bar and built on a thread, and the analyst runs several
+        times per bar, so this costs one scan a bar rather than one a cycle."""
         summary = (self.options_latest.get(symbol) or {}).get("summary")
         history = self.store.options_history(UNDERLYINGS.get(symbol, symbol), ts - 24 * 3600, OPTIONS_MINUTE_STEP)
-        verdicts = verdict.all_for(symbol, summary, history, found, lean, None)
+        view = await self.outlook(symbol)
+        verdicts = verdict.all_for(symbol, summary, history, found, lean, view if view.get("ready") else None)
         for v in verdicts:
             self.store.record_verdict(symbol, bar_time, ts, price, v)
         return verdicts

@@ -13,9 +13,9 @@ either measured or derived from the current defaults (2 symbols, 15m bars).
 | **0** — Lock the dashboard, clean the box | **done** — private by default, `/ws` gated, dead files gone |
 | **1** — The history layer | **done** — `bars`, `market_snapshots`, `process_health`, retention, rate counters |
 | 2 — The conviction engine | **partly** — `outlook.py` does the multi-timeframe read and counted odds; weights not fitted |
-| 2b — Indicators, patterns, labels | **partly** — `structure.py` (BOS/CHoCH/FVG/squeeze) and MTF done; triple-barrier labels not |
+| 2b — Indicators, patterns, labels | **partly** — structure, candle shapes, ADX/MACD/BB/OBV, volume and MTF done; triple-barrier labels not |
 | 3 — The scorecard | **partly** — `predictions` stores and settles every card verdict; calibration not drawn |
-| 4 — The advisor UI | **partly** — Market page Outlook, structure chart, verdict badges; `/accuracy` page not built |
+| 4 — The advisor UI | **partly** — Market page is tabbed by provenance, with a verdict per tab; calibration plot not built |
 | 5 — Auto mode | not started |
 | 6 — Models and training | not started |
 

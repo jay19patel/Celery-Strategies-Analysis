@@ -270,3 +270,93 @@ def realised_vol(closes: list[float], bars: int, bar_seconds: int) -> float | No
         return None
     per_year = 365 * 24 * 3600 / bar_seconds
     return statistics.stdev(rets) * math.sqrt(per_year)
+
+
+# -- candlestick shapes ---------------------------------------------------------------
+
+DOJI_BODY = 0.1  # body this small a share of the range is indecision, not a direction
+WICK_RATIO = 2.0  # a hammer's lower wick is at least this many times its body
+MARUBOZU_BODY = 0.9
+CANDLE_NAMES = {
+    "hammer": "Hammer", "shooting_star": "Shooting star", "bullish_engulfing": "Bullish engulfing",
+    "bearish_engulfing": "Bearish engulfing", "doji": "Doji", "inside": "Inside bar",
+    "outside": "Outside bar", "marubozu_bull": "Bullish marubozu", "marubozu_bear": "Bearish marubozu",
+}
+
+
+@dataclass(frozen=True)
+class Shape:
+    """One named candle, or pair of candles, on one bar.
+
+    A shape is not a signal. A hammer in a downtrend at a level is one thing and a hammer in the
+    middle of a range is noise, and the only way to tell them apart is to count what each has
+    actually led to — which is why every shape is stored and scored like a break."""
+
+    name: str
+    direction: str  # "bull" | "bear" | "neutral"
+    bar_time: int
+    index: int
+    strength: float  # 0..1: how pronounced the shape is, for sorting and for a threshold
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self) | {"label": CANDLE_NAMES.get(self.name, self.name)}
+
+
+def _anatomy(c: Candle) -> tuple[float, float, float, float]:
+    """(body, range, upper wick, lower wick). Everything below is a ratio of these."""
+    rng = c.high - c.low
+    body = abs(c.close - c.open)
+    upper = c.high - max(c.open, c.close)
+    lower = min(c.open, c.close) - c.low
+    return body, rng, upper, lower
+
+
+def find_shapes(candles: list[Candle], limit: int = 200) -> list[Shape]:
+    """Named candle shapes over the last `limit` bars, oldest first.
+
+    Only shapes with an agreed definition, each written as an explicit ratio rather than a feeling:
+    a reader can check any of them against the bar it fired on.
+    """
+    window = candles[-limit:] if len(candles) > limit else candles
+    offset = len(candles) - len(window)
+    out: list[Shape] = []
+    for i, c in enumerate(window):
+        body, rng, upper, lower = _anatomy(c)
+        if rng <= 0:
+            continue
+        found: list[tuple[str, str, float]] = []
+        # A hammer is a long lower wick with the body at the top; a shooting star is its mirror.
+        if body > 0 and lower >= WICK_RATIO * body and upper <= body:
+            found.append(("hammer", "bull", lower / (WICK_RATIO * body) / 2))
+        if body > 0 and upper >= WICK_RATIO * body and lower <= body:
+            found.append(("shooting_star", "bear", upper / (WICK_RATIO * body) / 2))
+        # Only if neither fired. A hammer has a small body and would also pass the doji test, but
+        # the specific shape is the better description — and labelling one bar both "bull" and
+        # "neutral" is exactly the kind of contradiction this page exists to remove.
+        if not found:
+            if body / rng <= DOJI_BODY:
+                found.append(("doji", "neutral", 1 - body / rng))
+            elif body / rng >= MARUBOZU_BODY:
+                up = c.close > c.open
+                found.append(("marubozu_bull" if up else "marubozu_bear", "bull" if up else "bear", body / rng))
+        if i:
+            prev = window[i - 1]
+            pbody = abs(prev.close - prev.open)
+            prange = prev.high - prev.low
+            if c.high <= prev.high and c.low >= prev.low:
+                found.append(("inside", "neutral", 1 - rng / prange if prange > 0 else 0.5))
+            elif c.high > prev.high and c.low < prev.low:
+                found.append(("outside", "bull" if c.close > c.open else "bear", rng / prange - 1 if prange > 0 else 0.5))
+            # Engulfing: this body swallows the last one, and the two close opposite ways.
+            if (pbody > 0 and body > pbody
+                    and min(c.open, c.close) <= min(prev.open, prev.close)
+                    and max(c.open, c.close) >= max(prev.open, prev.close)):
+                if c.close > c.open and prev.close < prev.open:
+                    found.append(("bullish_engulfing", "bull", body / pbody / 3))
+                elif c.close < c.open and prev.close > prev.open:
+                    found.append(("bearish_engulfing", "bear", body / pbody / 3))
+        out += [
+            Shape(name=n, direction=d, bar_time=c.time, index=offset + i, strength=round(min(1.0, max(0.0, st_)), 3))
+            for n, d, st_ in found
+        ]
+    return out

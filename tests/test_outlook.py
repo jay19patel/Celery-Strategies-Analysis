@@ -307,8 +307,12 @@ async def test_the_verdicts_route_gives_the_page_what_it_draws(cfg, exchange):
     system.store.record_bars("BTCUSD", "15m", walk(3_000, seed=17))
     body = await Api(system).verdicts("BTCUSD")
 
-    assert {"symbol", "days", "verdicts", "record"} <= body.keys()
-    assert {v["key"] for v in body["verdicts"]} == {"term_structure", "atm_iv", "pcr", "chain_oi", "insights", "outlook"}
+    assert {"symbol", "days", "verdicts", "record", "history"} <= body.keys()
+    # One per tab on the Market page: four from the books, and one each for the outlook, the rule
+    # findings, volume, the indicators and the candle shapes.
+    assert {v["key"] for v in body["verdicts"]} == {
+        "term_structure", "atm_iv", "pcr", "chain_oi", "insights", "outlook", "volume", "indicators", "shapes",
+    }
     for v in body["verdicts"]:
         assert {"key", "stance", "label", "detail", "confidence", "horizon_hours", "measure", "scorable"} <= v.keys()
         assert v["stance"] in verdict.STANCES

@@ -90,6 +90,10 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   the market did once the horizon passed (`System.score_forecasts`, `insights.outcome`). Market Data
   draws the two against each other and scores them with `insights.score_forecasts` — always beside
   the baseline that needed no model, because a hit rate alone cannot tell skill from drift.
+- `reading.py` — one block per Market-page tab (volume, indicators, candle-shape records). The tabs are
+  split by what a reading is MADE of, not by topic, because that is the only line along which they differ
+  in how much they can be trusted — one scroll is how a counted trend reading and a skill-less model's
+  direction ended up side by side saying opposite things. The page's one answer sits above the tabs.
 - `provenance.py` — where every figure came from (arithmetic, counted history, what traders paid, a
   trained model, TB-AI), ordered by how little has to be true for it to hold. The page badges each
   one: showing them identically is how an Outlook reading "up" ended up beside a skill-less model

@@ -101,6 +101,9 @@ CARD_SOURCE = {
     "pcr": IMPLIED,
     "chain_oi": IMPLIED,
     "insights": COUNTED,  # rules over measured numbers; no fit, no forecast
+    "volume": COUNTED,
+    "indicators": MATH,  # transforms of price; nothing fitted and nothing counted
+    "shapes": COUNTED,
     "outlook": COUNTED,
     "forecast": MODEL,
     "playbook": MODEL,

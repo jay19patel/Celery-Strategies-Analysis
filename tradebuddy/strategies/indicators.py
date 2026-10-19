@@ -88,3 +88,78 @@ def supertrend(
                 direction = 1
         out.append((lower if direction == 1 else upper, direction))
     return out
+
+
+def macd(values: list[float], fast: int = 12, slow: int = 26, signal: int = 9) -> tuple[list[float], list[float], list[float]]:
+    """(macd, signal, histogram), aligned to the end. The histogram is what is read: it crosses
+    zero when momentum turns, which is earlier and cleaner than the two lines crossing."""
+    f, s = ema(values, fast), ema(values, slow)
+    if not f or not s:
+        return [], [], []
+    line = [a - b for a, b in zip(f[-len(s):], s, strict=True)]
+    sig = ema(line, signal)
+    if not sig:
+        return line, [], []
+    return line[-len(sig):], sig, [a - b for a, b in zip(line[-len(sig):], sig, strict=True)]
+
+
+def adx(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> tuple[list[float], list[float], list[float]]:
+    """Wilder's ADX with +DI and -DI, aligned to the end.
+
+    ADX measures how *strongly* price is trending, not which way — it is the one reading that
+    separates a trend from a range, and nothing else here does that. Below 20 is chop, where
+    breakout rules misfire; above 25 a trend is worth following.
+    """
+    n = len(closes)
+    if n < 2 * period + 1:
+        return [], [], []
+    plus_dm, minus_dm, tr = [], [], []
+    for i in range(1, n):
+        up, down = highs[i] - highs[i - 1], lows[i - 1] - lows[i]
+        plus_dm.append(up if up > down and up > 0 else 0.0)
+        minus_dm.append(down if down > up and down > 0 else 0.0)
+        tr.append(max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])))
+
+    def wilder(series: list[float]) -> list[float]:
+        out = [sum(series[:period])]
+        for v in series[period:]:
+            out.append(out[-1] - out[-1] / period + v)
+        return out
+
+    atr_s, plus_s, minus_s = wilder(tr), wilder(plus_dm), wilder(minus_dm)
+    pdi = [100 * p / a if a else 0.0 for p, a in zip(plus_s, atr_s, strict=True)]
+    mdi = [100 * m / a if a else 0.0 for m, a in zip(minus_s, atr_s, strict=True)]
+    dx = [100 * abs(p - m) / (p + m) if (p + m) else 0.0 for p, m in zip(pdi, mdi, strict=True)]
+    if len(dx) < period:
+        return [], pdi, mdi
+    out = [sum(dx[:period]) / period]
+    for v in dx[period:]:
+        out.append((out[-1] * (period - 1) + v) / period)
+    return out, pdi[-len(out):], mdi[-len(out):]
+
+
+def bollinger(values: list[float], period: int = 20, mult: float = 2.0) -> tuple[list[float], list[float], list[float]]:
+    """(middle, upper, lower), aligned to the end."""
+    if len(values) < period:
+        return [], [], []
+    mid, up, low = [], [], []
+    for i in range(period - 1, len(values)):
+        window = values[i - period + 1 : i + 1]
+        m = sum(window) / period
+        sd = (sum((v - m) ** 2 for v in window) / period) ** 0.5
+        mid.append(m)
+        up.append(m + mult * sd)
+        low.append(m - mult * sd)
+    return mid, up, low
+
+
+def obv(closes: list[float], volumes: list[float]) -> list[float]:
+    """On-balance volume: volume added on an up close and taken off on a down close.
+
+    A running total, so only its slope means anything. Rising while price is flat says buying is
+    going on under the surface; falling while price rises says the move is not being paid for."""
+    out = [0.0]
+    for i in range(1, len(closes)):
+        step = volumes[i] if closes[i] > closes[i - 1] else -volumes[i] if closes[i] < closes[i - 1] else 0.0
+        out.append(out[-1] + step)
+    return out

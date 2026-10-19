@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from tradebuddy import provenance as prov
+from tradebuddy import reading
 from tradebuddy import structure as st
 from tradebuddy.delta import Candle
 from tradebuddy.strategies.indicators import ema
@@ -403,6 +404,14 @@ def build(
         },
         "min_sample": MIN_SAMPLE,
         "sources": prov.legend(),
+        # One block per tab, each a self-contained reading of the same bars. Built here because the
+        # candles are already in hand and the whole view is cached per bar.
+        "volume": reading.volume_block(candles),
+        "indicators": reading.indicator_block(candles),
+        "shapes": {
+            "latest": [s.to_dict() for s in st.find_shapes(candles, limit=6)],
+            "record": reading.shape_record(candles, 1.0, BAR_SECONDS),
+        },
     }
     # The same figures in sentences, from rules. Always present, never costs a token, and cannot
     # drift from the numbers above it. TB-AI's reading is separate and badged.

@@ -275,10 +275,12 @@ class Api:
         )
         analysis = s.analysis_latest.get(symbol) or {}
         view = await self.outlook(symbol)
-        now = [
-            *verdict.all_for(symbol, summary, history, analysis.get("insights") or [], (analysis.get("context") or {}).get("lean"), None),
-            verdict.from_outlook(view).to_dict() | {"symbol": symbol},
-        ]
+        # With the view, `all_for` also produces the outlook, volume, indicator and shape verdicts —
+        # one per tab. Passing None here is what left four tabs with no verdict on them.
+        now = verdict.all_for(
+            symbol, summary, history, analysis.get("insights") or [],
+            (analysis.get("context") or {}).get("lean"), view,
+        )
         days = min(max(days, 1), 180)
         since = time.time() - days * 86_400
         rows = await asyncio.to_thread(s.store.verdict_record, symbol, since)

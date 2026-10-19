@@ -163,3 +163,11 @@ body[data-locked] .switch .track { opacity: .75; }
 @keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); } }
 /* Slots that may hold nothing (no AI note, one broker so no tabs) take no space between cards */
 [data-ai-note]:empty, .collapse-empty:not(:has(> :not(.hidden))) { display: none; }
+
+/* Market page view tabs: one per kind of evidence. */
+.viewtab { display: inline-flex; align-items: center; gap: .4rem; padding: .45rem .7rem; font-size: 12.5px;
+           font-weight: 600; color: #64748b; border: 1px solid transparent; border-bottom: none;
+           border-radius: .5rem .5rem 0 0; background: transparent; }
+.viewtab:hover { color: #0f172a; background: #f8fafc; }
+.viewtab.on { color: #0f172a; background: #fff; border-color: #e2e8f0; }
+.tabverdict { font-size: 9px; font-weight: 700; letter-spacing: .02em; padding: 1px 5px; border-radius: 999px; }
