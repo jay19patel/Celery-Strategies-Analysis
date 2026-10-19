@@ -489,7 +489,9 @@
     "down": "bg-bear-bg text-bear-text", "weak down": "bg-bear-bg/60 text-bear-text",
     "flat": "bg-slate-100 text-slate-600", "unknown": "bg-slate-50 text-slate-400",
   };
-  let outlook = null, record = {}, history = [], structFrame = "15m", barsCache = {};
+  // Not `history`: that is window.history, and shadowing it silently broke the tab switcher's
+  // replaceState. `pastClaims` also says what these actually are.
+  let outlook = null, record = {}, pastClaims = [], structFrame = "15m", barsCache = {};
 
   function verdictBadge(v, card) {
     const [, cls] = STANCE[v.stance] || STANCE.unclear;
@@ -686,7 +688,7 @@
       marks: (s.breaks || []).map((b) => ({ bar_time: b.bar_time, direction: b.direction, kind: b.kind })),
       // Only on the 15-minute chart: a verdict is made on a 15m bar, and plotting it against a
       // folded hourly or daily candle would put it on a bar it was never about.
-      predictions: structFrame === "15m" ? history : [],
+      predictions: structFrame === "15m" ? pastClaims : [],
       projection: horizon ? { sigma_pct: horizon.sigma_pct, hours: horizon.hours } : null,
       label: `${sym} ${structFrame} with structure`,
     });
@@ -706,7 +708,7 @@
     renderOutlook();
     const v = await TB.get(`/api/verdicts?symbol=${sym}&days=30`);
     record = v.record || {};
-    history = v.history || [];
+    pastClaims = v.history || [];
     renderVerdicts(v.verdicts);
     paintTabVerdicts(v.verdicts);
     renderStructure();

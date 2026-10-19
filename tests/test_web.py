@@ -219,3 +219,115 @@ def test_card_headers_cannot_force_the_page_wider():
     assert "flex-wrap: wrap" in head and "min-width: 0" in head
     assert "flex-wrap: wrap" in title and "min-width: 0" in title
     assert "overflow-wrap: anywhere" in sub and "min-width: 0" in sub
+
+
+# Browser globals a page script must not shadow. Not every property of `window` — `status`, `name`
+# and `event` are deprecated and are ordinary variable names — only the ones whose shadowing
+# silently breaks something. `history` is here because it did: a local named `history` for the past
+# readings turned `history.replaceState` in the tab switcher into a call on an array.
+BROWSER_GLOBALS = {
+    "history", "location", "document", "window", "navigator", "console", "screen", "parent", "top",
+    "frames", "origin", "crypto", "performance", "localStorage", "sessionStorage", "fetch",
+    "URL", "URLSearchParams", "Date", "Math", "JSON", "Promise", "Array", "Object",
+}
+
+
+def page_scripts() -> dict[str, str]:
+    """The inline script of every template, by filename."""
+    here = pathlib.Path(__file__).resolve().parent.parent / "tradebuddy" / "templates"
+    return {
+        path.name: "\n".join(re.findall(r"<script>(.*?)</script>", path.read_text(), re.S))
+        for path in sorted(here.glob("*.html"))
+    }
+
+
+def _split_declarators(text: str) -> list[str]:
+    """Split a declaration list on its own commas — not the ones inside `Math.min(a, b)`.
+
+    A plain `split(",")` is what made the first attempt at this check useless: it saw a comma in
+    every initialiser and called the next token a declaration, so half the pages "declared" Math.
+    """
+    out, buf, depth, quote = [], [], 0, ""
+    for ch in text:
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in "\"'`":
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    out.append("".join(buf))
+    return out
+
+
+def _leading_group(text: str) -> str:
+    """The balanced `{...}` or `[...]` the text starts with, and nothing after it."""
+    depth = 0
+    for i, ch in enumerate(text):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0:
+                return text[: i + 1]
+    return text
+
+
+def declared_names(script: str) -> set[str]:
+    """Every name a `let`/`const`/`var`/`function` binds.
+
+    The commas are the whole point: the bug this guards against was `let outlook = null,
+    record = {}, history = []`, where only the first name follows the keyword. A check that
+    stopped at `outlook` would have passed the very line it exists to catch.
+    """
+    names: set[str] = set()
+    for body in re.findall(r"\b(?:let|const|var)\s+([^;]{0,400})", script):
+        for part in _split_declarators(body):
+            target = part.split("=", 1)[0].strip()
+            if target.startswith(("{", "[")):
+                # Only the pattern itself. `for (const [k, v] of Object.entries(x))` has no `=`, so
+                # the rest of the line rides along — and Object is not being declared here.
+                names |= set(re.findall(r"([A-Za-z_$][\w$]*)", _leading_group(target)))
+            elif (m := re.match(r"([A-Za-z_$][\w$]*)$", target)):
+                names.add(m.group(1))
+    names |= set(re.findall(r"\bfunction\s+([A-Za-z_$][\w$]*)", script))
+    return names
+
+
+@pytest.mark.parametrize("name", sorted(page_scripts()))
+def test_no_page_script_shadows_a_browser_global(name):
+    """Shadowing one of these fails at the call site, far from the declaration, and only when that
+    path runs — so it reaches the browser rather than the test suite."""
+    clashes = sorted(BROWSER_GLOBALS.intersection(declared_names(page_scripts()[name])))
+    assert not clashes, f"{name} declares {clashes}, shadowing a browser global"
+
+
+def test_the_shadowing_check_catches_the_bug_it_was_written_for():
+    """The detector, against the exact line that broke the Market page's tabs — and against the
+    shapes that made the first two attempts at this check useless."""
+    broken = "let outlook = null, record = {}, history = [], structFrame = '15m', barsCache = {};"
+    found = declared_names(broken)
+    assert found == {"outlook", "record", "history", "structFrame", "barsCache"}
+    assert BROWSER_GLOBALS & found == {"history"}
+    # Destructuring binds just as thoroughly.
+    assert "location" in declared_names("const { $, esc, location } = TB;")
+
+    # And the three ways it cried wolf before: a comma inside an initialiser is not a declarator,
+    # and `for (const [k, v] of Object.entries(x))` does not declare Object.
+    for innocent in (
+        "const WINDOW = 60, samples = [];",
+        "const used = Math.min(100, r.used_pct || 0);",
+        "const [a, risk] = await Promise.all([f(), g()]);",
+        "const by = Object.fromEntries((l || []).map((v) => [v.key, v]));",
+        "for (const [tab, key] of Object.entries(TAB_VERDICT)) {",
+    ):
+        assert not BROWSER_GLOBALS & declared_names(innocent), innocent

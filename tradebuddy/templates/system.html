@@ -137,7 +137,8 @@
 (() => {
   const { $, esc, num, ago, duration, count, ms, compact, time, price } = TB;
   // Rates come from the last minute of samples; until there is a minute of them, from the average since start.
-  const WINDOW = 60, history = [];
+  // Not `history`: that is window.history. This one is the rate samples.
+  const WINDOW = 60, samples = [];
   const rate = (now, current, base, uptime) => (base && now - base.at >= 20
     ? ((current - base.value) / (now - base.at)) * 60
     : uptime > 0 ? (current / uptime) * 60 : 0);
@@ -150,9 +151,9 @@
   async function load() {
     const m = await TB.get("/api/metrics"), s = m.system, now = Date.now() / 1000;
     const total = Object.values(m.bus.events).reduce((a, e) => a + e.count, 0);
-    history.push({ at: now, total, counts: Object.fromEntries(Object.entries(m.bus.events).map(([k, e]) => [k, e.count])) });
-    while (history.length > 2 && now - history[1].at >= WINDOW) history.shift();
-    const base = history.length > 1 && history[0].total <= total ? history[0] : null;  // a lower total means the engine restarted
+    samples.push({ at: now, total, counts: Object.fromEntries(Object.entries(m.bus.events).map(([k, e]) => [k, e.count])) });
+    while (samples.length > 2 && now - samples[1].at >= WINDOW) samples.shift();
+    const base = samples.length > 1 && samples[0].total <= total ? samples[0] : null;  // a lower total means the engine restarted
     const queued = m.bus.workers.reduce((a, w) => a + w.queue, 0);
     const feed = m.feed || {}, feedError = String(feed.last_error || "");
     $("kpis").innerHTML = [
