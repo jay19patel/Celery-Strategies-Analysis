@@ -106,7 +106,7 @@ def describe(e: dict[str, Any], orders: dict[str, dict[str, Any]]) -> str:
 
 
 def synthesize_narrative(d: dict[str, Any]) -> dict[str, Any]:
-    """The day in plain sentences, from the numbers. Rule-based: no AI writes this."""
+    """The day in plain sentences, from the numbers. Rules only."""
     s, sh = d["summary"], d["system_health"]
     pnl = s["total_pnl"]
     word = "profit" if pnl > 0 else ("loss" if pnl < 0 else "flat")
@@ -331,14 +331,6 @@ def collect_daily_analytics(
     ]
     warnings_count = sum(n for t, n in by_type.items() if t in WARNING_TYPES)
 
-    # -- TB-AI reviews of the day (written by Mistral, so labelled TB-AI wherever shown) --
-    ai_rows = store.ai_reports(start_ts, end_ts, limit=2000)
-    good = [r for r in ai_rows if r["ok"]]
-    ai = {
-        "attempts": len(ai_rows), "good": len(good), "failed": len(ai_rows) - len(good),
-        "latest": {"time": hhmm(good[0]["ts"]), "headline": good[0].get("headline") or "", "health": good[0].get("health") or "", "model": good[0].get("model") or ""} if good else None,
-    }
-
     live = live or {}
     data: dict[str, Any] = {
         "date": day,
@@ -371,7 +363,6 @@ def collect_daily_analytics(
         "skipped": skip_groups,
         "outages": outages,
         "risk": {"halts": halts, "accounts": live.get("accounts") or [], "positions": live.get("positions") or []},
-        "ai": ai,
         "timeline": timeline,
         "timeline_total": len(story),
         "system_health": _system_health(errors, warnings_count, by_type, live),

@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% block head %}{% endblock %}
 {% block content %}
-<div data-ai-note="market"></div>
 
 <!-- Price first: it is what the page is about, and it was below six cards of analysis of it.
      The socket, its channels and what closed each bar are plumbing and live on System. -->
@@ -9,9 +8,9 @@
 
 
 <!-- The page's one answer, above everything. The tabs below are the evidence for it, split by what
-     each reading is MADE of — volume, shapes, arithmetic, the books, the model — because that is the
-     only line along which they differ in how much they can be trusted. Reading a model's guess and a
-     counted rate as the same kind of claim is what made this page confusing. -->
+     each reading is MADE of — volume, shapes, arithmetic, the books, the rules — because that is the
+     only line along which they differ in how much they can be trusted. Reading two different kinds
+     of claim as the same kind is what made this page confusing. -->
 <section class="card">
   <div class="card-head flex-wrap gap-2">
     <div class="card-title"><i data-lucide="radar"></i>Market analysis <span class="card-sub">options every 15s · analysis every 5 min</span></div><span id="v_summary"></span>
@@ -47,8 +46,7 @@
     <button data-view="volume" class="viewtab" title="Who is behind the move, from traded size alone"><i data-lucide="bar-chart-4" class="w-3.5 h-3.5"></i><span>Volume</span><span id="tv_volume" class="tabverdict"></span></button>
     <button data-view="indicators" class="viewtab" title="The classical readings, and how far price can travel"><i data-lucide="gauge" class="w-3.5 h-3.5"></i><span>Indicators</span><span id="tv_indicators" class="tabverdict"></span></button>
     <button data-view="oi" class="viewtab" title="What the options and futures books are positioned for"><i data-lucide="scale" class="w-3.5 h-3.5"></i><span>Open interest</span><span id="tv_oi" class="tabverdict"></span></button>
-    <button data-view="model" class="viewtab" title="The forecaster, used only where it beat its baseline"><i data-lucide="brain-circuit" class="w-3.5 h-3.5"></i><span>Model & AI</span><span id="tv_model" class="tabverdict"></span></button>
-    <button data-view="scorecard" class="viewtab" title="What every card claimed, against what happened"><i data-lucide="target" class="w-3.5 h-3.5"></i><span>Scorecard</span><span id="tv_scorecard" class="tabverdict"></span></button>
+    <button data-view="findings" class="viewtab" title="What the rules found in the numbers above"><i data-lucide="lightbulb" class="w-3.5 h-3.5"></i><span>Findings</span><span id="tv_findings" class="tabverdict"></span></button>
 </nav>
 
 <div data-view-panel="patterns" class="space-y-5">
@@ -222,51 +220,12 @@
 </div>
 </div>
 
-<div data-view-panel="model" class="space-y-5">
-<div class="grid grid-cols-1 xl:grid-cols-3 gap-5">
-  <section class="card xl:col-span-2 min-w-0">
-    <div class="card-head"><div class="card-title"><i data-lucide="lightbulb"></i>Insights <span class="card-sub">rules over the numbers above: no model, no AI</span></div><span id="src_insights" class="mr-1"></span><span id="v_insights"></span></div>
-    <div class="card-body">
-      <div id="insights"></div>
-      <div class="mt-4 rounded-lg border border-violet-100 bg-violet-50/40 p-3">
-        <div class="flex items-center gap-2 mb-1.5"><span class="badge badge-ai" title="Written by TradeBuddy AI (Mistral) from the numbers above">TB-AI</span><span class="text-[12px] font-semibold">Review</span><span id="aiModel" class="text-[10.5px] muted"></span><a href="/ai" class="ml-auto text-[11px] text-brand-600">Full report →</a></div>
-        <div id="ai"></div>
-      </div>
-    </div>
-  </section>
-  <section class="card min-w-0">
-    <div class="card-head"><div class="card-title"><i data-lucide="brain-circuit"></i>Forecast &amp; playbook <span class="card-sub">next 24h</span></div><span id="src_forecast"></span></div>
-    <div id="forecast" class="card-body"></div>
-  </section>
-</div>
-</div>
-
-<div data-view-panel="scorecard" class="space-y-5">
+<div data-view-panel="findings" class="space-y-5">
 <section class="card min-w-0">
-  <div class="card-head flex-wrap gap-2">
-    <div class="card-title"><i data-lucide="target"></i>Forecast vs actual
-      <span class="card-sub">what the model said, against what the market then did</span></div>
-    <select id="scoreDays" class="select text-[12px] !py-1" aria-label="Window">
-      <option value="7">7 days</option><option value="14" selected>14 days</option><option value="30">30 days</option><option value="90">90 days</option>
-    </select>
-  </div>
-  <div id="scoreTiles" class="grid grid-cols-2 md:grid-cols-4 gap-2 px-4 pt-3"></div>
-  <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 px-4 py-3">
-    <div><div class="stat-label mb-1">Realised volatility <span style="color:#7c3aed">■ forecast</span> <span style="color:#0f766e">■ actual</span></div><div id="rvTrack"></div>
-      <p class="text-[10.5px] muted leading-snug mt-1.5">Oldest on the left, one point per settled forecast. The two lines
-      moving together is the model tracking the market; a flat forecast line under a moving actual one is a model that
-      saw nothing coming. Purple sitting above green throughout means it reads the market as wilder than it turns out.</p></div>
-    <div><div class="stat-label mb-1">Direction calls <span class="up">■ right</span> <span class="down">■ wrong</span></div><div id="dirTrack"></div>
-      <p class="text-[10.5px] muted leading-snug mt-1.5">Each column is a slice of time, oldest left: green is the share
-      of calls it got right there, red the share it got wrong, and the dashed line is half. The strip along the bottom is
-      which way it leaned in that slice. Read it against the baseline in the tile above — in a rising fortnight a wall of
-      green can just be the drift, not skill.</p></div>
-  </div>
-  <p id="scoreNote" class="text-[10.5px] muted px-4 pb-3"></p>
+  <div class="card-head"><div class="card-title"><i data-lucide="lightbulb"></i>Insights <span class="card-sub">rules over the numbers above, nothing fitted</span></div><span id="src_insights" class="mr-1"></span><span id="v_insights"></span></div>
+  <div class="card-body"><div id="insights"></div></div>
 </section>
 </div>
-
-
 
 {% endblock %}
 
@@ -287,13 +246,10 @@
     if (!data) return;
     const d = data.symbols[sym] || {}, o = d.options;
     $("symTabs").innerHTML = SYMS.map((s) => `<button class="btn btn-sm ${s === sym ? "btn-primary" : ""}" data-sym="${s}">${s.replace("USD", "")}</button>`).join("");
-    $("symTabs").querySelectorAll("[data-sym]").forEach((b) => (b.onclick = () => { sym = b.dataset.sym; expiry = null; render(); loadHist(); loadScore(); loadOutlook(); }));
+    $("symTabs").querySelectorAll("[data-sym]").forEach((b) => (b.onclick = () => { sym = b.dataset.sym; expiry = null; render(); loadHist(); loadOutlook(); }));
     $("srcBadge").innerHTML = TBA.sourceBadge(o);
     $("kpis").innerHTML = TBA.kpis(d);
     $("insights").innerHTML = TBA.insights(d);
-    $("ai").innerHTML = TBA.ai(d, data.ai);
-    $("aiModel").textContent = data.ai === "on" ? data.ai_model : "";
-    $("forecast").innerHTML = TBA.forecast(d);
     const exps = o?.summary?.expiries || [];
     if (!expiry || !exps.some((e) => String(Math.trunc(e.expiry)) === expiry)) {
       const day = o?.summary?.day;
@@ -320,24 +276,6 @@
   async function load() { data = await TB.get("/api/analysis"); render(); }
   async function loadHist() { hist[sym] = await TB.get(`/api/options/history?symbol=${sym}&hours=24`); renderHist(); }
 
-  // ── forecast vs actual ────────────────────────────────────────────────────
-  let score = null;
-  async function loadScore() {
-    try { score = await TB.get(`/api/forecast/record?symbol=${sym}&days=${$("scoreDays").value}`); } catch (err) { return; }
-    renderScore();
-  }
-  function renderScore() {
-    if (!score) return;
-    const pts = score.points || [];
-    $("scoreTiles").innerHTML = TBA.scoreTiles(score.score || {});
-    $("rvTrack").innerHTML = TBA.twoLines(pts, "predicted_realized_vol", "actual_realized_vol", (v) => TBA.ivp(v, 0));
-    $("dirTrack").innerHTML = TBA.hitTrack(pts);
-    const s = score.score || {};
-    $("scoreNote").textContent = s.count
-      ? `${s.count} forecast${s.count === 1 ? "" : "s"} scored over the last ${score.days} days on ${score.symbol}. A forecast is settled once its 24h horizon has passed, against the candles for that window.`
-      : "Forecasts are recorded as they are made and scored a day later, so this fills in from now on.";
-  }
-  $("scoreDays").onchange = loadScore;
   $("expiry").onchange = () => { expiry = $("expiry").value; render(); };
   TB.on("OptionsSnapshot", (e) => { if (!data) return; (data.symbols[e.symbol] ||= {}).options = { source: e.source, at: e.ts, summary: e.summary }; schedule(); });
   TB.on("MarketAnalysis", (e) => { if (!data) return; (data.symbols[e.symbol] ||= {}).analysis = e; schedule(); });
@@ -347,12 +285,12 @@
 
   // ── tabs ───────────────────────────────────────────────────────────────────
   // Split by what each reading is made of, not by topic. Volume, shapes, arithmetic, the books and
-  // the model differ in how much they can be trusted, and showing them in one scroll is what let a
-  // counted trend reading and a skill-less model's direction sit side by side saying opposite
-  // things. The headline above the tabs is the page's one answer; a tab is the evidence for it.
-  const VIEWS = ["patterns", "volume", "indicators", "oi", "model", "scorecard"];
+  // the rules differ in how much they can be trusted, and showing them in one scroll is what let
+  // two readings sit side by side saying opposite things. The headline above the tabs is the
+  // page's one answer; a tab is the evidence for it.
+  const VIEWS = ["patterns", "volume", "indicators", "oi", "findings"];
   const TAB_VERDICT = { patterns: "shapes", volume: "volume", indicators: "indicators",
-                        oi: "chain_oi", model: "forecast", scorecard: "outlook" };
+                        oi: "chain_oi", findings: "insights" };
   let view = VIEWS[0];
 
   function showView(next) {
@@ -603,9 +541,9 @@
 
   // ── provenance ─────────────────────────────────────────────────────────────
   // A badge is not decoration here. Arithmetic holds given its inputs; a counted rate holds if the
-  // future resembles the past; an implied vol is a fact about what someone paid, not a forecast;
-  // a model is worth what it beat its baseline by. Showing them identically was the page's worst
-  // habit — it is how "Outlook: up" and a skill-less "Down 57%" ended up side by side.
+  // future resembles the past; an implied vol is a fact about what someone paid, not a prediction.
+  // Showing them identically was the page's worst habit — it is how two readings of different
+  // worth ended up side by side looking equally solid.
   let SOURCES = {};
 
   function srcBadgeFor(key) {
@@ -622,7 +560,7 @@
     // Put the badge on every card whose source is fixed.
     for (const [card, key] of Object.entries({
       term_structure: "implied", atm_iv: "implied", pcr: "implied", chain_oi: "implied",
-      insights: "counted", outlook: "counted", summary: "counted", forecast: "model",
+      insights: "counted", outlook: "counted", summary: "counted",
       volume: "counted", indicators: "math", shapes: "counted", horizons: "math", agreement: "math",
       where: "counted", levels: "math",
     })) {
@@ -765,10 +703,9 @@
         </div>`;
       }).join("")}
     </div>
-    <p class="text-[10.5px] muted mt-1.5">Direction is read from trend and structure — what the market is doing — never from the
-    forecast model, which has been measured to have no skill at calling direction over these horizons. The move is what this
-    volatility implies, not a target. The chance is counted over the stored bars and is shown beside the base rate it has to
-    beat: a 56% that sits on a 56% base rate is the market drifting, not a reading.</p>`;
+    <p class="text-[10.5px] muted mt-1.5">Direction is read from trend and structure — what the market is doing. The move is
+    what this volatility implies, not a target. The chance is counted over the stored bars and is shown beside the base rate it
+    has to beat: a 56% that sits on a 56% base rate is the market drifting, not a reading.</p>`;
   }
 
   function renderOutlook() {
@@ -941,12 +878,11 @@
     document.querySelectorAll("#viewTabs [data-view]").forEach((b) => (b.onclick = () => safely("showView", () => showView(b.dataset.view))));
     showView(new URLSearchParams(location.search).get("view"));
   });
-  for (const [name, fn] of [["header", load], ["options history", loadHist], ["scorecard", loadScore], ["outlook", loadOutlook]]) {
+  for (const [name, fn] of [["header", load], ["options history", loadHist], ["outlook", loadOutlook]]) {
     safely(name, fn);
   }
   TB.every(load, 60000);
   TB.every(loadHist, 60000);
-  TB.every(loadScore, 300000);
   TB.every(loadOutlook, 300000);  // nothing in it changes until the next 15-minute bar closes
 })();
 

@@ -7,10 +7,6 @@
   const BIAS = { bullish: ["▲", "up"], bearish: ["▼", "down"], volatility: ["◆", "text-violet-600"], neutral: ["•", "muted"] };
   const ivp = (v, d = 1) => (v == null ? "—" : `${(100 * v).toFixed(d)}%`);
   const sgn = (v, d = 2) => (v == null ? "—" : `${v > 0 ? "+" : ""}${Number(v).toFixed(d)}%`);
-  const STRAT = {
-    NO_TRADE: ["No trade", ""], LONG_CALL_SPREAD: ["Long call spread", "badge-green"], LONG_PUT_SPREAD: ["Long put spread", "badge-red"],
-    LONG_STRADDLE: ["Long straddle", "badge-blue"], LONG_STRANGLE: ["Long strangle", "badge-blue"], IRON_CONDOR: ["Iron condor", "badge-amber"],
-  };
 
   const tile = (label, value, hint = "", cls = "", title = "") =>
     `<div class="rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2.5 min-w-0" title="${esc(title)}">
@@ -39,7 +35,7 @@
     ].join("");
   }
 
-  // ── insights, AI, forecast ─────────────────────────────────────────────────
+  // ── insights ───────────────────────────────────────────────────────────────
   function insights(d, limit = 99) {
     const a = d.analysis;
     if (!a) return `<div class="text-xs muted py-4 text-center">The first analysis runs within 5 minutes of the analyst starting.</div>`;
@@ -56,139 +52,6 @@
     }).join("");
     const errors = (a.context?.errors || []).length ? `<div class="text-[11px] down mt-1">Data missing: ${esc(a.context.errors.join("; "))}</div>` : "";
     return head + (rows || `<div class="text-xs muted py-3">Nothing stands out.</div>`) + errors;
-  }
-
-  function ai(d, status) {
-    const r = d.analysis?.ai;
-    if (status !== "on") {
-      return `<div class="text-[11.5px] muted">TB-AI is ${status === "no key" ? "on but has no Mistral API key" : "off"}. <a class="text-brand-600" href="/settings#ai">Settings</a></div>`;
-    }
-    if (!r) return `<div class="text-[11.5px] muted">Waiting for the first TB-AI report.</div>`;
-    const failed = r.error ? `<div class="text-[11px] text-amber-700 mb-1.5" title="${esc(r.error)}">Latest attempt failed (${esc(r.error.slice(0, 60))}); showing the last good review. <a class="text-brand-600" href="/ai">Details</a></div>` : "";
-    if (!r.summary) return failed || `<div class="text-[11.5px] muted">No review for this symbol yet.</div>`;
-    return `${failed}<div class="text-[12.5px] leading-relaxed">${esc(r.summary)}</div>
-      ${r.points?.length ? `<ul class="mt-2 space-y-1 text-[12px] list-disc pl-4">${r.points.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
-      ${r.risks?.length ? `<div class="mt-2 text-[11.5px]"><span class="font-semibold text-amber-700">Risks:</span> ${r.risks.map(esc).join(" · ")}</div>` : ""}
-      ${r.playbook_view ? `<div class="mt-2 text-[11.5px] muted">On the playbook: ${esc(r.playbook_view)}</div>` : ""}
-      <div class="mt-2 text-[10.5px] muted">${esc(r.model || "")} · ${ago(r.at)} · written from the numbers above; it does not decide trades</div>`;
-  }
-
-  function bar(label, p, color, note = "") {
-    const w = Math.max(0, Math.min(100, 100 * (p || 0)));
-    return `<div><div class="flex justify-between text-[11px]"><span class="muted">${label}</span><span class="font-mono">${p == null ? "—" : `${w.toFixed(0)}%`}${note}</span></div>
-      <div class="h-1.5 rounded-full bg-slate-100 mt-1"><div class="h-1.5 rounded-full" style="width:${w}%;background:${color}"></div></div></div>`;
-  }
-
-  // ── the forecast as one picture ────────────────────────────────────────────
-  // Across is which way the model leans, up is whether movement looks underpriced against the
-  // options. The shaded cross in the middle is where neither is far enough from the centre to act
-  // on, and the four corners name what the playbook builds there. A marker in a corner and a
-  // reason in the card are the same statement; this one can be read at a glance.
-  function quadrant(f, iv, sk) {
-    const W = 300, H = 250, L = 44, R = 10, T = 10, B = 34;  // plot box inside the labels
-    const x0 = L, x1 = W - R, y0 = T, y1 = H - B, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-    // 0.25..0.75 covers every probability these models produce, and the marker stays off the border
-    // so a pinned reading still reads as a position rather than as part of the frame.
-    const px = x0 + clamp((f.up_probability - 0.25) / 0.5, 0.04, 0.96) * (x1 - x0);
-    const ratio = iv ? f.predicted_realized_vol / iv : 1;
-    const py = y1 - clamp(Math.log(ratio || 1) / 0.8 + 0.5, 0.04, 0.96) * (y1 - y0);
-    // The bands the playbook will not act inside: 62% confidence, and a 1.15x volatility edge.
-    const bandX = ((0.62 - 0.5) / 0.5) * (x1 - x0), bandY = (Math.log(1.15) / 0.8) * (y1 - y0);
-    const corner = (x, y, anchor, title, sub) =>
-      `<text x="${x}" y="${y}" font-size="9.5" font-weight="600" text-anchor="${anchor}" fill="#475569">${esc(title)}</text>
-       <text x="${x}" y="${y + 11}" font-size="8.5" text-anchor="${anchor}" fill="#94a3b8">${esc(sub)}</text>`;
-    return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-auto" role="img"
-        aria-label="Direction across, how movement is priced against the options upward; the marker is this symbol">
-      <clipPath id="qbox"><rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}"/></clipPath>
-      <rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="#fff" stroke="#e2e8f0"/>
-      <g clip-path="url(#qbox)">
-        <rect x="${cx - bandX}" y="${y0}" width="${2 * bandX}" height="${y1 - y0}" fill="#eef2f7"/>
-        <rect x="${x0}" y="${cy - bandY}" width="${x1 - x0}" height="${2 * bandY}" fill="#eef2f7"/>
-        ${sk.direction ? "" : `<rect x="${x0}" y="${py - 8}" width="${x1 - x0}" height="16" fill="#94a3b8" fill-opacity=".18"/>`}
-      </g>
-      <line x1="${cx}" y1="${y0}" x2="${cx}" y2="${y1}" stroke="#cbd5e1" stroke-dasharray="3 3"/>
-      <line x1="${x0}" y1="${cy}" x2="${x1}" y2="${cy}" stroke="#cbd5e1" stroke-dasharray="3 3"/>
-      ${corner(x0 + 7, y0 + 14, "start", "Down, big move", "long puts")}
-      ${corner(x1 - 7, y0 + 14, "end", "Up, big move", "long calls")}
-      ${corner(x0 + 7, y1 - 19, "start", "Down, quiet", "iron condor")}
-      ${corner(x1 - 7, y1 - 19, "end", "Up, quiet", "iron condor")}
-      <circle cx="${px}" cy="${py}" r="6" fill="${sk.direction ? "#1e88e5" : "#fff"}" stroke="${sk.direction ? "#fff" : "#475569"}" stroke-width="2">
-        <title>${sk.direction ? "" : "Direction has no edge on unseen data: read the height, not the side. "}Up ${(100 * f.up_probability).toFixed(0)}%, forecast RV ${(100 * f.predicted_realized_vol).toFixed(0)}% against ATM IV ${(100 * (iv || 0)).toFixed(0)}%</title>
-      </circle>
-      <text x="${x0}" y="${H - 21}" font-size="9" fill="#64748b">Down</text>
-      <text x="${x1}" y="${H - 21}" font-size="9" text-anchor="end" fill="#64748b">Up</text>
-      <text x="${cx}" y="${H - 21}" font-size="8.5" text-anchor="middle" fill="#94a3b8">direction</text>
-      <text x="${cx}" y="${H - 7}" font-size="8.5" text-anchor="middle" fill="#94a3b8">${sk.direction ? "shaded: too near the middle to act on" : "no edge on direction — read the height, not the side"}</text>
-      <text x="12" y="${cy}" font-size="8.5" fill="#64748b" text-anchor="middle" transform="rotate(-90 12 ${cy})">movement vs options price</text>
-      <text x="26" y="${y0 + 2}" font-size="8" fill="#94a3b8" text-anchor="end" transform="rotate(-90 26 ${y0 + 2})">cheap</text>
-      <text x="26" y="${y1}" font-size="8" fill="#94a3b8" text-anchor="start" transform="rotate(-90 26 ${y1})">rich</text>
-    </svg>`;
-  }
-
-  function forecast(d) {
-    const a = d.analysis, f = a?.forecast, m = a?.context?.model || {}, p = a?.playbook;
-    let model;
-    if (!a) model = `<div class="text-xs muted">No analysis yet.</div>`;
-    else if (m.status !== "ready") {
-      model = `<div class="text-[12px]"><span class="badge badge-amber">${esc(m.status || "no model")}</span>
-        <div class="text-[11.5px] muted mt-2">${esc(m.hint || "")}</div>
-        <div class="text-[11px] muted mt-1">Rule-based insights do not need a model.</div></div>`;
-    } else if (!f) {
-      model = `<div class="text-[11.5px] down">Forecast failed: ${esc(m.hint || "")}</div>`;
-    } else {
-      const sk = f.skill || {};
-      // A model that did not beat a naive baseline on data it never saw is not a number to act on.
-      // It is marked, greyed and labelled, not quietly drawn like the ones that earned their place.
-      const flag = (k) => (sk[k]
-        ? `<span class="up" title="beats its baseline on unseen data">✓</span>`
-        : `<span class="badge !py-0 !px-1 !text-[9px] align-middle" title="no edge over a naive baseline on unseen data: the playbook ignores it">NO EDGE</span>`);
-      const grey = "#94a3b8";
-      // The model leans one way; show that way. "Up 43%" is the same statement as "Down 57%", and
-      // only one of them reads as what the model actually thinks.
-      const up = f.up_probability >= 0.5;
-      const lean = up ? f.up_probability : f.down_probability ?? 1 - f.up_probability;
-      // Without skill it does not get to name a side. A greyed bar still reading "Down 57%" was
-      // read as "down" next to an Outlook saying "up", and the NO EDGE badge beside it did not
-      // stop that — a number on a page is a claim, whatever is printed next to it. There is one
-      // direction on this page and Outlook owns it.
-      const directionRow = sk.direction
-        ? bar(`${up ? "Up" : "Down"} in ${num(f.horizon_hours, 0)}h ${flag("direction")}`, lean, up ? "#12804a" : "#b42323")
-        : `<div class="rounded-md bg-slate-50 px-2.5 py-2 text-[11.5px] leading-snug">
-             <span class="badge !py-0 !px-1 !text-[9px] align-middle">NO EDGE</span>
-             <span class="muted">This model cannot call direction over ${num(f.horizon_hours, 0)}h — on bars it had never
-             seen it did no better than always naming the side that came up more often. It is not shown a side here.
-             The direction on this page is <a href="#outlookCard" class="text-brand-600">Outlook</a>, read from trend
-             and structure.</span></div>`;
-      model = `<div class="space-y-2.5">
-        ${quadrant(f, p?.atm_iv ?? a.context?.atm_iv, sk)}
-        ${directionRow}
-        ${bar(`Breakout ±${num(f.breakout_pct, 2)}% ${flag("breakout")}`, f.breakout_probability, sk.breakout ? "#7c3aed" : grey,
-          `<span class="muted"> of ${num(f.breakout_sigma, 2)}σ</span>`)}
-        <div class="grid grid-cols-2 gap-2 pt-1">
-          ${tile(`Forecast RV ${flag("realized_vol")}`, ivp(f.predicted_realized_vol, 0), `vs ATM IV ${ivp(p?.atm_iv ?? a.context?.atm_iv, 0)}`, sk.realized_vol ? "" : "text-slate-400")}
-          ${tile(`Abs move ${flag("abs_move")}`, `±${(100 * f.expected_abs_move).toFixed(2)}%`, `return ${sgn(100 * f.expected_return, 2)}${sk.return ? "" : " · no edge"}`, sk.abs_move ? "" : "text-slate-400")}
-        </div>
-        ${Object.values(sk).every((v) => !v) ? `<div class="text-[11px] muted">Nothing here beat a naive baseline on unseen data, so the playbook uses none of it. The rule-based insights still apply.</div>` : ""}
-        <div class="text-[10.5px] muted">${esc(m.source || "")} · trained ${ago(m.trained_at)} on ${new Date(m.train_from * 1000).toLocaleDateString("en-GB")}–${new Date(m.train_to * 1000).toLocaleDateString("en-GB")} · holdout AUC dir ${num(m.metrics?.direction_auc, 3)} · breakout ${num(m.metrics?.breakout_auc, 3)}</div>
-        ${m.skipped?.length ? `<div class="text-[10.5px] text-amber-700">Using the shipped model: ${esc(m.skipped.join("; "))}. Retrain to replace it.</div>` : ""}
-      </div>`;
-    }
-    let play = "";
-    if (p) {
-      const [name, cls] = STRAT[p.strategy] || [p.strategy, ""];
-      const legs = (p.legs || []).map((l) => `<tr><td><span class="${l.action === "buy" ? "up" : "down"} font-semibold">${l.action.toUpperCase()}</span></td>
-        <td style="color:${l.kind === "call" ? CALL : PUT}">${l.kind}</td><td class="r font-mono">${num(l.strike, 0)}</td><td class="r font-mono">${price(l.mark)}</td>
-        <td class="r font-mono muted">${ivp(l.iv)}</td><td class="font-mono text-[10.5px] muted">${esc(l.symbol)}</td></tr>`).join("");
-      play = `<div class="mt-4 pt-3 border-t border-slate-100">
-        <div class="flex items-center justify-between gap-2"><div class="stat-label">Options playbook</div><span class="badge ${cls}">${esc(name)}</span></div>
-        <div class="text-[11.5px] text-slate-600 mt-1.5">${esc(p.reason)}</div>
-        ${legs ? `<table class="tbl mt-2 text-[11.5px]"><tbody>${legs}</tbody></table>
-          <div class="grid grid-cols-3 gap-2 mt-2">${tile(p.net >= 0 ? "Credit" : "Debit", price(Math.abs(p.net)), "per 1 underlying, at mark")}${tile("Max loss", p.max_loss == null ? "—" : price(p.max_loss), "")}${tile("Max profit", p.max_profit == null ? "open" : price(p.max_profit), (p.breakevens || []).map((b) => num(b, 0)).join(" / ") + " BE")}</div>` : ""}
-        <div class="text-[10.5px] muted mt-2">Advisory: TradeBuddy does not place option orders. ${p.expiry ? `Expiry ${esc(p.expiry)} (${num(p.hours, 0)}h).` : ""}</div>
-      </div>`;
-    }
-    return model + play;
   }
 
   // ── option chain ───────────────────────────────────────────────────────────
@@ -286,81 +149,11 @@
       <div class="flex justify-between text-[10.5px] muted font-mono"><span>${fmt(lo)}</span><span>now ${fmt(vs[vs.length - 1])}</span><span>${fmt(hi)}</span></div>`;
   }
 
-  // ── forecast against what happened ─────────────────────────────────────────
-  // Two lines on one scale: what the model said realised volatility would be, and what it turned
-  // out to be. A model that tracks has the lines moving together; one that does not is visibly flat
-  // while the market is not. Below it, one tick per direction call, green where it was right.
-  // A fortnight is ~1,350 settled forecasts and 1,350 points on a 480-wide chart is a smear, not a
-  // line. Average them into buckets wide enough to see: the shape is what is being read here, and
-  // the exact value of one 15-minute bar a week ago is not.
-  function buckets(rows, n) {
-    if (rows.length <= n) return rows.map((r) => [r]);
-    const size = rows.length / n;
-    return Array.from({ length: n }, (_, i) => rows.slice(Math.floor(i * size), Math.floor((i + 1) * size))).filter((b) => b.length);
-  }
-  const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
-
-  function twoLines(points, forecastKey, actualKey, fmt) {
-    const rows = points.filter((p) => p[forecastKey] != null && p[actualKey] != null);
-    if (rows.length < 2) return `<div class="text-[11px] muted py-6 text-center">Nothing has matured yet — a forecast is scored a day after it is made.</div>`;
-    const W = 480, H = 130, pad = 6;
-    const bs = buckets(rows, 160).map((b) => [mean(b.map((r) => r[forecastKey])), mean(b.map((r) => r[actualKey]))]);
-    const all = bs.flat();
-    const lo = Math.min(...all), hi = Math.max(...all), span = hi - lo || 1;
-    const X = (i) => (i / (bs.length - 1)) * W;
-    const Y = (v) => H - pad - ((v - lo) / span) * (H - 2 * pad);
-    const line = (k, color, width) =>
-      `<polyline fill="none" stroke="${color}" stroke-width="${width}" stroke-linejoin="round" vector-effect="non-scaling-stroke"
-         points="${bs.map((b, i) => `${X(i)},${Y(b[k])}`).join(" ")}"/>`;
-    return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-32" preserveAspectRatio="none" role="img"
-        aria-label="Forecast against actual, oldest left">${line(0, "#7c3aed", 2.6)}${line(1, "#0f766e", 1.8)}</svg>
-      <div class="flex justify-between text-[10.5px] muted font-mono"><span>${fmt(lo)}</span><span>${rows.length} settled</span><span>${fmt(hi)}</span></div>`;
-  }
-
-  // One column per slice of time: how much of it the model called right, stacked over how much it
-  // called wrong. A per-call tick would be 1,350 hairlines; this is the same answer, legible.
-  function hitTrack(points) {
-    const rows = points.filter((p) => p.up_probability != null);
-    if (!rows.length) return `<div class="text-[11px] muted py-6 text-center">No direction calls scored yet.</div>`;
-    const W = 480, H = 130;
-    const bs = buckets(rows, 60);
-    const w = W / bs.length;
-    const bars = bs.map((b, i) => {
-      const right = b.filter((p) => (p.up_probability > 0.5) === !!p.actual_up).length / b.length;
-      const up = b.filter((p) => p.up_probability > 0.5).length / b.length;  // which way it leaned here
-      const x = i * w, bw = Math.max(1, w - 0.8);
-      return `<rect x="${x}" y="${H * (1 - right)}" width="${bw}" height="${H * right}" fill="#00b852" fill-opacity=".9"/>
-              <rect x="${x}" y="0" width="${bw}" height="${H * (1 - right)}" fill="#eb5757" fill-opacity=".75"/>
-              <rect x="${x}" y="${H - 3}" width="${bw}" height="3" fill="${up >= 0.5 ? "#12804a" : "#b42323"}"/>`;
-    }).join("");
-    const half = `<line x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}" stroke="#fff" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>`;
-    return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-32" preserveAspectRatio="none" role="img"
-        aria-label="Share of direction calls that were right, per slice of time, oldest left">${bars}${half}</svg>
-      <div class="flex justify-between text-[10.5px] muted"><span>oldest</span><span>green = share called right · dashed line is half</span><span>newest</span></div>`;
-  }
-
-  function scoreTiles(score) {
-    if (!score.count) return `<div class="col-span-full text-[11.5px] muted py-2">No forecast has matured yet. The first one is scored 24 hours after it is made.</div>`;
-    const d = score.direction, b = score.breakout, rv = score.realized_vol, am = score.abs_move;
-    const beat = (v, base) => (v > base ? "up" : "text-slate-400");
-    const ratio = (m) => (m && m.baseline_mae ? m.mae / m.baseline_mae : null);
-    return [
-      tile("Direction right", `${(100 * d.hit_rate).toFixed(1)}%`, `always the busier side: ${(100 * d.baseline).toFixed(1)}%`,
-        beat(d.hit_rate, d.baseline), "Beating this baseline is the only thing that makes a direction call worth anything"),
-      tile("Breakout expected", `${(100 * b.predicted).toFixed(0)}%`, `it happened ${(100 * b.actual).toFixed(0)}% of the time`,
-        "", "Well calibrated means these two numbers are close"),
-      tile("Realised vol error", rv ? ivp(rv.mae, 1) : "—", rv ? `${ratio(rv).toFixed(2)}x predicting the average` : "",
-        rv && ratio(rv) < 1 ? "up" : "text-slate-400"),
-      tile("Abs move error", am ? `${(100 * am.mae).toFixed(2)}%` : "—", am ? `${ratio(am).toFixed(2)}x predicting the average` : "",
-        am && ratio(am) < 1 ? "up" : "text-slate-400"),
-    ].join("");
-  }
-
   function sourceBadge(o) {
     if (!o) return `<span class="badge badge-amber">no options data</span>`;
     const age = Date.now() / 1000 - o.at;
     return `<span class="badge ${age > 90 ? "badge-amber" : o.source === "websocket" ? "badge-green" : "badge-blue"}" title="Options summary ${Math.round(age)}s old">options · ${esc(o.source)} · ${ago(o.at)}</span>`;
   }
 
-  window.TBA = { CALL, PUT, kpis, insights, ai, forecast, quadrant, chain, oiChart, smileChart, termChart, spark, sourceBadge, twoLines, hitTrack, scoreTiles, STRAT, ivp, sgn };
+  window.TBA = { CALL, PUT, kpis, insights, chain, oiChart, smileChart, termChart, spark, sourceBadge, ivp, sgn };
 })();

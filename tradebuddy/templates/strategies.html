@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block content %}
-<div data-ai-note="trading"></div>
 <div class="flex flex-wrap items-center justify-between gap-3">
   <p class="text-xs text-slate-500 max-w-3xl">Each strategy runs when its candle closes on the WebSocket (or when the clock passes the bar's end). A strategy only produces signals; whether a signal becomes an order is decided by the trading switch, these toggles, and the broker.</p>
   <span class="text-xs muted">Add a strategy: drop a file into <span class="font-mono">tradebuddy/strategies/</span> and restart.</span>

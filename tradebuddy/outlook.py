@@ -434,8 +434,8 @@ def build(
             "record": reading.shape_record(candles, 1.0, BAR_SECONDS),
         },
     }
-    # The same figures in sentences, from rules. Always present, never costs a token, and cannot
-    # drift from the numbers above it. TB-AI's reading is separate and badged.
+    # The same figures in sentences, from rules. Always present and cannot drift from the numbers
+    # above it.
     view["narrative"] = narrate(view)
     return view
 
@@ -448,10 +448,9 @@ def summarise(frames: list[Timeframe], horizons: list[dict[str, Any]], counted: 
     timescale and this is where it is decided; everything else on the page either renders this or
     says why it cannot.
 
-    Direction comes from trend and structure — what the market is doing — never from the forecast
-    model, which has been measured to have no skill at calling 24-hour direction. "How likely" is
-    counted over the stored bars and carries the baseline it has to beat; where there are too few
-    outcomes it is None and the row says so rather than showing a number.
+    Direction comes from trend and structure — what the market is doing — and nothing else.
+    "How likely" is counted over the stored bars and carries the baseline it has to beat; where
+    there are too few outcomes it is None and the row says so rather than showing a number.
     """
     by_hours = {h["hours"]: h for h in horizons}
     by_horizon = {c["horizon_hours"]: c for c in counted}
@@ -524,13 +523,11 @@ def counted_edge(view: dict[str, Any], side: str, hours: float) -> dict[str, Any
 
 
 def narrate(view: dict[str, Any]) -> dict[str, str]:
-    """The same numbers in sentences. Rules only — no model and no AI writes this.
+    """The same numbers in sentences. Rules only.
 
     It is here because a page of percentages is not a reading: the point of "flat on 15m, up on 1h,
     down on 1d" is what it means for the next trade, and that has to be said out loud. Deterministic,
-    so the words can never drift from the figures above them, and free, so it is always there even
-    when TB-AI is off or rate-limited. TB-AI's own commentary sits beside this, badged, and may
-    disagree — which is useful; one is arithmetic, the other is a reading.
+    so the words can never drift from the figures above them.
     """
     if not view.get("ready"):
         return {"headline": "Not enough stored history yet.", "structure": "", "move": "", "odds": "", "plan": ""}

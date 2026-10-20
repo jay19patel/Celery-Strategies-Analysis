@@ -7,7 +7,7 @@ when you are trying to see whether the thing works.
 This writes a plausible market instead: bars with trends, ranges and breakouts in them rather than
 pure noise (noise would make every card say "no edge", which is true of noise and tells you nothing
 about the page), a minute-by-minute options history, the analyst's readings, card verdicts with
-most of them already marked, forecasts with outcomes, and process load.
+most of them already marked, and process load.
 
 Two rules, because fake market data in a system that places real orders is a genuine hazard:
 

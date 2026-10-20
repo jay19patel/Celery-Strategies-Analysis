@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block content %}
-<div data-ai-note="system"></div>
 <div id="kpis" class="grid grid-cols-2 md:grid-cols-5 gap-3"></div>
 
 <div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
@@ -235,7 +234,7 @@
     const jobs = m.jobs || [];
     const counts = jobs.reduce((a, j) => ((a[j.state] = (a[j.state] || 0) + 1), a), {});
     $("jobSummary").innerHTML = Object.entries(counts).map(([k, v]) => `<span class="badge ${STATE[k] || ""}">${v} ${esc(k)}</span>`).join("")
-      + (m.analyst ? `<span class="badge badge-ai" title="TradeBuddy AI (Mistral)">TB-AI ${esc(m.analyst.ai)}${m.analyst.ai_paused_until ? " · paused (rate limit)" : ""}${m.analyst.ai_errors ? ` · ${m.analyst.ai_errors} errors` : ""}</span>` : `<span class="badge badge-amber" title="Start the analyst service">no analyst</span>`)
+      + (m.analyst ? `<span class="badge badge-blue" title="Rule-based market analysis">analyst · ${esc(m.analyst.runs)} runs</span>` : `<span class="badge badge-amber" title="Start the analyst service">no analyst</span>`)
       + (m.options_feed ? `<span class="badge" title="Options snapshots by source">options ${Object.entries(m.options_feed.source || {}).map(([u, s]) => `${u}:${s}`).join(" ")}</span>` : "");
     const now = Date.now() / 1000;
     TB.rows("jobs", jobs, (j) => {

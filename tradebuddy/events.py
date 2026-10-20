@@ -106,38 +106,11 @@ class OptionsSnapshot(Event):
 
 @dataclass(frozen=True, kw_only=True)
 class MarketAnalysis(Event):
-    """The analyst's view of one symbol, every few minutes: context numbers, rule-based insights,
-    the model forecast and the options playbook when a model is trained, and the AI review when on."""
+    """The analyst's view of one symbol, every few minutes: context numbers and rule-based insights."""
 
     symbol: str
     context: dict[str, Any]
     insights: list[dict[str, Any]]
-    forecast: dict[str, Any] | None = None
-    playbook: dict[str, Any] | None = None
-    ai: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True, kw_only=True)
-class AIReport(Event):
-    """One TradeBuddy AI (TB-AI) attempt: the written report, or why there is none this time."""
-
-    ok: bool
-    model: str
-    report: dict[str, Any] | None = None  # tbai.clean(): headline, health, priorities, sections, symbols
-    error: str = ""
-    raw: str = ""  # what the model wrote when it answered but not in the shape asked for
-    finish_reason: str = ""  # "length" = cut off at max_tokens
-    attempts: int = 1  # 2 when a cut-off answer was asked for again with a bigger budget
-    status: int | None = None  # Mistral's HTTP status on failure (429 = rate limited)
-    paused_until: float | None = None  # no new request before this, after a rate limit
-    limits: dict[str, str] = field(default_factory=dict)  # Mistral's rate-limit headers
-    usage: dict[str, Any] = field(default_factory=dict)
-    ms: float = 0.0
-    shared_account: bool = False  # whether trades, positions and account figures were included
-
-    @property
-    def level(self) -> str:
-        return "info" if self.ok else "warning"
 
 
 @dataclass(frozen=True, kw_only=True)

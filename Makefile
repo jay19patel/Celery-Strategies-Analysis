@@ -14,7 +14,7 @@ logs:  ## Follow logs
 	docker compose logs -f --tail=100
 
 install:  ## Local dev dependencies (tests, lint)
-	uv sync --extra dev --extra ml
+	uv sync --extra dev
 
 test:  ## Run the tests
 	uv run pytest

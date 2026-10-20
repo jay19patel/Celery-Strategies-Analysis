@@ -139,12 +139,6 @@ body { font-feature-settings: "tnum", "cv02", "cv03", "cv04", "cv11"; }
 .log-line.lvl-error { background: #fef2f2; }
 .log-line.lvl-warning { background: #fffbeb; }
 
-/* TB-AI: marks everything written by TradeBuddy AI (Mistral), on every page */
-.badge-ai { background: linear-gradient(90deg, #6d28d9, #2563eb); color: #fff; font-weight: 700; letter-spacing: .05em; border: 0; }
-.badge-ai::before { content: "✦"; margin-right: 3px; font-size: 9px; }
-.ai-box { border: 1px solid #ddd6fe; background: linear-gradient(180deg, #faf5ff, #ffffff); border-radius: 10px; }
-.st-good { color: #047857; background: #d1fae5; } .st-watch { color: #92400e; background: #fef3c7; } .st-act { color: #991b1b; background: #fee2e2; }
-
 /* Read-only (no PIN): watch everything, change nothing. Unlocking flips the body attribute, no reload. */
 body[data-locked] .edit-only { display: none !important; }
 body:not([data-locked]) .locked-only { display: none !important; }
@@ -161,8 +155,8 @@ body[data-locked] .switch .track { opacity: .75; }
 #pinBoxes.shake { animation: shake .4s ease-in-out; }
 #pinBoxes.shake .pin-box { border-color: #fca5a5; }
 @keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); } }
-/* Slots that may hold nothing (no AI note, one broker so no tabs) take no space between cards */
-[data-ai-note]:empty, .collapse-empty:not(:has(> :not(.hidden))) { display: none; }
+/* Slots that may hold nothing (one broker, so no tabs) take no space between cards */
+.collapse-empty:not(:has(> :not(.hidden))) { display: none; }
 
 /* Market page view tabs: one per kind of evidence. */
 .viewtab { display: inline-flex; align-items: center; gap: .4rem; padding: .45rem .7rem; font-size: 12.5px;

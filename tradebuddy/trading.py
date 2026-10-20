@@ -507,7 +507,7 @@ class AutoStructures:
     opened through the same gate as the dashboard ticket, with the small SL/TP from Settings and sized
     so its max loss is options_auto_risk_pct of equity (options_auto_qty contracts per leg is the ceiling).
 
-    Rules only: no AI and no analyst output decides here (analysis never trades). One structure per
+    Rules only: no analyst output decides here (analysis never trades). One structure per
     underlying, a cooldown after each entry, close or refusal, and at most AUTO_MAX_PER_DAY entries a day.
     The request id is the symbol, the day and the entry's number that day, so a repeated pass can never
     open the same entry twice. Off until options_auto_enabled; the kill switch and the daily loss limit stop it."""
@@ -566,7 +566,7 @@ class AutoStructures:
         if not structures.fresh(summary, now):
             return "options chain is stale"
         history = await asyncio.to_thread(self.history, summary["underlying"], now - 7 * 86_400)
-        pick = structures.suggest(summary, None, history)
+        pick = structures.suggest(summary, history)
         if not pick.get("kind"):
             return f"no edge: {pick['reason'][-120:]}"
         day = datetime.fromtimestamp(now, ZoneInfo(s.day_timezone)).date().isoformat()

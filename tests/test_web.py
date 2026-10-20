@@ -159,17 +159,6 @@ def test_static_urls_carry_a_content_version(cfg, exchange):
     assert re.search(r'/static/js/app\.js\?v=[0-9a-f]{12}"', page) and re.search(r'/static/css/app\.css\?v=[0-9a-f]{12}"', page)
 
 
-async def test_saved_ai_reports_open_by_id(cfg, exchange):
-    from tradebuddy.events import AIReport
-
-    system, client = make(cfg, exchange)
-    await system.on_ai_report(AIReport(ok=True, model="ministral-3b-2512", report={"headline": "open me", "health": "good"}))
-    [row] = client.get("/api/ai/history", params={"start": 0, "ok_only": True}).json()
-    assert client.get(f"/api/ai/reports/{row['id']}").json()["report"]["headline"] == "open me"
-    assert client.get(f"/api/ai/reports/{row['id'] + 1}").status_code == 404
-    assert 'id="day"' in client.get("/ai").text
-
-
 def test_the_risk_view_tells_the_dashboard_how_trades_are_sized(cfg, exchange):
     """The Overview explains the sizing rules in words; it must read them, not hard-code them."""
     _, client = make(cfg, exchange)

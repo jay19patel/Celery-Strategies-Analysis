@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block content %}
-<div data-ai-note="trading"></div>
 <!-- Today on the selected broker -->
 <div class="collapse-empty flex flex-wrap items-center justify-between gap-3">
   {% with all_tab=False %}{% include "_broker_tabs.html" %}{% endwith %}
@@ -529,7 +528,7 @@
     $("osKinds").querySelectorAll("[data-kind]").forEach((b) => (b.onclick = () => { kind = b.dataset.kind; suggested = false; $("osTp").dataset.touched = ""; requestId = newId(); refresh(); }));
     const sg = os?.suggestion;
     $("osSuggest").innerHTML = !os ? $("osSuggest").innerHTML : sg
-      ? `<b>${sg.kind ? esc(os.kinds[sg.kind]) : "No structure has an edge now"}</b> <span class="badge">${esc(sg.source === "playbook" ? "forecast playbook" : "options market")}</span><div class="mt-1">${esc(sg.reason)}</div>`
+      ? `<b>${sg.kind ? esc(os.kinds[sg.kind]) : "No structure has an edge now"}</b> <span class="badge">options market</span><div class="mt-1">${esc(sg.reason)}</div>`
       : esc(os.error || "");
     $("osAge").textContent = os?.age_seconds == null ? "" : `chain ${num(os.age_seconds, 0)}s old${os.fresh ? "" : " · stale"}`;
     const auto = os?.auto;
@@ -585,7 +584,7 @@
   $("osAuto").onchange = async () => {
     const on = $("osAuto").checked;
     if (on && !await TB.ask({ title: "Auto-trade option structures on paper?", ok: "Turn on",
-      body: "Every minute the engine opens the structure the options-market rule suggests (straddle, strangle or iron condor) on paper, with the SL / TP from Settings. One per underlying, at most 3 a day, 30 minutes apart. No AI decides." })) { $("osAuto").checked = false; return; }
+      body: "Every minute the engine opens the structure the options-market rule suggests (straddle, strangle or iron condor) on paper, with the SL / TP from Settings. One per underlying, at most 3 a day, 30 minutes apart." })) { $("osAuto").checked = false; return; }
     try { await TB.put("/api/settings", { changes: { options_auto_enabled: on } }); TB.toast(`Options auto-trade ${on ? "on" : "off"}`, "ok"); }
     catch (err) { $("osAuto").checked = !on; TB.toast(err.message, "error"); }
     refresh();

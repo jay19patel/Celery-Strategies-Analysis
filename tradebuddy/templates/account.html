@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>{% endblock %}
 {% block content %}
-<div data-ai-note="portfolio"></div>
 <div class="flex flex-wrap items-center justify-between gap-3">
   {% with all_tab=False %}{% include "_broker_tabs.html" %}{% endwith %}
   <span id="updated" class="text-xs muted"></span>

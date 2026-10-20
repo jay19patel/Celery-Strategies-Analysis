@@ -30,9 +30,8 @@ KINDS = {
     "call_spread": "Bull call spread",
     "put_spread": "Bear put spread",
 }
-FROM_PLAYBOOK = {"LONG_STRADDLE": "straddle", "LONG_STRANGLE": "strangle", "IRON_CONDOR": "iron_condor", "LONG_CALL_SPREAD": "call_spread", "LONG_PUT_SPREAD": "put_spread"}
 CREDIT_KINDS = ("iron_condor",)
-MIN_HOURS = 20.0  # same expiry rule as the playbook: the nearest that covers most of a day
+MIN_HOURS = 20.0  # the nearest expiry that still covers most of a day
 FRESH_SECONDS = 60.0  # snapshots arrive every ~15s; older than this is no price (absence over staleness)
 DEFAULT_SL_PCT = 50.0  # of the max loss
 DEFAULT_TP_PCT = {"debit": 100.0, "credit": 50.0}  # of the premium paid / received
@@ -172,7 +171,7 @@ def build(
 ) -> dict[str, Any]:
     """The structure with real contracts and fill prices, and its risk: net, max loss/profit, breakevens.
 
-    `picks` ([{action, kind, strike}]) uses those strikes instead of choosing (e.g. the playbook's legs)."""
+    `picks` ([{action, kind, strike}]) uses those strikes instead of choosing."""
     if kind not in KINDS:
         raise StructureError(f"unknown structure {kind!r}; choose one of {', '.join(KINDS)}")
     if isinstance(qty, bool) or not isinstance(qty, int) or qty < 1:
@@ -279,31 +278,24 @@ def iv_rank(history: list[dict[str, Any]], now_iv: float | None) -> float | None
     return None if hi - lo < 1e-9 else round(100 * (now_iv - lo) / (hi - lo), 1)
 
 
-def suggest(summary: dict[str, Any] | None, playbook: dict[str, Any] | None, history: list[dict[str, Any]]) -> dict[str, Any]:
+def suggest(summary: dict[str, Any] | None, history: list[dict[str, Any]]) -> dict[str, Any]:
     """Which structure fits now, and why. On the ticket it is advisory; the options auto trader
-    (trading.AutoStructures) acts on it with playbook=None, i.e. on the options market alone.
+    (trading.AutoStructures) reads the same answer.
 
-    1. The playbook (trained forecast + IV), when it found a trade.
-    2. Otherwise the options market alone: IV rank over the stored history with the put/call OI ratio.
-       Cheap volatility -> buy it (straddle, or strangle when the straddle is dear); rich volatility ->
-       sell it with defined risk (iron condor), its short strikes inside the OI walls when they fit.
+    The options market alone: IV rank over the stored history with the put/call OI ratio. Cheap
+    volatility -> buy it (straddle, or strangle when the straddle is dear); rich volatility ->
+    sell it with defined risk (iron condor), its short strikes inside the OI walls when they fit.
     """
-    if playbook and playbook.get("strategy") in FROM_PLAYBOOK and playbook.get("legs"):
-        return {
-            "kind": FROM_PLAYBOOK[playbook["strategy"]], "source": "playbook", "reason": playbook.get("reason", ""),
-            "picks": [{"action": leg["action"], "kind": leg["kind"], "strike": leg["strike"]} for leg in playbook["legs"]],
-        }
     if not summary:
         return {"kind": None, "source": "none", "reason": "No options data yet."}
     day = summary.get("day") or {}
     iv, pcr = day.get("atm_iv"), summary.get("pcr_oi")
     rank = iv_rank(history, iv)
-    why_pb = f"Playbook: {playbook['reason']} " if playbook and playbook.get("reason") else ""
     if rank is None:
-        return {"kind": None, "source": "options", "reason": why_pb + "Not enough IV history yet to judge whether options are cheap or dear (needs an hour of data)."}
+        return {"kind": None, "source": "options", "reason": "Not enough IV history yet to judge whether options are cheap or dear (needs an hour of data)."}
     walls = f"put wall {day.get('put_wall'):,.0f}, call wall {day.get('call_wall'):,.0f}" if day.get("put_wall") and day.get("call_wall") else "no clear OI walls"
     tone = "" if pcr is None else (" Put/call OI {:.2f}: {}.".format(pcr, "puts dominate, hedging demand" if pcr > 1.1 else ("calls dominate" if pcr < 0.7 else "balanced")))
-    base = f"{why_pb}ATM IV {100 * iv:.1f}% sits at {rank:.0f}% of its stored range;{tone} {walls}."
+    base = f"ATM IV {100 * iv:.1f}% sits at {rank:.0f}% of its stored range;{tone} {walls}."
     if rank <= 25:
         cheap_straddle = (day.get("straddle_pct") or 0) <= (day.get("implied_move_pct") or 0) * 1.25
         kind = "straddle" if cheap_straddle else "strangle"

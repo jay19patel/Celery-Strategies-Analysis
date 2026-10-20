@@ -1,29 +1,22 @@
-"""Market analysis: the options book, insights, the forecaster, the playbook, the AI review and the jobs
-that run them."""
+"""Market analysis: the options book, the rule-based insights and the jobs that run them."""
 
 from __future__ import annotations
 
-import json
 import math
 import random
-import shutil
 import time
 from datetime import UTC, datetime
 
-import httpx
 import pytest
 
-from tradebuddy import tbai
-from tradebuddy.analyst import AI_MAX_TOKENS, Analyst
+from tradebuddy.analyst import Analyst
 from tradebuddy.api import METHODS, Api
 from tradebuddy.delta import Candle
-from tradebuddy.events import AIReport, EventBus, MarketAnalysis, OptionsSnapshot
+from tradebuddy.events import EventBus, OptionsSnapshot
 from tradebuddy.insights import insights, lean, market_context
 from tradebuddy.jobs import Jobs
-from tradebuddy.mistral import MistralError, check, complete
 from tradebuddy.options import OptionQuote, OptionsBook, OptionsFeed, max_pain, parse_symbol, parse_ticker, summarize
-from tradebuddy.playbook import decide
-from tradebuddy.settings import DELTA_ROUTING_FIELDS, Settings, apply_changes
+from tradebuddy.settings import Settings
 from tradebuddy.stream import BarCloser, DeltaStream
 from tradebuddy.system import System
 
@@ -174,241 +167,7 @@ def test_rules_stay_quiet_without_data():
     assert insights(market_context("BTCUSD", [])) == []
 
 
-# -- playbook ---------------------------------------------------------------------------
-
-
-def forecast(**over):
-    base = {"up_probability": 0.5, "down_probability": 0.5, "expected_return": 0.0, "expected_abs_move": 0.02,
-            "predicted_realized_vol": 0.5, "breakout_probability": 0.3, "skill": {"direction": True, "realized_vol": True, "breakout": True}}
-    return base | over
-
-
-def test_playbook_without_a_model_or_options_does_nothing():
-    assert decide(None, summarize("BTC", book_quotes(), SPOT, NOW))["strategy"] == "NO_TRADE"
-    assert decide(forecast(), None)["strategy"] == "NO_TRADE"
-
-
-def test_playbook_directional_needs_direction_skill():
-    opts = summarize("BTC", [q if q.kind == "put" else quote("call", q.strike, mark=3000 - 0.1 * (q.strike - 90_000)) for q in book_quotes()], SPOT, NOW)
-    up = forecast(up_probability=0.7, down_probability=0.3, expected_abs_move=0.05)
-    d = decide(up, opts)
-    assert d["strategy"] == "LONG_CALL_SPREAD"
-    assert [(leg["action"], leg["strike"]) for leg in d["legs"]] == [("buy", 100_000), ("sell", 105_000)]
-    assert d["max_loss"] == pytest.approx(500) and d["max_profit"] == pytest.approx(4500)
-    assert decide(up | {"skill": {"direction": False, "realized_vol": False}}, opts)["strategy"] == "NO_TRADE"
-
-
-def test_playbook_volatility_trades():
-    opts = summarize("BTC", book_quotes(), SPOT, NOW)  # ATM IV 50%, straddle 2,000
-    cheap = decide(forecast(predicted_realized_vol=0.8, breakout_probability=0.7, expected_abs_move=0.03), opts)
-    assert cheap["strategy"] == "LONG_STRADDLE" and len(cheap["legs"]) == 2
-    assert decide(forecast(predicted_realized_vol=0.5), opts)["strategy"] == "NO_TRADE"  # no edge either way
-
-    fine = summarize("BTC", book_quotes(step=1_000, priced=True), SPOT, NOW)  # implied move to expiry: about 2,600
-    rich = decide(forecast(predicted_realized_vol=0.3, breakout_probability=0.1), fine)
-    assert rich["strategy"] == "IRON_CONDOR"
-    assert [(leg["action"], leg["kind"], leg["strike"]) for leg in rich["legs"]] == [
-        ("sell", "put", 97_000), ("buy", "put", 96_000), ("sell", "call", 103_000), ("buy", "call", 104_000),
-    ]
-    assert rich["net"] == pytest.approx(1000) and rich["max_loss"] == pytest.approx(0)  # 1,000 credit on 1,000-wide wings
-
-
-# -- forecaster -------------------------------------------------------------------------
-
-
-def regime_bars(n, seed=3):
-    """A random walk whose volatility switches between calm and wild for days at a time: learnable."""
-    rnd, out, price = random.Random(seed), [], 100.0
-    vol = 0.001
-    for i in range(n):
-        if i % 400 == 0:
-            vol = rnd.choice((0.001, 0.006))
-        new = price * math.exp(rnd.gauss(0, vol))
-        out.append(Candle(1_700_000_000 + 900 * i, price, max(price, new), min(price, new), new, 100.0))
-        price = new
-    return out
-
-
-def test_features_never_look_ahead():
-    pytest.importorskip("sklearn")
-    import numpy as np
-
-    from tradebuddy.forecast import features
-
-    candles = regime_bars(900)
-    changed = candles[:800] + [Candle(c.time, c.open, c.high * 2, c.low, c.close * 2, c.volume * 9) for c in candles[800:]]
-    np.testing.assert_array_equal(features(candles)[:800], features(changed)[:800])  # the future changed; the past did not
-
-
-def test_forecaster_trains_validates_saves_and_predicts(tmp_path):
-    pytest.importorskip("sklearn")
-    from tradebuddy.forecast import ForecastConfig, Forecaster
-
-    candles = regime_bars(4000)
-    model = Forecaster.train("BTCUSD", candles, cfg=ForecastConfig(min_rows=1000))
-    card = model.card
-    assert card.rows_test > 0 and card.train_to > card.train_from
-    for name in ("realized_vol", "abs_move", "return"):  # skill means beating the naive baseline by 5% on unseen data
-        assert card.skill[name] == (card.metrics[f"{name}_mae"] <= 0.95 * card.baselines[f"{name}_mae"])
-    assert card.metrics["direction_auc"] < 0.62  # a random walk has no direction to find
-    assert "oi_chg_4" not in card.features and "rv_96" in card.features  # no OI series given: fitted without it
-    path = model.save(tmp_path)
-    again = Forecaster.load(path)
-    f = again.predict(candles[-500:])
-    assert set(f) >= {"up_probability", "predicted_realized_vol", "breakout_probability", "skill"}
-    assert f["up_probability"] + f["down_probability"] == pytest.approx(1)
-    with pytest.raises(ValueError):
-        again.predict(candles[-100:])  # not enough history for the 4-day vol
-
-
-def test_direction_needs_more_than_a_good_auc_to_count_as_skill():
-    """AUC ranks bars; it does not say the calls beat simply naming the side that came up more often.
-
-    On a year of live data BTC closed higher 24h later on 54.8% of holdout bars, so "always up"
-    scored 54.8% while the model scored 56.4% with a respectable 0.567 AUC — and ETH's model scored
-    54.8% against a 56.2% drift. Both read as skill on AUC alone. Neither is."""
-    pytest.importorskip("sklearn")
-    from tradebuddy.forecast import ForecastConfig, Forecaster
-
-    model = Forecaster.train("BTCUSD", regime_bars(4000), cfg=ForecastConfig(min_rows=1000))
-    card = model.card
-    beats_drift = card.metrics["direction_accuracy"] >= card.baselines["direction_accuracy"] + model.cfg.min_direction_edge
-    assert card.skill["direction"] == (card.metrics["direction_auc"] >= model.cfg.min_direction_auc and beats_drift)
-    # The baseline is the better of always-up and always-down, so it is never below a coin.
-    assert card.baselines["direction_accuracy"] >= 0.5
-
-
-def test_a_direction_model_that_only_rides_the_drift_has_no_skill():
-    """A series that rises on almost every bar: a model calling "up" every time looks accurate and
-    must still be marked without skill, because naming the majority needs no model."""
-    pytest.importorskip("sklearn")
-    from tradebuddy.forecast import ForecastConfig, Forecaster
-
-    rnd = random.Random(7)
-    bars, price = [], 100.0
-    for i in range(4000):  # drift up, with enough noise that nothing else is learnable
-        new = price * math.exp(0.0004 + rnd.gauss(0, 0.002))
-        bars.append(Candle(1_700_000_000 + 900 * i, price, max(price, new), min(price, new), new, 100.0))
-        price = new
-    card = Forecaster.train("BTCUSD", bars, cfg=ForecastConfig(min_rows=1000)).card
-    assert card.baselines["direction_accuracy"] > 0.9  # almost every bar closed higher
-    assert card.skill["direction"] is False
-
-
-def test_a_breakout_is_measured_against_the_bar_s_own_volatility():
-    """A fixed percentage asks a different question on a quiet bar than on a wild one. Over a year of
-    15m bars a fixed 4% excursion happened on 16.5% of BTC bars and 34.2% of ETH ones, so one model
-    was learning a rare event and the other a common one. A multiple of the bar's own volatility is
-    the same question everywhere, and the base rate stays where a classifier can learn it."""
-    pytest.importorskip("sklearn")
-    import numpy as np
-
-    from tradebuddy.forecast import ForecastConfig, targets
-
-    cfg = ForecastConfig()
-    out = targets(regime_bars(4000), cfg.horizon_bars, cfg)
-    thresholds, breakout = out["breakout_threshold"], out["breakout"]
-    known = ~np.isnan(breakout)
-    # The calm and wild stretches of the series get thresholds a multiple apart, not one number.
-    lo, hi = np.nanpercentile(thresholds[known], [10, 90])
-    assert hi > 3 * lo
-    assert float(np.nanmin(thresholds)) >= cfg.breakout_floor_pct / 100  # a dead-quiet window still asks something
-    assert 0.15 < breakout[known].mean() < 0.60  # balanced enough to learn, in either regime
-
-
-def test_the_live_breakout_threshold_is_the_one_the_model_was_taught(tmp_path):
-    pytest.importorskip("sklearn")
-    import math
-
-    import numpy as np
-
-    from tradebuddy.forecast import ANNUAL_BARS, FEATURES, ForecastConfig, Forecaster, features
-
-    candles = regime_bars(4000)
-    model = Forecaster.train("BTCUSD", candles, cfg=ForecastConfig(min_rows=1000))
-    f = model.predict(candles)
-    cfg = model.cfg
-    rv_96 = features(candles)[-1, FEATURES.index("rv_96")]
-    expected = max(cfg.breakout_sigma * rv_96 * math.sqrt(cfg.horizon_bars / ANNUAL_BARS), cfg.breakout_floor_pct / 100)
-    assert f["breakout_pct"] == pytest.approx(100 * expected, abs=0.01)
-    assert f["breakout_sigma"] == cfg.breakout_sigma
-    assert not np.isnan(f["breakout_probability"])
-
-
-# -- TradeBuddy AI ----------------------------------------------------------------------------
-
-
-def mistral(handler):
-    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
-
-
-def answer(content, status=200, headers=None):
-    return httpx.Response(status, headers=headers or {}, json={"model": "ministral-3b-2512", "choices": [{"message": {"content": json.dumps(content)}}]})
-
-
-async def test_complete_parses_json_and_reports_limits():
-    seen = {}
-
-    def handler(request):
-        seen["auth"] = request.headers["authorization"]
-        seen["body"] = json.loads(request.content)
-        return answer({"headline": "Calm."}, headers={"x-ratelimit-remaining-tokens-month": "999"})
-
-    out, meta = await complete("k-123", "ministral-3b-2512", "sys", {"x": 1}, http=mistral(handler))
-    assert out == {"headline": "Calm."} and meta["limits"] == {"x-ratelimit-remaining-tokens-month": "999"}
-    assert seen["auth"] == "Bearer k-123" and seen["body"]["response_format"] == {"type": "json_object"}
-
-
-async def test_rate_limit_errors_carry_retry_after_and_limits_but_never_the_key():
-    def limited(request):
-        return httpx.Response(429, headers={"retry-after": "120", "x-ratelimit-limit-req-minute": "2"}, json={"message": "Rate limit exceeded"})
-
-    with pytest.raises(MistralError) as info:
-        await complete("secret-key", "m", "sys", {"x": 1}, http=mistral(limited))
-    err = info.value
-    assert err.rate_limited and err.retry_after == 120 and err.limits["x-ratelimit-limit-req-minute"] == "2"
-    assert "secret-key" not in str(err) and "429" in str(err)
-    with pytest.raises(MistralError, match="not the JSON asked for"):
-        await complete("k", "m", "sys", {}, http=mistral(lambda r: httpx.Response(200, json={"choices": [{"message": {"content": "no json"}}]})))
-
-
-async def test_a_failed_answer_is_kept_so_the_failure_can_be_read_back():
-    """A parse failure that stores only "it was not JSON" teaches nothing: keep what the model wrote."""
-    cut_off = '{"headline": "Market is", "sections": {"market": {"summ'
-
-    def truncated(request):
-        return httpx.Response(200, json={"choices": [{"message": {"content": cut_off}, "finish_reason": "length"}]})
-
-    with pytest.raises(MistralError) as info:
-        await complete("k", "m", "sys", {}, http=mistral(truncated))
-    err = info.value
-    assert err.truncated and err.finish_reason == "length" and err.raw == cut_off
-    assert "cut off at max_tokens" in str(err)  # says which failure it was, not just "bad JSON"
-
-
-async def test_check_says_whether_the_model_is_available():
-    def handler(request):
-        if request.url.path.endswith("/models"):
-            return httpx.Response(200, json={"data": [{"id": "ministral-3b-2512"}, {"id": "ministral-8b-2512"}, {"id": "mistral-small-latest"}]})
-        return httpx.Response(429, headers={"x-ratelimit-remaining-req-minute": "0"}, json={"message": "Rate limit exceeded"})
-
-    out = await check("k", "ministral-3b-2512", http=mistral(handler))
-    assert out["model_listed"] and out["similar"] == ["ministral-3b-2512", "ministral-8b-2512"]
-    assert (out["ok"], out["status"], out["step"]) == (False, 429, "completion") and out["limits"]["x-ratelimit-remaining-req-minute"] == "0"
-
-
-def test_tbai_answers_are_cut_to_shape():
-    raw = {"headline": "h" * 999, "health": "panic", "priorities": ["a", "b", "c", "d"],
-           "sections": {"market": {"status": "act", "summary": "s", "points": list("abcdef"), "actions": ["x"]}, "extra": {}},
-           "symbols": {"BTCUSD": {"summary": "btc"}, "DOGE": {"summary": "?"}}}
-    out = tbai.clean(raw, ["BTCUSD", "ETHUSD"])
-    assert len(out["headline"]) == 300 and out["health"] == "watch" and len(out["priorities"]) == 3
-    assert set(out["sections"]) == set(tbai.SECTIONS) and out["sections"]["market"]["status"] == "act" and len(out["sections"]["market"]["points"]) == 4
-    assert out["sections"]["system"] == {"status": "watch", "summary": "", "points": [], "actions": []}
-    assert list(out["symbols"]) == ["BTCUSD"]
-
-
-# -- the analyst ------------------------------------------------------------------------------
+# -- the analyst ------------------------------------------------------------------------
 
 
 class CandleClient:
@@ -421,77 +180,21 @@ class CandleClient:
         return self.candles_by[-count:]
 
 
-def make_analyst(tmp_path, settings, published, digest=None):
+def make_analyst(settings, published):
     client = CandleClient(bars(700))
     live = summarize("BTC", book_quotes(expiry=time.time() + 86_400), SPOT)
-    a = Analyst(lambda: client, lambda: settings[0], published.append, lambda s: live if s == "BTCUSD" else None, lambda s: None, model_dir=tmp_path, digest=digest,
-                 bundled_models=tmp_path / "none")
+    a = Analyst(lambda: client, lambda: settings[0], published.append, lambda s: live if s == "BTCUSD" else None, lambda s: None)
     return a, client
 
 
-async def test_analyst_publishes_one_analysis_per_symbol(tmp_path):
+async def test_analyst_publishes_one_analysis_per_symbol():
     published = []
-    a, client = make_analyst(tmp_path, [Settings()], published)
+    a, client = make_analyst([Settings()], published)
     await a.cycle()
     assert [e.symbol for e in published] == ["BTCUSD", "ETHUSD"]
     btc = published[0]
-    assert btc.context["model"]["status"] == "not_trained" and btc.forecast is None and btc.ai is None
-    assert btc.playbook["strategy"] == "NO_TRADE" and btc.insights
+    assert btc.insights and btc.context["lean"]
     assert set(client.asked) == {"BTCUSD", "OI:BTCUSD", "FUNDING:BTCUSD", "ETHUSD", "OI:ETHUSD", "FUNDING:ETHUSD"}
-
-
-async def test_tbai_one_request_per_interval_with_the_engine_digest(tmp_path):
-    published, sent, digests = [], [], []
-
-    async def digest(include_account):
-        digests.append(include_account)
-        return {"as_of": 1, "trading": {"strategies": []}, "portfolio": {"shared": include_account}, "system": {"feed": {}}}
-
-    def handler(request):
-        sent.append(json.loads(request.content))
-        return answer({"headline": "All quiet", "health": "good", "sections": {"system": {"status": "good", "summary": "ok"}}, "symbols": {"BTCUSD": {"summary": "s"}}})
-
-    settings = [apply_changes(Settings(), {"ai_enabled": True, "mistral_api_key": "mk-0123456789", "ai_interval_minutes": 15, "ai_share_account": False})]
-    a, _ = make_analyst(tmp_path, settings, published, digest)
-    a.http = mistral(handler)
-    await a.cycle()
-    report = next(e for e in published if isinstance(e, AIReport))
-    assert report.ok and report.report["headline"] == "All quiet" and report.shared_account is False and digests == [False]
-    btc = next(e for e in published if isinstance(e, MarketAnalysis) and e.symbol == "BTCUSD")
-    assert btc.ai["summary"] == "s"
-    assert "mk-0123456789" not in json.dumps(sent[0])  # the key goes in a header, never in the body
-    user = json.loads(sent[0]["messages"][1]["content"])
-    assert user["portfolio"] == {"shared": False} and set(user["market"]) == {"BTCUSD", "ETHUSD"}
-
-    published.clear()
-    await a.cycle()  # 5 minutes later in real life: inside the 15-minute interval, no request
-    assert len(sent) == 1 and not any(isinstance(e, AIReport) for e in published)
-
-
-async def test_tbai_backs_off_after_a_rate_limit_and_keeps_the_last_review(tmp_path):
-    published, calls = [], []
-
-    def handler(request):
-        calls.append(1)
-        if len(calls) == 1:
-            return answer({"headline": "first", "symbols": {"BTCUSD": {"summary": "kept"}}})
-        return httpx.Response(429, headers={"retry-after": "900"}, json={"message": "Rate limit exceeded"})
-
-    settings = [apply_changes(Settings(), {"ai_enabled": True, "mistral_api_key": "mk-0123456789"})]
-    a, _ = make_analyst(tmp_path, settings, published)
-    a.http = mistral(handler)
-    now, results = time.time(), {"BTCUSD": {"context": {}, "insights": [], "forecast": None, "playbook": None}}
-    await a._tbai(settings[0], results, now=now)
-    reviews = await a._tbai(settings[0], results, now=now + 900)  # next 15-minute slot: 429
-    failure = [e for e in published if isinstance(e, AIReport)][-1]
-    assert not failure.ok and failure.status == 429 and failure.paused_until == pytest.approx(now + 900 + 900)
-    assert reviews["BTCUSD"]["summary"] == "kept" and reviews["BTCUSD"]["stale"] is True and "429" in reviews["BTCUSD"]["error"]
-    await a._tbai(settings[0], results, now=now + 900)  # still paused: no request
-    assert len(calls) == 2
-    assert a.status()["ai_paused_until"] is not None
-
-
-# -- engine, API, settings ----------------------------------------------------------------------
 
 
 async def test_engine_keeps_the_latest_and_a_row_a_minute(cfg, exchange):
@@ -508,23 +211,6 @@ async def test_engine_keeps_the_latest_and_a_row_a_minute(cfg, exchange):
     assert (await api.analysis())["symbols"]["BTCUSD"]["options"]["source"] == "websocket"
     db = await api.database()
     assert {t["name"] for t in db["tables"]} >= {"events", "orders", "options_history"} and db["file_bytes"] > 0
-
-
-def test_the_mistral_key_is_a_secret_but_not_a_delta_route():
-    s = apply_changes(Settings(), {"ai_enabled": True, "mistral_api_key": "mk-abcdefghijkl"})
-    assert s.public()["mistral_api_key"] == "••••ijkl" and "mk-abcdefghijkl" not in json.dumps(s.public())
-    assert "mistral_api_key" not in DELTA_ROUTING_FIELDS  # changing it never stops Delta trading
-    assert apply_changes(s, {"mistral_api_key": ""}).mistral_api_key == "mk-abcdefghijkl"  # blank keeps the key
-
-
-async def test_changing_the_ai_key_leaves_delta_trading_alone(cfg, exchange):
-    s = System(cfg, strategies=[AlwaysBuy()], stream_factory=IdleStream, client_factory=exchange.client)
-    s.set_toggle("trading:delta", True)
-    await s.update_settings({"ai_enabled": True, "mistral_api_key": "mk-abcdefghijkl"})
-    assert s.trading_on("delta") is True
-
-
-# -- jobs ----------------------------------------------------------------------------------------
 
 
 def test_jobs_record_runs_errors_and_the_next_run():
@@ -552,195 +238,6 @@ async def test_every_process_reports_its_jobs(cfg, exchange):
 
 
 
-async def test_the_ai_digest_has_numbers_not_secrets(cfg, exchange):
-    s = System(cfg, strategies=[AlwaysBuy()], stream_factory=IdleStream, client_factory=exchange.client)
-    await s.update_settings({"delta_api_key": "dk-SECRET-123", "delta_api_secret": "ds-SECRET-456", "mistral_api_key": "mk-SECRET-789", "delta_active": True})
-    api = Api(s)
-    full = await api.ai_digest(include_account=True)
-    text = json.dumps(full, default=str)
-    assert "SECRET" not in text and "client_order_id" not in text
-    assert set(full) == {"as_of", "system", "trading", "portfolio"} and full["portfolio"]["shared"] is True
-    assert {a["broker"] for a in full["portfolio"]["accounts"]} == {"paper", "delta"}
-    private = await api.ai_digest(include_account=False)
-    assert private["portfolio"] == {"shared": False} and "open_positions" not in private["trading"]
-
-
-async def test_ai_report_keeps_the_last_good_one(cfg, exchange):
-    s = System(cfg, strategies=[AlwaysBuy()], stream_factory=IdleStream, client_factory=exchange.client)
-    good = AIReport(ok=True, model="ministral-3b-2512", report={"headline": "fine", "health": "good"})
-    await s.on_ai_report(good)
-    await s.record(good)
-    bad = AIReport(ok=False, model="ministral-3b-2512", error="Mistral answered HTTP 429", status=429)
-    await s.on_ai_report(bad)
-    await s.record(bad)
-    r = await Api(s).ai_report()
-    assert r["report"]["report"]["headline"] == "fine" and r["latest"]["status"] == 429
-    assert [h["ok"] for h in r["history"]] == [False, True] and bad.level == "warning"
-    with pytest.raises(Exception, match="no Mistral API key"):
-        await Api(s).test_ai()
-
-
-def test_the_tbai_page_and_model_ids():
-    from tradebuddy.app import PAGES
-
-    assert ("ai", "/ai") in [(p[0], p[1]) for p in PAGES]
-    assert Settings().mistral_model == "ministral-3b-2512"
-    assert apply_changes(Settings(), {"mistral_model": "mistral-large-2411"}).mistral_model == "mistral-large-2411"
-    with pytest.raises(ValueError):
-        apply_changes(Settings(), {"mistral_model": "rm -rf /"})
-
-
-# -- saved TB-AI reports ---------------------------------------------------------------------------
-
-
-def _report(ts: float, ok: bool = True, headline: str = "fine") -> dict:
-    e = AIReport(ok=ok, model="ministral-3b-2512", report={"headline": headline, "health": "watch", "sections": {}} if ok else None,
-                 error="" if ok else "Mistral answered HTTP 429", status=None if ok else 429)
-    return e.to_dict() | {"ts": ts}
-
-
-def test_every_ai_report_is_saved_in_full_and_found_by_day():
-    from tradebuddy.store import Store
-
-    store, day = Store(":memory:"), 1_780_000_000.0
-    for n, ok in enumerate((True, False, True)):
-        store.record_ai_report(_report(day + 300 * n, ok, f"report {n}"))
-    store.record_ai_report(_report(day + 86_400, True, "next day"))
-    store.record_ai_report(_report(day, True, "duplicate"))  # same moment: recorded once
-
-    rows = store.ai_reports(day, day + 86_400)
-    assert [r["headline"] for r in rows] == ["report 2", None, "report 0"] and [r["ok"] for r in rows] == [True, False, True]
-    assert "data" not in rows[0]  # the list is summaries; the body comes one at a time
-    assert [r["headline"] for r in store.ai_reports(day, day + 86_400, ok_only=True)] == ["report 2", "report 0"]
-
-    first = store.ai_report(rows[-1]["id"])
-    assert first["report"]["headline"] == "report 0" and first["older_id"] is None
-    assert store.ai_report(first["newer_id"])["report"]["headline"] == "report 2"  # skips the failed attempt
-    assert store.ai_report(9999) is None
-
-
-def test_old_ai_reports_are_pruned_failed_ones_sooner():
-    from tradebuddy.store import AI_FAILED_DAYS, AI_REPORT_DAYS, Store
-
-    store, now = Store(":memory:"), 1_780_000_000.0
-    store.record_ai_report(_report(now - (AI_REPORT_DAYS + 1) * 86_400))
-    store.record_ai_report(_report(now - (AI_FAILED_DAYS + 1) * 86_400, ok=False))
-    store.record_ai_report(_report(now - (AI_FAILED_DAYS + 1) * 86_400 + 1))
-    assert store.prune_ai_reports(now) == 2
-    assert [r["ok"] for r in store.ai_reports()] == [True]
-
-
-def test_reports_from_the_event_log_are_copied_once(tmp_path):
-    from tradebuddy.store import Store
-
-    path = str(tmp_path / "tb.db")
-    old = Store(path)
-    old.db.execute("DELETE FROM ai_reports")
-    old.record_event(_report(1_780_000_000.0, headline="from before the table"))
-    assert old.ai_reports() == []
-    again = Store(path)
-    assert [r["headline"] for r in again.ai_reports()] == ["from before the table"]
-
-
-async def test_the_engine_saves_each_report_and_serves_it(cfg, exchange):
-    s = System(cfg, strategies=[AlwaysBuy()], stream_factory=IdleStream, client_factory=exchange.client)
-    await s.on_ai_report(AIReport(ok=True, model="ministral-3b-2512", report={"headline": "saved", "health": "good"}))
-    api = Api(s)
-    [row] = await api.ai_history()
-    full = await api.ai_report_at(row["id"])
-    assert full["report"]["headline"] == "saved" and full["id"] == row["id"]
-    assert (await api.ai_report())["saved"]["count"] == 1
-    with pytest.raises(Exception, match="no saved AI report"):
-        await api.ai_report_at(row["id"] + 1)
-    assert {"ai_history", "ai_report_at"} <= set(METHODS)
-
-
-def test_a_model_trained_here_wins_over_the_bundled_one(tmp_path):
-    from tradebuddy.analyst import BUNDLED_MODELS, model_path
-
-    here, bundled = tmp_path / "data_models", tmp_path / "bundled"
-    here.mkdir(), bundled.mkdir()
-    assert model_path(here, "BTCUSD", bundled) == (None, "")
-    (bundled / "forecast_BTCUSD.joblib").write_bytes(b"x")
-    assert model_path(here, "BTCUSD", bundled) == (bundled / "forecast_BTCUSD.joblib", "bundled")
-    (here / "forecast_BTCUSD.joblib").write_bytes(b"x")
-    assert model_path(here, "BTCUSD", bundled) == (here / "forecast_BTCUSD.joblib", "trained here")
-    # the repo ships models for both symbols, with their cards
-    assert {p.name for p in BUNDLED_MODELS.glob("forecast_*")} >= {f"forecast_{s}.{x}" for s in ("BTCUSD", "ETHUSD") for x in ("joblib", "json")}
-
-
-async def test_a_model_this_code_cannot_load_falls_back_to_the_shipped_one(cfg, exchange, tmp_path):
-    """A model trained on this server before a MODEL_VERSION bump is refused by the loader. There is a
-    working model shipped next to it, so the page gets a forecast and a note, not an error."""
-    pytest.importorskip("sklearn")
-    from tradebuddy.analyst import BUNDLED_MODELS, Analyst, model_paths
-
-    here, bundled = tmp_path / "here", tmp_path / "bundled"
-    here.mkdir(), bundled.mkdir()
-    (here / "forecast_BTCUSD.joblib").write_bytes(b"not a model")  # the stale one wins on order
-    shutil.copy(BUNDLED_MODELS / "forecast_BTCUSD.joblib", bundled / "forecast_BTCUSD.joblib")
-    assert [s for _, s in model_paths(here, "BTCUSD", bundled)] == ["trained here", "bundled"]
-
-    a = Analyst(client=lambda: None, settings=lambda: None, publish=lambda _e: None,
-                options=lambda _s: None, stats=lambda _s: None, model_dir=here, bundled_models=bundled)
-    model, info = a._model("BTCUSD")
-    assert model is not None and info["status"] == "ready" and info["source"] == "bundled"
-    assert info["skipped"] and "forecast_BTCUSD.joblib (trained here)" in info["skipped"][0]
-    a._model("BTCUSD")  # the broken file is remembered, not unpickled again every cycle
-    assert len(a._unloadable) == 1
-
-
-async def test_no_usable_model_anywhere_is_an_error_not_a_crash(tmp_path):
-    from tradebuddy.analyst import Analyst
-
-    here = tmp_path / "here"
-    here.mkdir()
-    (here / "forecast_BTCUSD.joblib").write_bytes(b"not a model")
-    a = Analyst(client=lambda: None, settings=lambda: None, publish=lambda _e: None,
-                options=lambda _s: None, stats=lambda _s: None, model_dir=here, bundled_models=tmp_path / "none")
-    model, info = a._model("BTCUSD")
-    assert model is None and info["status"] == "error" and "trained here" in info["hint"]
-
-
-async def test_an_answer_cut_off_is_asked_for_again_with_a_bigger_budget(tmp_path):
-    """Half of TB-AI's failures in production were the answer running past max_tokens mid-object."""
-    budgets, published = [], []
-
-    def handler(request):
-        budgets.append(json.loads(request.content)["max_tokens"])
-        if len(budgets) == 1:
-            return httpx.Response(200, json={"choices": [{"message": {"content": '{"headline": "cut'}, "finish_reason": "length"}]})
-        return answer({"headline": "second time", "symbols": {"BTCUSD": {"summary": "s"}}})
-
-    settings = [apply_changes(Settings(), {"ai_enabled": True, "mistral_api_key": "mk-0123456789"})]
-    a, _ = make_analyst(tmp_path, settings, published)
-    a.http = mistral(handler)
-    results = {"BTCUSD": {"context": {}, "insights": [], "forecast": None, "playbook": None}}
-    await a._tbai(settings[0], results, now=time.time())
-    report = [e for e in published if isinstance(e, AIReport)][-1]
-    assert report.ok and report.report["headline"] == "second time" and report.attempts == 2
-    assert budgets == [AI_MAX_TOKENS, 2 * AI_MAX_TOKENS] and a.ai_errors == 0
-
-
-async def test_a_second_failure_is_recorded_with_what_the_model_wrote(tmp_path):
-    published = []
-
-    def always_cut_off(request):
-        return httpx.Response(200, json={"choices": [{"message": {"content": '{"headline": "cut'}, "finish_reason": "length"}]})
-
-    settings = [apply_changes(Settings(), {"ai_enabled": True, "mistral_api_key": "mk-0123456789"})]
-    a, _ = make_analyst(tmp_path, settings, published)
-    a.http = mistral(always_cut_off)
-    results = {"BTCUSD": {"context": {}, "insights": [], "forecast": None, "playbook": None}}
-    await a._tbai(settings[0], results, now=time.time())
-    report = [e for e in published if isinstance(e, AIReport)][-1]
-    assert not report.ok and report.attempts == 2 and report.raw == '{"headline": "cut'
-    assert report.finish_reason == "length" and report.paused_until is None  # not a rate limit: no backoff
-
-
-# -- forecasts scored against what the market did ------------------------------------------
-
-
 def bars_from(start_ts, closes):
     """15m candles whose high and low straddle the close, so an excursion is measurable."""
     return [
@@ -749,7 +246,7 @@ def bars_from(start_ts, closes):
     ]
 
 
-def test_outcome_measures_the_window_the_forecast_covered():
+def test_outcome_measures_the_window_a_claim_covered():
     from tradebuddy.insights import outcome
 
     t0 = 1_700_000_000
@@ -769,84 +266,5 @@ def test_outcome_waits_rather_than_guessing_when_the_window_is_short():
     t0 = 1_700_000_000
     bars = bars_from(t0, [100.0] * 4)  # only an hour of candles
     assert outcome(bars, t0, 24, breakout_pct=3.0) is None  # a 24h horizon is not covered
-    assert outcome(bars, t0 - 86_400, 24, breakout_pct=3.0) is None  # the forecast bar is not in them
+    assert outcome(bars, t0 - 86_400, 24, breakout_pct=3.0) is None  # the claim bar is not in them
 
-
-def test_the_score_reads_every_number_against_what_needed_no_model():
-    from tradebuddy.insights import score_forecasts
-
-    # Ten bars that all went up: calling "up" every time is right 100% of the time and worth nothing.
-    points = [
-        {"bar_time": 1000 + i, "up_probability": 0.7, "actual_up": 1,
-         "predicted_realized_vol": 0.4, "actual_realized_vol": 0.4,
-         "expected_abs_move": 0.01, "actual_abs_move": 0.01,
-         "breakout_probability": 0.3, "actual_breakout": 0}
-        for i in range(10)
-    ]
-    s = score_forecasts(points)
-    assert s["count"] == 10
-    assert s["direction"]["hit_rate"] == 1.0 and s["direction"]["baseline"] == 1.0  # no edge over the drift
-    assert s["breakout"]["predicted"] == pytest.approx(0.3) and s["breakout"]["actual"] == 0.0
-    assert s["realized_vol"]["mae"] == 0.0 and s["realized_vol"]["bias"] == 0.0
-    assert score_forecasts([]) == {"count": 0}
-
-
-def test_the_score_sees_a_model_that_reads_the_market_high():
-    from tradebuddy.insights import score_forecasts
-
-    points = [
-        {"bar_time": 1000 + i, "up_probability": 0.4, "actual_up": i % 2,
-         "predicted_realized_vol": 0.60, "actual_realized_vol": 0.40,
-         "expected_abs_move": 0.02, "actual_abs_move": 0.01,
-         "breakout_probability": 0.9, "actual_breakout": 1}
-        for i in range(10)
-    ]
-    s = score_forecasts(points)
-    assert s["realized_vol"]["bias"] == pytest.approx(0.20)  # consistently 20 points too high
-    assert s["realized_vol"]["mae"] > s["realized_vol"]["baseline_mae"]  # worse than predicting the average
-    assert s["direction"]["baseline"] == 0.5  # the bars split evenly, so there is no side to ride
-
-
-async def test_the_engine_keeps_every_forecast_and_scores_it_when_the_horizon_is_up(cfg, exchange):
-    """Recorded on the way through, settled a day later from the candles for that window."""
-    from tradebuddy.events import MarketAnalysis
-    from tradebuddy.system import System
-
-    system = System(cfg, strategies=[], stream_factory=IdleStream, client_factory=exchange.client)
-    t0 = 1_700_000_000
-    forecast = {
-        "bar_time": t0, "horizon_hours": 1.0, "up_probability": 0.7, "down_probability": 0.3,
-        "breakout_probability": 0.4, "breakout_pct": 1.0, "predicted_realized_vol": 0.5,
-        "expected_abs_move": 0.01, "expected_return": 0.004, "skill": {"realized_vol": True},
-    }
-    await system.on_analysis(MarketAnalysis(symbol="BTCUSD", context={"price": 100.0}, insights=[], forecast=forecast, playbook=None))
-    # The analyst repeats a bar every cycle; the first claim is the one it made.
-    await system.on_analysis(MarketAnalysis(symbol="BTCUSD", context={"price": 999.0}, insights=[], forecast=forecast | {"up_probability": 0.1}, playbook=None))
-    [open_row] = system.store.unsettled_forecasts(now=t0 + 7200)
-    assert open_row["price"] == 100.0 and open_row["up_probability"] == 0.7
-
-    assert await system._score_once(now=t0 + 1800) == "nothing due"  # the horizon has not passed
-
-    exchange.history = bars_from(t0, [100.0, 101.0, 102.0, 102.5, 101.5])  # +1.5% an hour later
-    note = await system._score_once(now=t0 + 7200)
-    assert note == "settled 1"
-    assert system.store.unsettled_forecasts(now=t0 + 7200) == []
-    [row] = system.store.forecast_history("BTCUSD")
-    assert row["actual_return"] == pytest.approx(0.015)
-    assert row["actual_breakout"] == 1  # it travelled past the 1% threshold
-    assert row["up_probability"] == 0.7 and row["predicted_realized_vol"] == 0.5
-
-
-async def test_a_forecast_without_candles_stays_open_for_the_next_pass(cfg, exchange):
-    from tradebuddy.events import MarketAnalysis
-    from tradebuddy.system import System
-
-    system = System(cfg, strategies=[], stream_factory=IdleStream, client_factory=exchange.client)
-    t0 = 1_700_000_000
-    await system.on_analysis(MarketAnalysis(
-        symbol="BTCUSD", context={"price": 100.0}, insights=[], playbook=None,
-        forecast={"bar_time": t0, "horizon_hours": 1.0, "breakout_pct": 1.0, "up_probability": 0.5},
-    ))
-    exchange.history = []  # the exchange has nothing for that window yet
-    assert "without candles" in await system._score_once(now=t0 + 7200)
-    assert len(system.store.unsettled_forecasts(now=t0 + 7200)) == 1  # kept, not written off

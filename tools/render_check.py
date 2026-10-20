@@ -27,7 +27,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 PAGE_CALLS = {
     "market": [
         "/api/header", "/api/analysis", "/api/outlook?symbol=BTCUSD", "/api/verdicts?symbol=BTCUSD&days=30",
-        "/api/bars?symbol=BTCUSD&interval=15m&days=3", "/api/forecast/record?symbol=BTCUSD&days=14",
+        "/api/bars?symbol=BTCUSD&interval=15m&days=3",
         "/api/options/history?symbol=BTCUSD&hours=24",
     ],
     "system": ["/api/metrics", "/api/database", "/api/health?hours=48", "/api/events?type=CandleClosed&limit=100"],

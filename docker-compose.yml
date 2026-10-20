@@ -69,9 +69,9 @@ services:
     depends_on:
       redis: { condition: service_healthy }
 
-  # Market analysis every 5 minutes: insights, the trained forecaster, the options playbook and,
-  # when switched on in Settings, a Mistral review. Train its models once (and now and then):
-  #   docker compose run --rm analyst train --symbols BTCUSD ETHUSD --days 365
+  # Market analysis every 5 minutes: rule-based insights per symbol, from the stored bars and the
+  # options book. Fill the bars table first with:
+  #   docker compose run --rm analyst backfill --days 365
   analyst:
     <<: *app
     command: ["analyst"]

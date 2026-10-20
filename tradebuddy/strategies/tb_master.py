@@ -30,7 +30,7 @@ with it, it pays on both coins. EMA pullbacks (15m and 1h), Bollinger mean-rever
 breakouts, fading OI flushes and trading against negative funding all lost after costs. See BACKTEST.
 
 Perpetuals only: the brokers trade the BTCUSD and ETHUSD perps. Option structures (straddles, condors)
-are the analyst's playbook on the Market page, not traded here.
+are placed from the Positions page's options ticket, not traded here.
 
 `decide()` is a pure function over precomputed indicator series, so the backtest runs the code that trades.
 """

@@ -28,7 +28,6 @@ from tradebuddy.codec import EVENT_TYPES
 from tradebuddy.config import DEFAULT_AUTH_PIN
 from tradebuddy.delta import round_to_tick
 from tradebuddy.errors import BrokerError
-from tradebuddy.insights import score_forecasts
 from tradebuddy.options import UNDERLYINGS
 from tradebuddy.settings import SettingsError
 from tradebuddy.store import HEALTH_DAYS
@@ -48,8 +47,8 @@ METHODS = (
     "page_context", "header", "strategies", "signals", "positions", "orders", "open_orders", "account",
     "paper_stats", "paper_trades", "metrics", "events", "settings", "update_settings", "clear_credentials",
     "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order", "order_ticket",
-    "set_position_control", "risk", "risk_resume", "analysis", "options_history", "forecast_record", "database",
-    "ai_digest", "ai_report", "ai_history", "ai_report_at", "test_ai", "send_email_report",
+    "set_position_control", "risk", "risk_resume", "analysis", "options_history", "database",
+    "send_email_report",
     "bars", "snapshots", "health", "outlook", "verdicts",
     "journal_summary", "journal_month",
     "option_ticket", "place_structure", "structures", "close_structure", "paper_history",
@@ -113,7 +112,7 @@ class Api:
     async def page_context(self) -> dict[str, Any]:
         s = self.system.settings
         return {
-            "active_brokers": s.active_brokers, "paper_active": s.paper_active, "ai_enabled": s.ai_enabled,
+            "active_brokers": s.active_brokers, "paper_active": s.paper_active,
             # Set by `python -m tradebuddy demo`. Every page says so while it is set, because a
             # verdict's record read off a market that never happened is worse than no record.
             "demo_data": bool(self.system.store.load_settings().get("demo_data")),
@@ -206,8 +205,6 @@ class Api:
                 }
                 for sym in symbols
             },
-            "ai": "on" if s.settings.ai_ready else ("no key" if s.settings.ai_enabled else "off"),
-            "ai_model": s.settings.mistral_model,
         }
 
     async def options_history(self, symbol: str = "BTCUSD", hours: float = 24) -> list[dict[str, Any]]:
@@ -216,28 +213,6 @@ class Api:
         hours = min(max(hours, 1), 24 * 30)
         step = 60 if hours <= 24 else 900  # a minute apart for a day, a bar apart beyond
         return self.system.store.options_history(UNDERLYINGS[symbol], time.time() - hours * 3600, step)
-
-    async def forecast_record(self, symbol: str = "BTCUSD", days: float = 14) -> dict[str, Any]:
-        """Settled forecasts and how they did: what the model said, what the market then did.
-
-        A model card is a claim about the past; this is the running score since. The scoreboard is
-        measured against the same naive baselines the card is, so "56% right" is read next to what
-        always calling the busier side would have scored over the very same bars."""
-        days = min(max(days, 1), 180)
-        rows = self.system.store.forecast_history(symbol, time.time() - days * 86_400)
-        points = [
-            {
-                "bar_time": r["bar_time"], "price": r["price"], "actual_price": r["actual_price"],
-                "up_probability": r["up_probability"], "actual_up": int(r["actual_return"] > 0),
-                "predicted_realized_vol": r["predicted_realized_vol"], "actual_realized_vol": r["actual_realized_vol"],
-                "expected_abs_move": r["expected_abs_move"], "actual_abs_move": abs(r["actual_return"]),
-                "actual_return": r["actual_return"],
-                "breakout_probability": r["breakout_probability"], "breakout_pct": r["breakout_pct"],
-                "actual_breakout": r["actual_breakout"], "actual_excursion": r["actual_excursion"],
-            }
-            for r in rows
-        ]
-        return {"symbol": symbol, "days": days, "points": points, "score": score_forecasts(points)}
 
     async def bars(self, symbol: str = "BTCUSD", interval: str = "15m", days: float = 7) -> dict[str, Any]:
         """Stored candles with their open interest and funding, oldest first, and where the gaps are.
@@ -318,118 +293,6 @@ class Api:
             self._db_stats = (time.time(), stats)
         return stats | {"measured_at": self._db_stats[0]}
 
-    # -- TradeBuddy AI -----------------------------------------------------------------
-
-    async def ai_digest(self, include_account: bool = True) -> dict[str, Any]:
-        """What TB-AI reads: system, trading and portfolio as plain numbers. No keys, no order or
-        exchange ids; positions and account figures only with `include_account`."""
-        s, now = self.system, time.time()
-        day = now - 86_400
-        m = s.metrics()
-        r1 = lambda v, n=2: None if v is None else round(v, n)  # noqa: E731
-
-        market = s.market_status()
-        failing = [
-            {k: j.get(k) for k in ("process", "name", "state", "runs", "errors", "last_error")}
-            for j in m["jobs"]
-            if j.get("errors") or j.get("state") in ("failed", "silent") or (j.get("next_at") and now - j["next_at"] > max(60, 2 * (j.get("every") or 0)))
-        ]
-        warn_types = LEVEL_TYPES["warning"]
-        recent = [e for e in s.store.recent_events(500, types=warn_types) if e["ts"] >= day]
-        by_type: dict[str, int] = {}
-        for e in recent:
-            by_type[e["type"]] = by_type.get(e["type"], 0) + 1
-        errors = [
-            {"type": e["type"], "minutes_ago": round((now - e["ts"]) / 60), "what": str(e.get("error") or e.get("message") or e.get("reason") or "")[:160]}
-            for e in recent if e["type"] in LEVEL_TYPES["error"]
-        ][:6]
-        feed = m["feed"]
-        system = {
-            "market_data": {
-                "live": market["live"], "reason": market["reason"], "missing": market["missing"], "error": market["error"][:160],
-                "down_minutes": r1((now - market["down_since"]) / 60, 0) if market.get("down_since") else None,
-            },
-            "feed": {"connected": feed.get("connected"), "reconnects": feed.get("reconnects"), "seconds_since_message": feed.get("seconds_since_message")},
-            "processes": [
-                {"role": p.get("role"), "cpu_pct": p.get("process_cpu_pct"), "memory_mb": p.get("process_memory_mb"), "loop_lag_ms": p.get("loop_lag_ms"),
-                 "uptime_hours": r1((p.get("uptime_seconds") or 0) / 3600, 1), "seconds_since_report": r1(now - (p.get("at") or now), 0)}
-                for p in m["processes"]
-            ],
-            "host": {"cpu_pct": m["system"].get("system_cpu_pct"), "memory_pct": m["system"].get("system_memory_pct"), "load": m["system"].get("load_avg")},
-            "jobs": {"total": len(m["jobs"]), "needing_attention": failing},
-            "bus": {"queued": sum(w["queue"] for w in m["bus"]["workers"]),
-                    "handler_errors": [{"handler": w["name"], "errors": w["errors"], "last": w["last_error"][:120]} for w in m["bus"]["workers"] if w["errors"]]},
-            "evaluator": {k: m["evaluator"].get(k) for k in ("mode", "submitted", "failed_to_submit", "in_flight")} | {"workers_online": len(m["evaluator"].get("workers") or [])},
-            "warnings_and_errors_24h": by_type, "recent_errors": errors,
-            "event_log": m["event_log"],
-        }
-
-        skips: dict[str, int] = {}
-        for e in s.store.recent_events(2000, types=["TradeSkipped"]):
-            if e["ts"] >= day:
-                skips[e["reason"]] = skips.get(e["reason"], 0) + 1
-        trading: dict[str, Any] = {
-            "trading_switches": {b: s.trading_on(b) for b in s.settings.active_brokers},
-            "strategies": [
-                {"name": v["name"], "timeframe": v["interval"], "on": v["enabled"], "symbols_on": [x["symbol"] for x in v["symbols"] if x["enabled"]],
-                 **{k: v["stats"][k] for k in ("runs", "signals", "errors", "paused", "in_flight", "last_result")}}
-                for v in s.strategies_view()
-            ],
-            "last_24h": {t: s.store.count_events_since(t, day) for t in ("SignalGenerated", "TradeSkipped", "OrderPlaced", "OrderFailed", "OrderUnknown", "PositionClosed")},
-            "top_skip_reasons_24h": sorted(skips.items(), key=lambda kv: -kv[1])[:6],
-            "orders_by_status": s.store.order_counts(),
-        }
-        if not include_account:
-            return {"as_of": now, "system": system, "trading": trading, "portfolio": {"shared": False}}
-
-        positions, accounts = [], []
-        for name, broker in s.active.items():
-            try:
-                acct = await broker.account()
-                accounts.append({"broker": name, "currency": acct.currency, "equity": r1(acct.equity), "available": r1(acct.available),
-                                 "margin_used": r1(acct.margin_used), "unrealized_pnl": r1(acct.unrealized_pnl)})
-                for p in await broker.positions():
-                    d = 1 if p.side == "long" else -1
-                    positions.append({
-                        "broker": name, "symbol": p.symbol, "side": p.side, "size": p.size, "strategy": p.strategy, "entry": p.entry_price, "mark": p.mark_price,
-                        "pnl": r1(p.unrealized_pnl), "roe_pct": r1(p.unrealized_pnl / p.margin * 100 if p.margin else None),
-                        "to_stop_pct": r1(d * (p.mark_price - p.stop_loss) / p.mark_price * 100 if p.stop_loss else None),
-                        "to_target_pct": r1(d * (p.take_profit - p.mark_price) / p.mark_price * 100 if p.take_profit else None),
-                        "hours_open": r1((now - p.opened_at) / 3600, 1) if p.opened_at else None,
-                    })
-            except BrokerError as exc:
-                accounts.append({"broker": name, "error": str(exc)[:160]})
-        trading["open_positions"] = positions
-        paper = s.paper.stats() if s.settings.paper_active else None
-        closed = [
-            {"strategy": t["strategy"], "symbol": t["symbol"], "side": t["side"], "pnl": r1(t["pnl"], 4), "reason": t["reason"],
-             "hours_held": r1((t["closed_at"] - t["opened_at"]) / 3600, 1), "hours_ago": r1((now - t["closed_at"]) / 3600, 1)}
-            for t in (s.paper.trades(10) if paper else [])
-        ]
-        risk = await self.risk()
-        portfolio = {
-            "shared": True, "accounts": accounts,
-            "today": [{k: b.get(k) for k in ("broker", "pnl", "pnl_pct", "limit_pct", "used_pct", "halted", "halt_reason", "error")} for b in risk["brokers"]],
-            "paper_performance": {"overall": paper["overall"], "by_strategy": paper["by_strategy"]} if paper else None,
-            "recent_closed_trades": closed,
-        }
-        return {"as_of": now, "system": system, "trading": trading, "portfolio": portfolio}
-
-    async def ai_report(self) -> dict[str, Any]:
-        s, settings = self.system, self.system.settings
-        history = s.store.ai_reports(limit=30)
-        analyst = (s.remote_processes.get("analyst") or {}).get("status") or (s.analyst.status() if s.analyst else None)
-        return {
-            "enabled": settings.ai_enabled, "ready": settings.ai_ready, "has_key": bool(settings.mistral_api_key),
-            "model": settings.mistral_model, "interval_minutes": settings.ai_interval_minutes, "share_account": settings.ai_share_account,
-            "latest": s.ai_latest, "report": s.ai_last_good, "history": history, "analyst": analyst,
-            "saved": s.store.ai_reports_span(),
-        }
-
-    async def ai_history(self, start: float = 0.0, end: float = 0.0, ok_only: bool = False, limit: int = 500) -> list[dict[str, Any]]:
-        """Saved TB-AI attempts between two times (the dashboard asks for one local day), newest first."""
-        return self.system.store.ai_reports(start, end, ok_only, min(max(limit, 1), 2000))
-
     async def send_email_report(self, date: str = "") -> dict[str, Any]:
         """Email one day's report now (blank = today). It goes in the background: SMTP can take longer than
         an RPC, so the outcome arrives as an EmailReport event (and in the Event Log)."""
@@ -482,22 +345,6 @@ class Api:
             collect_month_summary, store, int(year), int(month), days, tz, equity, open_pnl,
         )
         return {"days": days, "month": summary}
-
-    async def ai_report_at(self, report_id: int) -> dict[str, Any]:
-        """One saved TB-AI attempt in full."""
-        report = self.system.store.ai_report(int(report_id))
-        if report is None:
-            raise ApiError(404, f"no saved AI report {report_id}: it may be older than the retention")
-        return report
-
-    async def test_ai(self, model: str = "") -> dict[str, Any]:
-        """Try the stored Mistral key: is it accepted, is the model available, what are its limits."""
-        from tradebuddy.mistral import check
-
-        settings = self.system.settings
-        if not settings.mistral_api_key:
-            raise ApiError(400, "no Mistral API key stored: add one in Settings → AI")
-        return await check(settings.mistral_api_key, model.strip() or settings.mistral_model)
 
     async def events(self, limit: int = 300, type: str = "", level: str = "") -> list[dict[str, Any]]:
         """`level` "warning" -> warnings and errors, "error" -> errors only."""
@@ -594,9 +441,8 @@ class Api:
         if not summary:
             out["error"] = f"no options data for {symbol or 'any symbol'} yet"
             return out
-        playbook = (s.analysis_latest.get(symbol) or {}).get("playbook")
         history = await asyncio.to_thread(s.store.options_history, summary["underlying"], time.time() - 7 * 86_400, 300)
-        out["suggestion"] = st.suggest(summary, playbook, history)
+        out["suggestion"] = st.suggest(summary, history)
         picks = None
         if suggested and out["suggestion"].get("kind"):
             kind, picks = out["suggestion"]["kind"], out["suggestion"].get("picks")

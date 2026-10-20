@@ -315,9 +315,8 @@ async def test_verdicts_are_stored_when_the_analyst_speaks_and_marked_when_the_h
         "term": [{"atm_iv": 0.60, "label": "near", "hours": 24}, {"atm_iv": 0.35, "label": "far"}],
     }}
     await system.on_analysis(MarketAnalysis(
-        symbol="BTCUSD", context={"price": bars[200].close, "lean": {"bullish": 3.0, "bearish": 0.5}},
+        symbol="BTCUSD", context={"price": bars[200].close, "bar_time": bar_time, "lean": {"bullish": 3.0, "bearish": 0.5}},
         insights=[{"key": "iv_rich", "severity": "alert", "bias": "volatility", "title": "rich", "detail": ""}],
-        forecast={"bar_time": bar_time, "horizon_hours": 24},
     ))
 
     written = [dict(r) for r in system.store.db.execute("SELECT * FROM predictions")]
@@ -387,7 +386,6 @@ def test_every_source_says_what_it_depends_on():
     # Every card the page draws resolves to one, and the options cards never claim to be counted.
     for card in ("term_structure", "atm_iv", "pcr", "chain_oi"):
         assert prov.of(card)["key"] == prov.IMPLIED
-    assert prov.of("forecast")["key"] == prov.MODEL
     assert prov.of("outlook")["key"] == prov.COUNTED
     assert prov.of("something new")["key"] == prov.COUNTED  # falls back without claiming more
 

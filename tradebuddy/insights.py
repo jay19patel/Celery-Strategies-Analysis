@@ -39,11 +39,11 @@ def _rv(closes: list[float], bars: int) -> float | None:
 
 
 def outcome(candles: list[Candle], bar_time: int, horizon_hours: float, breakout_pct: float) -> dict[str, float | bool] | None:
-    """What the market did over one forecast's horizon, or None when the candles do not cover it.
+    """What the market did over one claim's horizon, or None when the candles do not cover it.
 
-    Measured the way the model was trained: the return from the forecast bar's close to the close
-    `horizon_hours` later, the realised volatility of the closes between them, and the furthest the
-    price travelled either way against the threshold that bar's volatility implied."""
+    The return from the claim bar's close to the close `horizon_hours` later, the realised
+    volatility of the closes between them, and the furthest the price travelled either way
+    against `breakout_pct` (0 = do not ask)."""
     by_time = {c.time: c for c in candles}
     start = by_time.get(bar_time)
     end_time = bar_time + int(horizon_hours * 3600)
@@ -63,49 +63,6 @@ def outcome(candles: list[Candle], bar_time: int, horizon_hours: float, breakout
     }
 
 
-def score_forecasts(points: list[dict[str, Any]]) -> dict[str, Any]:
-    """How the model has actually done, over forecasts whose horizon has since passed.
-
-    Every number is read against what someone could have done without the model over the very same
-    bars: direction against always calling the side that came up more often, realised vol and the
-    absolute move against predicting their own average. A hit rate on its own says nothing — a
-    rising fortnight makes "always up" look clever too."""
-    n = len(points)
-    if not n:
-        return {"count": 0}
-
-    def mae(key: str, actual_key: str) -> dict[str, Any] | None:
-        pairs = [(p[key], p[actual_key]) for p in points if p.get(key) is not None and p.get(actual_key) is not None]
-        if len(pairs) < 2:
-            return None
-        mean = sum(a for _, a in pairs) / len(pairs)
-        return {
-            "n": len(pairs),
-            "mae": sum(abs(f - a) for f, a in pairs) / len(pairs),
-            "baseline_mae": sum(abs(mean - a) for _, a in pairs) / len(pairs),  # predict the average and nothing else
-            "bias": sum(f - a for f, a in pairs) / len(pairs),  # positive: the model reads the market high
-        }
-
-    called = [p for p in points if p.get("up_probability") is not None]
-    ups = sum(p["actual_up"] for p in called)
-    majority = max(ups, len(called) - ups) / len(called) if called else 0.0
-    hit = sum((p["up_probability"] > 0.5) == bool(p["actual_up"]) for p in called) / len(called) if called else 0.0
-    brk = [p for p in points if p.get("breakout_probability") is not None and p.get("actual_breakout") is not None]
-    return {
-        "count": n,
-        "from": points[0]["bar_time"],
-        "to": points[-1]["bar_time"],
-        "direction": {"n": len(called), "hit_rate": hit, "baseline": majority, "up_rate": ups / len(called) if called else 0.0},
-        "breakout": {
-            "n": len(brk),
-            "predicted": sum(p["breakout_probability"] for p in brk) / len(brk) if brk else 0.0,
-            "actual": sum(p["actual_breakout"] for p in brk) / len(brk) if brk else 0.0,
-        },
-        "realized_vol": mae("predicted_realized_vol", "actual_realized_vol"),
-        "abs_move": mae("expected_abs_move", "actual_abs_move"),
-    }
-
-
 def market_context(
     symbol: str, candles: list[Candle], oi: list[Candle] | None = None, funding: list[Candle] | None = None,
     stats: dict[str, Any] | None = None, options: dict[str, Any] | None = None,
@@ -113,7 +70,10 @@ def market_context(
     """Named numbers for one symbol. Candles are closed 15-minute bars, oldest first."""
     closes = [c.close for c in candles]
     price = (stats or {}).get("last") or (closes[-1] if closes else None)
-    ctx: dict[str, Any] = {"symbol": symbol, "price": price, "bars": len(candles)}
+    # The bar this reading was made on. Every claim the engine stores is pinned to it, so a verdict
+    # is marked against the window it actually covered rather than against whenever the event landed.
+    ctx: dict[str, Any] = {"symbol": symbol, "price": price, "bars": len(candles),
+                           "bar_time": int(candles[-1].time) if candles else None}
     if closes:
         ctx |= {
             "change_1h_pct": _pct(closes[-1], closes[-5]) if len(closes) > 4 else None,

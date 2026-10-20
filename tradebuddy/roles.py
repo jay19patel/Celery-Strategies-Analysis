@@ -160,10 +160,10 @@ def web_app(cfg: Config) -> FastAPI:
 
 
 async def analyst(cfg: Config) -> None:
-    """Market analysis in its own process: heavy imports (scikit-learn) and slow calls (Mistral)
-    stay out of the engine. Reads settings and the engine's events; writes only events, PUSHed to
-    the engine like strategy results."""
-    from tradebuddy.analyst import Analyst, model_dir_for
+    """Market analysis in its own process: the REST history it fetches every five minutes stays
+    out of the engine. Reads settings and the engine's events; writes only events, PUSHed to the
+    engine like strategy results."""
+    from tradebuddy.analyst import Analyst
     from tradebuddy.events import MarketStats, OptionsSnapshot, ProcessHeartbeat
 
     store = Store(cfg.db_path)
@@ -181,14 +181,9 @@ async def analyst(cfg: Config) -> None:
         return clients[env]
 
     pusher = ResultPusher(cfg.zmq_results_url)
-    engine = RemoteApi(RpcClient(cfg.zmq_rpc_url, timeout=20))  # read-only: the digest TB-AI writes about
-
-    async def digest(include_account: bool) -> dict:
-        return await engine.ai_digest(include_account=include_account)
-
-    worker = Analyst(client, settings, pusher.send, options.get, stats.get, model_dir=model_dir_for(cfg.db_path), digest=digest)
+    worker = Analyst(client, settings, pusher.send, options.get, stats.get)
     jobs, monitor = Jobs("analyst"), Monitor("analyst")
-    worker.job = jobs.add("market analysis", "Insights, forecast, options playbook, AI review", worker.every)
+    worker.job = jobs.add("market analysis", "Rule-based insights per symbol", worker.every)
     beat = jobs.add("heartbeat", "Tells the engine the analyst is alive, with these jobs", 10)
 
     async def heartbeat() -> None:
@@ -204,7 +199,7 @@ async def analyst(cfg: Config) -> None:
             elif isinstance(event, MarketStats):
                 stats[event.symbol] = {k: v for k, v in event.to_dict().items() if k not in ("type", "level", "symbol")}
 
-    log.info("analyst_started results=%s models=%s", cfg.zmq_results_url, model_dir_for(cfg.db_path))
+    log.info("analyst_started results=%s", cfg.zmq_results_url)
     await asyncio.gather(listen(), worker.run(), heartbeat(), monitor.run())
 
 

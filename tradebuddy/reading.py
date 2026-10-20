@@ -1,14 +1,13 @@
 """The Market page's tabs, each one a self-contained reading of the same bars.
 
 The page was one long scroll and the reader had to work out which numbers belonged together — which
-is how a trend reading and a skill-less model's direction ended up next to each other saying
+is how a counted trend reading and a bare arithmetic one ended up next to each other saying
 opposite things. The tabs are drawn along the only line that matters: **what the reading is made
 of**, the same split `provenance.py` names.
 
     Volume        who is behind the move, from traded size alone
     Patterns      structure and candle shapes, each with what it has actually led to
     Indicators    the classical readings, and the arithmetic of how far price can travel
-    Model & AI    the forecaster, used only where it beat its baseline, and TB-AI's prose
     Open interest what the options and futures books are positioned for
     Scorecard     what every card claimed, against what happened
 
@@ -64,7 +63,7 @@ def volume_block(candles: list[Candle]) -> dict[str, Any]:
     last = vols[-1]
     hour = sum(vols[-4:]) / 4
 
-    # Volume that arrived on up closes against down closes, over the last day. Not a forecast —
+    # Volume that arrived on up closes against down closes, over the last day. Not a prediction —
     # a tally of where the size actually went.
     up_vol = sum(v for v, i in zip(vols[-VOLUME_WINDOW:], range(len(vols) - VOLUME_WINDOW, len(vols)), strict=True)
                  if i > 0 and closes[i] > closes[i - 1])
@@ -279,7 +278,7 @@ def barrier_outcome(
 
     This is the only honest outcome for this system. Everything was scored on "did the close go up
     over N hours", but the Trader places a stop and a target (invariant 7) — so the page was
-    marking a question nobody trades. A forecast can be "right" while the trade it implies was
+    marking a question nobody trades. A claim can be "right" while the trade it implies was
     stopped out eight hours earlier.
 
     Three properties, each of which changes the answer:

@@ -10,9 +10,8 @@ it against, so the engine can settle it once that time has passed (`store.predic
 page can show how often each card has actually been right — beside the baseline that needed no
 chart at all. A verdict nobody scores is decoration.
 
-Rules only. No model, no AI, no network: the same numbers always give the same verdict, so the
-badge on the chart can never drift from the chart. TB-AI writes its own commentary elsewhere and
-is badged separately — it may disagree, and that is useful.
+Rules only. No model, no network: the same numbers always give the same verdict, so the badge on
+the chart can never drift from the chart.
 """
 
 from __future__ import annotations

@@ -32,7 +32,7 @@ engine  PriceBook · StrategyRunner · Trader · Executor · brokers · SQLite
         ◄─ RPC (api.METHODS) ── web
 worker  Celery task: evaluate() one strategy on one bar, PUSH the result
 feed    option tickers (WebSocket, REST fallback) ─► OptionsBook ─► OptionsSnapshot every 15s
-analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─► playbook ─► Mistral? ─► PUSH MarketAnalysis
+analyst every 5 min: candles+OI+funding ─► insights ─► PUSH MarketAnalysis
 ```
 
 - `System` (`system.py`) is the engine. It is the only writer of orders,
@@ -64,40 +64,26 @@ analyst every 5 min: candles+OI+funding ─► insights ─► Forecaster ─►
   the backtest runs the code that trades.
 - `options.py` — the options book and its arithmetic (ATM IV, skew, put/call, max pain, walls).
 - `structures.py` — defined-risk option structures (straddle, strangle, iron condor, debit spreads) built from
-  the live chain, and the suggestion (playbook, else IV rank + OI). Placed through `Trader.manual_structure`, on
-  paper only (`STRUCTURE_BROKERS`): by a person from the ticket, or by `trading.AutoStructures` when
-  `options_auto_enabled` (rules on the engine's own chain only, never the playbook or AI; one per underlying,
-  30-min cooldown, 3 a day, sized so the max loss is `options_auto_risk_pct` of equity).
+  the live chain, and the suggestion (IV rank over the stored history, with the put/call OI ratio). Placed
+  through `Trader.manual_structure`, on paper only (`STRUCTURE_BROKERS`): by a person from the ticket, or by
+  `trading.AutoStructures` when `options_auto_enabled` (rules on the engine's own chain only; one per
+  underlying, 30-min cooldown, 3 a day, sized so the max loss is `options_auto_risk_pct` of equity).
   `brokers/paper_options.py` holds them, reserves the max loss as margin and closes on
   whole-structure SL/TP or an hour before expiry — on `realisable()`, what closing would
   actually book, never the mark.
 - `email_report.py` — `DailyReporter`, an engine job: the day's report by email once at `email_report_hour`.
-- `insights.py` (rules), `forecast.py` (scikit-learn, `ml` extra), `playbook.py` (options
-  structure), `tbai.py` + `mistral.py` (TradeBuddy AI report; every attempt saved in full in `ai_reports`,
-  90 days, failed 14), `analyst.py` (runs them). Analysis is advisory:
-  nothing in it places an order.
-  A forecast target must ask the same question on every symbol and in every regime, or one model
-  learns a rare event and another a common one and neither is comparable: a breakout is
-  `breakout_sigma` x what the bar's own volatility implies over the horizon, never a fixed
-  percentage. Keep the models small — a 24h crypto target is mostly noise, and capacity goes into
-  the training regime. Every baseline must be the best thing someone could do without the model,
-  not a coin: direction is scored against always naming the side that came up more often, which
-  over a rising quarter was 54.8% on BTC and 56.2% on ETH. Measured that way nothing predicts 24h
-  direction here — not more features, not a shorter horizon, not pooling the symbols, not agreeing
-  with a trend indicator; all were tried and all were worse. Bump `MODEL_VERSION` whenever a target
-  or feature changes; `load` then refuses the old files and says to retrain, which is the point.
-- Every forecast is kept with the bar it was made on (`forecasts`), and the engine writes back what
-  the market did once the horizon passed (`System.score_forecasts`, `insights.outcome`). Market Data
-  draws the two against each other and scores them with `insights.score_forecasts` — always beside
-  the baseline that needed no model, because a hit rate alone cannot tell skill from drift.
+- `insights.py` (rules over measured numbers) and `analyst.py` (runs them every 5 minutes, one
+  `MarketAnalysis` per symbol). Analysis is advisory: nothing in it places an order. Rules only —
+  there is no trained model and no language model anywhere in this system, and a number on a page
+  is either arithmetic over its inputs or a rate counted over the stored bars. That is the whole
+  claim the Market page makes, and it is why `provenance.py` has three sources and not five.
 - `reading.py` — one block per Market-page tab (volume, indicators, candle-shape records). The tabs are
   split by what a reading is MADE of, not by topic, because that is the only line along which they differ
-  in how much they can be trusted — one scroll is how a counted trend reading and a skill-less model's
-  direction ended up side by side saying opposite things. The page's one answer sits above the tabs.
-- `provenance.py` — where every figure came from (arithmetic, counted history, what traders paid, a
-  trained model, TB-AI), ordered by how little has to be true for it to hold. The page badges each
-  one: showing them identically is how an Outlook reading "up" ended up beside a skill-less model
-  reading "Down 57%". A model without skill is not shown a side at all.
+  in how much they can be trusted — one scroll is how two readings of different worth ended up side by
+  side looking equally solid. The page's one answer sits above the tabs.
+- `provenance.py` — where every figure came from (arithmetic, counted history, what traders paid),
+  ordered by how little has to be true for it to hold. The page badges each one: showing them
+  identically is how two claims of very different worth ended up looking the same.
 - `demo.py` — `python -m tradebuddy demo` writes a market that never happened into its own database
   (`data/demo.db`), so the pages can be read before real history exists. It refuses a database that
   has ever held an order, and sets `demo_data`, which puts a banner on every page.
@@ -177,16 +163,12 @@ Enforced by tests. Breaking one should fail the build.
     (`predictions`: stance, horizon, what to measure, the numbers behind it) and the engine settles it
     once that horizon passes, beside the baseline that needed no chart at all. A probability is never
     shown without its sample size: under `outlook.MIN_SAMPLE` the page says how many it has and no
-    percentage. Direction starts at a coin and is only moved by what was counted — the forecaster has
-    no 24h direction skill and so stays out of it. A verdict badge reads the same series as the chart
-    it sits on.
-15. **Analysis never trades and never leaks.** The analyst reads market data and
-    the engine's `ai_digest` and writes only events. A forecast model is used only
-    for what it beat a naive baseline at on unseen data (`ModelCard.skill`).
-    TradeBuddy AI (TB-AI) sends Mistral computed numbers and findings, never keys,
-    secrets or order ids; trades, positions and account figures only with
-    `ai_share_account`. After a 429 it waits as long as Mistral asks (backoff
-    5 → 60 min). Every AI-written text in the UI carries the TB-AI badge.
+    percentage. Direction starts at a coin and is only moved by what was counted. A verdict badge
+    reads the same series as the chart it sits on.
+15. **Analysis never trades and never leaves the machine.** The analyst reads market data and
+    writes only events. Nothing on a page is a fit or a guess: every figure is arithmetic over its
+    inputs or a rate counted over the stored bars, and `provenance.py` names which. No part of the
+    system sends market data, account figures or anything else to a third-party service.
 
 ## Extension Points
 
@@ -228,8 +210,8 @@ routes that call `System`. State-changing routes take `Depends(protected)`; ever
 included, is already behind the PIN by the middleware (invariant 9b), so a new read needs nothing
 added to stay private. Live updates come from `TB.on(eventType, fn)`.
 
-Every number belongs to one page. `/` is Market Data: the market, its options and how the forecast
-has been doing. Balances and the paper record are on Account, open positions on Positions, the event
+Every number belongs to one page. `/` is Market Data: the market, its options and what the rules
+read in them. Balances and the paper record are on Account, open positions on Positions, the event
 stream on Event Log. Sidebar groups appear in the order their first page does in `PAGES`. There was
 an Overview above all of them that showed a copy of each; it is gone, and `/overview`, `/market` and
 `/paper` redirect. Resist adding it back — a second copy of a number is a second thing to keep right.
@@ -247,8 +229,6 @@ docker compose up          # everything: http://127.0.0.1:8080 (rebuilds on ever
 make install && make check # local lint + tests
 make token                 # an API_TOKEN for .env
 docker compose run --rm analyst backfill --days 365   # fill `bars` with past candles, OI and funding
-docker compose run --rm analyst train --symbols BTCUSD ETHUSD --days 365   # fit the forecaster (data/models)
-cp data/models/forecast_* models/   # ship them: models/ is in git and the image, used when data/models has none
 ```
 
 Tests run the engine in one process (`app.local_app`, inline evaluator, fake

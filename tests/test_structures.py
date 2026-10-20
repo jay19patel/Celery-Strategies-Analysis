@@ -91,17 +91,11 @@ def history(ivs):
     return [{"atm_iv": iv} for iv in ivs]
 
 
-def test_suggestion_follows_the_playbook_first():
-    pb = {"strategy": "IRON_CONDOR", "reason": "IV rich", "legs": [{"action": "sell", "kind": "put", "strike": 58_000}]}
-    sg = st.suggest(chain(), pb, [])
-    assert sg["kind"] == "iron_condor" and sg["source"] == "playbook" and sg["picks"][0]["strike"] == 58_000
-
-
-def test_without_a_forecast_iv_rank_decides():
+def test_iv_rank_decides_which_structure_is_suggested():
     summary = chain()  # ATM IV 0.45
-    assert st.suggest(summary, None, history([0.45 + i / 1000 for i in range(100)]))["kind"] in ("straddle", "strangle")  # cheapest
-    assert st.suggest(summary, None, history([0.30 + i / 1000 for i in range(100)]))["kind"] == "iron_condor"  # dearest
-    assert st.suggest(summary, None, history([0.45] * 10))["kind"] is None  # not enough history
+    assert st.suggest(summary, history([0.45 + i / 1000 for i in range(100)]))["kind"] in ("straddle", "strangle")  # cheapest
+    assert st.suggest(summary, history([0.30 + i / 1000 for i in range(100)]))["kind"] == "iron_condor"  # dearest
+    assert st.suggest(summary, history([0.45] * 10))["kind"] is None  # not enough history
 
 
 # -- the paper gate and exits ------------------------------------------------------------
@@ -356,7 +350,7 @@ async def test_cooldown_after_a_close_and_a_daily_maximum(cfg, exchange):
 async def test_no_condor_when_the_front_expiry_prices_an_event():
     summary = chain()
     summary["nearest"] = dict(summary["nearest"], atm_iv=summary["day"]["atm_iv"] * 1.3)
-    sg = st.suggest(summary, None, RICH)
+    sg = st.suggest(summary, RICH)
     assert sg["kind"] is None and "event" in sg["reason"]
 
 

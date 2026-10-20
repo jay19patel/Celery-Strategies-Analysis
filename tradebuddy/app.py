@@ -36,7 +36,6 @@ PAGES = [
     ("market", "/", "candlestick-chart", "Market Data", "Monitoring"),
     ("system", "/system", "gauge", "System", "Monitoring"),
     ("events", "/events", "scroll-text", "Event Log", "Monitoring"),
-    ("ai", "/ai", "sparkles", "TradeBuddy AI", "Trading"),
     ("strategies", "/strategies", "brain-circuit", "Strategies", "Trading"),
     ("signals", "/signals", "activity", "Signals", "Trading"),
     ("account", "/account", "wallet", "Account", "Portfolio"),
@@ -122,10 +121,6 @@ class StructureOrder(BaseModel):
     expiry: float | None = None
     legs: list[str] = Field(min_length=2, max_length=4)  # the contracts the person reviewed
     picks: list[StructurePick] | None = Field(default=None, max_length=4)
-
-
-class AITest(BaseModel):
-    model: str = Field(default="", max_length=64)
 
 
 class PositionControl(BaseModel):
@@ -330,8 +325,7 @@ def create_app(
                     "title": title,
                     "pages": [
                         p for p in PAGES
-                        if (p[0] != "paper" or ctx["paper_active"])
-                        and (p[0] != "ai" or ctx.get("ai_enabled") or page_id == "ai")
+                        if p[0] != "paper" or ctx["paper_active"]
                     ],
                     "active_brokers": ctx["active_brokers"],
                     "live_phrase": LIVE_CONFIRM_PHRASE,
@@ -451,10 +445,6 @@ def create_app(
     async def options_history(symbol: str = "BTCUSD", hours: float = 24) -> list[dict]:
         return await call("options_history", symbol=symbol, hours=hours)
 
-    @app.get("/api/forecast/record")
-    async def forecast_record(symbol: str = "BTCUSD", days: float = 14) -> dict:
-        return await call("forecast_record", symbol=symbol, days=days)
-
     @app.get("/api/bars")
     async def bars(symbol: str = "BTCUSD", interval: str = "15m", days: float = 7) -> dict:
         return await call("bars", symbol=symbol, interval=interval, days=days)
@@ -478,22 +468,6 @@ def create_app(
     @app.get("/api/database")
     async def database() -> dict:
         return await call("database")
-
-    @app.get("/api/ai")
-    async def ai_report() -> dict:
-        return await call("ai_report")
-
-    @app.get("/api/ai/history")
-    async def ai_history(start: float = 0.0, end: float = 0.0, ok_only: bool = False, limit: int = 500) -> list[dict]:
-        return await call("ai_history", start=start, end=end, ok_only=ok_only, limit=limit)
-
-    @app.get("/api/ai/reports/{report_id}")
-    async def ai_report_at(report_id: int) -> dict:
-        return await call("ai_report_at", report_id=report_id)
-
-    @app.post("/api/ai/test", dependencies=[Depends(protected)])
-    async def test_ai(body: AITest) -> dict:
-        return await call("test_ai", model=body.model)
 
     @app.get("/api/events")
     async def events(limit: int = 300, type: str = "", level: Literal["", "warning", "error"] = "") -> list[dict]:

@@ -126,7 +126,7 @@ def render(d: dict[str, Any]) -> tuple[str, str, str]:
         f'<div style="font-size:15px;font-weight:700;color:{INK}">{_e(n["headline"])}</div>'
         f'<ul style="font-size:13px;color:#334155;margin:10px 0 0;padding-left:18px;line-height:1.5">{brief}</ul>'
         f'<div style="font-size:13px;color:{INK};margin-top:8px"><b>Next:</b> {_e(n["coach_tip"])}</div>'
-        f'<div style="font-size:11px;color:{MUTED};margin-top:8px">Written by rules from the numbers below, not by AI.</div></div>'
+        f'<div style="font-size:11px;color:{MUTED};margin-top:8px">Written by rules from the numbers below.</div></div>'
     )
 
     parts = [summary_block, f'<table role="presentation" width="100%" cellpadding="0" cellspacing="6" style="margin-top:16px">{kpis}</table>']
@@ -205,17 +205,6 @@ def render(d: dict[str, Any]) -> tuple[str, str, str]:
         for h in d["risk"]["halts"]
     )
     parts.append(_section("Risk: trailing stops and loss limit", halts + _table(["Symbol", "Broker", "Trails", "Stop loss", "Take profit", "When"], trail_rows, "No stop was trailed today.", {4})))
-
-    ai = d["ai"]
-    if ai["attempts"]:
-        badge = '<span style="background:#ede9fe;color:#5b21b6;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px">TB-AI</span>'
-        latest = ai["latest"]
-        body = (
-            f'<p style="font-size:13px;margin:4px 0">{badge} {_e(latest["time"])} · {_e(latest["health"])} · {_e(latest["headline"])}</p>' if latest
-            else f'<p style="font-size:13px;color:{MUTED};margin:4px 0">No TB-AI review succeeded today.</p>'
-        )
-        body += f'<p style="font-size:12px;color:{MUTED};margin:4px 0">{ai["good"]} review(s) written, {ai["failed"]} failed. Advisory only: TB-AI never places an order.</p>'
-        parts.append(_section("Market review (TB-AI)", body))
 
     proc_rows = [[_e(p["role"]), _e(f"{p['cpu_pct']}%"), _e(f"{p['memory_mb']} MB"), _e(f"{p['uptime_hours']} h")] for p in sh["processes"]]
     job_rows = [[_e(j["process"]), _e(j["name"]), _e(j["errors"]), _e(j["last_error"])] for j in sh["failing_jobs"]]

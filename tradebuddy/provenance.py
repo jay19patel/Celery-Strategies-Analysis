@@ -1,19 +1,17 @@
 """Where a number came from, and therefore how much weight it can carry.
 
-The Market page draws arithmetic, counted history, what other traders have paid, a trained model
-and a language model's prose, and until now they all looked the same: same type, same card, same
-confidence. They are not the same. An expected move from volatility is true given the inputs; a
-hit rate counted over 3,000 bars is true with an error bar; an implied volatility is a fact about
-what someone paid, not a forecast; a model's direction call is worth exactly what it beat its
-baseline by, which here is nothing.
+The Market page draws arithmetic, counted history and what other traders have paid, and until now
+they all looked the same: same type, same card, same confidence. They are not the same. An
+expected move from volatility is true given the inputs; a hit rate counted over 3,000 bars is true
+with an error bar; an implied volatility is a fact about what someone paid, not a forecast.
 
 So every figure carries a source, the UI badges it, and the legend says in one line what each one
 depends on. Being able to see that the direction is counted and the distance is arithmetic — and
-that nothing on the page is the model guessing — is most of what makes the page trustworthy.
+that nothing on the page is a guess — is most of what makes the page trustworthy.
 
 Ordered most dependable first. "Dependable" means how little has to be true for the number to
 hold, not how useful it is: arithmetic needs only its inputs, a counted rate needs the future to
-resemble the past, a model needs that and its own fit to generalise.
+resemble the past.
 """
 
 from __future__ import annotations
@@ -23,8 +21,6 @@ from typing import Any
 MATH = "math"
 COUNTED = "counted"
 IMPLIED = "implied"
-MODEL = "model"
-AI = "ai"
 
 SOURCES: dict[str, dict[str, Any]] = {
     MATH: {
@@ -65,34 +61,9 @@ SOURCES: dict[str, dict[str, Any]] = {
             "what the market is paying for, which is why they are worth reading next to what it has been doing."
         ),
     },
-    MODEL: {
-        "key": MODEL,
-        "label": "Trained model",
-        "badge": "MODEL",
-        "colour": "#d97706",
-        "depends_on": "A fit that held up on bars it never saw.",
-        "detail": (
-            "Gradient-boosted models over 15-minute features. Each is scored against a naive baseline on a "
-            "purged holdout and used only for what it beat that baseline at. It currently has no skill at "
-            "24-hour direction, so it is not shown a side here — direction on this page is counted and "
-            "structural, never the model's guess."
-        ),
-    },
-    AI: {
-        "key": AI,
-        "label": "TradeBuddy AI",
-        "badge": "TB-AI",
-        "colour": "#db2777",
-        "depends_on": "A language model reading the numbers above.",
-        "detail": (
-            "Prose written by Mistral from the computed figures and findings. It can be wrong in ways the "
-            "rest of the page cannot: it is the only thing here that is not derived from a formula or a count. "
-            "Useful as a second reading, never as the reason for a trade."
-        ),
-    },
 }
 
-ORDER = (MATH, COUNTED, IMPLIED, MODEL, AI)
+ORDER = (MATH, COUNTED, IMPLIED)
 
 # Which card on the Market page rests on what. A card can only be as dependable as its source.
 CARD_SOURCE = {
@@ -100,16 +71,13 @@ CARD_SOURCE = {
     "atm_iv": IMPLIED,
     "pcr": IMPLIED,
     "chain_oi": IMPLIED,
-    "insights": COUNTED,  # rules over measured numbers; no fit, no forecast
+    "insights": COUNTED,  # rules over measured numbers; nothing fitted
     "volume": COUNTED,
     "indicators": MATH,  # transforms of price; nothing fitted and nothing counted
     "shapes": COUNTED,
     "where": COUNTED,  # levels the traded size itself made
     "levels": MATH,  # the highs and lows themselves; nothing fitted
     "outlook": COUNTED,
-    "forecast": MODEL,
-    "playbook": MODEL,
-    "review": AI,
 }
 
 

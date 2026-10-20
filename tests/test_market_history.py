@@ -124,11 +124,10 @@ async def test_every_analysis_is_stored_as_numbers_not_json(cfg, exchange):
     bar = 1_700_000_000 // STEP * STEP
     await system.on_analysis(MarketAnalysis(
         symbol="BTCUSD",
-        context={"price": 100.0, "atm_iv": 0.55, "iv_rv_ratio": 1.4, "implied_move_label": "Friday",
+        context={"price": 100.0, "bar_time": bar, "atm_iv": 0.55, "iv_rv_ratio": 1.4, "implied_move_label": "Friday",
                  "lean": {"bullish": 3.0, "bearish": 1.0, "lean": "bullish"}},
         insights=[{"key": "iv_rich", "severity": "watch", "bias": "volatility", "title": "", "detail": ""},
                   {"key": "trend", "severity": "info", "bias": "bullish", "title": "", "detail": ""}],
-        forecast={"bar_time": bar, "horizon_hours": 24},
     ))
 
     row = system.store.snapshots("BTCUSD")[-1]
@@ -238,3 +237,27 @@ async def test_the_health_job_survives_running_off_the_event_loop(cfg, exchange)
     # And the snapshot itself must still be taken where a loop exists.
     with pytest.raises(RuntimeError, match="no running event loop"):
         await asyncio.to_thread(system._health_snapshot)
+
+
+def test_a_database_from_the_old_build_loses_its_withdrawn_tables_and_its_api_key(tmp_path):
+    """The forecaster and TB-AI are gone. Their tables are rows no code can explain, and the stored
+    Mistral key is a live credential sitting in a file nothing reads: both go on the next open."""
+    import sqlite3
+
+    path = str(tmp_path / "old.db")
+    db = sqlite3.connect(path)
+    db.executescript(
+        "CREATE TABLE forecasts (symbol TEXT, bar_time INTEGER);"
+        "CREATE TABLE ai_reports (id INTEGER PRIMARY KEY, ts REAL);"
+        "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+    )
+    db.execute("INSERT INTO forecasts VALUES ('BTCUSD', 1)")
+    db.executemany("INSERT INTO settings VALUES (?, ?)", [("mistral_api_key", '"sk-live"'), ("delta_api_key", '"keep-me"')])
+    db.commit()
+    db.close()
+
+    store = Store(path)
+    tables = {r["name"] for r in store.db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "forecasts" not in tables and "ai_reports" not in tables
+    assert set(store.load_settings()) == {"delta_api_key"}
+    store.db.close()

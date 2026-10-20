@@ -22,7 +22,6 @@ from tradebuddy.delta import Candle, DeltaClient
 from tradebuddy.email_report import DailyReporter
 from tradebuddy.errors import BrokerError
 from tradebuddy.events import (
-    AIReport,
     CandleClosed,
     Event,
     EventBus,
@@ -62,8 +61,8 @@ from tradebuddy.trading import AUTO_EVERY, TRADING_DEFAULT, AutoStructures, Exec
 
 log = logging.getLogger(__name__)
 
-# Scoring a forecast needs the candles over its horizon, so it runs on a slow timer and asks for
-# them once per symbol per pass. A 24h horizon settles within a quarter hour of coming due.
+# Marking a card's claim needs the candles over its horizon, so it runs on a slow timer and asks
+# for them once per symbol per pass. A 24h horizon settles within a quarter hour of coming due.
 SCORE_EVERY = 900.0
 SCORE_RESOLUTION = "15m"
 SCORE_BAR_SECONDS = 900
@@ -229,9 +228,6 @@ class System:
         self._outlook: dict[str, tuple[int, dict[str, Any]]] = {}  # symbol -> (bar_time, view); rebuilt once a bar
         for e in self.store.recent_events(20, types=["MarketAnalysis"]):  # survive a restart
             self.analysis_latest.setdefault(e["symbol"], e)
-        reports = self.store.recent_events(50, types=["AIReport"])
-        self.ai_latest: dict[str, Any] | None = reports[0] if reports else None  # the last attempt
-        self.ai_last_good: dict[str, Any] | None = next((r for r in reports if r.get("ok")), None)
         self._options_minute: dict[str, int] = {}
         self.options_book = OptionsBook(set(UNDERLYINGS.values())) if local_feed and options_feed else None
         self.options_feed = (
@@ -282,7 +278,6 @@ class System:
         self.bus.subscribe(self.on_options, OptionsSnapshot)
         self.bus.subscribe(self.on_analysis, MarketAnalysis)
         self.bus.subscribe(self.on_process, ProcessHeartbeat)
-        self.bus.subscribe(self.on_ai_report, AIReport)
         self.bus.subscribe(self.live.on_event)
         self.analyst = analyst(self) if analyst else None
 
@@ -296,7 +291,7 @@ class System:
         if self.options_feed:
             self.options_feed.job = self.jobs.add("options snapshot", "Summarises the options book per underlying (REST if the socket is quiet)", self.options_feed.every)
         if self.analyst:
-            self.analyst.job = self.jobs.add("market analysis", "Insights, forecast, options playbook, AI review", self.analyst.every)
+            self.analyst.job = self.jobs.add("market analysis", "Rule-based insights per symbol", self.analyst.every)
         self.jobs_option_exits = self.jobs.add("paper option exits", "Stop loss, take profit and pre-expiry close of paper option structures", 5)
         self.auto_options = AutoStructures(
             self.trader, self.store, lambda: self.settings,
@@ -306,7 +301,7 @@ class System:
         self.auto_options.job = self.jobs.add("options auto-trade", "Opens the suggested option structure on paper, when switched on", AUTO_EVERY)
         self.reporter = DailyReporter(self)
         self.reporter.job = self.jobs.add("daily email", "Emails the day's report once, at the hour set in Settings", self.reporter.every)
-        self.jobs_forecast_score = self.jobs.add("forecast scoring", "Writes back what the market did over each matured forecast's horizon", SCORE_EVERY)
+        self.jobs_verdict_score = self.jobs.add("verdict scoring", "Writes back what the market did over each matured card claim's horizon", SCORE_EVERY)
         self.jobs_bars = self.jobs.add("bar collection", "Stores every closed bar with its open interest and funding", BAR_COLLECT_EVERY)
         self.jobs_health = self.jobs.add("process health", "Records CPU, memory and loop lag per process", HEALTH_EVERY)
         self.remote_processes: dict[str, dict[str, Any]] = {}  # role -> latest heartbeat (analyst)
@@ -359,14 +354,12 @@ class System:
                 with self.jobs_housekeeping.tick() as job:
                     deleted = await asyncio.to_thread(self.store.prune_events)
                     minutes = await asyncio.to_thread(self.store.prune_options)
-                    reports = await asyncio.to_thread(self.store.prune_ai_reports)
-                    forecasts = await asyncio.to_thread(self.store.prune_forecasts)
                     snapshots = await asyncio.to_thread(self.store.prune_snapshots)
                     health = await asyncio.to_thread(self.store.prune_health)
                     claims = await asyncio.to_thread(self.store.prune_predictions)
                     job.note = (
-                        f"deleted {deleted} events, {minutes} options minutes, {reports} AI reports, "
-                        f"{forecasts} forecasts, {snapshots} snapshots, {health} health rows, {claims} verdicts"
+                        f"deleted {deleted} events, {minutes} options minutes, {snapshots} snapshots, "
+                        f"{health} health rows, {claims} verdicts"
                     )
                 if deleted or minutes:
                     log.info("events_pruned deleted=%d options_minutes=%d", deleted, minutes)
@@ -398,7 +391,7 @@ class System:
         written, failed = 0, []
         for symbol in self.history_symbols:
             last = await asyncio.to_thread(self.store.last_bar_time, symbol, BAR_RESOLUTION)
-            # Nothing stored yet: take a run-up, so the first forecast has history behind it.
+            # Nothing stored yet: take a run-up, so the first reading has history behind it.
             behind = int((now - last) // SCORE_BAR_SECONDS) + 2 if last else BAR_CATCHUP_MAX
             count = min(max(behind, 2), BAR_CATCHUP_MAX)
             try:
@@ -454,47 +447,36 @@ class System:
         """One pass, for tests and for a manual run."""
         return self._write_health(self._health_snapshot(), time.time() if now is None else now)
 
-    async def score_forecasts(self, every: float = SCORE_EVERY) -> None:
-        """What the market actually did over each matured forecast's horizon.
+    async def score_verdicts(self, every: float = SCORE_EVERY) -> None:
+        """What the market actually did over each matured card claim's horizon.
 
         The engine is the only writer, so it settles here rather than in the analyst. One candle
-        request per symbol per pass covers every forecast of that symbol that has come due."""
+        request per symbol per pass covers every claim of that symbol that has come due."""
         while True:
             try:
-                with self.jobs_forecast_score.tick() as job:
+                with self.jobs_verdict_score.tick() as job:
                     job.note = await self._score_once()
             except Exception:
-                log.exception("forecast_scoring_failed")
+                log.exception("verdict_scoring_failed")
             await asyncio.sleep(every)
 
     async def _score_once(self, now: float | None = None) -> str:
         now = time.time() if now is None else now
-        due = await asyncio.to_thread(self.store.unsettled_forecasts, now)
         claims = await asyncio.to_thread(self.store.unsettled_verdicts, now)
-        if not due and not claims:
+        if not claims:
             return "nothing due"
-        settled, failed, marked = 0, 0, 0
-        for symbol in sorted({r["symbol"] for r in due} | {r["symbol"] for r in claims}):
-            rows = [r for r in due if r["symbol"] == symbol]
+        failed, marked = 0, 0
+        for symbol in sorted({r["symbol"] for r in claims}):
             mine = [r for r in claims if r["symbol"] == symbol]
-            oldest = min([r["bar_time"] for r in rows + mine], default=now)
-            span = now - oldest
+            span = now - min(r["bar_time"] for r in mine)
             try:  # one request covers every claim of this symbol that has come due
                 bars = await self.market_client.candles(symbol, SCORE_RESOLUTION, int(span / SCORE_BAR_SECONDS) + 8)
             except Exception as exc:
-                log.warning("forecast_scoring_no_candles symbol=%s error=%s", symbol, exc)
-                failed += len(rows) + len(mine)
+                log.warning("verdict_scoring_no_candles symbol=%s error=%s", symbol, exc)
+                failed += len(mine)
                 continue
-            for row in rows:
-                actual = outcome(bars, int(row["bar_time"]), float(row["horizon_hours"]), float(row["breakout_pct"] or 0.0))
-                if actual is None:
-                    failed += 1
-                    continue
-                self.store.settle_forecast(symbol, int(row["bar_time"]), now, **actual)
-                settled += 1
             marked += self._mark_verdicts(mine, bars, now)
-        note = f"settled {settled}" + (f", marked {marked} verdicts" if marked else "")
-        return note + (f", {failed} without candles" if failed else "")
+        return f"marked {marked} verdicts" + (f", {failed} without candles" if failed else "")
 
     def _mark_verdicts(self, rows: list[dict[str, Any]], bars: list[Any], now: float) -> int:
         """Score each card's claim against what the market did over its horizon.
@@ -583,12 +565,6 @@ class System:
             self._options_minute[e.underlying] = minute
             self.store.record_options(history_row(e.summary))
 
-    async def on_ai_report(self, e: AIReport) -> None:
-        self.ai_latest = e.to_dict()
-        self.store.record_ai_report(self.ai_latest)
-        if e.ok:
-            self.ai_last_good = self.ai_latest
-
     async def on_process(self, e: ProcessHeartbeat) -> None:
         self.remote_processes[e.role] = {"process": e.process, "jobs": e.jobs, "status": e.status, "at": e.ts}
 
@@ -611,16 +587,11 @@ class System:
     async def on_analysis(self, e: MarketAnalysis) -> None:
         self.analysis_latest[e.symbol] = e.to_dict()
         ctx = e.context or {}
-        f = e.forecast or {}
         price = ctx.get("price")
-        # Keep the claim. The analyst repeats a bar's forecast every cycle and the store keeps the
-        # first; the scorer writes back what the market did once the horizon is up. Without this a
-        # forecast is only ever read once and never checked.
-        if f.get("bar_time") and f.get("horizon_hours") and price:
-            self.store.record_forecast(e.symbol, int(f["bar_time"]), e.ts, float(price), f)
-        # Keep the reading too. The event log held it for three days as JSON, which is long enough
-        # to look at and far too short to count a base rate from.
-        bar_time = f.get("bar_time") or int(e.ts // SCORE_BAR_SECONDS * SCORE_BAR_SECONDS)
+        # Keep the reading. The event log held it for three days as JSON, which is long enough
+        # to look at and far too short to count a base rate from. The bar the analyst read is the
+        # one every claim is pinned to; without it a claim would be marked against the wrong window.
+        bar_time = int(ctx.get("bar_time") or e.ts // SCORE_BAR_SECONDS * SCORE_BAR_SECONDS)
         self.store.record_snapshot(
             e.symbol, int(bar_time), e.ts, ctx,
             ",".join(i["key"] for i in e.insights or []),
@@ -715,7 +686,7 @@ class System:
             asyncio.create_task(self.reporter.run(), name="daily-email"),
             asyncio.create_task(self.option_exits(), name="option-exits"),
             asyncio.create_task(self.auto_options.run(), name="auto-options"),
-            asyncio.create_task(self.score_forecasts(), name="forecast-scoring"),
+            asyncio.create_task(self.score_verdicts(), name="verdict-scoring"),
             asyncio.create_task(self.collect_bars(), name="bar-collection"),
             asyncio.create_task(self.record_health(), name="process-health"),
         ]
