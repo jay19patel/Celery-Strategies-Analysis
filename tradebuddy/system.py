@@ -15,7 +15,7 @@ from typing import Any, Protocol
 import psutil
 from fastapi import WebSocket
 
-from tradebuddy import outlook, reading, verdict
+from tradebuddy import liquidity, nearby, orderflow, outlook, profile, reading, verdict, zones
 from tradebuddy.brokers import Broker, DeltaBroker, PaperBroker
 from tradebuddy.config import Config
 from tradebuddy.delta import Candle, DeltaClient
@@ -54,8 +54,9 @@ from tradebuddy.settings import (
     clear_credentials,
     from_stored,
 )
-from tradebuddy.store import Store
+from tradebuddy.store import BAR_SECONDS, BASE_INTERVAL, Store
 from tradebuddy.strategies import Strategy, discover
+from tradebuddy.strategies.indicators import atr
 from tradebuddy.stream import BarCloser, DeltaStream, PriceBook
 from tradebuddy.trading import AUTO_EVERY, TRADING_DEFAULT, AutoStructures, Executor, Trader, atr_pct_from, trading_key
 
@@ -74,9 +75,25 @@ SCORE_BAR_SECONDS = 900
 BAR_RESOLUTION = "15m"
 BAR_COLLECT_EVERY = 900.0
 BAR_CATCHUP_MAX = 500  # one pass covers ~5 days of outage; older than that, use the backfill command
+# The base series. Collected on its own minute cadence rather than through the feed: nothing trades
+# on a 1m close, so a CandleClosed per symbol per minute would add 2,880 event-log rows a day and
+# wake every strategy subscriber for a bar none of them want. A REST read of the last few minutes
+# is idempotent against the same table (INSERT OR IGNORE), costs one call a symbol a minute, and
+# leaves the feed's subscription set exactly as the strategies define it.
+BASE_COLLECT_EVERY = 60.0
+BASE_CATCHUP_MAX = 1000  # ~17 hours of outage in one pass; beyond that the backfill fills it in
 HEALTH_EVERY = 300.0  # one row per process per 5 minutes
 OPTIONS_MINUTE_STEP = 60  # what the ATM IV and put/call cards chart, and so what their verdicts read
 OUTLOOK_BARS = 40_000  # a year of 15-minute bars is 35,040
+# What the market-structure read scans. Not the whole year: pools, zones and sweeps are about
+# where price is NOW, and a level from eleven months ago has been traded through many times over.
+# Five thousand 15m bars is ~52 days, which is long enough for the sweep and zone records to carry
+# a real sample and short enough that the whole read is ~150 ms.
+STRUCTURE_BARS = 5_000
+# The base series feeds the volume profile, where it buys real precision: a 15m bar that travelled
+# 2% has its volume smeared across the whole range, while fifteen 1m bars say where inside it the
+# trade happened. Three days of minutes covers today, yesterday and the sessions before them.
+PROFILE_BASE_BARS = 3 * 1440
 
 
 class Stream(Protocol):
@@ -226,6 +243,7 @@ class System:
         self.options_latest: dict[str, dict[str, Any]] = {}
         self.analysis_latest: dict[str, dict[str, Any]] = {}
         self._outlook: dict[str, tuple[int, dict[str, Any]]] = {}  # symbol -> (bar_time, view); rebuilt once a bar
+        self._structure: dict[str, tuple[int, dict[str, Any]]] = {}  # the same, for the market-structure read
         for e in self.store.recent_events(20, types=["MarketAnalysis"]):  # survive a restart
             self.analysis_latest.setdefault(e["symbol"], e)
         self._options_minute: dict[str, int] = {}
@@ -303,6 +321,9 @@ class System:
         self.reporter.job = self.jobs.add("daily email", "Emails the day's report once, at the hour set in Settings", self.reporter.every)
         self.jobs_verdict_score = self.jobs.add("verdict scoring", "Writes back what the market did over each matured card claim's horizon", SCORE_EVERY)
         self.jobs_bars = self.jobs.add("bar collection", "Stores every closed bar with its open interest and funding", BAR_COLLECT_EVERY)
+        self.jobs_base_bars = self.jobs.add(
+            "base bars", f"Stores every closed {BASE_INTERVAL} bar: the series every higher timeframe is folded from", BASE_COLLECT_EVERY,
+        )
         self.jobs_health = self.jobs.add("process health", "Records CPU, memory and loop lag per process", HEALTH_EVERY)
         self.remote_processes: dict[str, dict[str, Any]] = {}  # role -> latest heartbeat (analyst)
 
@@ -357,9 +378,10 @@ class System:
                     snapshots = await asyncio.to_thread(self.store.prune_snapshots)
                     health = await asyncio.to_thread(self.store.prune_health)
                     claims = await asyncio.to_thread(self.store.prune_predictions)
+                    base = await asyncio.to_thread(self.store.prune_bars)
                     job.note = (
                         f"deleted {deleted} events, {minutes} options minutes, {snapshots} snapshots, "
-                        f"{health} health rows, {claims} verdicts"
+                        f"{health} health rows, {claims} verdicts, {base} {BASE_INTERVAL} bars"
                     )
                 if deleted or minutes:
                     log.info("events_pruned deleted=%d options_minutes=%d", deleted, minutes)
@@ -409,6 +431,42 @@ class System:
                 {int(c.time): c.close for c in oi}, {int(c.time): c.close for c in funding},
             )
         note = f"{written} bars"
+        return f"{note}, no data for {', '.join(failed)}" if failed else note
+
+    async def collect_base_bars(self, every: float = BASE_COLLECT_EVERY) -> None:
+        """One pass a minute: store the base bars this run has not got.
+
+        These are what every timeframe between the base and 15m is folded from (`resample.py`), and
+        what makes a session level, a volume profile and a liquidity sweep answerable at all — none
+        of which a fifteen-minute bar can see inside of. Open interest and funding are not fetched
+        here: both are levels that barely move in a minute, both already ride the 15m series, and
+        three REST calls a symbol a minute to carry them would be the most expensive thing the
+        engine does."""
+        while True:
+            try:
+                with self.jobs_base_bars.tick() as job:
+                    job.note = await self._collect_base_bars_once()
+            except Exception:
+                log.exception("base_bar_collection_failed")
+            # Wake 5s after the minute closes, by which time the REST history has it.
+            await asyncio.sleep(every - (time.time() % every) + 5)
+
+    async def _collect_base_bars_once(self, now: float | None = None) -> str:
+        now = time.time() if now is None else now
+        step = BAR_SECONDS[BASE_INTERVAL]
+        written, failed = 0, []
+        for symbol in self.history_symbols:
+            last = await asyncio.to_thread(self.store.last_bar_time, symbol, BASE_INTERVAL)
+            behind = int((now - last) // step) + 2 if last else BASE_CATCHUP_MAX
+            count = min(max(behind, 2), BASE_CATCHUP_MAX)
+            try:
+                candles = await self.market_client.candles(symbol, BASE_INTERVAL, count)
+            except Exception as exc:  # one symbol's outage never stops the others
+                log.warning("base_bar_collection_no_candles symbol=%s error=%s", symbol, exc)
+                failed.append(symbol)
+                continue
+            written += await asyncio.to_thread(self.store.record_bars, symbol, BASE_INTERVAL, candles)
+        note = f"{written} {BASE_INTERVAL} bars"
         return f"{note}, no data for {', '.join(failed)}" if failed else note
 
     async def record_health(self, every: float = HEALTH_EVERY) -> None:
@@ -620,6 +678,58 @@ class System:
             self.store.record_verdict(symbol, bar_time, ts, price, v)
         return verdicts
 
+    async def market_structure(self, symbol: str) -> dict[str, Any]:
+        """Liquidity, zones, the volume profile and estimated flow, for one symbol.
+
+        One method because the four share their inputs — the same bars and the same ATR — and
+        because they are read together: a zone matters more when a pool sits behind it and the
+        profile says price was rejected there. Computed once by the engine and cached per bar, for
+        the same reason `outlook` is: the dashboard and any strategy that wants it must be looking
+        at one reading, not two that drifted.
+
+        The profile prefers the base series and says which it used. Everything else runs on the
+        bars the strategies run on."""
+        rows = await asyncio.to_thread(self.store.bars, symbol, BAR_RESOLUTION, 0.0, STRUCTURE_BARS)
+        if not rows:
+            return {"ready": False, "note": "no stored bars yet — run backfill", "symbol": symbol}
+        last = int(rows[-1]["time"])
+        cached = self._structure.get(symbol)
+        if cached and cached[0] == last:
+            view = cached[1]
+        else:
+            candles = [Candle(int(r["time"]), r["open"], r["high"], r["low"], r["close"], r["volume"]) for r in rows]
+            base = await asyncio.to_thread(self.store.bars, symbol, BASE_INTERVAL, 0.0, PROFILE_BASE_BARS)
+            view = await asyncio.to_thread(self._build_structure, symbol, candles, base, last)
+            self._structure[symbol] = (last, view)
+        # The merged map is rebuilt on every read rather than cached with the rest: it is a sort
+        # over a few hundred numbers, and the option walls that feed it move every 15 seconds,
+        # which is a hundred times inside one 15-minute bar.
+        return view | {"nearby": nearby.read(
+            view.get("price") or 0.0, view.get("atr") or 0.0,
+            view.get("liquidity"), view.get("zones"), view.get("profile"),
+            (self.options_latest.get(symbol) or {}).get("summary"),
+        )}
+
+    @staticmethod
+    def _build_structure(symbol: str, candles: list[Candle], base: list[dict[str, Any]], last: int) -> dict[str, Any]:
+        """Pure, and off the loop: every module here is a scan over thousands of bars."""
+        highs = [c.high for c in candles]
+        lows = [c.low for c in candles]
+        closes = [c.close for c in candles]
+        atr_now = (atr(highs, lows, closes, 14) or [0.0])[-1]
+        # A minute profile is a real profile; a 15-minute one is an estimate of where inside each
+        # bar the volume went. Use the base when there is enough of it, and say which was used.
+        rich = len(base) >= 240
+        profile_rows = base if rich else candles
+        return {
+            "symbol": symbol, "ready": True, "bar_time": last, "bars": len(candles),
+            "atr": round(atr_now, 2), "price": round(closes[-1], 2),
+            "liquidity": liquidity.read(candles, atr_now).to_dict(),
+            "zones": zones.read(candles, atr_now, BAR_RESOLUTION).to_dict(),
+            "profile": profile.read(profile_rows, source=BASE_INTERVAL if rich else BAR_RESOLUTION).to_dict(),
+            "flow": orderflow.read(candles).to_dict(),
+        }
+
     async def outlook(self, symbol: str) -> dict[str, Any]:
         """The directional view for one symbol, from the stored bars.
 
@@ -688,6 +798,7 @@ class System:
             asyncio.create_task(self.auto_options.run(), name="auto-options"),
             asyncio.create_task(self.score_verdicts(), name="verdict-scoring"),
             asyncio.create_task(self.collect_bars(), name="bar-collection"),
+            asyncio.create_task(self.collect_base_bars(), name="base-bar-collection"),
             asyncio.create_task(self.record_health(), name="process-health"),
         ]
         if self.local_feed:

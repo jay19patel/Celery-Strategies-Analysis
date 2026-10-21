@@ -168,7 +168,9 @@ async def test_the_outlook_reads_every_timeframe_and_counts_the_odds(cfg, exchan
     # Longer horizon, bigger move — and the bands widen with it.
     moves = [h["expected_move_pct"] for h in view["horizons"]]
     assert moves[0] < moves[1] < moves[2]
-    assert view["narrative"]["headline"] and view["narrative"]["plan"]
+    # The view carries numbers, not prose. The "In words" card restated the figures above it as
+    # sentences; it was a second rendering of one reading, and two renderings is one too many.
+    assert "narrative" not in view
 
 
 async def test_a_random_walk_shows_no_edge(cfg, exchange):
@@ -340,11 +342,11 @@ async def test_the_verdicts_route_gives_the_page_what_it_draws(cfg, exchange):
     body = await Api(system).verdicts("BTCUSD")
 
     assert {"symbol", "days", "verdicts", "record", "history"} <= body.keys()
-    # One per tab on the Market page: four from the books, and one each for the outlook, the rule
-    # findings, volume, the indicators and the candle shapes.
+    # One per card the page still shows: four from the books, and one each for the outlook, the
+    # rule findings, volume and where it traded. Indicators, Levels and Candle shapes were dropped
+    # with the cards that rendered them.
     assert {v["key"] for v in body["verdicts"]} == {
-        "term_structure", "atm_iv", "pcr", "chain_oi", "insights", "outlook",
-        "volume", "indicators", "shapes", "where", "levels",
+        "term_structure", "atm_iv", "pcr", "chain_oi", "insights", "outlook", "volume", "where",
     }
     for v in body["verdicts"]:
         assert {"key", "stance", "label", "detail", "confidence", "horizon_hours", "measure", "scorable"} <= v.keys()

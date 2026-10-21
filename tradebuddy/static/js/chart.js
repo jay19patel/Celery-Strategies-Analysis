@@ -345,5 +345,243 @@
     </svg>`;
   }
 
-  window.TBC = { timeLine, hbars, candles, rangeBar, probBar, volumeProfile, colorFor, niceTicks, ROLE_COLOR };
+
+  /**
+   * The tape: one chart that answers the whole question.
+   *
+   * This replaces eight tabs, and the reason it can is that seven of them were lists of PRICES —
+   * pools, zones, reference levels, value-area edges, option walls. A price belongs on a price
+   * axis. Reading it off a table meant doing in your head the one thing a chart is for.
+   *
+   * Everything here shares ONE vertical scale: the candles, the zone rectangles, the level lines
+   * and the volume-by-price histogram in the right-hand gutter. That is the whole trick. Two
+   * charts side by side with their own axes cannot be compared by eye, however neatly they are
+   * aligned; one axis means the POC is drawn at the same height as the price it refers to and the
+   * comparison is free.
+   *
+   *   bars     [{time, open, high, low, close, volume}]
+   *   zones    [{low, high, kind, direction, state, created_at}] drawn from where they formed
+   *   levels   [{price, label, kind, confluence}] horizontal, labelled in the right margin
+   *   marks    [{bar_time, direction, kind}] structure breaks
+   *   sweeps   [{bar_time, direction}] stop raids, drawn as a hook through the level
+   *   profile  {levels:[{price, share, in_value, poc}]} the right gutter
+   *   sub      {mode:"volume"|"delta", bars:[{time, value, up}]} the pane underneath
+   *
+   * Layers are passed in already filtered — the caller owns what is visible, this owns how it is
+   * drawn.
+   */
+  // `tape()` used to live here: a hand-rolled candle chart with its own wheel, drag and crosshair
+  // handlers. It is now `static/js/tape.js` on TradingView's Lightweight Charts — a price chart
+  // needs zoom, pan, a snapping crosshair and a canvas renderer, and each of those is a week of
+  // work the library has already done. Everything else on the dashboard stays hand-rolled SVG,
+  // because a bar chart does not need 160 KB to draw six bars.
+
+
+  /**
+   * Open interest and volume by strike: puts left, calls right, spot in the middle.
+   *
+   * The option chain is a table of a hundred numbers and the question anyone actually has of it is
+   * shaped like a picture — WHERE is the size, and is it calls or puts? Mirrored bars answer that
+   * in one look: the longest bar on the right is the call wall, the longest on the left is the put
+   * wall, and a lopsided chart is a positioned market.
+   *
+   * Open interest is the solid bar — contracts that exist and must eventually be closed or settled.
+   * Volume is the darker inner bar: what changed hands TODAY. A strike with big OI and no volume is
+   * an old position sitting there; big volume and little OI is something being opened right now,
+   * and those are very different pieces of news.
+   */
+  function strikeLadder(rows, opts = {}) {
+    const live = (rows || []).filter((r) => r && isFinite(r.strike));
+    if (live.length < 2) return empty(opts.height || 300, "No contracts near spot for this expiry.");
+    const { spot = null, maxPain = null, height = 340, format = (v) => Math.round(v).toLocaleString() } = opts;
+    const CALL = "#2a78d6", PUT = "#eb6834";
+
+    const oiOf = (s) => (s && s.oi) || 0;
+    const volOf = (s) => (s && s.volume) || 0;
+    const peak = Math.max(...live.flatMap((r) => [oiOf(r.call), oiOf(r.put)]), 1e-9);
+
+    // Nearest the money first is the wrong order for a ladder: price runs down the page, so the
+    // strikes do too, highest at the top, the way every option chain is read.
+    const sorted = [...live].sort((a, b) => b.strike - a.strike);
+    const rowH = Math.max(9, Math.min(20, (height - 26) / sorted.length));
+    const half = 46;  // % of width each side gets, leaving a gutter for the strike label
+
+    const atm = spot == null ? null
+      : sorted.reduce((best, r) => (Math.abs(r.strike - spot) < Math.abs(best.strike - spot) ? r : best), sorted[0]).strike;
+
+    const bar = (side, colour, right) => {
+      const oi = oiOf(side), vol = volOf(side);
+      if (!oi && !vol) return "";
+      const w = (100 * oi / peak) * (half / 100);
+      const vw = (100 * Math.min(vol, oi) / peak) * (half / 100);
+      const edge = right ? "left:50.8%" : `right:50.8%`;
+      return `<span style="position:absolute;${edge};top:12%;height:76%;width:${w.toFixed(2)}%;
+          background:${colour};opacity:.3;border-radius:2px"></span>
+        ${vw > 0.2 ? `<span style="position:absolute;${edge};top:28%;height:44%;width:${vw.toFixed(2)}%;
+          background:${colour};opacity:.85;border-radius:1px"></span>` : ""}`;
+    };
+
+    const body = sorted.map((r) => {
+      const isAtm = atm != null && r.strike === atm;
+      const isPain = maxPain != null && Math.abs(r.strike - maxPain) < 1e-9;
+      return `<div style="position:relative;height:${rowH}px" title="${format(r.strike)} — calls OI ${
+          compactish(oiOf(r.call))} vol ${compactish(volOf(r.call))} · puts OI ${compactish(oiOf(r.put))} vol ${compactish(volOf(r.put))}">
+        ${bar(r.put, PUT, false)}${bar(r.call, CALL, true)}
+        <span style="position:absolute;left:50%;transform:translateX(-50%);top:0;height:100%;display:flex;align-items:center;
+          font:600 9.5px ui-monospace,monospace;color:${isAtm ? "#0f172a" : "#94a3b8"};
+          ${isAtm ? "background:#f1f5f9;border-radius:2px;padding:0 3px" : ""}">${format(r.strike)}${isPain ? " ◆" : ""}</span>
+      </div>`;
+    }).join("");
+
+    return `<div>
+      <div class="flex justify-between text-[10.5px] muted mb-1">
+        <span style="color:${PUT}">◀ puts</span>
+        <span>pale = open interest · solid = traded today${maxPain != null ? " · ◆ max pain" : ""}</span>
+        <span style="color:${CALL}">calls ▶</span>
+      </div>
+      <div style="position:relative">${body}</div>
+    </div>`;
+  }
+
+  const compactish = (v) => (v == null ? "—" : Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(v));
+
+  /**
+   * The level ladder: what is above and what is below, as a shape rather than two tables.
+   *
+   * Distance is drawn to scale, so "price is sitting right under a wall of three agreeing levels"
+   * is something you see instead of something you work out from a percentage column.
+   */
+  function ladder(above, below, price, opts = {}) {
+    const { format = (v) => v.toLocaleString(undefined, { maximumFractionDigits: 0 }) } = opts;
+    const all = [...(above || []), ...(below || [])];
+    if (!all.length) return `<div class="text-[11px] muted">No levels within reach — the scan found nothing above or below.</div>`;
+    const reach = Math.max(...all.map((l) => Math.abs(l.distance_atr)), 1);
+    const KIND_COLOR = {
+      pool: "#d97706", zone: "#7c3aed", poc: "#0891b2", value: "#0891b2",
+      naked: "#0891b2", reference: "#64748b", wall: "#1e88e5",
+    };
+    const row = (l) => {
+      const col = KIND_COLOR[l.kind] || "#94a3b8";
+      const pct = (100 * Math.abs(l.distance_atr) / reach).toFixed(1);
+      const strong = (l.confluence || 1) > 1;
+      return `<div class="flex items-center gap-2 py-[3px]" title="${esc(l.evidence || "")}">
+        <span class="font-mono text-[11px] tabular-nums" style="width:5.5rem;text-align:right;color:${col}">${esc(format(l.price))}</span>
+        <span class="relative bg-slate-100 rounded-sm" style="flex:1;height:9px">
+          <span class="absolute left-0 top-0 bottom-0 rounded-sm" style="width:${pct}%;background:${col};opacity:${strong ? 0.9 : 0.5}"></span>
+        </span>
+        <span class="text-[10.5px] muted truncate" style="width:9rem">${strong
+          ? `<span style="color:${col}" title="${esc((l.agrees || []).join(', '))}">◆${l.confluence}</span> ` : ""}${esc(l.label || "")}</span>
+        <span class="font-mono text-[10px] muted tabular-nums" style="width:3.2rem;text-align:right">${l.distance_atr.toFixed(1)}atr</span>
+      </div>`;
+    };
+    return `<div>
+      ${[...(above || [])].reverse().map(row).join("")}
+      <div class="flex items-center gap-2 my-1">
+        <span class="font-mono text-[11px] font-semibold tabular-nums" style="width:5.5rem;text-align:right">${esc(format(price))}</span>
+        <span style="flex:1;height:1px;background:#0f172a"></span>
+        <span class="text-[10.5px] font-semibold" style="width:9rem">price now</span>
+        <span style="width:3.2rem"></span>
+      </div>
+      ${(below || []).map(row).join("")}
+    </div>`;
+  }
+
+
+  /**
+   * A row of outcomes, oldest left. Green worked, red did not, hollow still open.
+   *
+   * Replaces a table of twenty sweeps. A table makes you read twenty rows to answer "do these
+   * usually work", which is the only question anyone asks of them — here the answer is the colour
+   * of the row, and the individual events are still on hover.
+   */
+  function outcomeStrip(items, opts = {}) {
+    const rows = items || [];
+    if (!rows.length) return `<div class="text-[11px] muted">${esc(opts.empty || "Nothing in the window.")}</div>`;
+    const { label = (r) => "", height = 22 } = opts;
+    const cell = (r) => {
+      const open = r.worked == null;
+      const col = open ? "#cbd5e1" : r.worked ? "#00b852" : "#eb5757";
+      return `<span title="${esc(label(r))}" style="flex:1 1 0;min-width:3px;height:${height}px;border-radius:2px;
+        background:${open ? "transparent" : col};border:1.5px solid ${col};opacity:${open ? 0.6 : 0.9}"></span>`;
+    };
+    const done = rows.filter((r) => r.worked != null);
+    const won = done.filter((r) => r.worked).length;
+    return `<div>
+      <div style="display:flex;gap:2px;align-items:stretch">${rows.map(cell).join("")}</div>
+      <div class="flex justify-between text-[10.5px] muted mt-1">
+        <span>oldest</span>
+        <span>${done.length ? `${won} of ${done.length} worked` : "none resolved yet"}${
+          rows.length > done.length ? ` · ${rows.length - done.length} still open` : ""}</span>
+        <span>newest</span>
+      </div></div>`;
+  }
+
+  /**
+   * A lifecycle as one proportional bar: how many zones are fresh, tested, mitigated, dead.
+   *
+   * The states only ever move forward, so this bar is a picture of how worked-through the current
+   * set of zones is — all-fresh after a move into new territory, all-mitigated in a range.
+   */
+  function stateBar(counts, opts = {}) {
+    const order = opts.order || ["fresh", "tested", "mitigated", "invalidated"];
+    const colour = { fresh: "#00b852", tested: "#1e88e5", mitigated: "#94a3b8", invalidated: "#e2e8f0" };
+    const total = order.reduce((s, k) => s + (counts[k] || 0), 0);
+    if (!total) return `<div class="text-[11px] muted">No zones found yet.</div>`;
+    return `<div>
+      <div style="display:flex;height:16px;border-radius:3px;overflow:hidden">${order.map((k) => {
+        const n = counts[k] || 0;
+        return n ? `<span title="${n} ${k}" style="width:${(100 * n / total).toFixed(1)}%;background:${colour[k]}"></span>` : "";
+      }).join("")}</div>
+      <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[10.5px] muted mt-1">${order.map((k) => {
+        const n = counts[k] || 0;
+        return n ? `<span><span style="display:inline-block;width:8px;height:8px;border-radius:1px;background:${colour[k]};vertical-align:middle"></span> ${n} ${esc(k)}</span>` : "";
+      }).join("")}</div></div>`;
+  }
+
+  /**
+   * Session ranges, one row per UTC day, each session a bar across a shared price axis.
+   *
+   * The question a table of session highs and lows cannot answer is the one worth asking: WHICH
+   * session made the day's range. Drawn on one axis, that is immediate — a long New York bar under
+   * a short Asia one is a day the move happened in the afternoon, and you can see a week of them
+   * at a glance.
+   */
+  function sessionRanges(rows, opts = {}) {
+    const live = (rows || []).filter((r) => r && isFinite(r.high) && isFinite(r.low) && r.high > r.low);
+    if (!live.length) return `<div class="text-[11px] muted">No session data stored yet.</div>`;
+    const { price = null, format = (v) => Math.round(v).toLocaleString() } = opts;
+    const lo = Math.min(...live.map((r) => r.low), price ?? Infinity);
+    const hi = Math.max(...live.map((r) => r.high), price ?? -Infinity);
+    const span = (hi - lo) || 1;
+    const COL = { asia: "#7c3aed", london: "#1e88e5", newyork: "#d97706" };
+    const pos = (v) => (100 * (v - lo) / span);
+
+    const byDay = {};
+    for (const r of live) (byDay[r.day] ||= []).push(r);
+    const days = Object.keys(byDay).sort().reverse();
+
+    const body = days.map((day) => {
+      const label = new Date(+day * 1000).toLocaleDateString([], { day: "2-digit", month: "short" });
+      return `<div class="flex items-center gap-2 py-1 border-t border-slate-100 first:border-0">
+        <span class="text-[10.5px] muted" style="width:3.6rem">${esc(label)}</span>
+        <span class="relative" style="flex:1;height:34px">
+          ${byDay[day].map((r, i) => `<span title="${esc(r.label)} ${format(r.low)}-${format(r.high)}${r.complete ? "" : " (still open)"}"
+              style="position:absolute;left:${pos(r.low).toFixed(1)}%;width:${Math.max(0.6, pos(r.high) - pos(r.low)).toFixed(1)}%;
+              top:${i * 11}px;height:9px;border-radius:2px;background:${COL[r.session] || "#94a3b8"};
+              opacity:${r.complete ? 0.85 : 0.4}"></span>`).join("")}
+          ${price == null ? "" : `<span style="position:absolute;left:${pos(price).toFixed(1)}%;top:0;bottom:0;width:1.5px;background:#0f172a"></span>`}
+        </span></div>`;
+    }).join("");
+
+    return `<div>
+      <div class="flex flex-wrap gap-x-3 text-[10.5px] muted mb-1">
+        ${Object.entries(COL).map(([k, c]) => `<span><span style="display:inline-block;width:8px;height:8px;border-radius:1px;background:${c};vertical-align:middle"></span> ${esc(k === "newyork" ? "New York" : k)}</span>`).join("")}
+        <span class="ml-auto">faded = still open · the dark line is now</span>
+      </div>
+      ${body}
+      <div class="flex justify-between text-[10px] muted font-mono mt-1" style="margin-left:4.1rem">
+        <span>${format(lo)}</span><span>${format(hi)}</span></div></div>`;
+  }
+
+  window.TBC = { timeLine, hbars, candles, ladder, strikeLadder, outcomeStrip, stateBar, sessionRanges, rangeBar, probBar, volumeProfile, colorFor, niceTicks, ROLE_COLOR };
 })();

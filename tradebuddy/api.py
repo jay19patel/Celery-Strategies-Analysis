@@ -13,25 +13,25 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from tradebuddy import auth, verdict
+from tradebuddy import auth, resample, verdict
 from tradebuddy import structures as st  # option structures (straddles, condors)
-from tradebuddy.analytics import (
-    collect_daily_analytics,
+from tradebuddy.brokers import Broker
+from tradebuddy.codec import EVENT_TYPES
+from tradebuddy.config import DEFAULT_AUTH_PIN
+from tradebuddy.delta import round_to_tick
+from tradebuddy.errors import BrokerError
+from tradebuddy.journal import (
+    collect_day,
     collect_month_summary,
     collect_monthly_calendar_data,
     gather_live,
     get_day_bounds,
     parse_day,
 )
-from tradebuddy.brokers import Broker
-from tradebuddy.codec import EVENT_TYPES
-from tradebuddy.config import DEFAULT_AUTH_PIN
-from tradebuddy.delta import round_to_tick
-from tradebuddy.errors import BrokerError
 from tradebuddy.options import UNDERLYINGS
 from tradebuddy.settings import SettingsError
-from tradebuddy.store import HEALTH_DAYS
-from tradebuddy.system import System
+from tradebuddy.store import BASE_INTERVAL, HEALTH_DAYS
+from tradebuddy.system import BAR_RESOLUTION, System
 from tradebuddy.trading import TradeRefused
 from tradebuddy.transport import RpcClient, RpcError
 
@@ -49,7 +49,7 @@ METHODS = (
     "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order", "order_ticket",
     "set_position_control", "risk", "risk_resume", "analysis", "options_history", "database",
     "send_email_report",
-    "bars", "snapshots", "health", "outlook", "verdicts",
+    "bars", "snapshots", "health", "outlook", "verdicts", "market_structure",
     "journal_summary", "journal_month",
     "option_ticket", "place_structure", "structures", "close_structure", "paper_history",
     "verify_pin", "change_pin", "get_auth_status",
@@ -81,6 +81,24 @@ def _one_claim_per_bar(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 class ApiError(RpcError):
     """An error with an HTTP status, raised the same way locally and over RPC."""
+
+
+# The timeframes actually stored: the base, and the one the strategies run on. Everything else is
+# folded from whichever of these divides it — the coarser one where both do, because reading 96
+# bars to build a day beats reading 1,440 to build the same day out of the same market.
+STORED_INTERVALS = (BASE_INTERVAL, BAR_RESOLUTION)
+MAX_BARS = 20_000  # a chart that cannot be panned through 20,000 candles is not the problem
+
+
+def _bar_source(interval: str) -> str:
+    """Which stored series to build `interval` from. Raises when nothing divides it."""
+    if interval in STORED_INTERVALS:
+        return interval
+    usable = [s for s in STORED_INTERVALS if resample.seconds(interval) % resample.seconds(s) == 0
+              and resample.seconds(s) <= resample.seconds(interval)]
+    if not usable:
+        raise ApiError(400, f"{interval} cannot be folded from any stored series ({', '.join(STORED_INTERVALS)})")
+    return max(usable, key=resample.seconds)
 
 
 class Api:
@@ -214,17 +232,36 @@ class Api:
         step = 60 if hours <= 24 else 900  # a minute apart for a day, a bar apart beyond
         return self.system.store.options_history(UNDERLYINGS[symbol], time.time() - hours * 3600, step)
 
-    async def bars(self, symbol: str = "BTCUSD", interval: str = "15m", days: float = 7) -> dict[str, Any]:
-        """Stored candles with their open interest and funding, oldest first, and where the gaps are.
+    async def bars(self, symbol: str = "BTCUSD", interval: str = "15m", days: float = 7, limit: int = 5000) -> dict[str, Any]:
+        """Candles with their open interest and funding, oldest first, and where the gaps are.
+
+        Two timeframes are stored — the base (1m) and the one the strategies run on (15m). Every
+        other one is **folded from whichever of those divides it**, so the hourly candle is exactly
+        the four fifteen-minute candles underneath it rather than a separate download that may
+        disagree with them. `derived_from` says which, and `bars[i].coverage` how much of each
+        folded bar was actually there.
 
         Gaps are returned rather than smoothed over: a chart that joins across a missing hour draws
         a move the market never made."""
+        if interval not in resample.BAR_SECONDS:
+            raise ApiError(400, f"unknown interval {interval!r}; one of: {', '.join(resample.BAR_SECONDS)}")
         days = min(max(days, 0.25), 365)
+        limit = min(max(int(limit), 1), MAX_BARS)
         since = time.time() - days * 86_400
-        rows = await asyncio.to_thread(self.system.store.bars, symbol, interval, since)
-        gaps = await asyncio.to_thread(self.system.store.bar_gaps, symbol, interval, since)
+        source = _bar_source(interval)
+        # Read enough of the source to build `limit` folded bars, plus a little slack for holes.
+        per = resample.divides(source, interval)
+        rows = await asyncio.to_thread(self.system.store.bars, symbol, source, since, min(limit * per + per, MAX_BARS * 2))
+        if source == interval:
+            gaps = await asyncio.to_thread(self.system.store.bar_gaps, symbol, interval, since)
+            out = rows[-limit:]
+        else:
+            folded = resample.fold(rows, source, interval)
+            out = folded[-limit:]
+            gaps = resample.gaps(out, interval)
         return {
-            "symbol": symbol, "interval": interval, "days": days, "bars": rows,
+            "symbol": symbol, "interval": interval, "days": days, "bars": out,
+            "source_interval": source, "derived": source != interval,
             "gaps": [{"after": a, "before": b} for a, b in gaps],
         }
 
@@ -233,6 +270,19 @@ class Api:
         actually worked out. The engine builds and caches it, so the page and any strategy that
         reads it are looking at one reading rather than two that drifted apart."""
         return await self.system.outlook(symbol)
+
+    async def market_structure(self, symbol: str = "BTCUSD") -> dict[str, Any]:
+        """Where the stops are, which zones are still live, where the volume actually traded, and
+        who has been leaning on it.
+
+        Four readings that belong together: a zone is worth more with a pool of stops behind it and
+        the profile saying price was rejected there. The engine builds and caches it per bar, so
+        the page and any strategy that reads it see one answer rather than two that drifted.
+
+        Everything under `flow` is estimated from candles rather than read off a trade tape and
+        carries `approx: true` — the UI badges it, because a footprint built from candles is not a
+        footprint."""
+        return await self.system.market_structure(symbol)
 
     async def verdicts(self, symbol: str = "BTCUSD", days: float = 30) -> dict[str, Any]:
         """Each card's verdict right now, and how that card has done since it started making them.
@@ -320,7 +370,7 @@ class Api:
         tz = self.system.settings.day_timezone
         day = self._report_day(date)
         live = await gather_live(self.system) if day == get_day_bounds(None, tz)[2] else None
-        return await asyncio.to_thread(collect_daily_analytics, self.system.store, day, tz, live)
+        return await asyncio.to_thread(collect_day, self.system.store, day, tz, live)
 
     async def journal_month(self, year: int = 0, month: int = 0) -> dict[str, Any]:
         """PnL, trades and orders per day of one month (default: this month, in day_timezone)."""

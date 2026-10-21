@@ -7,10 +7,12 @@
 <div id="priceCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
 
 
-<!-- The page's one answer, above everything. The tabs below are the evidence for it, split by what
-     each reading is MADE of — volume, shapes, arithmetic, the books, the rules — because that is the
-     only line along which they differ in how much they can be trusted. Reading two different kinds
-     of claim as the same kind is what made this page confusing. -->
+<!-- The page's one answer, above everything, then the evidence for it on ONE chart.
+     This page used to be eight tabs. Seven of them were lists of PRICES — pools, zones, reference
+     levels, value-area edges, option walls — and a price belongs on a price axis, not in a table
+     you have to hold in your head while you look at a different tab. The tape below draws all of
+     them against the same scale. What is left over, the genuinely tabular stuff, is underneath it
+     and folded away: available, not shouting. -->
 <section class="card">
   <div class="card-head flex-wrap gap-2">
     <div class="card-title"><i data-lucide="radar"></i>Market analysis <span class="card-sub">options every 15s · analysis every 5 min</span></div><span id="v_summary"></span>
@@ -30,80 +32,163 @@
     <div id="summaryBand"></div>
     <div id="alignment"></div>
     <div id="frames" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
-    <div>
-      <div class="stat-label mb-1">Every card, and how often it has been right</div>
-      <div id="verdictDetail"></div>
-      <p class="text-[10.5px] muted mt-1.5">The bar is how often the card held; the black line is the best anyone could do
-      without it — always calling whichever outcome came up more often. The gap between them is the only thing here worth
-      acting on, and it is only coloured once it is bigger than sampling noise would give. Saying "volatility falls" every
-      day through a calm month scores 96%, and is worth nothing.</p>
-    </div>
   </div>
 </section>
 
-<nav id="viewTabs" class="flex flex-wrap gap-1.5 border-b border-slate-200 pb-0 -mb-px">
-    <button data-view="patterns" class="viewtab" title="Structure and candle shapes, each with what it has actually led to"><i data-lucide="shapes" class="w-3.5 h-3.5"></i><span>Patterns</span><span id="tv_patterns" class="tabverdict"></span></button>
-    <button data-view="volume" class="viewtab" title="Who is behind the move, from traded size alone"><i data-lucide="bar-chart-4" class="w-3.5 h-3.5"></i><span>Volume</span><span id="tv_volume" class="tabverdict"></span></button>
-    <button data-view="indicators" class="viewtab" title="The classical readings, and how far price can travel"><i data-lucide="gauge" class="w-3.5 h-3.5"></i><span>Indicators</span><span id="tv_indicators" class="tabverdict"></span></button>
-    <button data-view="oi" class="viewtab" title="What the options and futures books are positioned for"><i data-lucide="scale" class="w-3.5 h-3.5"></i><span>Open interest</span><span id="tv_oi" class="tabverdict"></span></button>
-    <button data-view="findings" class="viewtab" title="What the rules found in the numbers above"><i data-lucide="lightbulb" class="w-3.5 h-3.5"></i><span>Findings</span><span id="tv_findings" class="tabverdict"></span></button>
-</nav>
-
-<div data-view-panel="patterns" class="space-y-5">
-<section class="card min-w-0">
-    <div class="card-head flex-wrap gap-2">
-      <div class="card-title"><i data-lucide="candlestick-chart"></i>Structure <span id="structSub" class="card-sub"></span></div>
-      <div id="structTabs" class="flex gap-1"></div>
+<!-- ══ The tape ══════════════════════════════════════════════════════════════════════════
+     One chart, one price axis, every level drawn on it. The layer buttons decide what is
+     visible; nothing here computes anything, it only draws what the engine already sent. -->
+<section class="card min-w-0" id="tapeCard">
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="candlestick-chart"></i>The tape
+      <span class="card-sub">price, and everything sitting at a price</span></div>
+    <span id="src_tape" class="mr-1"></span>
+    <div class="flex flex-wrap items-center gap-1.5">
+      <div id="tapeFrames" class="flex gap-1"></div>
+      <span class="w-px h-4 bg-slate-200 mx-0.5"></span>
+      <div id="tapeNav" class="flex gap-1"></div>
+      <span class="w-px h-4 bg-slate-200 mx-0.5"></span>
+      <div id="tapeLayers" class="flex flex-wrap gap-1"></div>
     </div>
-    <div class="card-body">
-      <div id="structChart"></div>
-      <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10.5px] muted mt-1">
-        <span><span style="color:#eb5757">▬</span> swing high</span>
-        <span><span style="color:#00b852">▬</span> swing low</span>
-        <span><span style="color:#00b852">▲</span>/<span style="color:#eb5757">▼</span> break of structure</span>
-        <span><span style="color:#d97706">▲</span> change of character</span>
-        <span><span class="text-brand-500">▨</span> next horizon, ±1σ and ±2σ</span>
-        <span class="opacity-60"><span style="color:#00b852">⌃</span>/<span style="color:#eb5757">⌄</span> past readings — filled green where they held, red where they did not, grey while still open</span>
-      </div>
-      <div id="breakList" class="mt-3"></div>
-    </div>
+  </div>
+  <div id="tapeNote" class="px-4 pt-1"></div>
+  <p class="px-4 pt-1 text-[10.5px] muted">Scroll to zoom, drag to move back in time, hover a candle for its
+  numbers and whatever is sitting at that price. Shaded bands are zones price reacted to before; dashed lines
+  are levels; the blue bars on the right are how much traded at each price.</p>
+  <div class="card-body space-y-2">
+    <div id="tapeChart" class="min-w-0"></div>
+    <div id="tapeLegend" class="flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] muted"></div>
+  </div>
 </section>
+
+<!-- ══ Around price ══════════════════════════════════════════════════════════════════════
+     The merged map. Every source that names a price, ranked by distance, with the count of
+     how many independent sources agree. This is the question the tabs could not answer. -->
 <div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
-  <section class="card xl:col-span-2 min-w-0">
-    <div class="card-head"><div class="card-title"><i data-lucide="percent"></i>Which way, counted
-      <span class="card-sub">against the base rate it has to beat</span></div></div>
-    <div id="direction" class="card-body space-y-3"></div>
-  </section>
   <section class="card xl:col-span-3 min-w-0">
-    <div class="card-head"><div class="card-title"><i data-lucide="scan-search"></i>What breaks have led to
-      <span class="card-sub">every one in the stored history, and what followed</span></div></div>
-    <div id="patterns" class="card-body"></div>
+    <div class="card-head"><div class="card-title"><i data-lucide="list-ordered"></i>Around price
+      <span class="card-sub">every level, nearest first, drawn to scale</span></div>
+      <span id="src_nearby" class="mr-1"></span><span id="nearbyMeta" class="text-[11px] muted"></span></div>
+    <div class="card-body space-y-2">
+      <div id="ladderBox"></div>
+      <p class="text-[11px] muted leading-relaxed">Prices above and below where we are now, closest first.
+      The bar shows how far away each one is. <b class="text-slate-700">ATR</b> is just "a normal bar's range" —
+      so <span class="font-mono">1.0 ATR</span> away is about one candle's worth of move, and 5 ATR is a long way.
+      <span class="font-mono">◆</span> means two different things point at the same price, which is worth more
+      than either on its own. They are not ranked by how strong they are, only by how close: strength would need
+      one number blending touches, freshness and volume, and those do not add up.</p>
+    </div>
+  </section>
+  <section class="card xl:col-span-2 min-w-0">
+    <div class="card-head"><div class="card-title"><i data-lucide="crosshair"></i>Right now</div></div>
+    <div class="card-body space-y-3">
+      <div id="nowBox" class="space-y-2"></div>
+      <div id="confluenceBox"></div>
+    </div>
   </section>
 </div>
+
+
+
+
+<!-- ══ The numbers ═══════════════════════════════════════════════════════════════════════
+     Everything above is the answer. This is the working, folded away by what each reading is
+     MADE of — which is the only line along which readings differ in how far they can be
+     trusted. Open means you wanted the detail; it is never in the way of the call. -->
+<div class="space-y-3">
+<details class="card" >
+  <summary class="card-head cursor-pointer select-none list-none flex items-center justify-between gap-2">
+    <div class="card-title"><i data-lucide="align-left"></i>Volume by price <span class="card-sub">the full profile, naked points of control, the TPO market profile</span></div>
+    <i data-lucide="chevron-down" class="w-4 h-4 muted shrink-0"></i>
+  </summary>
+  <div class="card-body space-y-5">
 <section class="card min-w-0">
-  <div class="card-head"><div class="card-title"><i data-lucide="ruler"></i>Key levels
-    <span class="card-sub">the highs and lows other people are watching</span></div><span id="src_levels"></span><span id="v_levels"></span></div>
-  <div class="card-body space-y-3">
-    <div id="levelsTable"></div>
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="align-left"></i>Volume by price
+      <span class="card-sub">not when the size traded — at what price</span></div>
+    <div id="profileTabs" class="flex gap-1"></div>
+    <span id="profileSource" class="text-[11px] muted"></span>
+  </div>
+  <div class="card-body grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
+    <div><div id="vpChart"></div></div>
+    <div class="space-y-3">
+      <div id="vpStats" class="grid grid-cols-2 md:grid-cols-3 gap-2"></div>
+      <div id="vpNodes"></div>
+      <p class="text-[11.5px] muted leading-relaxed">The <b class="text-slate-700">point of control</b> is where the most
+        changed hands and tends to act as a magnet. The <b class="text-slate-700">value area</b> holds 70% of the volume
+        and its edges are where price has been rejected back inside. <b class="text-slate-700">LVNs</b> are prices the
+        market rejected — price moves fast through them, which makes them better targets than supports.</p>
+    </div>
   </div>
 </section>
 
 <section class="card min-w-0">
-  <div class="card-head"><div class="card-title"><i data-lucide="shapes"></i>Candle shapes
-    <span class="card-sub">named shapes on the latest bars, and the record of each</span></div><span id="src_shapes"></span><span id="v_shapes"></span></div>
-  <div class="card-body space-y-3">
-    <div id="shapesLatest"></div>
-    <div id="shapesRecord"></div>
+  <div class="card-head"><div class="card-title"><i data-lucide="magnet"></i>Naked points of control
+    <span class="card-sub">volume that was transacted, then abandoned</span></div></div>
+  <div class="card-body space-y-2">
+    <div id="nakedList"></div>
+    <p class="text-[10.5px] muted">A session's POC that price has never traded back to. Unfinished business — the market
+    has a habit of going back to finish.</p>
   </div>
 </section>
-<section class="card min-w-0">
-  <div class="card-head"><div class="card-title"><i data-lucide="message-square-text"></i>In words
-    <span class="card-sub">the same numbers as sentences — rules, not AI</span></div></div>
-  <div id="narrative" class="card-body space-y-2 text-[13px] leading-relaxed"></div>
-</section>
-</div>
 
-<div data-view-panel="volume" class="space-y-5">
+<section class="card min-w-0">
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="type"></i>Market profile <span id="tpoSub" class="card-sub"></span></div>
+    <span id="tpoMeta" class="text-[11px] muted"></span>
+  </div>
+  <div class="card-body space-y-3">
+    <div id="tpoStats" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
+    <div id="tpoChart" class="overflow-x-auto"></div>
+    <p class="text-[11.5px] muted leading-relaxed">One letter per half hour, printed at every price it traded through.
+      Many letters at a price means the market accepted it; a single letter means it was rejected.
+      The <b class="text-slate-700">initial balance</b> is the first hour — the opening auction everything after it is
+      measured against. A <b class="text-slate-700">poor high</b> is an extreme with two or more letters on it: the
+      auction stopped without a tail, which usually means price comes back for it.</p>
+  </div>
+</section>
+  </div>
+</details>
+<details class="card" >
+  <summary class="card-head cursor-pointer select-none list-none flex items-center justify-between gap-2">
+    <div class="card-title"><i data-lucide="waves"></i>Order flow <span class="card-sub">delta, CVD, divergence — all estimated from candles, all badged APPROX</span></div>
+    <i data-lucide="chevron-down" class="w-4 h-4 muted shrink-0"></i>
+  </summary>
+  <div class="card-body space-y-5">
+<section class="card min-w-0">
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="waves"></i>Delta and CVD
+      <span class="card-sub">who has been leaning on it</span></div>
+    <span id="flowApprox"></span>
+  </div>
+  <div class="card-body space-y-3">
+    <div id="flowKpis" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
+    <div><div class="stat-label mb-1">Delta per bar <span class="up">■ buying</span> <span class="down">■ selling</span></div>
+      <div id="deltaChart"></div></div>
+    <div><div class="stat-label mb-1">Cumulative delta <span class="muted">· resets at 00:00 UTC</span></div>
+      <div id="cvdChart"></div></div>
+  </div>
+</section>
+
+<section class="card min-w-0">
+  <div class="card-head"><div class="card-title"><i data-lucide="git-compare-arrows"></i>Divergence and absorption</div></div>
+  <div class="card-body space-y-3">
+    <div id="flowRecord" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+    <div id="divergenceList"></div>
+    <div><div class="stat-label mb-1 mt-2">Absorption</div><div id="absorptionList"></div>
+      <p class="text-[10.5px] muted mt-1.5">Heavy volume that went nowhere, with the flow pushing the other way —
+      somebody filling size against the move. Rare by construction, and deliberately given no hit rate: ten of these in
+      5,000 bars will never be a sample worth quoting. Markers, not signals.</p></div>
+  </div>
+</section>
+  </div>
+</details>
+<details class="card" >
+  <summary class="card-head cursor-pointer select-none list-none flex items-center justify-between gap-2">
+    <div class="card-title"><i data-lucide="bar-chart-4"></i>Volume <span class="card-sub">who is behind the move, from traded size alone</span></div>
+    <i data-lucide="chevron-down" class="w-4 h-4 muted shrink-0"></i>
+  </summary>
+  <div class="card-body space-y-5">
 <section class="card min-w-0">
   <div class="card-head"><div class="card-title"><i data-lucide="bar-chart-4"></i>Volume
     <span class="card-sub">everything as a ratio to what this market normally does</span></div><span id="src_volume"></span><span id="v_volume"></span></div>
@@ -134,50 +219,25 @@
     <div id="whereBody" class="card-body space-y-3"></div>
   </section>
 </div>
-</div>
-
-<div data-view-panel="indicators" class="space-y-5">
-<section class="card min-w-0">
-  <div class="card-head flex-wrap gap-2">
-    <div class="card-title"><i data-lucide="layers"></i>Where the timeframes agree
-      <span class="card-sub">one vote per reading, per timeframe</span></div><span id="src_agreement"></span>
   </div>
-  <div id="tfAgreement" class="card-body"></div>
-</section>
-
-<section class="card min-w-0">
-  <div class="card-head flex-wrap gap-2">
-    <div class="card-title"><i data-lucide="gauge"></i>Indicators
-      <span class="card-sub">ADX decides whether the rest of them mean anything</span></div>
-    <div class="flex items-center gap-2">
-      <span id="src_indicators"></span><span id="v_indicators"></span>
-      <div id="indTabs" class="flex gap-1"></div>
-    </div>
-  </div>
-  <div class="card-body space-y-4">
-    <div id="indKpis" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2"></div>
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <div><div class="stat-label mb-1">RSI(14)</div><div id="rsiChart"></div></div>
-      <div><div class="stat-label mb-1">MACD histogram</div><div id="macdChart"></div></div>
-      <div><div class="stat-label mb-1">ADX(14)</div><div id="adxChart"></div></div>
-    </div>
-  </div>
-</section>
-
-<section class="card xl:col-span-2 min-w-0">
-  <div class="card-head"><div class="card-title"><i data-lucide="move-horizontal"></i>How far, by when
-    <span class="card-sub">from realised volatility</span></div><span id="src_horizons"></span></div>
-  <div id="horizons" class="card-body space-y-3"></div>
-</section>
-</div>
-
-<div data-view-panel="oi" class="space-y-5">
+</details>
+<details class="card" >
+  <summary class="card-head cursor-pointer select-none list-none flex items-center justify-between gap-2">
+    <div class="card-title"><i data-lucide="scale"></i>Options and open interest <span class="card-sub">what the books are positioned for — the chain, the smile, the term structure</span></div>
+    <i data-lucide="chevron-down" class="w-4 h-4 muted shrink-0"></i>
+  </summary>
+  <div class="card-body space-y-5">
 <section class="card min-w-0">
   <div class="card-head flex-wrap gap-2">
     <div class="card-title"><i data-lucide="table-2"></i>Option chain <span id="chainSub" class="card-sub"></span></div><span id="src_chain_oi" class="mr-1"></span><span id="v_chain_oi"></span>
     <select id="expiry" class="select" aria-label="Expiry"></select>
   </div>
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 px-4 pt-3">
+    <div><div class="stat-label mb-1">Where the size is, by strike</div><div id="strikeLadder"></div>
+      <p class="text-[10.5px] muted mt-1.5">Puts left, calls right, strikes running down the page the way a chain is read.
+      The pale bar is open interest — contracts that exist and must eventually be closed or settled. The solid bar inside it
+      is what traded <b class="text-slate-700">today</b>. Big open interest with no volume is an old position sitting there;
+      big volume with little open interest is something being opened right now, and those are different news.</p></div>
     <div><div class="stat-label mb-1">Open interest by strike <span style="color:#2a78d6">■ calls</span> <span style="color:#eb6834">■ puts</span></div><div id="oiChart"></div>
       <p class="text-[10.5px] muted leading-snug mt-1.5">How many contracts are open at each strike. The tallest bars are where the most money is parked, and
       price tends to be drawn towards them: the biggest call strike above spot acts as resistance, the biggest put
@@ -218,20 +278,24 @@
     can sit wherever the book happens to sit for hours, so it is a rise or a fall over a few hours that says writers have
     switched sides.</p></section>
 </div>
+  </div>
+</details>
 </div>
 
-<div data-view-panel="findings" class="space-y-5">
+
 <section class="card min-w-0">
   <div class="card-head"><div class="card-title"><i data-lucide="lightbulb"></i>Insights <span class="card-sub">rules over the numbers above, nothing fitted</span></div><span id="src_insights" class="mr-1"></span><span id="v_insights"></span></div>
   <div class="card-body"><div id="insights"></div></div>
 </section>
-</div>
+
 
 {% endblock %}
 
 
 {% block scripts %}
+<script src="/static/js/vendor/lightweight-charts.js?v={{ v }}"></script>
 <script src="/static/js/chart.js?v={{ v }}"></script>
+<script src="/static/js/tape.js?v={{ v }}"></script>
 <script src="/static/js/analysis.js?v={{ v }}"></script>
 <script>
 // ── market analysis ──────────────────────────────────────────────────────────
@@ -262,6 +326,9 @@
     // Bring the at-the-money row to the middle when the chain is first shown or the expiry changes.
     const key = `${sym}:${expiry}`, atm = $("chain").querySelector("tr.bg-sky-50");
     if (atm && key !== centred) { const box = atm.closest(".scroll"); box.scrollTop = atm.offsetTop - box.clientHeight / 2; centred = key; }
+    $("strikeLadder").innerHTML = TBC.strikeLadder(o?.summary?.chains?.[expiry] || [], {
+      spot: o?.summary?.spot, maxPain: e?.max_pain, height: 360, format: (v) => TB.num(v, 0),
+    });
     $("oiChart").innerHTML = TBA.oiChart(o, expiry) || '<div class="text-xs muted">No data</div>';
     $("smile").innerHTML = TBA.smileChart(o, expiry) || '<div class="text-xs muted">No data</div>';
     $("term").innerHTML = TBA.termChart(o) || '<div class="text-xs muted">No data</div>';
@@ -283,41 +350,206 @@
 
 
 
-  // ── tabs ───────────────────────────────────────────────────────────────────
-  // Split by what each reading is made of, not by topic. Volume, shapes, arithmetic, the books and
-  // the rules differ in how much they can be trusted, and showing them in one scroll is what let
-  // two readings sit side by side saying opposite things. The headline above the tabs is the
-  // page's one answer; a tab is the evidence for it.
-  const VIEWS = ["patterns", "volume", "indicators", "oi", "findings"];
-  const TAB_VERDICT = { patterns: "shapes", volume: "volume", indicators: "indicators",
-                        oi: "chain_oi", findings: "insights" };
-  let view = VIEWS[0];
+  // ── the tape ───────────────────────────────────────────────────────────────
+  // One chart instead of eight tabs. The layers are what the tabs used to be, except that now
+  // they are drawn against the same price axis and can therefore be compared by eye, which is
+  // the entire reason the split was costing something.
+  const LAYERS = [
+    ["zones", "Zones", "order blocks, fair value gaps and S/R bands, shaded by how fresh they are"],
+    ["levels", "Levels", "every price the structure modules name, from the merged map"],
+    ["breaks", "Breaks", "BOS and CHoCH, on the bar they happened"],
+    ["sweeps", "Sweeps", "stops taken and price closed back inside"],
+    ["profile", "Profile", "volume by price, in the right-hand gutter, on the same scale"],
+    ["flow", "Flow", "estimated delta underneath, instead of volume — APPROX"],
+  ];
+  // The six timeframes, folded server-side from the stored base. `days` is chosen so each shows a
+  // comparable number of bars — three days of 1m is 4,320 candles and unreadable.
+  const FRAMES = [["1m", 0.5], ["5m", 2], ["15m", 3], ["1h", 14], ["4h", 60], ["1d", 365]];
+  let tapeFrame = "15m";
+  const LAYER_KEY = "tb.market.layers";
+  let layers = (() => {
+    try { const v = JSON.parse(localStorage.getItem(LAYER_KEY)); if (Array.isArray(v)) return new Set(v); } catch { /* first visit */ }
+    return new Set(["zones", "levels", "breaks", "sweeps", "profile"]);
+  })();
 
-  function showView(next) {
-    view = VIEWS.includes(next) ? next : VIEWS[0];
-    document.querySelectorAll("[data-view-panel]").forEach((el) =>
-      el.classList.toggle("hidden", el.dataset.viewPanel !== view));
-    document.querySelectorAll("#viewTabs [data-view]").forEach((b) =>
-      b.classList.toggle("on", b.dataset.view === view));
-    const url = new URL(location.href);
-    url.searchParams.set("view", view);
-    history.replaceState(null, "", url);
-    TB.icons();
+  function paintNav() {
+    $("tapeNav").innerHTML = [
+      ["back", "←", "older bars"], ["fwd", "→", "newer bars"],
+      ["out", "−", "zoom out"], ["in", "+", "zoom in"], ["reset", "⤢", "back to the latest 180 bars"],
+    ].map(([k, glyph, why]) =>
+      `<button class="btn btn-sm" data-nav="${k}" title="${esc(why)}" aria-label="${esc(why)}">${glyph}</button>`).join("");
+    $("tapeNav").querySelectorAll("[data-nav]").forEach((b) => (b.onclick = () => {
+      if (!tape?.ok) return;
+      ({ back: () => tape.nudge(-20), fwd: () => tape.nudge(20),
+         out: () => tape.zoom(1.5), in: () => tape.zoom(1 / 1.5), reset: () => tape.fit() })[b.dataset.nav]();
+    }));
   }
 
-  // The stance of each tab's own verdict, on its tab, so the shape of the market is readable
-  // without opening any of them.
-  function paintTabVerdicts(list) {
-    const by = Object.fromEntries((list || []).map((v) => [v.key, v]));
-    for (const [tab, key] of Object.entries(TAB_VERDICT)) {
-      const el = $(`tv_${tab}`), v = by[key];
-      if (!el) continue;
-      const [, cls] = STANCE[v?.stance] || STANCE.unclear;
-      el.className = `tabverdict ${v && v.stance !== "unclear" ? cls : "bg-slate-100 text-slate-400"}`;
-      el.textContent = v && v.stance !== "unclear" ? (STANCE[v.stance] || [])[0] : "—";
-      el.title = v ? `${v.label} — ${v.detail}` : "";
+  function paintFrames() {
+    $("tapeFrames").innerHTML = FRAMES.map(([f]) =>
+      `<button class="btn btn-sm ${f === tapeFrame ? "btn-primary" : ""}" data-frame="${f}">${f}</button>`).join("");
+    $("tapeFrames").querySelectorAll("[data-frame]").forEach((b) => (b.onclick = async () => {
+      tapeFrame = b.dataset.frame;
+      paintFrames();
+      await loadTapeBars();
+      renderTape();
+      if (tape?.ok) tape.fit();
+    }));
+  }
+
+  // Zones, levels, sweeps and the profile are all computed on 15m bars by the engine. Drawn over
+  // a 1-hour or 1-day candle they still sit at the right PRICE — which is the axis they are about —
+  // so they stay on. The break markers do not: a break is dated to a 15m bar and pinning it to a
+  // daily candle would put it on a bar it was never about.
+  async function loadTapeBars() {
+    const key = `${sym}:${tapeFrame}`;
+    if (barsCache[key]) return;
+    const days = (FRAMES.find(([f]) => f === tapeFrame) || [, 3])[1];
+    const r = await TB.get(`/api/bars?symbol=${sym}&interval=${tapeFrame}&days=${days}`);
+    barsCache[key] = r.bars || [];
+    framesMeta[key] = { derived: r.derived, source: r.source_interval, gaps: (r.gaps || []).length };
+  }
+
+  function paintLayers() {
+    $("tapeLayers").innerHTML = LAYERS.map(([k, label, why]) =>
+      `<button class="btn btn-sm ${layers.has(k) ? "btn-primary" : ""}" data-layer="${k}" title="${esc(why)}">${esc(label)}</button>`).join("");
+    $("tapeLayers").querySelectorAll("[data-layer]").forEach((b) => (b.onclick = () => {
+      const k = b.dataset.layer;
+      layers.has(k) ? layers.delete(k) : layers.add(k);
+      try { localStorage.setItem(LAYER_KEY, JSON.stringify([...layers])); } catch { /* private mode */ }
+      paintLayers(); renderTape();
+    }));
+  }
+
+  // Zones are coloured by what they ARE; everything else by what it is. Direction is readable
+  // from where a band sits relative to price, the kind is not readable from the chart at all.
+  const LEGEND = [
+    ["#d97706", "order block"], ["#7c3aed", "fair value gap"], ["#0d9488", "S/R band"],
+    ["#7c3aed", "sweep ●"], ["#0891b2", "naked POC"], ["#1e88e5", "option wall"], ["#64748b", "prev period"],
+  ];
+
+  // One chart object for the life of the page. Rebuilding it on every poll would throw away the
+  // zoom and the scroll position, which is the one thing on this page a person sets by hand.
+  let tape = null, tapeTooltip = null;
+
+  function tooltipFor(S) {
+    const shapesAt = {};
+    for (const s of (outlook?.shapes?.latest || [])) (shapesAt[s.bar_time] ||= []).push(s.label || s.name);
+    return (bar, time, price) => {
+      const up = bar.close >= bar.open, move = 100 * (bar.close / bar.open - 1);
+      // Only what is near the pointer: a tooltip listing every level is a second chart, and
+      // Around price below already lists them all.
+      const near = !S ? [] : [...(S.nearby?.above || []), ...(S.nearby?.below || [])]
+        .filter((l) => price != null && Math.abs(l.price - price) < (S.atr || 1) * 0.3).slice(0, 3);
+      const inside = !S ? [] : (S.zones?.zones || []).filter((z) =>
+        z.state !== "invalidated" && price != null && z.low <= price && price <= z.high).slice(0, 2);
+      const shapes = shapesAt[time] || [];
+      return `<div class="muted text-[10px]">${esc(TB.dateTime(time))}</div>
+        <div class="font-mono">O ${TB.num(bar.open, 0)} · H ${TB.num(bar.high, 0)} · L ${TB.num(bar.low, 0)}</div>
+        <div class="font-mono font-semibold">C ${TB.num(bar.close, 0)}
+          <span class="${up ? "up" : "down"}">${move >= 0 ? "+" : ""}${move.toFixed(2)}%</span></div>
+        ${shapes.length ? `<div class="mt-0.5">${shapes.map((s) => chip(s, "bg-slate-100 text-slate-600")).join(" ")}</div>` : ""}
+        ${near.length ? `<div class="mt-1 pt-1 border-t border-slate-100">${near.map((l) =>
+            `<div>${TB.num(l.price, 0)} <span class="muted">${esc(l.label)}</span></div>`).join("")}</div>` : ""}
+        ${inside.length ? `<div class="mt-0.5">${inside.map((z) =>
+            chip(`in ${String(z.kind).toUpperCase()} ${z.direction}`,
+              z.direction === "bull" ? "bg-bull-bg text-bull-text" : "bg-bear-bg text-bear-text")).join(" ")}</div>` : ""}`;
+    };
+  }
+
+  function renderTape() {
+    const box = $("tapeChart");
+    if (!box) return;
+    const key = `${sym}:${tapeFrame}`, raw = barsCache[key];
+    if (!raw || !raw.length) { box.innerHTML = `<div class="text-[11px] muted py-8 text-center">Loading bars…</div>`; return; }
+    const S = structure && structure.ready ? structure : null;
+    // The tooltip closure changes with every new structure payload; the chart is mounted once.
+    // So mount with an indirection and swap what it points at, rather than remounting.
+    if (!tape) tape = TBTape.mount(box, { height: 440, tooltip: (b, time, price) => tapeTooltip ? tapeTooltip(b, time, price) : "" });
+    if (!tape.ok) return;
+
+    const since = raw[0].time;
+    const zones = !S || !layers.has("zones") ? [] : (S.zones.zones || []).filter((z) => z.state !== "invalidated");
+    const levels = !S || !layers.has("levels") ? [] : [...(S.nearby?.above || []), ...(S.nearby?.below || [])];
+    const f = outlook?.timeframes?.find((x) => x.interval === tapeFrame);
+    const prof = !S || !layers.has("profile") ? null : (S.profile?.session || S.profile?.composite || null);
+
+    // Breaks and sweeps are both markers on the bar they happened; the library draws them on the
+    // series, so they can never drift from their candle the way an overlay can.
+    const marks = [];
+    if (layers.has("breaks")) {
+      for (const b of (f?.structure?.breaks || [])) {
+        if (b.bar_time < since) continue;
+        marks.push({ bar_time: b.bar_time, above: b.direction !== "up", shape: b.direction === "up" ? "arrowUp" : "arrowDown",
+                     color: b.kind === "choch" ? "#d97706" : (b.direction === "up" ? "#00b852" : "#eb5757"),
+                     text: b.kind === "choch" ? "CHoCH" : "BOS" });
+      }
     }
+    if (layers.has("sweeps") && S) {
+      // No text. There are commonly twenty sweeps in a window and the word repeated twenty times
+      // is a purple cloud with the chart behind it — the dot says where, the tooltip says what,
+      // and the outcome strip in Liquidity detail says whether they pay.
+      for (const s of (S.liquidity.sweeps || [])) {
+        if (s.bar_time < since) continue;
+        marks.push({ bar_time: s.bar_time, above: s.direction === "high", shape: "circle", color: "#7c3aed" });
+      }
+    }
+
+    const flow = S && layers.has("flow") ? (S.flow?.bars || []) : null;
+    const sub = flow && flow.length
+      ? flow.filter((b) => b.time >= since).map((b) => ({ time: b.time, value: Math.abs(b.delta), up: b.delta >= 0 }))
+      : raw.map((b) => ({ time: b.time, value: b.volume || 0, up: b.close >= b.open }));
+
+    tapeTooltip = tooltipFor(S);
+    const naked = !S || !layers.has("profile") ? [] : (S.profile?.naked_pocs || []);
+    tape.update({ bars: raw, zones, levels, naked, profile: prof ? { levels: prof.nodes } : null, marks, sub });
+
+    const r = framesMeta[key];
+    $("tapeLegend").innerHTML = LEGEND.map(([c, l]) =>
+      `<span><span style="display:inline-block;width:8px;height:8px;background:${c};border-radius:1px;vertical-align:middle"></span> ${esc(l)}</span>`).join("")
+      + `<span class="ml-auto whitespace-nowrap">${raw.length.toLocaleString()} ${tapeFrame}${r?.derived ? ` from ${r.source}` : ""}${
+            r?.gaps ? ` · ${r.gaps} gap${r.gaps > 1 ? "s" : ""}` : ""}${S ? ` · ${S.bars.toLocaleString()} bars scanned` : ""}</span>`;
+    $("tapeNote").innerHTML = S ? "" : TBA.note("The structure scan has not run yet — levels and zones will fill in once it does.");
   }
+
+  // ── around price ───────────────────────────────────────────────────────────
+  function renderNearby() {
+    const n = structure?.nearby;
+    if (!n || !n.ready) {
+      $("ladderBox").innerHTML = `<div class="text-[11px] muted">${esc(structure?.note || "No stored bars yet — run backfill.")}</div>`;
+      $("nowBox").innerHTML = ""; $("confluenceBox").innerHTML = "";
+      return;
+    }
+    $("ladderBox").innerHTML = TBC.ladder(n.above, n.below, n.price, { format: (v) => TB.num(v, 0) });
+    $("nearbyMeta").textContent = `${n.above.length} above · ${n.below.length} below · ATR ${TB.num(n.atr, 0)}`;
+
+    const side = (l, which) => !l ? `<div class="text-[11px] muted">Nothing ${which}.</div>` : `
+      <div class="rounded-md border border-slate-200 p-2">
+        <div class="stat-label">Next ${which}</div>
+        <div class="flex items-baseline gap-2">
+          <span class="font-mono text-[15px] font-semibold">${TB.num(l.price, 0)}</span>
+          <span class="text-[11px] ${l.distance_pct >= 0 ? "up" : "down"}">${l.distance_pct >= 0 ? "+" : ""}${l.distance_pct.toFixed(2)}%</span>
+          <span class="text-[10.5px] muted">${l.distance_atr.toFixed(1)} ATR</span>
+        </div>
+        <div class="text-[11px] mt-0.5">${esc(l.label)} <span class="muted">— ${esc(l.kind_label)}</span></div>
+        <div class="text-[10.5px] muted">${esc(l.evidence)}</div>
+      </div>`;
+    $("nowBox").innerHTML = side(n.next_above, "above") + side(n.next_below, "below")
+      + (n.inside?.length ? `<div class="text-[11px]">Price is inside ${n.inside.length} live zone${n.inside.length > 1 ? "s" : ""}:
+          ${n.inside.map((z) => `${chip(`${String(z.kind).toUpperCase()} ${z.direction}`, z.direction === "bull" ? "bg-bull-bg text-bull-text" : "bg-bear-bg text-bear-text")}`).join(" ")}</div>` : "");
+
+    $("confluenceBox").innerHTML = !n.confluences?.length
+      ? `<div class="text-[11px] muted">No price has more than one source naming it right now. That is the normal case — agreement is the exception, which is what makes it worth marking.</div>`
+      : `<div class="stat-label mb-1">Where sources agree</div>` + n.confluences.map((c) => `
+        <div class="flex items-center justify-between gap-2 py-[3px] border-t border-slate-100 first:border-0">
+          <span class="font-mono text-[12px] font-semibold">${TB.num(c.price, 0)}</span>
+          <span class="text-[10.5px] muted truncate">${esc([c.kind_label, ...(c.agrees || []).map((k) => k)].join(" + "))}</span>
+          <span class="text-[10.5px] font-semibold">${c.confluence}×</span>
+        </div>`).join("");
+  }
+
+  // ── what has actually paid ─────────────────────────────────────────────────
+  // Every counted rate in the system, in one table. Separately they looked like six findings;
 
   // ── volume ─────────────────────────────────────────────────────────────────
   function renderVolume(b) {
@@ -369,85 +601,7 @@
   // more than any single value: an overbought 15m inside a daily uptrend is a pullback, not a top.
   let indTf = "15m";
 
-  function renderAgreement(a) {
-    const rows = (a && a.rows) || [];
-    if (!rows.length) { $("tfAgreement").innerHTML = `<div class="text-[11px] muted">Not enough bars yet.</div>`; return; }
-    const lean = (l) => (l === "up" ? "up" : l === "down" ? "down" : "muted");
-    const vote = (v) => (v > 0 ? `<span class="up">▲</span>` : v < 0 ? `<span class="down">▼</span>` : `<span class="muted">·</span>`);
-    const tone = a.agreement.includes("up") ? "border-bull/40 bg-bull-bg/40"
-      : a.agreement.includes("down") ? "border-bear/40 bg-bear-bg/40" : "border-slate-200 bg-slate-50";
-    $("tfAgreement").innerHTML = `
-      <div class="rounded-lg border ${tone} px-3 py-2 mb-3">
-        <span class="text-[13px] font-semibold capitalize">${esc(a.agreement)}</span>
-        <span class="text-[11.5px] muted ml-2">${a.agreement === "conflicting"
-          ? "one timeframe points the other way — take the shorter one with a tight stop, or wait"
-          : a.agreement.startsWith("aligned") ? "every reading on every timeframe agrees"
-          : "the readings do not line up; mixed is a real answer, not a missing one"}</span>
-      </div>
-      <table class="tbl text-[12px]"><thead><tr><th>Timeframe</th><th>Lean</th><th class="text-center">EMA</th>
-        <th class="text-center">MACD</th><th class="text-center">RSI</th><th class="text-center">Supertrend</th>
-        <th class="r">ADX</th><th>Regime</th></tr></thead><tbody>${
-        rows.map((r) => r.lean === "unknown"
-          ? `<tr><td class="font-mono">${esc(r.interval)}</td><td colspan="7" class="muted text-[11px]">${esc(r.note || "not enough bars")}</td></tr>`
-          : `<tr>
-            <td class="font-mono font-semibold">${esc(r.interval)}<div class="text-[10px] muted font-sans">${esc(r.label || "")}</div></td>
-            <td class="${lean(r.lean)} font-semibold">${esc(r.lean)} <span class="muted text-[10px]">${r.votes >= 0 ? "+" : ""}${r.votes}/${r.of}</span></td>
-            <td class="text-center">${vote(r.detail.ema)}</td><td class="text-center">${vote(r.detail.macd)}</td>
-            <td class="text-center">${vote(r.detail.rsi)}</td><td class="text-center">${vote(r.detail.supertrend)}</td>
-            <td class="r font-mono">${r.adx ?? "—"}</td>
-            <td class="text-[11px] ${r.trending ? "" : "muted"}">${r.trending ? "trending" : "no trend to follow"}</td></tr>`).join("")}
-      </tbody></table>
-      <p class="text-[10.5px] muted mt-2">A vote each from the EMA stack, the MACD histogram, RSI either side of 50, and which
-      side of price the Supertrend sits. ADX is not a vote — it says whether a trend reading means anything at all on that
-      timeframe, and below 20 none of the others do.</p>`;
-  }
 
-  function renderIndicators(_block) {
-    const byTf = (outlook && outlook.indicators_by_tf) || {};
-    const tfs = Object.keys(byTf);
-    const b = byTf[indTf] || byTf[tfs[0]] || _block;
-    $("indTabs").innerHTML = tfs.map((tf) =>
-      `<button class="btn btn-sm ${tf === indTf ? "btn-primary" : ""}" data-indtf="${tf}">${esc(tf)}</button>`).join("");
-    $("indTabs").querySelectorAll("[data-indtf]").forEach((el) => (el.onclick = () => { indTf = el.dataset.indtf; renderIndicators(_block); }));
-
-    if (!b || !b.ready) {
-      $("indKpis").innerHTML = `<div class="text-[11px] muted">${esc((b && b.note) || "Not enough bars yet.")}</div>`;
-      ["rsiChart", "macdChart", "adxChart"].forEach((id) => ($(id).innerHTML = ""));
-      return;
-    }
-    const STATE = { overbought: "down", oversold: "up", trending: "up", ranging: "muted", forming: "",
-                    rising: "up", falling: "down", neutral: "", "above price": "down", "below price": "up" };
-    const tile = (label, value, hint, cls = "") =>
-      `<div class="bg-slate-50 rounded-lg p-2.5"><div class="text-[10.5px] uppercase tracking-wide muted">${label}</div>
-       <div class="text-[16px] font-semibold font-mono ${cls}">${value}</div>
-       <div class="text-[10.5px] muted leading-snug">${hint}</div></div>`;
-    const e = b.ema, st = b.supertrend;
-    $("indKpis").innerHTML = [
-      tile("ADX(14)", b.adx.value ?? "—", esc(b.adx.state), STATE[b.adx.state] || ""),
-      tile("RSI(14)", b.rsi.value ?? "—", esc(b.rsi.state), STATE[b.rsi.state] || ""),
-      tile("MACD hist", b.macd.hist ?? "—", esc(b.macd.state), STATE[b.macd.state] || ""),
-      tile("Supertrend", st.level == null ? "—" : TB.num(st.level, 0),
-           st.distance_pct == null ? esc(st.state) : `${esc(st.state)} · ${st.distance_pct}%`, STATE[st.state] || ""),
-      tile("Band width", b.bollinger.width_pct == null ? "—" : `${b.bollinger.width_pct}%`,
-           b.bollinger.squeeze ? "squeezed" : "normal", b.bollinger.squeeze ? "down" : ""),
-      tile("ATR(14)", b.atr.pct == null ? "—" : `${b.atr.pct}%`, `${TB.num(b.atr.value, 0)} a bar`),
-      tile("EMA stack", e.stacked_up ? "20>50>200" : e.stacked_down ? "20<50<200" : "mixed",
-           `50 at ${TB.num(e.ema50, 0)}`, e.stacked_up ? "up" : e.stacked_down ? "down" : ""),
-    ].join("");
-
-    const chart = (id, rows, guides, note, fmt) => {
-      $(id).innerHTML = TBC.timeLine([{ name: "", points: rows.map((r) => ({ x: r.time, y: r.value })) }],
-        { height: 130, format: fmt, hideLegend: true, gapSeconds: 0, guides })
-        + `<div class="text-[10px] muted mt-0.5">${note}</div>`;
-    };
-    chart("rsiChart", b.rsi_series, [{ at: 30, label: "30" }, { at: 50, label: "50", color: "#e2e8f0" }, { at: 70, label: "70" }],
-      "Above 70 is stretched, below 30 washed out — in a trend both can stay there for days.", (v) => v.toFixed(0));
-    chart("macdChart", b.macd_series, [{ at: 0, label: "0" }],
-      "Momentum, not direction. It crosses zero when the pace of the move turns, which is earlier than the lines crossing.",
-      (v) => TB.num(v, 0));
-    chart("adxChart", b.adx_series, [{ at: 20, label: "20" }, { at: 25, label: "25" }],
-      "Below 20 there is no trend to follow and trend readings misfire. Above 25 one is worth following.", (v) => v.toFixed(0));
-  }
 
 
   // ── where the size traded: VWAP, the profile, and the bar itself ───────────
@@ -489,54 +643,6 @@
         ${Math.round(100 * a.buy_pressure)}% of the way up its own range.
         ${a.wick_imbalance > 0.25 ? "Rejected from above." : a.wick_imbalance < -0.25 ? "Rejected from below." : "No clear rejection."}</div>
       </div>` : ""}`;
-  }
-
-  // ── the levels other people are watching ───────────────────────────────────
-  function renderLevels(block) {
-    const windows = (block && block.windows) || [];
-    if (!windows.length) { $("levelsTable").innerHTML = `<div class="text-[11px] muted">Not enough bars yet.</div>`; return; }
-    $("levelsTable").innerHTML = `<table class="tbl text-[12px]">
-      <thead><tr><th>Window</th><th class="r">Low</th><th>Where price sits</th><th class="r">High</th><th>In play</th></tr></thead>
-      <tbody>${windows.map((w) => {
-        const flag = w.fresh_high ? `<span class="up font-semibold">new high</span>`
-          : w.fresh_low ? `<span class="down font-semibold">new low</span>`
-          : w.high_in_play ? `<span class="down">${w.to_high_pct}% under the high</span>`
-          : w.low_in_play ? `<span class="up">${w.to_low_pct}% above the low</span>`
-          : `<span class="muted">—</span>`;
-        return `<tr>
-          <td><span class="font-semibold">${esc(w.label)}</span>${w.complete ? "" : `<div class="text-[10px] text-amber-700">only ${TB.count(w.bars)} bars</div>`}</td>
-          <td class="r font-mono">${TB.num(w.low, 0)}<div class="text-[10px] muted">${w.to_low_pct}% away</div></td>
-          <td style="min-width:10rem">${TBC.rangeBar(w.low, w.high, block.price, { format: (x) => TB.num(x, 0) })}</td>
-          <td class="r font-mono">${TB.num(w.high, 0)}<div class="text-[10px] muted">${w.to_high_pct}% away</div></td>
-          <td class="text-[11px]">${flag}</td></tr>`;
-      }).join("")}</tbody></table>
-      <p class="text-[10.5px] muted mt-2">These are not predictions — they are prices a great many orders are parked around,
-      which is most of why they matter. A fresh extreme and a price sitting just under an old one look identical in a number
-      and are opposite situations: the first has nothing overhead, the second is being held down by orders at a known price.</p>`;
-  }
-
-  // ── candle shapes ──────────────────────────────────────────────────────────
-  function renderShapes(s) {
-    const latest = (s && s.latest) || [], record = (s && s.record) || [];
-    const col = (d) => (d === "bull" ? "up" : d === "bear" ? "down" : "muted");
-    $("shapesLatest").innerHTML = latest.length
-      ? `<div class="flex flex-wrap gap-1.5">${latest.slice().reverse().map((x) => `
-          <span class="px-2 py-1 rounded border border-slate-200 text-[11.5px]">
-            <span class="${col(x.direction)} font-semibold">${esc(x.label)}</span>
-            <span class="muted ml-1">${TB.time(x.bar_time)}</span></span>`).join("")}</div>`
-      : `<div class="text-[11px] muted">No named shape on the last few bars.</div>`;
-    $("shapesRecord").innerHTML = record.length
-      ? `<table class="tbl text-[12px]"><thead><tr><th>Shape</th><th>Asks</th><th class="r">Seen</th><th>How often it held</th><th class="r">Mean move</th></tr></thead><tbody>${
-          record.map((r) => `<tr>
-            <td class="${col(r.direction)} font-semibold">${esc(r.label)}</td>
-            <td class="muted text-[11px]">${esc(r.asks)}</td>
-            <td class="r font-mono">${r.count.toLocaleString()}</td>
-            <td style="min-width:11rem">${TBC.probBar(r.followed_through, r.baseline, { sample: r.count, minSample: 20, height: 14 })}</td>
-            <td class="r font-mono">${r.mean_move_pct}%</td></tr>`).join("")}</tbody></table>
-         <p class="text-[10.5px] muted mt-2">A shape is not a signal. The bar is how often it was followed by what it is
-         supposed to promise; the marker is the same question asked of any bar at all. Most shapes sit on their marker,
-         which is the useful finding.</p>`
-      : `<div class="text-[11px] muted">Not enough stored history to score shapes yet — run <span class="font-mono">backfill</span>.</div>`;
   }
 
   // ── provenance ─────────────────────────────────────────────────────────────
@@ -583,18 +689,15 @@
     "down": "bg-bear-bg text-bear-text", "weak down": "bg-bear-bg/60 text-bear-text",
     "flat": "bg-slate-100 text-slate-600", "unknown": "bg-slate-50 text-slate-400",
   };
-  // Not `history`: that is window.history, and shadowing it silently broke the tab switcher's
-  // replaceState. `pastClaims` also says what these actually are.
-  let outlook = null, record = {}, pastClaims = [], structFrame = "15m", barsCache = {};
+  const safely = (name, fn) => { try { return fn(); } catch (e) { console.error(`${name} failed:`, e); } };
+  let outlook = null, barsCache = {}, framesMeta = {};
 
-  function verdictBadge(v, card) {
+  // A badge says what THIS card is saying right now. It used to carry the card's record as well —
+  // "+3 pts over 412" repeated on a dozen badges, too small to read and too short to explain
+  // itself: one short claim, on the card that made it.
+  function verdictBadge(v) {
     const [, cls] = STANCE[v.stance] || STANCE.unclear;
-    const r = (record.cards || []).find((c) => c.source === v.key);
-    const edge = r && r.n >= 20
-      ? `<span class="text-[10px] ${r.edge > 0.02 ? "up" : r.edge < -0.02 ? "down" : "muted"}" title="${r.n} marked: right ${(100 * r.hit_rate).toFixed(0)}%, saying nothing ${(100 * r.baseline).toFixed(0)}%">${r.edge >= 0 ? "+" : ""}${(100 * r.edge).toFixed(0)} pts over ${r.n}</span>`
-      : `<span class="text-[10px] muted" title="a verdict is marked once its horizon has passed">${r ? `${r.n} marked` : "no record yet"}</span>`;
-    return `<span class="inline-flex items-center gap-1.5">
-      <span class="px-1.5 py-0.5 rounded text-[11px] font-semibold ${cls}" title="${esc(v.detail)}">${esc(v.label)}</span>${edge}</span>`;
+    return `<span class="px-1.5 py-0.5 rounded text-[11px] font-semibold ${cls}" title="${esc(v.detail)}">${esc(v.label)}</span>`;
   }
 
   function renderVerdicts(list) {
@@ -605,71 +708,8 @@
     // The summary badge on the top card is the Outlook one: it is the reading the rest supports.
     const head = (list || []).find((v) => v.key === "outlook");
     if (head && $("v_summary")) $("v_summary").innerHTML = verdictBadge(head);
-    renderRecord(list);
   }
 
-  // Each card's record, drawn. A wall of sentences is the one thing nobody reads on a page they
-  // open to make a decision, and the numbers in it were the most important on the page.
-  const CARD_NAME = {
-    term_structure: "Term structure", atm_iv: "ATM implied vol", pcr: "Put/call open interest",
-    chain_oi: "Option walls", insights: "Rule findings", outlook: "Timeframe outlook",
-    volume: "Volume", indicators: "Indicators", shapes: "Candle shapes",
-  };
-
-  function renderRecord(list) {
-    const box = $("verdictDetail");
-    if (!box) return;
-    const cards = (record.cards || []);
-    const byKey = Object.fromEntries((list || []).map((v) => [v.key, v]));
-    const scored = Object.fromEntries(cards.map((c) => [c.source, c]));
-    const keys = [...new Set([...cards.map((c) => c.source), ...(list || []).map((v) => v.key)])];
-
-    box.innerHTML = keys.map((key) => {
-      const v = byKey[key], c = scored[key];
-      const [word, cls] = STANCE[v?.stance] || STANCE.unclear;
-      const name = CARD_NAME[key] || key;
-
-      // No record yet, or too few to call anything.
-      if (!c || !c.enough) {
-        const have = c ? c.n : 0;
-        return `<div class="flex items-center gap-2 py-2 border-b border-slate-100 last:border-0">
-          <div style="flex:0 0 9.5rem" class="text-[12px] font-semibold">${esc(name)}</div>
-          <div style="flex:0 0 6.5rem"><span class="px-1.5 py-0.5 rounded text-[10.5px] font-semibold ${v && v.stance !== "unclear" ? cls : "bg-slate-100 text-slate-400"}">${esc(v && v.stance !== "unclear" ? word : "nothing to say")}</span></div>
-          <div class="flex-1 h-2 rounded-sm bg-[repeating-linear-gradient(45deg,#f1f5f9,#f1f5f9_4px,#e2e8f0_4px,#e2e8f0_8px)]"></div>
-          <div style="flex:0 0 11rem" class="text-[10.5px] muted text-right">${have}/${record.min_marked || 30} marked — no edge claimed yet</div>
-        </div>`;
-      }
-
-      // Hit rate as the bar, the baseline as a line on it. The gap between them is the only thing
-      // on this row worth acting on, and it is only coloured once it clears sampling noise.
-      const tone = !c.reliable ? "#94a3b8" : c.edge > 0 ? "#00b852" : "#eb5757";
-      const won = c.disagreed ? Math.round((100 * c.card_won) / c.disagreed) : null;
-      return `<div class="flex items-center gap-2 py-2 border-b border-slate-100 last:border-0">
-        <div style="flex:0 0 9.5rem">
-          <div class="text-[12px] font-semibold">${esc(name)}</div>
-          <div class="text-[10px] muted">${c.n.toLocaleString()} marked${c.measure ? ` · ${esc(c.measure)}` : ""}</div>
-        </div>
-        <div style="flex:0 0 6.5rem"><span class="px-1.5 py-0.5 rounded text-[10.5px] font-semibold ${v && v.stance !== "unclear" ? cls : "bg-slate-100 text-slate-400"}"
-          title="${esc(v ? v.detail : "")}">${esc(v && v.stance !== "unclear" ? word : "—")}</span></div>
-        <div class="flex-1 min-w-0">
-          <div class="relative bg-slate-100 rounded-sm overflow-hidden" style="height:16px"
-               title="right ${(100 * c.hit_rate).toFixed(0)}% of ${c.n}; always calling ${esc(c.always)} gives ${(100 * c.baseline).toFixed(0)}%">
-            <div style="width:${(100 * c.hit_rate).toFixed(1)}%;height:100%;background:${tone};opacity:.8"></div>
-            <div class="absolute top-0 bottom-0" style="left:${(100 * c.baseline).toFixed(1)}%;width:2px;background:#0f172a"></div>
-            <div class="absolute inset-0 flex items-center justify-between px-1.5 text-[10px] font-mono">
-              <span class="text-slate-800 font-semibold">${(100 * c.hit_rate).toFixed(0)}%</span>
-              <span class="text-slate-600">no card: ${(100 * c.baseline).toFixed(0)}%</span>
-            </div>
-          </div>
-          ${won == null ? "" : `<div class="text-[10px] muted mt-0.5">won ${c.card_won} of the ${c.disagreed} times it disagreed with that</div>`}
-        </div>
-        <div style="flex:0 0 7rem" class="text-right">
-          <div class="font-mono text-[13px] font-semibold" style="color:${tone}">${c.edge >= 0 ? "+" : ""}${(100 * c.edge).toFixed(1)} pts</div>
-          <div class="text-[10px] ${c.reliable ? "" : "muted"}">${c.reliable ? "clears noise" : "within noise"}</div>
-        </div>
-      </div>`;
-    }).join("") || `<div class="text-[11px] muted">No card has made a claim yet.</div>`;
-  }
 
   // One row per timescale: which way, how far, how likely. The page used to spread those three
   // across three cards and leave the reader to join them up, which is how it managed to say "up"
@@ -717,7 +757,7 @@
       $("outlookNote").innerHTML = `<div class="rounded-md bg-amber-50 text-amber-800 text-[12px] px-3 py-2">${esc(v.hint || "")}</div>`;
       $("frames").innerHTML = ""; $("alignment").innerHTML = ""; $("summaryBand").innerHTML = "";
       $("outlookMeta").textContent = "";
-      renderVolume(v.volume); renderIndicators(v.indicators); renderShapes(v.shapes);
+      renderVolume(v.volume);
       return;
     }
     $("outlookNote").innerHTML = "";
@@ -762,100 +802,160 @@
       </div>`;
     }).join('<div class="border-t border-slate-100"></div>');
 
-    // Which way, counted.
-    $("direction").innerHTML = v.direction.map((d) => `<div>
-      <div class="flex items-baseline justify-between mb-1">
-        <div class="text-[12px] font-semibold">Higher in ${d.horizon_hours >= 24 ? `${d.horizon_hours / 24}d` : `${d.horizon_hours}h`}</div>
-        <div class="text-[10.5px] muted">${d.bias ? `structure: ${esc(d.bias)}` : ""}</div>
-      </div>
-      ${TBC.probBar(d.conditional ?? d.baseline, d.conditional != null ? d.baseline : null,
-        { sample: d.conditional != null ? d.conditional_sample : d.sample, minSample: v.min_sample })}
-      ${d.note ? `<div class="text-[10.5px] text-amber-700 mt-0.5">${esc(d.note)}</div>` : ""}
-    </div>`).join("") + `<div class="rounded-md bg-slate-50 px-2.5 py-2 text-[11px] leading-snug">
-      <span class="font-semibold">Your current levels:</span> ${v.trade_odds.stop_pct}% stop / ${v.trade_odds.target_pct}% target (1:${v.trade_odds.reward_risk}).
-      Of the trades that reach a level, <span class="font-mono font-semibold">${(100 * v.trade_odds.p_stop_first).toFixed(0)}%</span> reach the stop first.
-      That is the arithmetic of the ratio, not a flaw — it pays if the win rate beats it.</div>`;
-
-    // What breaks have led to.
-    const pats = v.patterns[structFrame] || [];
-    $("patterns").innerHTML = pats.length
-      ? `<table class="tbl text-[12px]"><thead><tr><th>Break</th><th class="r">Seen</th><th>Followed through</th><th class="r">Mean move</th></tr></thead><tbody>${
-          pats.map((p) => `<tr>
-            <td><span class="font-mono">${esc(p.kind)}</span> <span class="${p.direction === "up" ? "up" : "down"}">${esc(p.direction)}</span></td>
-            <td class="r font-mono">${p.count.toLocaleString()}</td>
-            <td style="min-width:11rem">${TBC.probBar(p.followed_through, p.baseline, { sample: p.count, minSample: 20, height: 14 })}</td>
-            <td class="r font-mono">${p.mean_move_pct.toFixed(2)}%</td></tr>`).join("")}</tbody></table>
-         <p class="text-[10.5px] muted mt-2">Counted over every break in the stored ${structFrame} bars, measured
-         ${v.timeframes.find((f) => f.interval === structFrame)?.sense || ""} ahead. The bar is how often it went on the
-         way it broke; the marker is the same question asked of any bar at all. A flag with no gap over that marker is noise.</p>`
-      : `<div class="text-[11px] muted">Not enough stored history to count breaks on ${structFrame} yet — run <span class="font-mono">backfill</span>.</div>`;
-
-    // In words.
-    const n = v.narrative || {};
-    $("narrative").innerHTML = ["headline", "structure", "move", "odds", "plan"].filter((k) => n[k]).map((k) =>
-      `<p class="${k === "headline" ? "font-semibold text-[14px]" : "text-slate-600"}">${esc(n[k])}</p>`).join("");
-
-    renderStructure();
     renderVolume(v.volume);
-    renderIndicators(v.indicators);
-    renderAgreement(v.indicator_agreement);
-    renderShapes(v.shapes);
     renderWhere(v);
-    renderLevels(v.levels);
   }
 
-  // The chart the rest of it is about: candles, the levels that matter, where the breaks were,
-  // and a cone for how far the next horizon reaches.
-  async function renderStructure() {
-    if (!outlook?.ready) return;
-    $("structTabs").innerHTML = outlook.timeframes.map((f) =>
-      `<button class="btn btn-sm ${f.interval === structFrame ? "btn-primary" : ""}" data-tf="${f.interval}">${f.interval}</button>`).join("");
-    $("structTabs").querySelectorAll("[data-tf]").forEach((b) => (b.onclick = () => { structFrame = b.dataset.tf; renderOutlook(); }));
+  // ── liquidity, profile and flow ────────────────────────────────────────────
+  // One fetch for all three: they share their inputs and are read together — a zone is worth more
+  // with a pool of stops behind it and the profile saying price was rejected there. The engine
+  // computes it once per bar and caches it, so this is a cheap read of one reading rather than
+  // three that could drift apart.
+  let structure = null, profileScope = "session";
 
-    const f = outlook.timeframes.find((x) => x.interval === structFrame);
-    const s = f?.structure || {};
-    const key = `${sym}:${structFrame}`;
-    if (!barsCache[key]) {
-      const days = structFrame === "1d" ? 180 : structFrame === "1h" ? 21 : 3;
-      barsCache[key] = (await TB.get(`/api/bars?symbol=${sym}&interval=15m&days=${days}`)).bars;
-    }
-    const raw = barsCache[key];
-    const factor = structFrame === "1d" ? 96 : structFrame === "1h" ? 4 : 1;
-    // Fold the stored 15m bars the same way the server did, so the chart is the series that was read.
-    const folded = factor === 1 ? raw : (() => {
-      const span = 900 * factor, groups = new Map();
-      for (const b of raw) {
-        const k = Math.floor(b.time / span) * span;
-        if (!groups.has(k)) groups.set(k, []);
-        groups.get(k).push(b);
+  const dist = (d) => d == null ? "" :
+    `<span class="font-mono text-[10.5px] ${d > 0 ? "up" : d < 0 ? "down" : "muted"}">${d >= 0 ? "+" : ""}${d.toFixed(2)}%</span>`;
+  const chip = (text, cls) => `<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold ${cls}">${esc(text)}</span>`;
+  const tile = (label, value, sub) => `<div class="stat"><div class="stat-label">${esc(label)}</div>
+    <div class="stat-value">${value}</div>${sub ? `<div class="stat-sub">${sub}</div>` : ""}</div>`;
+
+
+  const STATE_CLASS = {
+    fresh: "bg-bull-bg text-bull-text", tested: "bg-sky-50 text-sky-700",
+    mitigated: "bg-slate-100 text-slate-600", invalidated: "bg-bear-bg text-bear-text",
+  };
+  const KIND_NAME = { ob: "Order block", fvg: "Fair value gap", sr: "Support / resistance" };
+
+
+  function renderProfile(s) {
+    const P = s.profile || {};
+    if (!P.ready) { $("vpChart").innerHTML = `<div class="text-[11px] muted">${esc(P.note || "Not ready.")}</div>`; return; }
+    const scopes = [["session", "Today"], ["previous", "Yesterday"], ["composite", "Composite"]];
+    $("profileTabs").innerHTML = scopes.map(([k, label]) =>
+      `<button data-scope="${k}" class="chip ${k === profileScope ? "on" : ""}">${esc(label)}</button>`).join("");
+    $("profileTabs").querySelectorAll("[data-scope]").forEach((b) =>
+      (b.onclick = () => { profileScope = b.dataset.scope; renderProfile(s); }));
+    // 1m is a real profile; 15m is an estimate of where inside each bar the volume went. Say which.
+    $("profileSource").innerHTML = P.source === "1m"
+      ? `<span class="muted">built from 1-minute bars</span>`
+      : `<span class="muted" title="A 15-minute bar cannot say where inside itself the volume traded, so it is spread evenly across its range. Backfill the 1m series for a real profile.">estimated from ${esc(P.source)} bars</span>`;
+
+    const p = P[profileScope];
+    if (!p) { $("vpChart").innerHTML = `<div class="text-[11px] muted">Nothing for this window yet.</div>`;
+              $("vpStats").innerHTML = ""; $("vpNodes").innerHTML = ""; return; }
+    $("vpChart").innerHTML = TBC.volumeProfile(p.nodes, { price: P.price, height: 320 });
+    $("vpStats").innerHTML =
+      tile("Point of control", TB.num(p.poc, 1), p.naked ? "never revisited" : "") +
+      tile("Value area", `${TB.num(p.value_low, 0)}–${TB.num(p.value_high, 0)}`,
+           P.price >= p.value_low && P.price <= p.value_high ? "price inside" : "price outside") +
+      tile("Range", `${TB.num(p.low, 0)}–${TB.num(p.high, 0)}`, `${p.bars} bars`);
+    const node = (price, kind) => `<span class="px-1.5 py-0.5 rounded font-mono text-[10.5px] ${kind === "hvn" ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-700"}">${TB.num(price, 0)}</span>`;
+    $("vpNodes").innerHTML = `
+      <div class="text-[11px] mb-1"><b>High-volume nodes</b> <span class="muted">price moves slowly through these</span></div>
+      <div class="flex flex-wrap gap-1 mb-2">${(p.hvn || []).map((x) => node(x, "hvn")).join("") || '<span class="text-[11px] muted">none — the distribution is flat</span>'}</div>
+      <div class="text-[11px] mb-1"><b>Low-volume nodes</b> <span class="muted">price moves fast through these</span></div>
+      <div class="flex flex-wrap gap-1">${(p.lvn || []).map((x) => node(x, "lvn")).join("") || '<span class="text-[11px] muted">none</span>'}</div>`;
+
+    $("nakedList").innerHTML = (P.naked_pocs || []).length ? `<div class="overflow-x-auto"><table class="tbl"><tbody>${P.naked_pocs.map((n) => `<tr>
+        <td class="text-[11.5px]">${esc(n.label)}</td><td class="r font-mono">${TB.num(n.price, 1)}</td>
+        <td class="r">${dist(n.distance_pct)}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="text-[11px] muted">None — price has been back to every stored point of control.</div>`;
+
+    const T = P.tpo;
+    if (!T) { $("tpoChart").innerHTML = `<div class="text-[11px] muted">Not enough of today stored yet.</div>`;
+              $("tpoStats").innerHTML = ""; return; }
+    $("tpoSub").textContent = T.label;
+    $("tpoMeta").textContent = `${T.periods} half-hour periods`;
+    $("tpoStats").innerHTML =
+      tile("TPO point of control", TB.num(T.poc, 1)) +
+      tile("Value area", `${TB.num(T.value_low, 0)}–${TB.num(T.value_high, 0)}`) +
+      tile("Initial balance", `${TB.num(T.ib_low, 0)}–${TB.num(T.ib_high, 0)}`, "first hour") +
+      tile("Single prints", String((T.single_prints || []).length),
+           [T.poor_high ? "poor high" : "", T.poor_low ? "poor low" : ""].filter(Boolean).join(" · "));
+    $("tpoChart").innerHTML = `<div class="font-mono text-[10.5px] leading-[1.35]">${T.rows.map((r) => `
+      <div class="flex gap-2 ${r.in_value ? "" : "opacity-55"}">
+        <span class="w-20 text-right ${r.poc ? "font-bold text-amber-700" : "muted"}">${TB.num(r.price, 0)}</span>
+        <span class="${r.single ? "text-amber-700 font-semibold" : ""}">${esc(r.letters)}</span>
+      </div>`).join("")}</div>`;
+  }
+
+  // A counted rate, always beside the baseline it has to beat and the sample behind it. The only
+  // place this survives is order-flow divergence; everywhere else the rates were noise dressed as
+  // findings and were removed rather than made prettier.
+  function ratePanel(title, row, note) {
+    return `<div class="rounded-md border border-slate-200 p-2.5">
+      <div class="stat-label mb-1">${esc(title)}</div>
+      ${TBC.probBar(row && row.enough === false ? null : (row ? row.rate : null), row ? row.baseline : null,
+        { sample: row ? row.n : 0, minSample: row ? row.min_sample : 0, height: 16 })}
+      <div class="text-[10px] muted mt-1">${esc(note || "")}</div>
+    </div>`;
+  }
+
+  function renderFlow(s) {
+    const F = s.flow || {};
+    $("flowApprox").innerHTML = `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700"
+      title="${esc(F.approx_note || "")} Delta is inferred from where each bar closed inside its range. A footprint built from candles is not a footprint.">APPROX</span>`;
+    if (!F.ready) { $("flowKpis").innerHTML = `<div class="text-[11px] muted">${esc(F.note || "Not ready.")}</div>`; return; }
+    const press = { buyers: ["Buyers", "bg-bull-bg text-bull-text"], sellers: ["Sellers", "bg-bear-bg text-bear-text"],
+                    balanced: ["Balanced", "bg-slate-100 text-slate-600"] }[F.pressure] || ["—", ""];
+    $("flowKpis").innerHTML =
+      tile("Pressure today", chip(press[0], press[1])) +
+      tile("Last bar", `${F.delta_ratio >= 0 ? "+" : ""}${(100 * F.delta_ratio).toFixed(0)}%`, "of its volume, net") +
+      tile("CVD move", `${F.cvd_change_pct >= 0 ? "+" : ""}${F.cvd_change_pct}%`, "of the volume behind it") +
+      tile("Today", `${TB.compact(F.day_buy)} / ${TB.compact(F.day_sell)}`, "bought / sold");
+
+    const bars = F.bars || [];
+    $("deltaChart").innerHTML = TBC.timeLine(
+      [{ name: "delta", points: bars.map((b) => ({ x: b.time, y: b.delta })) }],
+      { height: 120, format: (v) => TB.compact(v), hideLegend: true, guides: [{ at: 0, label: "" }] });
+    $("cvdChart").innerHTML = TBC.timeLine(
+      [{ name: "CVD", points: bars.map((b) => ({ x: b.time, y: b.cvd })) }],
+      { height: 120, format: (v) => TB.compact(v), hideLegend: true, guides: [{ at: 0, label: "" }] });
+
+    const r = F.record || {};
+    $("flowRecord").innerHTML =
+      ratePanel("Bullish divergence → price rose", r.bullish ? { ...r.bullish, min_sample: r.min_sample } : null, `over the next ${r.react_bars} bars`) +
+      ratePanel("Bearish divergence → price fell", r.bearish ? { ...r.bearish, min_sample: r.min_sample } : null, `over the next ${r.react_bars} bars`);
+
+    const dv = (F.divergences || []).slice(-10).reverse();
+    $("divergenceList").innerHTML = dv.length ? `<div class="overflow-x-auto"><table class="tbl"><thead><tr>
+      <th>When</th><th>What</th><th class="r">At price</th><th class="r">Reaction</th><th>Outcome</th></tr></thead>
+      <tbody>${dv.map((d) => `<tr>
+        <td class="muted text-[10.5px]">${TB.time(d.bar_time)}</td>
+        <td>${chip(d.kind, d.kind === "bullish" ? "bg-bull-bg text-bull-text" : "bg-bear-bg text-bear-text")}</td>
+        <td class="r font-mono">${TB.num(d.price, 1)}</td>
+        <td class="r">${d.reaction_pct == null ? '<span class="muted">—</span>' : dist(d.reaction_pct)}</td>
+        <td>${d.worked == null ? chip("still open", "bg-slate-50 text-slate-400")
+              : d.worked ? chip("followed", "bg-bull-bg text-bull-text") : chip("did not", "bg-bear-bg text-bear-text")}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="text-[11px] muted">No divergence in the window.</div>`;
+
+    const ab = (F.absorptions || []).slice(-8).reverse();
+    $("absorptionList").innerHTML = ab.length ? `<div class="overflow-x-auto"><table class="tbl"><thead><tr>
+      <th>When</th><th>What</th><th class="r">Volume</th><th class="r">Range</th><th class="r">Net flow</th></tr></thead>
+      <tbody>${ab.map((a) => `<tr>
+        <td class="muted text-[10.5px]">${TB.time(a.bar_time)}</td>
+        <td>${chip(a.direction === "bull" ? "selling absorbed" : "buying absorbed", a.direction === "bull" ? "bg-bull-bg text-bull-text" : "bg-bear-bg text-bear-text")}</td>
+        <td class="r font-mono">${a.volume_ratio}×</td><td class="r font-mono">${a.range_ratio}×</td>
+        <td class="r font-mono">${(100 * a.delta_ratio).toFixed(0)}%</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="text-[11px] muted">None in the window. Heavy volume with no movement is rare — see the note below.</div>`;
+  }
+
+  async function loadStructure() {
+    structure = await TB.get(`/api/market-structure?symbol=${sym}`);
+    // The tape needs the 15m bars whether or not the scan is ready: price with no levels on it is
+    // still the most useful thing on the page, and a blank chart because one fetch failed is not.
+    await loadTapeBars();
+    if (!structure || !structure.ready) {
+      for (const id of ["poolSummary", "zoneStates", "vpChart", "flowKpis"]) {
+        if ($(id)) $(id).innerHTML = `<div class="text-[11px] muted">${esc((structure && structure.note) || "No stored bars yet — run backfill.")}</div>`;
       }
-      return [...groups.entries()].sort((a, b) => a[0] - b[0]).filter(([, g]) => g.length === factor).map(([t, g]) => ({
-        time: t, open: g[0].open, high: Math.max(...g.map((x) => x.high)), low: Math.min(...g.map((x) => x.low)), close: g[g.length - 1].close,
-      }));
-    })();
-    const shown = folded.slice(-140);
-    const horizon = outlook.horizons.find((h) => h.hours === (f?.interval === "1d" ? 24 : f?.interval === "1h" ? 24 : 1)) || outlook.horizons[1];
-    $("structSub").textContent = `${shown.length} ${structFrame} bars · ${s.bias || "—"}${s.squeeze ? " · squeeze" : ""}`;
-    $("structChart").innerHTML = TBC.candles(shown, {
-      levels: [
-        { price: s.swing_high, label: `swing high ${TB.num(s.swing_high, 0)}`, color: "#eb5757" },
-        { price: s.swing_low, label: `swing low ${TB.num(s.swing_low, 0)}`, color: "#00b852" },
-      ],
-      marks: (s.breaks || []).map((b) => ({ bar_time: b.bar_time, direction: b.direction, kind: b.kind })),
-      // Only on the 15-minute chart: a verdict is made on a 15m bar, and plotting it against a
-      // folded hourly or daily candle would put it on a bar it was never about.
-      predictions: structFrame === "15m" ? pastClaims : [],
-      projection: horizon ? { sigma_pct: horizon.sigma_pct, hours: horizon.hours } : null,
-      label: `${sym} ${structFrame} with structure`,
-    });
-    const recent = (s.breaks || []).slice(-4).reverse();
-    $("breakList").innerHTML = recent.length
-      ? `<div class="text-[11px] space-y-1">${recent.map((b) => `<div class="flex gap-2">
-          <span class="font-mono ${b.direction === "up" ? "up" : "down"}">${b.kind === "choch" ? "CHoCH" : "BOS"} ${b.direction}</span>
-          <span class="muted">${TB.time(b.bar_time)}</span>
-          <span>through <span class="font-mono">${TB.num(b.level, 0)}</span></span>
-          <span class="muted">bar ${b.displacement.toFixed(1)}x usual, volume ${b.volume_ratio.toFixed(1)}x</span></div>`).join("")}</div>`
-      : `<div class="text-[11px] muted">No break in the window shown.</div>`;
+      renderTape(); renderNearby();
+      return;
+    }
+    renderProfile(structure);
+    renderFlow(structure);
+    renderTape();
+    renderNearby();
   }
 
   async function loadOutlook() {
@@ -863,27 +963,24 @@
     renderSources(outlook.sources);
     renderOutlook();
     const v = await TB.get(`/api/verdicts?symbol=${sym}&days=30`);
-    record = v.record || {};
-    pastClaims = v.history || [];
     renderVerdicts(v.verdicts);
-    paintTabVerdicts(v.verdicts);
-    renderStructure();
+    safely("tape", renderTape);
   }
 
-  // Each on its own. These used to run as one statement sequence, so when showView threw — a
-  // local named `history` had shadowed window.history — every loader after it was skipped and the
-  // whole page came up empty with one console line to explain it.
-  const safely = (name, fn) => { try { return fn(); } catch (e) { console.error(`${name} failed:`, e); } };
-  safely("tabs", () => {
-    document.querySelectorAll("#viewTabs [data-view]").forEach((b) => (b.onclick = () => safely("showView", () => showView(b.dataset.view))));
-    showView(new URLSearchParams(location.search).get("view"));
-  });
-  for (const [name, fn] of [["header", load], ["options history", loadHist], ["outlook", loadOutlook]]) {
+  // Each on its own. These used to run as one statement sequence, so when one threw — a local
+  // named `history` had shadowed window.history — every loader after it was skipped and the whole
+  // page came up empty with one console line to explain it.
+  safely("layers", paintLayers);
+  safely("frames", paintFrames);
+  safely("nav", paintNav);
+  for (const [name, fn] of [["header", load], ["options history", loadHist], ["outlook", loadOutlook],
+                            ["market structure", loadStructure]]) {
     safely(name, fn);
   }
   TB.every(load, 60000);
   TB.every(loadHist, 60000);
   TB.every(loadOutlook, 300000);  // nothing in it changes until the next 15-minute bar closes
+  TB.every(loadStructure, 300000);  // same: the engine rebuilds it once a bar and caches it
 })();
 
 (() => {

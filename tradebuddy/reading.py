@@ -23,7 +23,7 @@ from typing import Any
 
 from tradebuddy import structure as st
 from tradebuddy.delta import Candle
-from tradebuddy.strategies.indicators import adx, atr, bollinger, ema, macd, obv, rsi, supertrend
+from tradebuddy.strategies.indicators import adx, atr, obv
 
 VOLUME_WINDOW = 96  # a day of 15-minute bars: what "normal volume" means here
 MIN_PATTERN_SAMPLE = 20  # fewer than this of a shape and its rate is not worth printing
@@ -110,91 +110,6 @@ def _series(candles: list[Candle], values: list[float], window: int) -> list[dic
         return []
     start = len(candles) - len(values)
     return [{"time": candles[start + i].time, "value": round(v, 4)} for i, v in enumerate(values)][-window:]
-
-
-def indicator_block(candles: list[Candle], window: int = VOLUME_WINDOW) -> dict[str, Any]:
-    """The classical readings, each with the state it is in rather than a bare number.
-
-    "RSI 68" is only useful if you remember where the lines are. Every reading here carries its own
-    verdict word, and ADX is the one that decides whether the others mean anything: below 20 the
-    market is ranging and trend-following readings misfire, which is the single most common way
-    indicators are misread.
-    """
-    if len(candles) < 60:
-        return {"ready": False, "note": f"needs 60 bars, has {len(candles)}"}
-    closes = [c.close for c in candles]
-    highs, lows = [c.high for c in candles], [c.low for c in candles]
-    price = closes[-1]
-
-    r = rsi(closes, 14)
-    macd_line, macd_sig, macd_hist = macd(closes)
-    adx_line, pdi, mdi = adx(highs, lows, closes, 14)
-    mid, upper, lower = bollinger(closes, 20, 2.0)
-    bands = atr(highs, lows, closes, 14)
-    emas = {n: ema(closes, n) for n in (20, 50, 200)}
-    line = supertrend(highs, lows, closes, 10, 3.0)
-
-    def state(value: float | None, low: float, high: float, below: str, between: str, above: str) -> str:
-        if value is None:
-            return "unknown"
-        return below if value < low else above if value > high else between
-
-    width = round(100 * (upper[-1] - lower[-1]) / mid[-1], 3) if mid else None
-    widths = [100 * (u - lo) / m for m, u, lo in zip(mid[-50:], upper[-50:], lower[-50:], strict=True) if m] if mid else []
-    stack = [emas[n][-1] if emas[n] else None for n in (20, 50, 200)]
-    return {
-        "ready": True,
-        "price": round(price, 2),
-        "rsi": {
-            "value": round(r[-1], 1) if r else None,
-            "state": state(r[-1] if r else None, 30, 70, "oversold", "neutral", "overbought"),
-        },
-        "macd": {
-            "line": round(macd_line[-1], 4) if macd_line else None,
-            "signal": round(macd_sig[-1], 4) if macd_sig else None,
-            "hist": round(macd_hist[-1], 4) if macd_hist else None,
-            "state": "rising" if macd_hist and macd_hist[-1] > 0 else "falling" if macd_hist else "unknown",
-        },
-        "adx": {
-            "value": round(adx_line[-1], 1) if adx_line else None,
-            "plus_di": round(pdi[-1], 1) if pdi else None,
-            "minus_di": round(mdi[-1], 1) if mdi else None,
-            # The gate on every other reading here.
-            "state": state(adx_line[-1] if adx_line else None, 20, 25, "ranging", "forming", "trending"),
-        },
-        "bollinger": {
-            "upper": round(upper[-1], 2) if upper else None,
-            "middle": round(mid[-1], 2) if mid else None,
-            "lower": round(lower[-1], 2) if lower else None,
-            "width_pct": width,
-            "position": round((price - lower[-1]) / (upper[-1] - lower[-1]), 3) if upper and upper[-1] > lower[-1] else None,
-            # Squeeze is relative to this market's own recent width, not an absolute number.
-            "squeeze": bool(widths and width is not None and width < 0.6 * (sum(widths) / len(widths))),
-        },
-        "atr": {
-            "value": round(bands[-1], 2) if bands else None,
-            "pct": round(100 * bands[-1] / price, 3) if bands else None,
-        },
-        "ema": {
-            "ema20": round(stack[0], 2) if stack[0] else None,
-            "ema50": round(stack[1], 2) if stack[1] else None,
-            "ema200": round(stack[2], 2) if stack[2] else None,
-            "stacked_up": bool(all(stack) and stack[0] > stack[1] > stack[2]),
-            "stacked_down": bool(all(stack) and stack[0] < stack[1] < stack[2]),
-        },
-        # Where the trend claim stops being true. The only reading here that names a price rather
-        # than a state, which is why a strategy can put a stop on it and the others cannot.
-        "supertrend": {
-            "level": round(line[-1][0], 2) if line else None,
-            "direction": line[-1][1] if line else 0,
-            "state": "above price" if line and line[-1][1] < 0 else "below price" if line else "unknown",
-            "distance_pct": round(100 * abs(price - line[-1][0]) / price, 3) if line else None,
-        },
-        "series": [{"time": c.time, "close": c.close} for c in candles[-window:]],
-        "rsi_series": _series(candles, r, window),
-        "adx_series": _series(candles, adx_line, window),
-        "macd_series": _series(candles, macd_hist, window),
-    }
 
 
 # -- candle shapes, scored like breaks ------------------------------------------------
@@ -351,57 +266,6 @@ TIMEFRAMES = (
     {"interval": "1h", "factor": 4, "label": "Medium term", "window": 120},
     {"interval": "1d", "factor": 96, "label": "Long term", "window": 120},
 )
-
-
-def indicators_by_timeframe(candles: list[Candle]) -> dict[str, Any]:
-    """The same readings on every timeframe, folded from the one stored series.
-
-    Reading RSI on a 15-minute chart and nothing else is how a pullback inside a daily uptrend gets
-    traded as a reversal. The readings disagree across timeframes most of the time, and which ones
-    agree is worth more than any single value.
-    """
-    out: dict[str, Any] = {}
-    for spec in TIMEFRAMES:
-        folded = st.resample(candles, spec["factor"])
-        block = indicator_block(folded, spec["window"])
-        out[spec["interval"]] = block | {"label": spec["label"], "bars": len(folded)}
-    return out
-
-
-def indicator_agreement(by_tf: dict[str, Any]) -> dict[str, Any]:
-    """Which way each timeframe's readings lean, and how much they agree.
-
-    One vote per reading per timeframe — EMA stack, MACD histogram, RSI either side of 50, and
-    Supertrend's side of price — gated by whether ADX says there is a trend to read at all.
-    """
-    rows = []
-    for interval, b in by_tf.items():
-        if not b.get("ready"):
-            rows.append({"interval": interval, "votes": 0, "lean": "unknown", "trending": False, "note": b.get("note", "")})
-            continue
-        ema_b = b["ema"]
-        votes = [
-            1 if ema_b["stacked_up"] else -1 if ema_b["stacked_down"] else 0,
-            1 if (b["macd"]["hist"] or 0) > 0 else -1 if (b["macd"]["hist"] or 0) < 0 else 0,
-            1 if (b["rsi"]["value"] or 50) > 55 else -1 if (b["rsi"]["value"] or 50) < 45 else 0,
-            b["supertrend"]["direction"] or 0,
-        ]
-        total = sum(votes)
-        rows.append({
-            "interval": interval,
-            "label": b.get("label", interval),
-            "votes": total,
-            "of": len(votes),
-            "lean": "up" if total >= 2 else "down" if total <= -2 else "mixed",
-            "trending": b["adx"]["state"] == "trending",
-            "adx": b["adx"]["value"],
-            "detail": {"ema": votes[0], "macd": votes[1], "rsi": votes[2], "supertrend": votes[3]},
-        })
-    scores = [r["votes"] for r in rows if r.get("lean") != "unknown"]
-    agree = "aligned up" if scores and all(v >= 2 for v in scores) else (
-        "aligned down" if scores and all(v <= -2 for v in scores) else (
-            "conflicting" if scores and max(scores) >= 2 and min(scores) <= -2 else "mixed"))
-    return {"rows": rows, "agreement": agree}
 
 
 # -- where the money actually traded ---------------------------------------------------
@@ -562,48 +426,3 @@ LEVEL_WINDOWS = (
 IN_PLAY_PCT = 1.0  # within this of an extreme and the level is live rather than history
 
 
-def levels_block(candles: list[Candle], bar_seconds: int = 900) -> dict[str, Any]:
-    """The high and low of each well-known window, and where price sits between them.
-
-    These are the levels other people are watching, which is most of why they matter — a 52-week
-    high is not a prediction, it is a price a great many orders are parked around. Each window
-    reports how far price is from both ends, how long ago the extreme was set, and whether it is
-    close enough to be in play rather than a fact about the past.
-
-    A fresh extreme is called out separately: making a new high today is a different event from
-    sitting under one set three weeks ago.
-    """
-    if len(candles) < 20:
-        return {"ready": False, "note": f"needs 20 bars, has {len(candles)}"}
-    price = candles[-1].close
-    out = []
-    for spec in LEVEL_WINDOWS:
-        window = candles[-spec["bars"]:] if len(candles) > spec["bars"] else candles
-        if len(window) < 20:
-            continue
-        highs = [c.high for c in window]
-        lows = [c.low for c in window]
-        hi, lo = max(highs), min(lows)
-        hi_at = len(window) - 1 - highs[::-1].index(hi)
-        lo_at = len(window) - 1 - lows[::-1].index(lo)
-        to_high = 100 * (hi / price - 1)
-        to_low = 100 * (1 - lo / price)
-        out.append({
-            "key": spec["key"],
-            "label": spec["label"],
-            "complete": len(window) >= spec["bars"],  # a 52-week high needs 52 weeks of bars
-            "bars": len(window),
-            "high": round(hi, 2),
-            "low": round(lo, 2),
-            "to_high_pct": round(to_high, 2),
-            "to_low_pct": round(to_low, 2),
-            "position": round((price - lo) / (hi - lo), 3) if hi > lo else None,
-            "high_hours_ago": round((len(window) - 1 - hi_at) * bar_seconds / 3600, 1),
-            "low_hours_ago": round((len(window) - 1 - lo_at) * bar_seconds / 3600, 1),
-            "high_in_play": to_high <= IN_PLAY_PCT,
-            "low_in_play": to_low <= IN_PLAY_PCT,
-            # Set on one of the last few bars: price is making the extreme, not approaching it.
-            "fresh_high": hi_at >= len(window) - 3,
-            "fresh_low": lo_at >= len(window) - 3,
-        })
-    return {"ready": bool(out), "price": round(price, 2), "windows": out}

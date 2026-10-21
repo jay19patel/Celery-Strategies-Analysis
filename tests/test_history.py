@@ -169,7 +169,7 @@ async def test_the_month_percentage_is_taken_from_equity_not_the_trades(cfg, exc
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    from tradebuddy.analytics import collect_month_summary, collect_monthly_calendar_data
+    from tradebuddy.journal import collect_month_summary, collect_monthly_calendar_data
 
     system = await make(cfg, exchange)
     tz = system.settings.day_timezone
@@ -190,7 +190,7 @@ async def test_the_open_figure_comes_from_the_broker_not_a_subtraction(cfg, exch
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    from tradebuddy.analytics import collect_month_summary, collect_monthly_calendar_data
+    from tradebuddy.journal import collect_month_summary, collect_monthly_calendar_data
 
     system = await make(cfg, exchange)
     tz = system.settings.day_timezone
@@ -221,7 +221,7 @@ async def test_a_finished_month_closed_where_it_closed(cfg, exchange):
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    from tradebuddy.analytics import collect_month_summary, collect_monthly_calendar_data
+    from tradebuddy.journal import collect_month_summary, collect_monthly_calendar_data
 
     system = await make(cfg, exchange)
     tz = system.settings.day_timezone

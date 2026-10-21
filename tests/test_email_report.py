@@ -10,10 +10,10 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from tradebuddy import email_report
-from tradebuddy.analytics import collect_daily_analytics, get_day_bounds
 from tradebuddy.api import Api, ApiError
 from tradebuddy.email_report import MAX_ATTEMPTS, RETRY_AFTER, DailyReporter, EmailError, deliver, render
 from tradebuddy.events import EmailReport, TradeSkipped
+from tradebuddy.journal import collect_day, get_day_bounds
 from tradebuddy.runner import PAUSED
 from tradebuddy.settings import Settings, SettingsError, apply_changes
 
@@ -64,7 +64,7 @@ async def test_a_day_holds_its_trades_orders_timeline_and_skips(cfg, exchange):
     system.bus.publish(TradeSkipped(strategy="needs_history", symbol="ETHUSD", side="", broker="", reason=PAUSED))
     await system.drain()
 
-    d = collect_daily_analytics(system.store, None, "UTC")
+    d = collect_day(system.store, None, "UTC")
     s = d["summary"]
     assert s["total_trades"] == 1 and s["total_orders"] == 1 and s["signals_count"] >= 1
     assert d["trades"][0]["reason"] == "take profit" and d["trades"][0]["time"] != "-"
@@ -81,7 +81,7 @@ async def test_a_day_holds_its_trades_orders_timeline_and_skips(cfg, exchange):
 
 async def test_past_days_have_no_made_up_load_numbers(cfg, exchange):
     system = await make(cfg, exchange)
-    d = collect_daily_analytics(system.store, "2020-01-01", "UTC")
+    d = collect_day(system.store, "2020-01-01", "UTC")
     assert d["summary"]["total_trades"] == 0 and d["timeline"] == []
     sh = d["system_health"]
     assert sh["measured"] is False and sh["peak_cpu_pct"] is None and sh["peak_rss_mb"] is None
@@ -100,7 +100,7 @@ async def test_email_escapes_what_it_shows_and_names_the_day(cfg, exchange):
     system = await make(cfg, exchange)
     system.bus.publish(TradeSkipped(strategy="s", symbol="BTCUSD", side="buy", broker="paper", reason="<script>x</script>"))
     await system.drain()
-    d = collect_daily_analytics(system.store, None, "UTC")
+    d = collect_day(system.store, None, "UTC")
     subject, _, html = render(d)
     assert d["date"] in subject and "<script>" not in html and "&lt;script&gt;" in html
     assert "Why signals were skipped" in html and "Timeline" in html

@@ -22,9 +22,9 @@ from html import escape
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from tradebuddy.analytics import collect_daily_analytics, gather_live, get_day_bounds
 from tradebuddy.events import EmailReport
 from tradebuddy.jobs import NULL_JOB
+from tradebuddy.journal import collect_day, gather_live, get_day_bounds
 from tradebuddy.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -360,7 +360,7 @@ class DailyReporter:
             try:
                 today = get_day_bounds(None, s.day_timezone)[2]
                 live = await gather_live(self.system) if day == today else None
-                data = await asyncio.to_thread(collect_daily_analytics, self.system.store, day, s.day_timezone, live)
+                data = await asyncio.to_thread(collect_day, self.system.store, day, s.day_timezone, live)
                 subject, text, html = render(data)
                 await asyncio.to_thread(deliver, s, subject, text, html)
                 event = EmailReport(day=day, trigger=trigger, ok=True)

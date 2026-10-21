@@ -446,8 +446,8 @@ def create_app(
         return await call("options_history", symbol=symbol, hours=hours)
 
     @app.get("/api/bars")
-    async def bars(symbol: str = "BTCUSD", interval: str = "15m", days: float = 7) -> dict:
-        return await call("bars", symbol=symbol, interval=interval, days=days)
+    async def bars(symbol: str = "BTCUSD", interval: str = "15m", days: float = 7, limit: int = 5000) -> dict:
+        return await call("bars", symbol=symbol, interval=interval, days=days, limit=limit)
 
     @app.get("/api/snapshots")
     async def snapshots(symbol: str = "BTCUSD", days: float = 7) -> dict:
@@ -460,6 +460,10 @@ def create_app(
     @app.get("/api/outlook")
     async def outlook_route(symbol: str = "BTCUSD") -> dict:
         return await call("outlook", symbol=symbol)
+
+    @app.get("/api/market-structure")
+    async def market_structure(symbol: str = "BTCUSD") -> dict:
+        return await call("market_structure", symbol=symbol)
 
     @app.get("/api/verdicts")
     async def verdicts(symbol: str = "BTCUSD", days: float = 30) -> dict:

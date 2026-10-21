@@ -1,8 +1,8 @@
 """One local day of trading, read back from the store: the Journal page and the daily email.
 
 Everything here is read-only. Numbers come from the permanent tables (orders, paper_trades) and the
-event log; nothing is estimated. Process load is not stored (heartbeats are never written), so it
-is only known for today, from the live snapshot the engine passes in.
+event log; nothing is estimated. Process load for past days lives in `process_health`; today's is taken
+from the live snapshot the engine passes in.
 """
 
 from __future__ import annotations
@@ -204,7 +204,7 @@ def _system_health(errors: list[dict[str, Any]], warnings_count: int, by_type: d
     }
 
 
-def collect_daily_analytics(
+def collect_day(
     store: Store,
     date_str: str | None = None,
     tz_name: str = "Asia/Kolkata",

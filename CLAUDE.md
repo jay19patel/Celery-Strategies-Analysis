@@ -77,10 +77,10 @@ analyst every 5 min: candles+OI+funding ─► insights ─► PUSH MarketAnalys
   there is no trained model and no language model anywhere in this system, and a number on a page
   is either arithmetic over its inputs or a rate counted over the stored bars. That is the whole
   claim the Market page makes, and it is why `provenance.py` has three sources and not five.
-- `reading.py` — one block per Market-page tab (volume, indicators, candle-shape records). The tabs are
-  split by what a reading is MADE of, not by topic, because that is the only line along which they differ
-  in how much they can be trusted — one scroll is how two readings of different worth ended up side by
-  side looking equally solid. The page's one answer sits above the tabs.
+- `reading.py` — the measured blocks the page and the engine still read: volume, VWAP, the volume
+  profile, candle anatomy, candle-shape records, `regime_at` and `barrier_outcome`. The indicator
+  blocks (RSI/MACD/ADX, per-timeframe and their agreement) and the levels block were removed with
+  the cards that rendered them: nothing else read them, so they were arithmetic nobody saw.
 - `provenance.py` — where every figure came from (arithmetic, counted history, what traders paid),
   ordered by how little has to be true for it to hold. The page badges each one: showing them
   identically is how two claims of very different worth ended up looking the same.
@@ -97,9 +97,39 @@ analyst every 5 min: candles+OI+funding ─► insights ─► PUSH MarketAnalys
   `verdict.py` (one short checkable claim per Market-page card). All three are pure — bars in, numbers
   out, no clock and no network — so the dashboard, a worker and a backtest get the same answer.
   The arithmetic is checked against simulation, not against itself (`tests/test_outlook.py`).
+- `liquidity.py`, `zones.py`, `profile.py`, `orderflow.py` — where price reacts, and whether it has
+  paid to think so. `liquidity`: fractal pivots (confirmed only `n` bars later, so a pivot is never
+  known on the bar it happened), equal-high/low pools with their touch count, **sweeps** (through a
+  pool and closed back inside — a raid, not a break), previous day/week/month levels and the UTC
+  sessions (Asia 00-08, London 07-16, New York 13-22, overlapping on purpose). `zones`: order blocks
+  (the last opposite candle before a displacement that also broke structure — both required), fair
+  value gaps and clustered S/R bands, each with a lifecycle that **only moves forward**
+  (`fresh → tested → mitigated → invalidated`). `profile`: volume by price — POC, value area, HVN/LVN,
+  naked POCs, and a TPO market profile with its initial balance, single prints and poor highs.
+  `orderflow`: delta and CVD **estimated from candles and badged APPROX everywhere**, because the
+  feed records no trade tape; it earns its place by being the one axis uncorrelated with the price
+  transforms (ρ 0.03-0.32 against RSI/MACD/bands, which sit at 0.80-0.97 with each other).
+  Every rate any of them reports is shown beside the baseline it has to beat and the sample behind
+  it — measured over 35,000 stored bars the sweep edge is +0.2 points, while over 2,000 it reads
+  +3.3, which is what a few hundred samples of a coin look like.
+  `System.market_structure` builds all four together and caches per bar, like `outlook`.
+- `resample.py` — one base series, every higher timeframe folded from it. Two timeframes are stored:
+  the base (1m, `System.collect_base_bars`, 90 days) and the one the strategies run on (15m, kept for
+  good). Everything else — 5m, 1h, 4h, 1d — is folded from whichever of those divides it, so the
+  hourly candle is exactly the four quarter-hours underneath it rather than a second download that
+  may disagree. Buckets start at `time // span * span`: epoch seconds are UTC and every interval
+  divides the epoch, so the day opens at 00:00 UTC with no timezone arithmetic anywhere. A bar is
+  stamped when it OPENED and is emitted only once the source has run past its end — not once it has
+  enough bars, which is what stops a half-finished day being drawn as a closed one. Each folded bar
+  says how many source bars it was built from, and a bucket under `MIN_COVERAGE` is dropped rather
+  than averaged over a hole. The base exists because a fifteen-minute bar cannot see inside itself:
+  session levels, an honest volume profile and a liquidity sweep are questions only a minute bar
+  answers. Since the 15m series is both stored and foldable, `tests/test_base_bars.py` asserts the
+  two agree — that is the condition under which the duplication is allowed.
 - `jobs.py` — every background loop wraps a pass in `job.tick()`; the System page shows them all.
 - The market itself is kept, not just read: `bars` (closed candles with the open interest and
-  funding of the same bar, `System.collect_bars` fetching only what the store is missing),
+  funding of the same bar, `System.collect_bars` for 15m and `System.collect_base_bars` for the 1m
+  base, each fetching only what the store is missing),
   `market_snapshots` (the analyst's numbers per bar as typed columns, because base rates are
   counted with SQL and JSON cannot be scanned) and `process_health` (CPU, memory and loop lag per
   process, which the monitor had always measured and never stored). A bar already stored is never
@@ -122,7 +152,20 @@ Enforced by tests. Breaking one should fail the build.
 4. **Brokers are independent.** A signal is gated per broker; the broker is
    fixed when the order is reserved; one broker's state never blocks another.
 5. **Closed candles only.** Strategies run on `CandleClosed`; a strategy with
-   `lookback` must see the bar that closed.
+   `lookback` must see the bar that closed. A folded timeframe is emitted only once the source has
+   run past its end, so a bar still forming is never served as a closed one.
+5c. **A level's state only moves forward.** A zone goes fresh → tested → mitigated → invalidated
+   and never back, so running the scan over more history can only advance it. A chart that redraws
+   its zones on every refresh cannot be counted, which is the whole point of storing the state.
+5d. **A pattern is nothing without its baseline.** Every sweep, zone and divergence rate is
+   reported next to what any bar at all would have given over the same horizon, and under its
+   minimum sample no rate is shown. Measuring "did price ever trade through this zone" over a year
+   answers yes for nearly every zone ever drawn; the question that counts is what happened the
+   **first** time price came back.
+5b. **One base, every frame derived.** 1m is the only raw series stored below 15m; 5m and 3m are
+   folded from it and 1h/4h/1d from the 15m series. Nothing fetches a timeframe separately, and a
+   folded bar never changes once later bars arrive (`tests/test_resample.py`) — a value that moves
+   when the future arrives is a value that saw it.
 6. **The broker decides.** Before an entry, open positions are read from the
    broker; if that fails, no trade.
 7. **Protected entries.** SL/TP go with the entry (a manual order needs an SL; an SL
@@ -216,6 +259,59 @@ stream on Event Log. Sidebar groups appear in the order their first page does in
 an Overview above all of them that showed a copy of each; it is gone, and `/overview`, `/market` and
 `/paper` redirect. Resist adding it back — a second copy of a number is a second thing to keep right.
 
+**The tape is the page**, and it is the one thing here drawn by a library: TradingView's
+Lightweight Charts (`static/js/vendor/`, Apache 2.0, **vendored not CDN** — a trading dashboard
+should not lose its chart when unpkg has a bad day). Everything else stays hand-rolled SVG in
+`chart.js`; a bar chart does not need 160 KB to draw six bars. A price chart does — zoom, pan, a
+crosshair that snaps to bars, a price scale that stays readable at every zoom, and a canvas that
+redraws ten thousand candles smoothly are each a week of work, and the hand-rolled version that
+stood here was already the most delicate code on the page.
+
+`static/js/tape.js` owns it. The library draws candles, volume, price lines and markers; it has no
+notion of a shaded zone or a volume-by-price gutter, so those go on our own canvas **underneath**
+it — chart background transparent, our canvas behind — both driven by the library's own
+`priceToCoordinate` and `timeToCoordinate`, so a zone cannot drift from the candle it belongs to.
+Only some levels get a label: eleven labelled lines inside a few hundred dollars stack into an
+unreadable block, so the nearest each way and anything with confluence are named and the rest are
+drawn plain. Sweep markers carry no text for the same reason — twenty of them is a purple cloud
+with the chart behind it. The chart is mounted **once** and updated, never rebuilt: a poll that
+remounts it throws away the zoom, which is the one thing on the page a person sets by hand.
+
+The page shows a verdict badge per card, and `verdict.py` builds one per card that EXISTS — no
+more. Three (indicators, levels, candle shapes) outlived their cards and went on being computed,
+stored and settled every bar for nobody; `tests/test_reading.py` now asserts the stronger form,
+that every verdict has a badge on the page to appear in.
+
+`tools/render_check.py` stubs the library and records what the page *handed* it, so a renamed field
+that leaves the chart drawing candles and nothing else fails the build (`tests/test_web.py`) — a
+chart with no zones on it looks exactly like a market with no zones in it. `tools/snapshot.py`
+is the other half: it runs the real page, real scripts and real library in headless Chrome against
+captured payloads and photographs the result, because a stub DOM cannot run a canvas library and a
+screenshot of one shows the stub.
+
+Market Data is **one view, not tabs.** It was eight — patterns, volume, indicators, open interest,
+liquidity, profile, flow, findings — and seven of them were lists of PRICES. A price belongs on a
+price axis, so they are all drawn on one chart (`TBC.tape`) against one scale: zones as shaded
+rectangles from where they formed, every named level as a line, sweeps as hooks, the volume profile
+in the right-hand gutter, delta or volume underneath. The layer buttons choose what is visible and
+the choice is remembered; the timeframe buttons refold the same stored base (§`resample.py`).
+There is no separate structure card and no candle-shape table: breaks are markers on the tape and
+a shape is named in the tooltip of the bar it describes, which is the only place it means anything.
+Underneath sit two cards and then the working: **Around price** (`nearby.py` — every level from
+every source, ranked by distance, with a count of how many independent sources name the same price)
+and **What has actually paid** (every counted rate in the system in one table, each against its
+baseline). The dense tables are still there, folded into `<details>` — folding is honest, deleting
+would have made the page simpler by making it say less.
+
+The split was not costing clarity, it was costing an answer: "what is above me and what is below
+me" is a merge across all four structure modules, and no single tab could ever have shown it. That
+is why `nearby.py` is a module and not a loop in the template. There is deliberately **no composite
+strength score** on a level — touches, zone state and volume share are not in the same units, and
+one number blending them would be a guess wearing a decimal point; the one derived number is
+confluence, which is a count. The old Scorecard (every card, and how often it was right) is gone:
+a page that grades its own cards in front of someone trying to read a market is a second thing to
+read, and the per-card verdict badge already says what each card is claiming.
+
 ## Commands
 
 The source is not bind-mounted into the containers. The engine is one long-lived process while Celery
@@ -228,7 +324,10 @@ and it moves for every process at once.
 docker compose up          # everything: http://127.0.0.1:8080 (rebuilds on every up)
 make install && make check # local lint + tests
 make token                 # an API_TOKEN for .env
-docker compose run --rm analyst backfill --days 365   # fill `bars` with past candles, OI and funding
+docker compose run --rm analyst backfill --days 365   # fill `bars` with past 15m candles, OI and funding
+docker compose run --rm analyst backfill --interval 1m --days 90   # the base series every shorter frame folds from
+#   both are resumable (they start from the newest bar stored) and idempotent (a stored bar is
+#   never rewritten); --restart walks the whole window again. Holes are printed, never filled.
 ```
 
 Tests run the engine in one process (`app.local_app`, inline evaluator, fake

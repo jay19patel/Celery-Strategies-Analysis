@@ -122,36 +122,24 @@ def test_volume_says_so_when_there_is_not_enough_of_it():
     assert b["ready"] is False and "needs" in b["note"]
 
 
-def test_indicators_carry_the_state_not_just_the_number():
-    """"RSI 68" is only useful if you remember where the lines are."""
-    b = reading.indicator_block(walk(2_000, seed=45))
-    assert b["ready"]
-    assert b["rsi"]["state"] in ("oversold", "neutral", "overbought")
-    assert b["adx"]["state"] in ("ranging", "forming", "trending")
-    assert b["macd"]["state"] in ("rising", "falling", "unknown")
-    assert len(b["rsi_series"]) and len(b["adx_series"])
-
-
-def test_a_ranging_market_is_called_a_range_whatever_else_is_true():
-    """Trend readings in a range are the most reliably wrong thing on a chart."""
-    flat = [Candle(T + i * STEP, 100, 100.3, 99.7, 100 + (i % 3) * 0.01, 10) for i in range(300)]
-    v = verdict.indicators(reading.indicator_block(flat))
-    assert v.stance in ("range", "vol_up")  # a range, or a range about to break
-    assert "ADX" in v.detail or "range" in v.detail.lower()
-
-
 # -- one verdict per tab ------------------------------------------------------------------
 
 
-async def test_every_tab_carries_its_own_verdict(cfg, exchange):
-    """A tab with no verdict is a tab the reader has to work out for themselves, which is what the
-    page looked like before it had tabs at all."""
+async def test_every_verdict_has_somewhere_on_the_page_to_appear(cfg, exchange):
+    """The stronger form of "every card carries a verdict": no verdict without a card.
+
+    A verdict for a card that no longer exists is a claim made to nobody — still computed, still
+    stored, still settled every bar, read by no one. Three of them survived the page losing its
+    Indicators, Levels and Candle-shapes cards, which is how this check earned its place."""
+    import pathlib as _p
+
     system = await make(cfg, exchange)
     system.store.record_bars("BTCUSD", "15m", walk(20_000, seed=46))
     body = await Api(system).verdicts("BTCUSD")
-    keys = {v["key"] for v in body["verdicts"]}
-    assert {"shapes", "volume", "indicators", "chain_oi", "outlook", "insights"} <= keys
+    page = (_p.Path(__file__).resolve().parent.parent / "tradebuddy" / "templates" / "market.html").read_text()
+
     for v in body["verdicts"]:
+        assert f'id="v_{v["key"]}"' in page, f'verdict {v["key"]!r} has no badge on the page'
         assert v["source"] in ("math", "counted", "implied", "model", "ai")
         assert v["label"] and v["detail"]
 
@@ -160,9 +148,9 @@ async def test_the_view_carries_a_block_for_every_tab(cfg, exchange):
     system = await make(cfg, exchange)
     system.store.record_bars("BTCUSD", "15m", walk(20_000, seed=47))
     view = await Api(system).outlook("BTCUSD")
-    assert view["volume"]["ready"] and view["indicators"]["ready"]
-    assert "latest" in view["shapes"] and "record" in view["shapes"]
-    assert view["summary"] and view["horizons"]  # the headline above the tabs
+    assert view["volume"]["ready"]
+    assert "latest" in view["shapes"] and "record" in view["shapes"]  # the tape's tooltip reads these
+    assert view["summary"] and view["horizons"]  # the page's one answer
 
 
 def test_the_volume_verdict_never_claims_a_direction_from_size_alone():
@@ -185,10 +173,9 @@ async def test_the_payload_carries_every_tabs_block_even_with_no_bars(cfg, excha
     view = await Api(system).outlook("BTCUSD")
 
     assert view["ready"] is False and "backfill" in view["hint"]
-    for key in ("volume", "indicators", "shapes", "summary", "horizons", "timeframes", "sources", "alignment"):
+    for key in ("volume", "shapes", "summary", "horizons", "timeframes", "sources", "alignment"):
         assert key in view, f"{key} missing when there are no bars"
     assert view["volume"]["ready"] is False and view["volume"]["note"]
-    assert view["indicators"]["ready"] is False
     assert view["shapes"] == {"latest": [], "record": []}
     assert view["sources"]  # the legend still renders
 
@@ -251,28 +238,3 @@ def test_the_regime_separates_a_trend_from_a_range():
     assert reading.regime_at(bars, 5) == "unknown"  # too early to say, and it says so
 
 
-# -- the same readings on every timeframe ----------------------------------------------
-
-
-def test_indicators_are_read_on_every_timeframe():
-    """Reading RSI on a 15-minute chart alone is how a pullback inside a daily uptrend gets traded
-    as a reversal."""
-    by = reading.indicators_by_timeframe(walk(20_000, seed=72))
-    assert set(by) == {"15m", "1h", "1d"}
-    for tf, b in by.items():
-        assert b["ready"], tf
-        assert b["supertrend"]["level"] and b["supertrend"]["state"] in ("above price", "below price")
-        for key in ("rsi_series", "adx_series", "macd_series"):
-            assert b[key], f"{tf} has no {key} to draw"
-            assert b[key][0]["time"] < b[key][-1]["time"]  # oldest first, or the chart reads backwards
-
-
-def test_agreement_counts_one_vote_per_reading_and_gates_on_adx():
-    by = reading.indicators_by_timeframe(walk(20_000, seed=73, drift=0.00004))
-    a = reading.indicator_agreement(by)
-    assert a["agreement"] in ("aligned up", "aligned down", "conflicting", "mixed")
-    for row in a["rows"]:
-        assert row["of"] == 4 and -4 <= row["votes"] <= 4
-        assert set(row["detail"]) == {"ema", "macd", "rsi", "supertrend"}
-        # ADX is reported but is not one of the votes: it says whether the others mean anything.
-        assert "adx" not in row["detail"]

@@ -278,7 +278,15 @@ SNAPSHOT_COLUMNS = (
 SNAPSHOT_DAYS = 30  # off-boundary rows; the 15-minute ones are kept for good
 HEALTH_DAYS = 30  # process load: 4 processes every 5 minutes is ~1,150 rows a day
 PREDICTION_DAYS = 180  # card verdicts and how they turned out: ~6 a bar a symbol, kept long enough to judge
-BAR_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14_400, "1d": 86_400}
+BAR_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14_400, "1d": 86_400}
+# The base series is the only raw timeframe stored below 15m; 5m and 3m are folded from it on
+# demand (`resample.py`), never fetched. It is also the only one with a retention rule: a minute
+# bar is 90 bytes and there are 1,440 a day a symbol, so a year of it is ~45 MB a symbol against
+# ~5 MB for the 15m series. Ninety days is long enough for every session, profile and sweep the
+# dashboard counts, and what is dropped can be fetched again — unlike the 15m series, which is the
+# permanent record and is kept for good.
+BASE_INTERVAL = "1m"
+BASE_BAR_DAYS = 90
 
 # What each table holds and keeps, for the System page.
 TABLE_INFO = {
@@ -288,7 +296,7 @@ TABLE_INFO = {
     "paper_positions": ("Open paper positions", "opened_at", "while open"),
     "paper_account": ("Paper balance and totals", None, "one row"),
     "options_history": ("Options numbers per underlying per minute", "ts", f"{OPTIONS_MINUTE_DAYS} days; 15-minute rows forever"),
-    "bars": ("Closed candles with their open interest and funding", "time", "forever"),
+    "bars": ("Closed candles with their open interest and funding", "time", f"{BASE_INTERVAL} {BASE_BAR_DAYS} days; 15m and above forever"),
     "market_snapshots": ("The analyst's numbers per bar, for base rates", "ts", f"{SNAPSHOT_DAYS} days; 15-minute rows forever"),
     "process_health": ("CPU, memory and loop lag per process", "ts", f"{HEALTH_DAYS} days"),
     "predictions": ("Every card verdict and whether it held", "ts", f"{PREDICTION_DAYS} days"),
@@ -562,6 +570,27 @@ class Store:
             (symbol, since, limit),
         )
         return [dict(r) for r in rows][::-1]
+
+    def prune_bars(self, now: float | None = None) -> int:
+        """Drop base bars past their retention. Only the base: every longer timeframe is the
+        permanent record of what this market did, and 480 rows a day is not worth a rule."""
+        now = time.time() if now is None else now
+        return self.db.execute(
+            "DELETE FROM bars WHERE interval = ? AND time < ?", (BASE_INTERVAL, now - BASE_BAR_DAYS * 86_400),
+        ).rowcount
+
+    def bar_coverage(self, symbol: str, interval: str) -> dict[str, Any]:
+        """How much of this series is stored: first bar, last bar, how many there are and how many
+        there should be. The difference is what the backfill still has to fetch."""
+        row = self.db.execute(
+            "SELECT COUNT(*) AS n, MIN(time) AS first, MAX(time) AS last FROM bars WHERE symbol = ? AND interval = ?",
+            (symbol, interval),
+        ).fetchone()
+        step = BAR_SECONDS.get(interval, 900)
+        first, last, n = row["first"], row["last"], int(row["n"] or 0)
+        want = (int(last) - int(first)) // step + 1 if n else 0
+        return {"symbol": symbol, "interval": interval, "bars": n, "first": first, "last": last,
+                "expected": want, "missing": max(0, want - n)}
 
     def prune_snapshots(self, now: float | None = None) -> int:
         now = time.time() if now is None else now

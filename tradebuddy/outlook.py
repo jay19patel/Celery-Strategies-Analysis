@@ -370,12 +370,10 @@ def build(
                     "`docker compose run --rm analyst backfill --days 365` fills in the past.",
             "timeframes": [], "alignment": {"verdict": "unknown", "score": 0, "advice": ""},
             "horizons": [], "summary": [], "direction": [], "patterns": {},
-            "volume": dict(empty), "indicators": dict(empty),
-            "vwap": dict(empty), "profile": dict(empty), "anatomy": dict(empty), "levels": dict(empty),
-            "indicators_by_tf": {}, "indicator_agreement": {"rows": [], "agreement": "unknown"},
+            "volume": dict(empty),
+            "vwap": dict(empty), "profile": dict(empty), "anatomy": dict(empty),
             "shapes": {"latest": [], "record": []},
-            "narrative": {}, "sources": prov.legend(), "min_sample": MIN_SAMPLE,
-            "trade_odds": {},
+            "sources": prov.legend(), "min_sample": MIN_SAMPLE,
         }
     price = candles[-1].close
     frames, counted, patterns = [], [], {}
@@ -391,7 +389,6 @@ def build(
     # doing now rather than what it averaged over a week.
     rv = st.realised_vol([c.close for c in candles], min(96, len(candles) - 1), BAR_SECONDS) or 0.0
     horizons = [horizon_view(h["hours"], h["label"], price, rv, implied_for(h["hours"], options)) for h in HORIZONS]
-    by_tf = reading.indicators_by_timeframe(candles)
     view = {
         "symbol": symbol,
         "ready": True,
@@ -409,11 +406,6 @@ def build(
         "patterns": patterns,
         # The reward-to-risk the Trader would actually use, and what the arithmetic says about it.
         # Volatility cancels: only the ratio of the two distances matters.
-        "trade_odds": {
-            "stop_pct": stop_pct, "target_pct": target_pct,
-            "p_stop_first": round(p_stop_first(stop_pct, target_pct) or 0, 4),
-            "reward_risk": round(target_pct / stop_pct, 2) if stop_pct else None,
-        },
         "min_sample": MIN_SAMPLE,
         "sources": prov.legend(),
         # One block per tab, each a self-contained reading of the same bars. Built here because the
@@ -423,20 +415,13 @@ def build(
         "vwap": reading.vwap_block(candles),
         "profile": reading.volume_profile(candles),
         "anatomy": reading.anatomy(candles),
-        "levels": reading.levels_block(candles, BAR_SECONDS),
-        "indicators": reading.indicator_block(candles),
         # The same readings on 15m, 1h and 1d. Reading RSI on one chart alone is how a pullback
         # inside a daily uptrend gets traded as a reversal.
-        "indicators_by_tf": by_tf,
-        "indicator_agreement": reading.indicator_agreement(by_tf),
         "shapes": {
             "latest": [s.to_dict() for s in st.find_shapes(candles, limit=6)],
             "record": reading.shape_record(candles, 1.0, BAR_SECONDS),
         },
     }
-    # The same figures in sentences, from rules. Always present and cannot drift from the numbers
-    # above it.
-    view["narrative"] = narrate(view)
     return view
 
 
@@ -520,103 +505,6 @@ def counted_edge(view: dict[str, Any], side: str, hours: float) -> dict[str, Any
         "edge": round(edge if side == "buy" else -edge, 4),
         "conditional": row["conditional"], "baseline": row["baseline"], "sample": row["conditional_sample"],
     }
-
-
-def narrate(view: dict[str, Any]) -> dict[str, str]:
-    """The same numbers in sentences. Rules only.
-
-    It is here because a page of percentages is not a reading: the point of "flat on 15m, up on 1h,
-    down on 1d" is what it means for the next trade, and that has to be said out loud. Deterministic,
-    so the words can never drift from the figures above them.
-    """
-    if not view.get("ready"):
-        return {"headline": "Not enough stored history yet.", "structure": "", "move": "", "odds": "", "plan": ""}
-
-    frames = {f["interval"]: f for f in view["timeframes"]}
-    align = view["alignment"]
-    price = view["price"]
-
-    def trend_words(f: dict[str, Any]) -> str:
-        if f["trend"] == "unknown":
-            return f"{f['interval']} not readable yet"
-        return f"{f['interval']} {f['trend']}"
-
-    headline = f"{', '.join(trend_words(frames[i]) for i in ('15m', '1h', '1d') if i in frames)} — {align['verdict']}."
-
-    # structure: the levels that matter right now
-    short = frames.get("15m", {})
-    sdata = short.get("structure") or {}
-    hi, lo = sdata.get("swing_high"), sdata.get("swing_low")
-    bits = []
-    if hi and lo:
-        bits.append(f"On 15m price sits {100 * (price - lo) / (hi - lo):.0f}% of the way up a {lo:,.0f} to {hi:,.0f} range.")
-        bits.append(f"A close above {hi:,.0f} or below {lo:,.0f} is the break that changes the reading.")
-    last = (sdata.get("breaks") or [])[-1:]
-    if last:
-        b = last[0]
-        word = "change of character" if b["kind"] == "choch" else "break of structure"
-        bits.append(
-            f"The last one was a {b['direction']} {word} through {b['level']:,.0f}"
-            + (f", on a bar {b['displacement']:.1f}x the usual size" if b["displacement"] >= 1.5 else "")
-            + ("; volume was heavy." if b["volume_ratio"] >= 1.5 else ".")
-        )
-    if sdata.get("squeeze"):
-        bits.append("The range is compressed — breakouts tend to come out of this, in either direction.")
-    structure_text = " ".join(bits)
-
-    # how far it can go
-    moves = []
-    for h in view["horizons"]:
-        imp = h.get("implied")
-        line = f"{h['label'].lower()}: about ±{h['expected_move_pct']:.2f}% (±{h['expected_move_usd']:,.0f})"
-        if imp:
-            line += f", options price ±{imp['expected_move_pct']:.2f}%"
-        moves.append(line)
-    move_text = "Typical move " + "; ".join(moves) + "."
-    day = next((h for h in view["horizons"] if h["hours"] == 24.0), None)
-    if day and day.get("implied"):
-        ratio = day["implied"]["sigma_pct"] / day["sigma_pct"] if day["sigma_pct"] else 1
-        if ratio >= 1.15:
-            move_text += " Options are charging more than the market has been moving — selling premium is paid well, buying it is expensive."
-        elif ratio <= 0.87:
-            move_text += " Options are charging less than the market has been moving — buying premium is cheap relative to recent moves."
-
-    # which way, counted
-    odds = []
-    for d in view["direction"]:
-        label = f"{d['horizon_hours']:g}h"
-        if d.get("conditional") is not None:
-            odds.append(
-                f"over {label}, price was higher {100 * d['conditional']:.0f}% of the time in this structure "
-                f"({d['conditional_sample']:,} bars) against {100 * d['baseline']:.0f}% for any bar"
-            )
-        elif d.get("baseline") is not None:
-            odds.append(f"over {label}, any bar was higher {100 * d['baseline']:.0f}% of the time ({d['sample']:,} counted)")
-    odds_text = (
-        "Counted on the stored bars: " + "; ".join(odds) + "."
-        if odds else
-        "There is not enough stored history to count direction yet — run backfill, and until then treat direction as a coin."
-    )
-    edges = [d for d in view["direction"] if d.get("edge") is not None]
-    if edges:
-        best = max(edges, key=lambda d: abs(d["edge"]))
-        odds_text += (
-            f" The structure moves the {best['horizon_hours']:g}h odds by {100 * best['edge']:+.1f} points — "
-            + ("worth something, but not a lot." if abs(best["edge"]) < 0.05 else "a real difference.")
-        )
-    else:
-        odds_text += " Nothing here beats the base rate by enough to call it an edge."
-
-    # what to do with it
-    to = view["trade_odds"]
-    plan = align["advice"]
-    if to.get("p_stop_first"):
-        plan += (
-            f" At the current {to['stop_pct']:g}% stop and {to['target_pct']:g}% target (1:{to['reward_risk']:g}), "
-            f"{100 * to['p_stop_first']:.0f}% of trades that reach a level reach the stop first — that is the arithmetic of the "
-            f"ratio, not a flaw in the setup. It pays if the win rate beats it."
-        )
-    return {"headline": headline, "structure": structure_text, "move": move_text, "odds": odds_text, "plan": plan}
 
 
 def pattern_record(candles: list[Candle], hours: float, lookback: int = st.DEFAULT_LOOKBACK) -> list[dict[str, Any]]:

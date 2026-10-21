@@ -3,6 +3,7 @@
 import dataclasses
 import pathlib
 import re
+import sys
 import time
 
 import pytest
@@ -171,7 +172,8 @@ def test_the_risk_view_tells_the_dashboard_how_trades_are_sized(cfg, exchange):
 # -- the dashboard has to fit on a phone ---------------------------------------------
 
 TEMPLATES = pathlib.Path(__file__).resolve().parent.parent / "tradebuddy" / "templates"
-APP_CSS = pathlib.Path(__file__).resolve().parent.parent / "tradebuddy" / "static" / "css" / "app.css"
+STATIC = pathlib.Path(__file__).resolve().parent.parent / "tradebuddy" / "static"
+APP_CSS = STATIC / "css" / "app.css"
 
 
 def test_every_table_can_scroll_on_its_own():
@@ -185,6 +187,85 @@ def test_every_table_can_scroll_on_its_own():
             if 'class="scroll' not in section and "overflow-x-auto" not in section:
                 loose.append(f"{f.name}:{html[:m.start()].count(chr(10)) + 1}")
     assert loose == [], f"tables with no scrolling ancestor: {loose}"
+
+
+def test_the_market_page_is_one_view_and_not_a_set_of_tabs():
+    """The page was eight tabs. Seven of them were lists of PRICES — pools, zones, reference
+    levels, value-area edges, option walls — and a price belongs on a price axis, not in a table
+    you hold in your head while looking at a different tab.
+
+    The cost was not cosmetic: the one question a person actually has in front of a chart ("what
+    is above me and what is below me") could not be answered by any single tab, because the answer
+    is a merge across all of them. This asserts the shape that made it answerable, so the tabs
+    cannot quietly grow back."""
+    html = (TEMPLATES / "market.html").read_text()
+    assert "data-view-panel=" not in html, "the tab panels are back"
+    assert 'id="viewTabs"' not in html, "the tab bar is back"
+    # What replaced them: one chart, and the merged map of what sits around price.
+    for panel in ('id="tapeChart"', 'id="ladderBox"', 'id="nowBox"'):
+        assert panel in html, f"the single view lost {panel}"
+
+
+def test_the_price_chart_is_the_only_vendored_library():
+    """Everything else on this dashboard is hand-rolled SVG and should stay that way — a bar chart
+    does not need 160 KB to draw six bars. A price chart does: zoom, pan, a crosshair that snaps to
+    bars, and a canvas that redraws ten thousand candles smoothly are each a week of work and all
+    of them are table stakes for reading a market. One library, vendored rather than fetched from a
+    CDN, so the chart does not go dark when unpkg does."""
+    vendor = sorted(p.name for p in (STATIC / "js" / "vendor").glob("*.js"))
+    assert vendor == ["lightweight-charts.js"], f"a second library appeared: {vendor}"
+    lib = (STATIC / "js" / "vendor" / "lightweight-charts.js").read_text()
+    assert "Apache License 2.0" in lib[:400], "the licence header is gone — check what this file is"
+    page = (TEMPLATES / "market.html").read_text()
+    assert "/static/js/vendor/lightweight-charts.js" in page
+    assert "cdn" not in page.lower().split("{% block scripts %}")[1], "the chart is being fetched from a CDN"
+
+
+def test_the_tape_is_handed_every_layer_it_draws():
+    """The failure this catches is silent: a rename in the structure payload leaves the chart
+    drawing candles and nothing else, and a chart with no zones on it looks exactly like a market
+    with no zones in it. The harness stands in for the library and records what it was handed."""
+    import json
+    import subprocess
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    out = subprocess.run(
+        [sys.executable, "-m", "tools.render_check", "--db", "data/demo.db", "--dump", "tapeChart"],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    drawn = json.loads(out.stdout.strip().splitlines()[0])
+    for layer in ("bars", "zones", "levels", "marks", "sub"):
+        assert drawn.get(layer, 0) > 0, f"the tape was handed no {layer}: {drawn}"
+
+
+def test_the_detail_sections_are_collapsed_rather_than_deleted():
+    """Folding the working away is only honest if it is still there. A <details> keeps it one click
+    from the answer; deleting it would make the page simpler by making it say less."""
+    html = (TEMPLATES / "market.html").read_text()
+    assert html.count("<details") >= 3, "the working was dropped rather than folded"
+    for panel in ("vpChart", "tpoChart", "deltaChart", "cvdChart", "chain", "strikeLadder"):
+        assert f'id="{panel}"' in html, f"{panel} vanished"
+
+
+def test_the_page_never_repeats_the_chart_as_a_table():
+    """Pools, zones, sweeps and naked points of control are all drawn on the tape and listed in
+    Around price. Every table that was a third copy of them is gone, and the counted-rate tables
+    went with them: a rate inside its own sampling noise is not a finding, and a page full of them
+    reads as evidence when it is the opposite."""
+    page = (TEMPLATES / "market.html").read_text()
+    for gone in ("poolList", "sweepList", "zoneList", "sessionList", "poolSummary",
+                 "zoneStates", "sweepStrip", "recordAll", "indKpis", "rsiChart"):
+        assert f'id="{gone}"' not in page, f"{gone} is back — that is the chart repeated as a table"
+
+
+def test_the_tape_colours_zones_by_what_they_are():
+    """Direction is readable from where a band sits relative to price. The KIND is not readable
+    from the chart at all, and an order block and a fair value gap were being drawn identically."""
+    js = (STATIC / "js" / "tape.js").read_text()
+    fills = js[js.index("const ZONE_FILL"):js.index("const ZONE_LABEL")]
+    for kind in ("ob:", "fvg:", "sr:"):
+        assert kind in fills, f"zones are no longer coloured by {kind}"
+    assert "ZONE_FILL[z.kind]" in js, "the fill stopped being chosen by kind"
 
 
 def test_no_table_is_wrapped_in_two_scroll_boxes():
