@@ -363,7 +363,6 @@
     ["breaks", "Breaks", "BOS and CHoCH, on the bar they happened"],
     ["sweeps", "Sweeps", "stops taken and price closed back inside"],
     ["profile", "Profile", "volume by price, in the right-hand gutter, on the same scale"],
-    ["flow", "Flow", "estimated delta underneath, instead of volume — APPROX"],
   ];
   // The six timeframes, folded server-side from the stored base. `days` is chosen so each shows a
   // comparable number of bars — three days of 1m is 4,320 candles and unreadable.
@@ -432,9 +431,16 @@
 
   // Zones are coloured by what they ARE; everything else by what it is. Direction is readable
   // from where a band sits relative to price, the kind is not readable from the chart at all.
+  // What the mark means, not what colour it is. "purple = sweep" tells a reader the thing they
+  // can already see; it does not tell them a sweep is a failed break, which is the whole point.
   const LEGEND = [
-    ["#d97706", "order block"], ["#7c3aed", "fair value gap"], ["#0d9488", "S/R band"],
-    ["#7c3aed", "sweep ●"], ["#0891b2", "naked POC"], ["#1e88e5", "option wall"], ["#64748b", "prev period"],
+    ["#00b852", "bull zone", "price reacted up from here before"],
+    ["#eb5757", "bear zone", "price reacted down from here before"],
+    ["#d97706", "pool / POC", "stops stacked at one price, or where most volume traded"],
+    ["#7c3aed", "sweep", "price poked through a level and closed back inside — stops taken, level held"],
+    ["#1e88e5", "option wall", "the strike with the most open interest — dealers defend it"],
+    ["#0891b2", "value area", "the band holding 70% of the day's volume"],
+    ["#64748b", "prev period", "yesterday's or last week's high, low, open or close"],
   ];
 
   // One chart object for the life of the page. Rebuilding it on every poll would throw away the
@@ -466,18 +472,29 @@
         fresh: "never touched since it formed", tested: "price came back and it held",
         mitigated: "price has traded most of the way through", invalidated: "gone",
       };
-      return `<div style="color:#64748b;font-size:10px">${esc(TB.dateTime(time))}</div>
+      const head = (text) => `<div style="margin-top:6px;padding-top:4px;border-top:1px solid #e2e8f0;
+        font-size:9px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8">${text}</div>`;
+      // Everything the pointer is over, in bands that say what they are. A tooltip that opens
+      // with four numbers and no heading makes the reader guess which of them is the candle.
+      const sweptHere = !S ? [] : (S.liquidity?.sweeps || []).filter((s) => s.bar_time === time);
+      return `<div style="font-weight:600;font-size:11px">${esc(TB.dateTime(time))}</div>
+        ${head("this candle")}
         <div style="font-family:ui-monospace,monospace">O ${TB.num(bar.open, 0)} · H ${TB.num(bar.high, 0)} · L ${TB.num(bar.low, 0)}</div>
         <div style="font-family:ui-monospace,monospace;font-weight:600">C ${TB.num(bar.close, 0)}
           <span style="color:${up ? "#00b852" : "#eb5757"}">${move >= 0 ? "+" : ""}${move.toFixed(2)}%</span></div>
         <div style="color:#64748b;font-size:10px">volume ${TB.compact(volAt[time] ?? null)}</div>
         ${shapes.length ? `<div style="margin-top:3px;color:#475569">${shapes.map(esc).join(" · ")}</div>` : ""}
-        ${near.length ? `<div style="margin-top:5px;padding-top:4px;border-top:1px solid #f1f5f9">${near.map((l) =>
+        ${sweptHere.length ? head("stops taken here") + sweptHere.map((s) => `
+          <div><b>swept the ${esc(s.direction === "high" ? "highs" : "lows")} at ${TB.num(s.level, 0)}</b></div>
+          <div style="color:#64748b;font-size:10px">price traded through a level ${s.touches} highs had stacked at,
+            then closed back inside — the stops were taken and the level held${
+            s.resolved ? `. It then went ${s.worked ? "the way that implies" : "the other way"}.` : ". Too recent to say what followed."}</div>`).join("") : ""}
+        ${near.length ? head("levels at this price") + `<div>${near.map((l) =>
             `<div><span style="font-family:ui-monospace,monospace">${TB.num(l.price, 0)}</span>
                <b style="font-weight:600">${esc(l.label)}</b>
                <div style="color:#64748b;font-size:10px;margin-left:2px">${esc(l.kind_label)} — ${esc(l.evidence || "")}${
                  (l.confluence || 1) > 1 ? ` · ${l.confluence} sources agree here` : ""}</div></div>`).join("")}</div>` : ""}
-        ${inside.length ? `<div style="margin-top:5px;padding-top:4px;border-top:1px solid #f1f5f9">${inside.map((z) =>
+        ${inside.length ? head("zone price is inside") + `<div>${inside.map((z) =>
             `<div><b style="font-weight:600;color:${z.direction === "bull" ? "#00b852" : "#eb5757"}">inside this ${
                esc({ ob: "order block", fvg: "fair value gap", sr: "S/R band" }[z.kind] || z.kind)}</b>
              <div style="color:#64748b;font-size:10px">${esc(ZONE_WHY[z.kind] || "")}</div>
@@ -534,10 +551,9 @@
       }
     }
 
-    const flow = S && layers.has("flow") ? (S.flow?.bars || []) : null;
-    const sub = flow && flow.length
-      ? flow.filter((b) => b.time >= since).map((b) => ({ time: b.time, value: Math.abs(b.delta), up: b.delta >= 0 }))
-      : raw.map((b) => ({ time: b.time, value: b.volume || 0, up: b.close >= b.open }));
+    // Always volume. It used to become estimated delta when a layer was ticked — the same bars in
+    // the same place measuring something else, with nothing on screen saying so.
+    const sub = raw.map((b) => ({ time: b.time, value: b.volume || 0, up: b.close >= b.open }));
 
     tapeTooltip = tooltipFor(S, raw);
     const naked = !S || !layers.has("profile") ? [] : (S.profile?.naked_pocs || []);
@@ -545,8 +561,8 @@
     tapeDrawn = true;
 
     const r = framesMeta[key];
-    $("tapeLegend").innerHTML = LEGEND.map(([c, l]) =>
-      `<span><span style="display:inline-block;width:8px;height:8px;background:${c};border-radius:1px;vertical-align:middle"></span> ${esc(l)}</span>`).join("")
+    $("tapeLegend").innerHTML = LEGEND.map(([c, l, why]) =>
+      `<span title="${esc(why)}"><span style="display:inline-block;width:8px;height:8px;background:${c};border-radius:1px;vertical-align:middle"></span> ${esc(l)}</span>`).join("")
       + `<span class="ml-auto whitespace-nowrap">${raw.length.toLocaleString()} ${tapeFrame}${r?.derived ? ` from ${r.source}` : ""}${
             r?.gaps ? ` · ${r.gaps} gap${r.gaps > 1 ? "s" : ""}` : ""}${S ? ` · ${S.bars.toLocaleString()} bars scanned` : ""}</span>`;
     const age = (Date.now() / 1000) - raw[raw.length - 1].time;

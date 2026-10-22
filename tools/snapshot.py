@@ -123,7 +123,10 @@ def main() -> int:
     # The shim goes after app.js (which defines TB) and before the page's own inline script.
     marker = page.index("<script>", page.index("app.js"))
     page = page[:marker] + OFFLINE.replace("__PAYLOADS__", json.dumps(payloads)) + page[marker:]
-    page = page.replace("</body>", REPORT + "</body>") if "</body>" in page else page + REPORT
+    # Only when asked for: it is a fixed overlay pinned to the bottom of the viewport, so in a
+    # screenshot it sits on top of whatever the page was drawing there.
+    if args.errors:
+        page = page.replace("</body>", REPORT + "</body>") if "</body>" in page else page + REPORT
 
     with tempfile.TemporaryDirectory() as tmp:
         built = pathlib.Path(args.out).with_suffix(".html") if args.html else pathlib.Path(tmp) / "page.html"
