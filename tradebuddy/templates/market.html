@@ -123,12 +123,15 @@
 </section>
 
 <section class="card min-w-0">
-  <div class="card-head"><div class="card-title"><i data-lucide="magnet"></i>Naked points of control
-    <span class="card-sub">volume that was transacted, then abandoned</span></div></div>
+  <div class="card-head"><div class="card-title"><i data-lucide="magnet"></i>Where price was accepted, day by day
+    <span class="card-sub">each day's value area, and what it left behind</span></div>
+    <span id="nakedMeta" class="text-[11px] muted"></span></div>
   <div class="card-body space-y-2">
-    <div id="nakedList"></div>
-    <p class="text-[10.5px] muted">A session's POC that price has never traded back to. Unfinished business — the market
-    has a habit of going back to finish.</p>
+    <div id="valueMap"></div>
+    <p class="text-[10.5px] muted mt-1.5">The shaded band is where that day's trade actually happened — 70% of its volume.
+    Candles inside the band are a market agreeing with itself; candles outside it are the day's move. A dashed line is a
+    point of control price walked away from and has never come back to: unfinished business, and the market has a habit
+    of going back to finish it.</p>
   </div>
 </section>
 
@@ -364,7 +367,13 @@
   ];
   // The six timeframes, folded server-side from the stored base. `days` is chosen so each shows a
   // comparable number of bars — three days of 1m is 4,320 candles and unreadable.
-  const FRAMES = [["1m", 0.5], ["5m", 2], ["15m", 3], ["1h", 14], ["4h", 60], ["1d", 365]];
+  // [timeframe, how many days to look back]. The window is deliberately far wider than the bars
+  // drawn, because `limit` is what actually decides how many you see. Anchoring the chart to
+  // "the last 3 days" meant it went blank the moment the newest stored bar was older than that —
+  // which is exactly when something is wrong and you most want to look at it. The demo database
+  // aged past its own window overnight and drew nothing.
+  const FRAMES = [["1m", 3], ["5m", 10], ["15m", 30], ["1h", 90], ["4h", 240], ["1d", 365]];
+  const TAPE_BARS = 400;
   let tapeFrame = "15m";
   const LAYER_KEY = "tb.market.layers";
   let layers = (() => {
@@ -404,8 +413,8 @@
   async function loadTapeBars() {
     const key = `${sym}:${tapeFrame}`;
     if (barsCache[key]) return;
-    const days = (FRAMES.find(([f]) => f === tapeFrame) || [, 3])[1];
-    const r = await TB.get(`/api/bars?symbol=${sym}&interval=${tapeFrame}&days=${days}`);
+    const days = (FRAMES.find(([f]) => f === tapeFrame) || [, 30])[1];
+    const r = await TB.get(`/api/bars?symbol=${sym}&interval=${tapeFrame}&days=${days}&limit=${TAPE_BARS}`);
     barsCache[key] = r.bars || [];
     framesMeta[key] = { derived: r.derived, source: r.source_interval, gaps: (r.gaps || []).length };
   }
@@ -432,7 +441,8 @@
   // zoom and the scroll position, which is the one thing on this page a person sets by hand.
   let tape = null, tapeTooltip = null;
 
-  function tooltipFor(S) {
+  function tooltipFor(S, bars) {
+    const volAt = Object.fromEntries((bars || []).map((b) => [b.time, b.volume]));
     const shapesAt = {};
     for (const s of (outlook?.shapes?.latest || [])) (shapesAt[s.bar_time] ||= []).push(s.label || s.name);
     return (bar, time, price) => {
@@ -444,24 +454,53 @@
       const inside = !S ? [] : (S.zones?.zones || []).filter((z) =>
         z.state !== "invalidated" && price != null && z.low <= price && price <= z.high).slice(0, 2);
       const shapes = shapesAt[time] || [];
-      return `<div class="muted text-[10px]">${esc(TB.dateTime(time))}</div>
-        <div class="font-mono">O ${TB.num(bar.open, 0)} · H ${TB.num(bar.high, 0)} · L ${TB.num(bar.low, 0)}</div>
-        <div class="font-mono font-semibold">C ${TB.num(bar.close, 0)}
-          <span class="${up ? "up" : "down"}">${move >= 0 ? "+" : ""}${move.toFixed(2)}%</span></div>
-        ${shapes.length ? `<div class="mt-0.5">${shapes.map((s) => chip(s, "bg-slate-100 text-slate-600")).join(" ")}</div>` : ""}
-        ${near.length ? `<div class="mt-1 pt-1 border-t border-slate-100">${near.map((l) =>
-            `<div>${TB.num(l.price, 0)} <span class="muted">${esc(l.label)}</span></div>`).join("")}</div>` : ""}
-        ${inside.length ? `<div class="mt-0.5">${inside.map((z) =>
-            chip(`in ${String(z.kind).toUpperCase()} ${z.direction}`,
-              z.direction === "bull" ? "bg-bull-bg text-bull-text" : "bg-bear-bg text-bear-text")).join(" ")}</div>` : ""}`;
+      // A line on a chart with no reason attached is a line someone drew. Every level and zone
+      // here says what put it there and what it is made of, because that is the difference
+      // between a level worth a stop and one worth nothing.
+      const ZONE_WHY = {
+        ob: "last opposite candle before a big move that also broke structure",
+        fvg: "three-bar gap price skipped and has not filled",
+        sr: "swing highs and lows clustered at one price",
+      };
+      const STATE_WHY = {
+        fresh: "never touched since it formed", tested: "price came back and it held",
+        mitigated: "price has traded most of the way through", invalidated: "gone",
+      };
+      return `<div style="color:#64748b;font-size:10px">${esc(TB.dateTime(time))}</div>
+        <div style="font-family:ui-monospace,monospace">O ${TB.num(bar.open, 0)} · H ${TB.num(bar.high, 0)} · L ${TB.num(bar.low, 0)}</div>
+        <div style="font-family:ui-monospace,monospace;font-weight:600">C ${TB.num(bar.close, 0)}
+          <span style="color:${up ? "#00b852" : "#eb5757"}">${move >= 0 ? "+" : ""}${move.toFixed(2)}%</span></div>
+        <div style="color:#64748b;font-size:10px">volume ${TB.compact(volAt[time] ?? null)}</div>
+        ${shapes.length ? `<div style="margin-top:3px;color:#475569">${shapes.map(esc).join(" · ")}</div>` : ""}
+        ${near.length ? `<div style="margin-top:5px;padding-top:4px;border-top:1px solid #f1f5f9">${near.map((l) =>
+            `<div><span style="font-family:ui-monospace,monospace">${TB.num(l.price, 0)}</span>
+               <b style="font-weight:600">${esc(l.label)}</b>
+               <div style="color:#64748b;font-size:10px;margin-left:2px">${esc(l.kind_label)} — ${esc(l.evidence || "")}${
+                 (l.confluence || 1) > 1 ? ` · ${l.confluence} sources agree here` : ""}</div></div>`).join("")}</div>` : ""}
+        ${inside.length ? `<div style="margin-top:5px;padding-top:4px;border-top:1px solid #f1f5f9">${inside.map((z) =>
+            `<div><b style="font-weight:600;color:${z.direction === "bull" ? "#00b852" : "#eb5757"}">inside this ${
+               esc({ ob: "order block", fvg: "fair value gap", sr: "S/R band" }[z.kind] || z.kind)}</b>
+             <div style="color:#64748b;font-size:10px">${esc(ZONE_WHY[z.kind] || "")}</div>
+             <div style="color:#64748b;font-size:10px">${esc(z.state)} — ${esc(STATE_WHY[z.state] || "")}${
+               z.touches ? `, touched ${z.touches}x` : ""}</div></div>`).join("")}</div>` : ""}`;
     };
   }
+
+  const note = (text) => `<div class="read-note"><i data-lucide="info"></i><span>${esc(text)}</span></div>`;
+  let tapeDrawn = false;
 
   function renderTape() {
     const box = $("tapeChart");
     if (!box) return;
     const key = `${sym}:${tapeFrame}`, raw = barsCache[key];
-    if (!raw || !raw.length) { box.innerHTML = `<div class="text-[11px] muted py-8 text-center">Loading bars…</div>`; return; }
+    if (!raw || !raw.length) {
+      // Only before anything has been drawn. Two loaders repaint the tape — the structure one,
+      // which fetches the bars, and the outlook one, which brings the breaks — and they race. The
+      // loser used to overwrite a drawn chart with this placeholder, so whether the page ended up
+      // showing a chart or the word "Loading" depended on which fetch returned second.
+      if (!tapeDrawn) box.innerHTML = `<div class="text-[11px] muted py-8 text-center">Loading bars…</div>`;
+      return;
+    }
     const S = structure && structure.ready ? structure : null;
     // The tooltip closure changes with every new structure payload; the chart is mounted once.
     // So mount with an indirection and swap what it points at, rather than remounting.
@@ -500,16 +539,21 @@
       ? flow.filter((b) => b.time >= since).map((b) => ({ time: b.time, value: Math.abs(b.delta), up: b.delta >= 0 }))
       : raw.map((b) => ({ time: b.time, value: b.volume || 0, up: b.close >= b.open }));
 
-    tapeTooltip = tooltipFor(S);
+    tapeTooltip = tooltipFor(S, raw);
     const naked = !S || !layers.has("profile") ? [] : (S.profile?.naked_pocs || []);
     tape.update({ bars: raw, zones, levels, naked, profile: prof ? { levels: prof.nodes } : null, marks, sub });
+    tapeDrawn = true;
 
     const r = framesMeta[key];
     $("tapeLegend").innerHTML = LEGEND.map(([c, l]) =>
       `<span><span style="display:inline-block;width:8px;height:8px;background:${c};border-radius:1px;vertical-align:middle"></span> ${esc(l)}</span>`).join("")
       + `<span class="ml-auto whitespace-nowrap">${raw.length.toLocaleString()} ${tapeFrame}${r?.derived ? ` from ${r.source}` : ""}${
             r?.gaps ? ` · ${r.gaps} gap${r.gaps > 1 ? "s" : ""}` : ""}${S ? ` · ${S.bars.toLocaleString()} bars scanned` : ""}</span>`;
-    $("tapeNote").innerHTML = S ? "" : TBA.note("The structure scan has not run yet — levels and zones will fill in once it does.");
+    const age = (Date.now() / 1000) - raw[raw.length - 1].time;
+    const stale = age > 4 * 3600;
+    $("tapeNote").innerHTML = stale
+      ? note(`The newest stored bar is ${TB.ago(raw[raw.length - 1].time)} old. This is the market as it was then, not as it is now.`)
+      : (S ? "" : note("The structure scan has not run yet — levels and zones will fill in once it does."));
   }
 
   // ── around price ───────────────────────────────────────────────────────────
@@ -573,12 +617,19 @@
     ].join("");
 
     const max = Math.max(...b.series.map((s) => s.volume), 1);
+    // Scale to the 95th percentile, not the maximum. Volume is violently skewed — over the last
+    // day the median bar was 10% of the biggest one, so scaling to the max drew every normal bar
+    // as an 8-pixel sliver and the chart read as empty. The few bars above the line are drawn full
+    // height and outlined, so the outlier is marked rather than hidden.
+    const ranked = b.series.map((s) => s.volume).sort((x, y) => x - y);
+    const cap = ranked[Math.floor(0.95 * (ranked.length - 1))] || max;
     $("volumeChart").innerHTML = `<svg viewBox="0 0 480 90" class="w-full" style="height:90px" role="img"
         aria-label="Volume over the last day, coloured by whether the bar closed up">
       ${b.series.map((s, i) => {
-        const w = 480 / b.series.length, h = (s.volume / max) * 78;
+        const over = s.volume > cap;
+        const w = 480 / b.series.length, h = Math.min(1, s.volume / cap) * 78;
         return `<rect x="${(i * w).toFixed(2)}" y="${(84 - h).toFixed(2)}" width="${Math.max(0.8, w - 0.6).toFixed(2)}"
-          height="${h.toFixed(2)}" fill="${s.up ? "#00b852" : "#eb5757"}" opacity="0.8"/>`;
+          height="${h.toFixed(2)}" fill="${s.up ? "#00b852" : "#eb5757"}" opacity="0.8"/>${over ? `<rect x="${(i * w).toFixed(2)}" y="12" width="${(w - 0.6).toFixed(2)}" height="2" fill="#0f172a"/>` : ""}`;
       }).join("")}
       <line x1="0" y1="84" x2="480" y2="84" stroke="#e2e8f0"/>
     </svg>`;
@@ -789,18 +840,8 @@
     }).join("");
 
     // How far, by when.
-    $("horizons").innerHTML = v.horizons.map((h) => {
-      const bars = h.touch.map((t) => ({ name: `±${t.move_pct}%`, value: t.either, hint: `${(100 * t.probability).toFixed(0)}% each side` }));
-      return `<div>
-        <div class="flex items-baseline justify-between">
-          <div class="text-[12px] font-semibold">${esc(h.label)}</div>
-          <div class="font-mono text-[13px]">±${h.expected_move_pct.toFixed(2)}% <span class="muted text-[11px]">±${TB.num(h.expected_move_usd, 0)}</span></div>
-        </div>
-        <div class="text-[10.5px] muted mb-1">two bars in three land inside ${TB.num(h.band_68[0], 0)}–${TB.num(h.band_68[1], 0)}
-          ${h.implied ? ` · options price ±${h.implied.expected_move_pct.toFixed(2)}%` : ""}</div>
-        ${TBC.hbars(bars, { format: (x) => `${(100 * x).toFixed(0)}%`, height: 8 })}
-      </div>`;
-    }).join('<div class="border-t border-slate-100"></div>');
+    // The "How far, by when" card went with the Indicators fold, and the typical move it showed
+    // is in the Outlook table above. Nothing renders horizons now.
 
     renderVolume(v.volume);
     renderWhere(v);
@@ -856,10 +897,14 @@
       <div class="text-[11px] mb-1"><b>Low-volume nodes</b> <span class="muted">price moves fast through these</span></div>
       <div class="flex flex-wrap gap-1">${(p.lvn || []).map((x) => node(x, "lvn")).join("") || '<span class="text-[11px] muted">none</span>'}</div>`;
 
-    $("nakedList").innerHTML = (P.naked_pocs || []).length ? `<div class="overflow-x-auto"><table class="tbl"><tbody>${P.naked_pocs.map((n) => `<tr>
-        <td class="text-[11.5px]">${esc(n.label)}</td><td class="r font-mono">${TB.num(n.price, 1)}</td>
-        <td class="r">${dist(n.distance_pct)}</td></tr>`).join("")}</tbody></table></div>`
-      : `<div class="text-[11px] muted">None — price has been back to every stored point of control.</div>`;
+    // Each day's value area as a band with price drawn over it. The question a list of naked POCs
+    // cannot answer is which candles were made INSIDE value and which outside — price in the band
+    // is a market agreeing with itself, price leaving it is the day's move.
+    $("valueMap").innerHTML = TBC.valueAreaMap(P.days || [], barsCache[`${sym}:15m`] || [], P.naked_pocs || [],
+      { height: 260, format: (v) => TB.num(v, 0) });
+    $("nakedMeta").textContent = (P.naked_pocs || []).length
+      ? `${P.naked_pocs.length} point${P.naked_pocs.length === 1 ? "" : "s"} of control never traded back to`
+      : "price has been back to every stored point of control";
 
     const T = P.tpo;
     if (!T) { $("tpoChart").innerHTML = `<div class="text-[11px] muted">Not enough of today stored yet.</div>`;
@@ -872,11 +917,9 @@
       tile("Initial balance", `${TB.num(T.ib_low, 0)}–${TB.num(T.ib_high, 0)}`, "first hour") +
       tile("Single prints", String((T.single_prints || []).length),
            [T.poor_high ? "poor high" : "", T.poor_low ? "poor low" : ""].filter(Boolean).join(" · "));
-    $("tpoChart").innerHTML = `<div class="font-mono text-[10.5px] leading-[1.35]">${T.rows.map((r) => `
-      <div class="flex gap-2 ${r.in_value ? "" : "opacity-55"}">
-        <span class="w-20 text-right ${r.poc ? "font-bold text-amber-700" : "muted"}">${TB.num(r.price, 0)}</span>
-        <span class="${r.single ? "text-amber-700 font-semibold" : ""}">${esc(r.letters)}</span>
-      </div>`).join("")}</div>`;
+    // Not the letter grid. Twenty columns of letters, and the only thing anyone extracts from
+    // them is "how many periods traded here" — so print that, and keep the letters on hover.
+    $("tpoChart").innerHTML = TBC.timeAtPrice(T, { height: 360, price: P.price, format: (v) => TB.num(v, 0) });
   }
 
   // A counted rate, always beside the baseline it has to beat and the sample behind it. The only

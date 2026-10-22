@@ -273,7 +273,7 @@ SNAPSHOT_COLUMNS = (
     "price", "change_1h_pct", "change_4h_pct", "change_24h_pct", "rv_24h", "rv_7d", "atr_pct", "range_pos_24h",
     "ema20", "ema50", "ema200", "volume_z_1h", "oi_change_1h_pct", "oi_change_24h_pct", "funding_avg_24h_pct",
     "basis_pct", "atm_iv", "iv_rv_ratio", "skew_25d", "pcr_oi", "pcr_volume", "implied_move_pct",
-    "max_pain_gap_pct", "call_wall_gap_pct", "put_wall_gap_pct", "term_slope",
+    "max_pain_gap_pct", "call_wall_gap_pct", "put_wall_gap_pct", "term_slope", "spread_pct",
 )
 SNAPSHOT_DAYS = 30  # off-boundary rows; the 15-minute ones are kept for good
 HEALTH_DAYS = 30  # process load: 4 processes every 5 minutes is ~1,150 rows a day
@@ -345,6 +345,12 @@ class Store:
         for column, kind in (("regime", "TEXT"), ("exit_reason", "TEXT"), ("r_multiple", "REAL")):
             if column not in existing:
                 self.db.execute(f"ALTER TABLE predictions ADD COLUMN {column} {kind}")
+        # The bid/ask spread was on every ticker from the first day and stored nowhere, so "was it
+        # expensive to trade then" had no answer for any past bar. NULL on older rows: the spread
+        # at that moment is gone and cannot be reconstructed from anything kept.
+        existing = {r["name"] for r in self.db.execute("PRAGMA table_info(market_snapshots)")}
+        if "spread_pct" not in existing:
+            self.db.execute("ALTER TABLE market_snapshots ADD COLUMN spread_pct REAL")
         # Databases created before trades recorded how far they went either way. Rows already closed
         # keep 0: the excursions were never measured and cannot be reconstructed.
         for table in ("paper_positions", "paper_trades"):

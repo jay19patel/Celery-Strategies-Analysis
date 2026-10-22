@@ -163,9 +163,40 @@ def test_every_source_reaches_the_map():
         liquidity=liquidity(pools=[pool(104, "high")], levels=[{"price": 106, "label": "Prev day high", "name": "PDH"}]),
         zones={"zones": [zone(108, 112)]},
         profile={"session": {"poc": 114, "value_high": 116, "value_low": 94},
-                 "naked_pocs": [{"poc": 118, "label": "Mon"}]},
+                 "naked_pocs": [{"price": 118, "label": "Mon"}]},
         options={"call_wall": 122, "put_wall": 90, "max_pain": 124},
     )
     kinds = {level["kind"] for level in view["above"] + view["below"]}
     assert kinds == {"pool", "reference", "zone", "poc", "value", "naked", "wall"}
     assert all(level["kind_label"] for level in view["above"])
+
+
+def test_the_map_reads_the_keys_the_profile_actually_emits():
+    """Built from the real producer, not from a hand-written dict.
+
+    The hand-written version of the test above said `{"poc": 118}` for a naked point of control and
+    the module read `.get("poc")` to match — but `profile.py` emits `price`. Test and code shared
+    one wrong assumption, so naked POCs never once reached the page and nothing failed. A fixture
+    invented by the same person who wrote the reader cannot catch that; the producer's own output
+    can."""
+    from tests.test_market_structure import atr_of, walk
+    from tradebuddy import liquidity as lq
+    from tradebuddy import profile as pf
+    from tradebuddy import zones as zn
+
+    candles = walk(4 * 86_400 // 900, seed=5)
+    atr = atr_of(candles)
+    price = candles[-1].close
+    prof = pf.read(candles).to_dict()
+    liq = lq.read(candles, atr).to_dict()
+    zns = zn.read(candles, atr).to_dict()
+
+    # `collect`, not `read`: collection is where keys are read, and it is the only stage that must
+    # see everything. What survives `read` is then subject to the merge and the per-side cap, both
+    # of which are allowed to drop a distant level and are tested on their own above.
+    got = {level.kind for level in nearby.collect(price, atr, liq, zns, prof)}
+    assert prof["naked_pocs"], "fixture produced no naked POCs — the check below would prove nothing"
+    assert "naked" in got, "naked points of control did not reach the map"
+    assert {"poc", "value"} <= got, "the session profile did not reach the map"
+    assert {"pool", "reference"} <= got, "liquidity did not reach the map"
+    assert nearby.read(price, atr, liq, zns, prof)["ready"] is True

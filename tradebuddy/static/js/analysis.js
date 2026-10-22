@@ -32,6 +32,12 @@
       tile("Perp OI", `$${compact(s.oi_usd ?? c.oi_usd)}`, `24h ${sgn(c.oi_change_24h_pct, 1)} · 1h ${sgn(c.oi_change_1h_pct, 1)}`),
       tile("Options OI", `$${compact(o?.oi_usd)}`, `${num(o?.contracts, 0)} contracts · 24h vol $${compact(o?.turnover_usd)}`),
       tile("Realised vol", ivp(c.rv_24h, 0), `24h · ATR ${c.atr_pct == null ? "—" : `${c.atr_pct.toFixed(2)}%`} (15m)`),
+      // What it costs to cross, right now. A round trip pays this twice before a trade is even
+      // wrong, which is why the Trader gates on it — and why a wide book is a reason not to be in.
+      tile("Spread", c.spread_pct == null ? "—" : `${c.spread_pct.toFixed(3)}%`,
+        c.bid == null ? "no book" : `${num(c.bid, 1)} / ${num(c.ask, 1)} · ${num(c.spread, 1)} wide`,
+        c.spread_pct == null ? "" : c.spread_pct > 0.05 ? "text-amber-600" : "",
+        "Ask minus bid, as a share of the mid. You pay half of it going in and half coming out."),
     ].join("");
   }
 

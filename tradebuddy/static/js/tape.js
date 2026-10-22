@@ -66,9 +66,17 @@
     holder.style.cssText = "position:relative;z-index:1";
     el.appendChild(holder);
 
+    // Inline styles, not Tailwind classes. This element is created by JavaScript after the CDN
+    // build has already scanned the document, so its arbitrary-value classes (`bg-white/97`) were
+    // never generated — the card rendered with no background at all and the chart showed straight
+    // through the text. Anything built at runtime styles itself.
     const tip = document.createElement("div");
-    tip.style.cssText = "position:absolute;z-index:3;pointer-events:none;display:none";
-    tip.className = "bg-white/97 border border-slate-200 rounded-md shadow-lg px-2.5 py-1.5 text-[11px] leading-[1.45] whitespace-nowrap";
+    tip.style.cssText = [
+      "position:absolute", "z-index:3", "pointer-events:none", "display:none",
+      "background:#fff", "border:1px solid #e2e8f0", "border-radius:6px",
+      "box-shadow:0 4px 14px rgba(15,23,42,.13)", "padding:6px 9px",
+      "font-size:11px", "line-height:1.45", "white-space:nowrap", "color:#0f172a",
+    ].join(";");
     el.appendChild(tip);
 
     const chart = LightweightCharts.createChart(holder, {
@@ -134,7 +142,7 @@
       // Naked points of control — a price the market agreed on and then left without returning.
       // Dotted, because it is a magnet rather than a level that has already held something.
       for (const n of (state.naked || [])) {
-        const y = candles.priceToCoordinate(n.poc);
+        const y = candles.priceToCoordinate(n.price);
         if (y == null) continue;
         ctx.save();
         ctx.setLineDash([2, 4]);
@@ -144,7 +152,7 @@
         ctx.setLineDash([]);
         ctx.fillStyle = "rgba(8,145,178,0.95)";
         ctx.font = "9px ui-monospace, monospace";
-        ctx.fillText(`naked POC ${fmt(n.poc)}`, 4, y - 3);
+        ctx.fillText(`naked POC ${fmt(n.price)}`, 4, y - 3);
         ctx.restore();
       }
 

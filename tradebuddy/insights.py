@@ -108,6 +108,15 @@ def market_context(
         ctx |= {"funding_pct": rates[-1], "funding_avg_24h_pct": round(sum(rates[-BARS_PER_DAY:]) / len(rates[-BARS_PER_DAY:]), 5)}
     if stats:
         ctx |= {"oi_usd": stats.get("oi_usd"), "turnover_24h_usd": stats.get("turnover_24h_usd"), "basis_pct": _pct(stats.get("mark"), stats.get("index"))}
+        # What it costs to cross, right now. The ticker has carried a bid and an ask since the
+        # first day and nothing read either, so the one number that says whether this is an
+        # expensive moment to trade was being thrown away every tick. Stored per bar, because
+        # "was the book thin when that signal fired" is a question about the past.
+        bid, ask = stats.get("bid"), stats.get("ask")
+        if isinstance(bid, int | float) and isinstance(ask, int | float) and bid > 0 and ask > bid:
+            mid = (bid + ask) / 2
+            ctx |= {"bid": bid, "ask": ask, "spread": round(ask - bid, 4),
+                    "spread_pct": round(100 * (ask - bid) / mid, 5)}
     if options:
         day, near = options["day"], options["nearest"]
         spot = options["spot"]

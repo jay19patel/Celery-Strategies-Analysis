@@ -126,9 +126,12 @@ def collect(
         _add(out, p.get("poc"), price, atr, kind="poc", label=f"POC {name}", evidence="most traded price")
         _add(out, p.get("value_high"), price, atr, kind="value", label=f"VAH {name}", evidence="70% value area edge")
         _add(out, p.get("value_low"), price, atr, kind="value", label=f"VAL {name}", evidence="70% value area edge")
+    # `price`, not `poc`: that is the key `profile.Profile.to_dict` actually emits for a naked
+    # point of control. Reading the wrong one failed silently — no exception, just a kind of level
+    # that never once appeared on the page.
     for n in prof.get("naked_pocs") or []:
-        _add(out, n.get("poc"), price, atr, kind="naked", label=f"Naked POC {n.get('label', '')}".strip(),
-             evidence="price has not been back")
+        _add(out, n.get("price"), price, atr, kind="naked", label=f"Naked POC {n.get('label', '')}".strip(),
+             evidence="price has not been back to it")
 
     for level in (liquidity or {}).get("levels") or []:
         _add(out, level.get("price"), price, atr, kind="reference",

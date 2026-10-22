@@ -409,16 +409,20 @@
     const atm = spot == null ? null
       : sorted.reduce((best, r) => (Math.abs(r.strike - spot) < Math.abs(best.strike - spot) ? r : best), sorted[0]).strike;
 
+    // The strike sits in a reserved gutter down the middle, not on top of the bars — with the
+    // label overlaid the two longest bars always ran under it and the number was unreadable.
+    const GUT = 13;  // % of width kept clear for the strike
+    const side_ = (100 - GUT) / 2;
     const bar = (side, colour, right) => {
       const oi = oiOf(side), vol = volOf(side);
       if (!oi && !vol) return "";
-      const w = (100 * oi / peak) * (half / 100);
-      const vw = (100 * Math.min(vol, oi) / peak) * (half / 100);
-      const edge = right ? "left:50.8%" : `right:50.8%`;
-      return `<span style="position:absolute;${edge};top:12%;height:76%;width:${w.toFixed(2)}%;
-          background:${colour};opacity:.3;border-radius:2px"></span>
-        ${vw > 0.2 ? `<span style="position:absolute;${edge};top:28%;height:44%;width:${vw.toFixed(2)}%;
-          background:${colour};opacity:.85;border-radius:1px"></span>` : ""}`;
+      const w = (oi / peak) * side_;
+      const vw = (Math.min(vol, oi) / peak) * side_;
+      const edge = right ? `left:${50 + GUT / 2}%` : `right:${50 + GUT / 2}%`;
+      return `<span style="position:absolute;${edge};top:14%;height:72%;width:${w.toFixed(2)}%;
+          background:${colour};opacity:.28;border-radius:2px"></span>
+        ${vw > 0.15 ? `<span style="position:absolute;${edge};top:30%;height:40%;width:${vw.toFixed(2)}%;
+          background:${colour};opacity:.9;border-radius:1px"></span>` : ""}`;
     };
 
     const body = sorted.map((r) => {
@@ -428,8 +432,9 @@
           compactish(oiOf(r.call))} vol ${compactish(volOf(r.call))} · puts OI ${compactish(oiOf(r.put))} vol ${compactish(volOf(r.put))}">
         ${bar(r.put, PUT, false)}${bar(r.call, CALL, true)}
         <span style="position:absolute;left:50%;transform:translateX(-50%);top:0;height:100%;display:flex;align-items:center;
-          font:600 9.5px ui-monospace,monospace;color:${isAtm ? "#0f172a" : "#94a3b8"};
-          ${isAtm ? "background:#f1f5f9;border-radius:2px;padding:0 3px" : ""}">${format(r.strike)}${isPain ? " ◆" : ""}</span>
+          justify-content:center;width:${GUT}%;font:600 9.5px ui-monospace,monospace;
+          color:${isAtm ? "#0f172a" : "#64748b"};
+          ${isAtm ? "background:#e2e8f0;border-radius:3px" : ""}">${format(r.strike)}${isPain ? " ◆" : ""}</span>
       </div>`;
     }).join("");
 
@@ -440,10 +445,135 @@
         <span style="color:${CALL}">calls ▶</span>
       </div>
       <div style="position:relative">${body}</div>
+      <div class="flex justify-between text-[10px] muted mt-1" style="font-family:ui-monospace,monospace">
+        <span>${compactish(peak)}</span><span>0</span><span>${compactish(peak)}</span>
+      </div>
+      <div class="text-[10.5px] muted mt-1">Widest bar is ${compactish(peak)} contracts of open interest${
+        spot != null ? ` · spot ${format(spot)} is the highlighted strike` : ""}.</div>
     </div>`;
   }
 
   const compactish = (v) => (v == null ? "—" : Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(v));
+
+
+  /**
+   * Time at price: how long the market spent at each price, as a sideways histogram.
+   *
+   * This replaces the TPO letter grid. The grid is the traditional form and it is genuinely hard
+   * to read — twenty columns of letters, and the thing you are supposed to extract from them is
+   * just "how many periods traded here". So print that directly. The letters are kept on hover
+   * for anyone who wants to see which half hours made a price, which is the only question the
+   * grid answered that a bar does not.
+   *
+   * A wide bar is a price the market accepted and kept coming back to. A single-period bar is a
+   * price it rejected — those are the prices price moves THROUGH, which makes them targets rather
+   * than supports.
+   */
+  function timeAtPrice(tpo, opts = {}) {
+    const rows = (tpo?.rows || []).filter((r) => r && isFinite(r.price));
+    if (rows.length < 3) return empty(opts.height || 300, "Not enough half-hours stored yet for a market profile.");
+    const { height = 320, price = null, format = (v) => Math.round(v).toLocaleString() } = opts;
+    const peak = Math.max(...rows.map((r) => r.count), 1);
+    const sorted = [...rows].sort((a, b) => b.price - a.price);
+    const rowH = Math.max(5, Math.min(18, (height - 18) / sorted.length));
+
+    const band = (r) => {
+      const w = (100 * r.count) / peak;
+      const colour = r.poc ? "#d97706" : r.single ? "#cbd5e1" : r.in_value ? "#1e88e5" : "#94a3b8";
+      const edge = [];
+      if (tpo.ib_high != null && r.price <= tpo.ib_high && r.price >= tpo.ib_low) edge.push("initial balance");
+      if (r.single) edge.push("single print — rejected, price moved straight through");
+      if (r.poc) edge.push("point of control — most time spent here");
+      if (tpo.poor_high && Math.abs(r.price - tpo.poor_high) < 1e-9) edge.push("poor high — no tail, price tends to come back for it");
+      if (tpo.poor_low && Math.abs(r.price - tpo.poor_low) < 1e-9) edge.push("poor low — no tail");
+      return `<div style="position:relative;height:${rowH}px;display:flex;align-items:center;gap:6px"
+          title="${format(r.price)} — ${r.count} half-hour${r.count === 1 ? "" : "s"}${
+            edge.length ? ` · ${edge.join(" · ")}` : ""}${r.letters ? ` · ${r.letters}` : ""}">
+        <span style="width:4.6rem;text-align:right;font:9.5px ui-monospace,monospace;color:${
+          r.poc ? "#0f172a" : "#94a3b8"};flex:none">${format(r.price)}</span>
+        <span style="flex:1;position:relative;height:${Math.max(3, rowH - 2)}px">
+          <span style="position:absolute;left:0;top:0;bottom:0;width:${w.toFixed(1)}%;background:${colour};
+            opacity:${r.poc ? 0.95 : r.in_value ? 0.62 : 0.4};border-radius:1px"></span>
+          ${tpo.ib_high != null && r.price <= tpo.ib_high && r.price >= tpo.ib_low
+            ? `<span style="position:absolute;left:-3px;top:0;bottom:0;width:2px;background:#7c3aed;opacity:.75"></span>` : ""}
+          ${price != null && Math.abs(r.price - price) < (sorted[0].price - sorted[sorted.length - 1].price) / sorted.length
+            ? `<span style="position:absolute;left:0;right:0;top:50%;height:1.5px;background:#0f172a"></span>` : ""}
+        </span></div>`;
+    };
+
+    return `<div>
+      <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[10.5px] muted mb-1.5">
+        <span><span style="display:inline-block;width:8px;height:8px;background:#d97706;border-radius:1px;vertical-align:middle"></span> most time here</span>
+        <span><span style="display:inline-block;width:8px;height:8px;background:#1e88e5;opacity:.62;border-radius:1px;vertical-align:middle"></span> value area (70%)</span>
+        <span><span style="display:inline-block;width:8px;height:8px;background:#cbd5e1;border-radius:1px;vertical-align:middle"></span> single print — rejected</span>
+        <span><span style="display:inline-block;width:2px;height:9px;background:#7c3aed;vertical-align:middle"></span> first hour</span>
+      </div>
+      ${sorted.map(band).join("")}
+      <p class="text-[10.5px] muted mt-1.5">Each bar is how many half-hours traded at that price. Long bars are prices the
+      market kept coming back to; one-period bars are prices it rejected and moved straight through, which makes them
+      better targets than supports. Hover a row for the half hours that made it.</p>
+    </div>`;
+  }
+
+  /**
+   * Where price has been accepted, day by day — the value area of each day as a band, with price
+   * drawn over it and the points of control it never came back to.
+   *
+   * The question it answers is the one a list of naked POCs cannot: WHICH candles were made inside
+   * value and which were made outside it. Price inside the band is a market agreeing with itself;
+   * price leaving it is the day's move, and a naked POC left behind is unfinished business the
+   * market has a habit of returning to.
+   */
+  function valueAreaMap(days, bars, naked, opts = {}) {
+    const live = (days || []).filter((d) => d && isFinite(d.value_low) && isFinite(d.value_high));
+    const rows = (bars || []).filter((b) => b && isFinite(b.close));
+    if (!live.length || rows.length < 5) return empty(opts.height || 260, "Not enough stored days yet — run the backfill.");
+    const { height = 260, width = 900, format = (v) => Math.round(v).toLocaleString() } = opts;
+    const padL = 4, padR = 62, padT = 8, padB = 16;
+
+    const t0 = Math.min(rows[0].time, ...live.map((d) => d.start));
+    const t1 = Math.max(rows[rows.length - 1].time, ...live.map((d) => d.end));
+    let lo = Math.min(...rows.map((b) => b.low), ...live.map((d) => d.value_low));
+    let hi = Math.max(...rows.map((b) => b.high), ...live.map((d) => d.value_high));
+    for (const n of naked || []) if (isFinite(n.price)) { lo = Math.min(lo, n.price); hi = Math.max(hi, n.price); }
+    const pad = (hi - lo) * 0.04 || 1;
+    lo -= pad; hi += pad;
+
+    const X = (t) => padL + ((t - t0) / (t1 - t0 || 1)) * (width - padL - padR);
+    const Y = (p) => padT + (1 - (p - lo) / (hi - lo)) * (height - padT - padB);
+
+    // One band per day. Alternating tints so two days running do not read as one long band.
+    const bands = live.map((d, i) => {
+      const x0 = X(d.start), x1 = X(d.end);
+      const colour = i % 2 ? "#1e88e5" : "#0891b2";
+      return `<rect x="${x0.toFixed(1)}" y="${Y(d.value_high).toFixed(1)}" width="${Math.max(1, x1 - x0).toFixed(1)}"
+          height="${Math.max(1, Y(d.value_low) - Y(d.value_high)).toFixed(1)}" fill="${colour}" opacity="0.13"/>
+        <line x1="${x0.toFixed(1)}" y1="${Y(d.poc).toFixed(1)}" x2="${x1.toFixed(1)}" y2="${Y(d.poc).toFixed(1)}"
+          stroke="#d97706" stroke-width="1.4" opacity="0.8"><title>${esc(d.label)} point of control ${format(d.poc)}</title></line>
+        <text x="${(x0 + 3).toFixed(1)}" y="${(padT + 9).toFixed(1)}" font-size="9" fill="#94a3b8">${esc(d.label)}</text>`;
+    }).join("");
+
+    const line = rows.map((b, i) => `${i ? "L" : "M"} ${X(b.time).toFixed(1)} ${Y(b.close).toFixed(1)}`).join(" ");
+
+    const pocs = (naked || []).filter((n) => isFinite(n.price)).map((n) => `
+      <line x1="${padL}" y1="${Y(n.price).toFixed(1)}" x2="${(width - padR).toFixed(1)}" y2="${Y(n.price).toFixed(1)}"
+        stroke="#0891b2" stroke-width="1.2" stroke-dasharray="2 4"/>
+      <text x="${width - padR + 3}" y="${(Y(n.price) + 3.4).toFixed(1)}" font-size="9" fill="#0891b2"
+        font-family="ui-monospace,monospace">${esc(format(n.price))}</text>
+      <title>${esc(n.label || "")} point of control, never traded back to</title>`).join("");
+
+    return `<div>
+      <svg viewBox="0 0 ${width} ${height}" class="w-full" style="height:${height}px" role="img"
+        aria-label="Value area by day with price drawn over it">
+        ${bands}${pocs}
+        <path d="${line}" fill="none" stroke="#0f172a" stroke-width="1.3"/>
+      </svg>
+      <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[10.5px] muted mt-1">
+        <span><span style="display:inline-block;width:10px;height:8px;background:#1e88e5;opacity:.25;vertical-align:middle"></span> that day's value area — 70% of its volume</span>
+        <span><span style="display:inline-block;width:10px;height:2px;background:#d97706;vertical-align:middle"></span> its point of control</span>
+        <span><span style="display:inline-block;width:10px;height:0;border-top:2px dashed #0891b2;vertical-align:middle"></span> never traded back to</span>
+      </div></div>`;
+  }
 
   /**
    * The level ladder: what is above and what is below, as a shape rather than two tables.
@@ -583,5 +713,5 @@
         <span>${format(lo)}</span><span>${format(hi)}</span></div></div>`;
   }
 
-  window.TBC = { timeLine, hbars, candles, ladder, strikeLadder, outcomeStrip, stateBar, sessionRanges, rangeBar, probBar, volumeProfile, colorFor, niceTicks, ROLE_COLOR };
+  window.TBC = { timeLine, hbars, candles, ladder, strikeLadder, timeAtPrice, valueAreaMap, outcomeStrip, stateBar, sessionRanges, rangeBar, probBar, volumeProfile, colorFor, niceTicks, ROLE_COLOR };
 })();

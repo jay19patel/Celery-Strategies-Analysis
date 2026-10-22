@@ -234,8 +234,42 @@ def test_the_tape_is_handed_every_layer_it_draws():
         cwd=root, capture_output=True, text=True, check=False,
     )
     drawn = json.loads(out.stdout.strip().splitlines()[0])
-    for layer in ("bars", "zones", "levels", "marks", "sub"):
-        assert drawn.get(layer, 0) > 0, f"the tape was handed no {layer}: {drawn}"
+    # Separated on purpose. "No bars" means the fixture went stale or the request window is wrong;
+    # "bars but no zones" means a payload key was renamed and the chart is quietly drawing candles
+    # and nothing else. They have the same symptom on screen and completely different causes, and
+    # this test has already been failed by the first while nobody had broken the second.
+    assert drawn.get("bars", 0) > 0, (
+        f"the tape was handed no bars at all — the demo database has probably aged past the "
+        f"request window, which is why that window is limit-driven and wide: {drawn}")
+    for layer in ("zones", "levels", "marks", "sub"):
+        assert drawn.get(layer, 0) > 0, f"the tape got bars but no {layer} — a renamed payload key: {drawn}"
+
+
+def test_every_element_a_page_script_writes_to_exists_in_its_markup():
+    """The bug this catches cost a whole section of the Market page, silently.
+
+    `$("horizons")` was left behind when the card holding it was removed. In a browser that
+    returns null, `.innerHTML =` throws, and every statement after it in the same function is
+    skipped — which happened to be `renderVolume()` and `renderWhere()`. Two panels went blank and
+    nothing in the test suite or `render_check` noticed, because the harness's stub DOM hands back
+    a working element for every id ever asked for. That stub is deliberate: it stops a missing
+    element from hiding a real throw. The cost is that it also hides THIS, so the markup and the
+    script have to be compared directly."""
+    import re
+
+    broken = {}
+    for f in sorted(TEMPLATES.glob("*.html")):
+        html = f.read_text()
+        if "{% block scripts %}" not in html:
+            continue
+        cut = html.index("{% block scripts %}")
+        in_markup = set(re.findall(r'id="([A-Za-z_][\w]*)"', html[:cut]))
+        # Ids created at runtime are written by the script before they are read.
+        in_markup |= set(re.findall(r'id=[\'"`]\$?\{?[^"\'`<>]*?([A-Za-z_][\w]*)[\'"`]', html[cut:]))
+        written = set(re.findall(r'\$\("([A-Za-z_][\w]*)"\)', html[cut:]))
+        if missing := sorted(written - in_markup):
+            broken[f.name] = missing
+    assert not broken, f"page scripts write to elements that do not exist: {broken}"
 
 
 def test_the_detail_sections_are_collapsed_rather_than_deleted():

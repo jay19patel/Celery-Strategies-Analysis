@@ -52,6 +52,42 @@ OFFLINE = """
   window.__ready = () => Promise.all(wait);
 })();
 </script>
+<script>
+// Everything the real DOM objects to, painted onto the page so a headless screenshot reports it.
+// A TypeError here kills the rest of its function silently; the panels it would have filled just
+// stay empty and look like a market with nothing to say.
+window.__errors = [];
+addEventListener("error", (e) => window.__errors.push(`${e.message} (${(e.filename || "").split("/").pop()}:${e.lineno})`));
+addEventListener("unhandledrejection", (e) => window.__errors.push(`unhandled: ${(e.reason && e.reason.message) || e.reason}`));
+const __warn = console.warn, __err = console.error;
+console.warn = (...a) => { window.__errors.push("warn: " + a.join(" ")); __warn(...a); };
+console.error = (...a) => { window.__errors.push("error: " + a.join(" ")); __err(...a); };
+</script>
+"""
+
+# Written into the page itself: a headless screenshot has nowhere else to report.
+REPORT = """
+<script>
+addEventListener("DOMContentLoaded", () => setTimeout(() => {
+  const skip = /^(expiry|outlookNote|tapeNote|__report)$/;
+  const blank = [...document.querySelectorAll("[id]")]
+    .filter((el) => !el.children.length && !el.textContent.trim() && !skip.test(el.id))
+    .map((el) => el.id);
+  const box = document.createElement("pre");
+  box.id = "__report";
+  box.style.cssText = "position:fixed;left:0;bottom:0;z-index:99999;background:#0b1220;color:#7CFF9B;"
+    + "font:11px ui-monospace,monospace;padding:8px;max-width:100vw;white-space:pre-wrap;margin:0";
+  // Built as an array and joined, never with a "\\n" escape: this file writes JS out of a Python
+  // string, and one layer of escaping turned that into a real line break inside a JS string
+  // literal — a SyntaxError that killed the whole report and left the harness saying nothing was
+  // wrong. A harness that fails silently is worse than no harness.
+  box.textContent = [
+    "THREW (" + window.__errors.length + "): " + (window.__errors.join("  |  ") || "nothing"),
+    "EMPTY (" + blank.length + "): " + (blank.join(" ") || "none"),
+  ].join(String.fromCharCode(10));
+  document.body.appendChild(box);
+}, 900));
+</script>
 """
 
 
@@ -71,6 +107,9 @@ def main() -> int:
     parser.add_argument("--height", type=int, default=2000)
     parser.add_argument("--settle", type=int, default=6000, help="ms of virtual time to let the page finish")
     parser.add_argument("--html", action="store_true", help="keep the built HTML beside the png")
+    parser.add_argument("--open", action="store_true", help="expand every <details> fold before shooting")
+    parser.add_argument("--errors", action="store_true",
+                        help="print what the real DOM threw and which panels came up blank, instead of a png")
     args = parser.parse_args()
 
     sys.path.insert(0, str(ROOT))
@@ -84,10 +123,23 @@ def main() -> int:
     # The shim goes after app.js (which defines TB) and before the page's own inline script.
     marker = page.index("<script>", page.index("app.js"))
     page = page[:marker] + OFFLINE.replace("__PAYLOADS__", json.dumps(payloads)) + page[marker:]
+    page = page.replace("</body>", REPORT + "</body>") if "</body>" in page else page + REPORT
 
     with tempfile.TemporaryDirectory() as tmp:
         built = pathlib.Path(args.out).with_suffix(".html") if args.html else pathlib.Path(tmp) / "page.html"
+        if args.open:
+            page = page.replace("<details class=\"card\"", "<details open class=\"card\"")
         built.write_text(page)
+        if args.errors:
+            dom = subprocess.run(  # noqa: S603
+                [chrome(), "--headless", "--disable-gpu", "--allow-file-access-from-files", "--dump-dom",
+                 f"--virtual-time-budget={args.settle}", f"file://{built}"],
+                check=False, capture_output=True, text=True,
+            ).stdout
+            found = re.search(r'id="__report"[^>]*>(.*?)</pre>', dom, re.S)
+            report = re.sub(r"<[^>]+>", "", found.group(1)) if found else "(the report never ran)"
+            print(report.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">"))
+            return 1 if "THREW (0)" not in report else 0
         subprocess.run(  # noqa: S603
             [chrome(), "--headless", "--disable-gpu", "--hide-scrollbars", "--allow-file-access-from-files",
              f"--screenshot={args.out}", f"--window-size={args.width},{args.height}",
