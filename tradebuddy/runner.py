@@ -219,7 +219,11 @@ class StrategyRunner:
         self._paused: set[tuple[str, str]] = set()  # (strategy, symbol) waiting for prices to return
 
     def is_on(self, strategy: Strategy, symbol: str) -> bool:
-        return self.store.enabled(strategy_key(strategy.name)) and self.store.enabled(pair_key(strategy.name, symbol))
+        """Both switches on. A strategy with `default_on = False` is off until someone says
+        otherwise — a toggle row that does not exist yet means "never asked", not "yes"."""
+        default = strategy.default_on
+        return (self.store.enabled(strategy_key(strategy.name), default)
+                and self.store.enabled(pair_key(strategy.name, symbol), default))
 
     async def on_candle_closed(self, event: CandleClosed) -> None:
         prices = self.prices()

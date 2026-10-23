@@ -201,9 +201,13 @@ def test_the_market_page_is_one_view_and_not_a_set_of_tabs():
     html = (TEMPLATES / "market.html").read_text()
     assert "data-view-panel=" not in html, "the tab panels are back"
     assert 'id="viewTabs"' not in html, "the tab bar is back"
-    # What replaced them: one chart, and the merged map of what sits around price.
-    for panel in ('id="tapeChart"', 'id="ladderBox"', 'id="nowBox"'):
+    # What replaced them: the merged map of what sits around price, and a link to the chart. The
+    # chart itself moved to /tape, where it gets the whole window — and it is linked to rather
+    # than copied, because two charts of one market are two things to keep right.
+    for panel in ('id="ladderBox"', 'id="nowBox"'):
         assert panel in html, f"the single view lost {panel}"
+    assert 'href="/tape"' in html, "Market Data no longer links to the chart"
+    assert 'id="tapeChart"' not in html, "the chart is drawn twice — it lives on /tape now"
 
 
 def test_the_price_chart_is_the_only_vendored_library():
@@ -224,13 +228,15 @@ def test_the_price_chart_is_the_only_vendored_library():
 def test_the_tape_is_handed_every_layer_it_draws():
     """The failure this catches is silent: a rename in the structure payload leaves the chart
     drawing candles and nothing else, and a chart with no zones on it looks exactly like a market
-    with no zones in it. The harness stands in for the library and records what it was handed."""
+    with no zones in it. The harness stands in for the library and records what it was handed.
+
+    Runs against /tape, which is where the chart lives now."""
     import json
     import subprocess
 
     root = pathlib.Path(__file__).resolve().parent.parent
     out = subprocess.run(
-        [sys.executable, "-m", "tools.render_check", "--db", "data/demo.db", "--dump", "tapeChart"],
+        [sys.executable, "-m", "tools.render_check", "--page", "tape", "--db", "data/demo.db", "--dump", "tapeChart"],
         cwd=root, capture_output=True, text=True, check=False,
     )
     drawn = json.loads(out.stdout.strip().splitlines()[0])
@@ -437,18 +443,30 @@ def test_the_shadowing_check_catches_the_bug_it_was_written_for():
         assert not BROWSER_GLOBALS & declared_names(innocent), innocent
 
 
+# The prefixes a page uses for its own helpers. `paint*` joined them when the controls grew their
+# own painters; it was not covered, which is half of why the break below went unnoticed.
+# The suffix must start with a capital: the convention is `renderOutlook`, `loadAll`, `paintNav`.
+# Without that, the bare word in `addEventListener("load", ...)` reads as a call to a helper
+# called `load` and every page fails for a reason that is not a bug.
+PREFIXES = r"(?:render|load|paint)(?=[A-Z])"
+
+
 def page_locals(script: str) -> tuple[set[str], set[str]]:
     """(defined, called) for the page's own `render*` / `load*` helpers.
 
-    Narrow on purpose. Those two prefixes are the convention for a page's own functions, so a call
-    to one that nothing defines is always a bug — and it is the bug that actually happened: an edit
+    Narrow on purpose. Those prefixes are the convention for a page's own functions, so a use of
+    one that nothing defines is always a bug — and it is the bug that actually happened: an edit
     that replaced one block silently took `renderSummary` with it, the page threw on first paint,
     and every panel stayed empty.
     """
-    defined = set(re.findall(r"\bfunction\s+((?:render|load)[A-Za-z0-9_]*)", script))
-    defined |= set(re.findall(r"\b(?:const|let|var)\s+((?:render|load)[A-Za-z0-9_]*)\s*=", script))
-    # Not `TB.loadHeader()`: a method on the shared object is someone else's to define.
-    called = set(re.findall(r"(?<![.\w])((?:render|load)[A-Za-z0-9_]*)\s*\(", script))
+    defined = set(re.findall(r"\bfunction\s+(" + PREFIXES + r"[A-Za-z0-9_]*)", script))
+    defined |= set(re.findall(r"\b(?:const|let|var)\s+(" + PREFIXES + r"[A-Za-z0-9_]*)\s*=", script))
+    # Any USE, not just a call with parentheses. `safely("nav", paintNav)` passes the function as a
+    # value, and that is exactly the shape that broke: the chart moved to its own page, the call to
+    # paint its buttons stayed behind, and the whole Market script threw on first paint with every
+    # panel empty. A detector that only looked for `name(` saw nothing wrong.
+    # Not `TB.loadHeader`: a member of the shared object is someone else's to define.
+    called = set(re.findall(r"(?<![.\w])(" + PREFIXES + r"[A-Za-z0-9_]*)\b", script))
     return defined, called - defined
 
 
@@ -468,3 +486,9 @@ def test_the_missing_helper_check_catches_the_bug_it_was_written_for():
     assert page_locals("const loadThing = async () => {}; loadThing();")[1] == set()
     # A method on the shared TB object is someone else's to define, and is not a page helper.
     assert page_locals("await TB.loadHeader();")[1] == set()
+    # A function passed as a VALUE counts as used. This is the shape that broke Market Data when
+    # the chart moved to its own page and `safely("nav", paintNav)` stayed behind.
+    assert page_locals('safely("nav", paintNav);')[1] == {"paintNav"}
+    assert page_locals("function paintNav() {} safely('nav', paintNav);")[1] == set()
+    # And the bare word in an event name is not a call to a helper called `load`.
+    assert page_locals('addEventListener("load", () => {});')[1] == set()

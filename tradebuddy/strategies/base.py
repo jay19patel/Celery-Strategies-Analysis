@@ -70,6 +70,19 @@ class Strategy(ABC):
     # Hand the engine's directional view to on_candle through ctx.outlook. Same reasoning as
     # options_history_hours: the worker has no database, and the reading must be the shared one.
     wants_outlook: ClassVar[bool] = False
+    # Margin cap for this strategy's orders, as a % of the broker's available margin, overriding
+    # Settings' trade_margin_pct. For a scalper and nothing else: its stop is a fraction of a
+    # percent, so the risk-based size is large and the normal cap binds long before the risk rule
+    # does — the position ends up decided by the cap rather than by what is being risked. Raising
+    # the GLOBAL cap to fix that would widen every other strategy's positions too. The risk rule
+    # is never bypassed: size is still min(by_risk, by_margin), so this can only let the risk
+    # calculation have its way, never exceed it.
+    margin_pct: ClassVar[float | None] = None
+    # Whether this strategy is on before anyone has touched its switch. Toggles default to ON, so
+    # a strategy that lands in a release starts trading the moment it is deployed — fine for one
+    # that takes a position every few days, wrong for anything that trades often or sizes hard.
+    # Set False and it waits to be switched on, like Delta does (invariant 1: fail closed).
+    default_on: ClassVar[bool] = True
 
     @abstractmethod
     async def on_candle(self, ctx: Context) -> Signal | None: ...

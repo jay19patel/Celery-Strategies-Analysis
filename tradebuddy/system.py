@@ -279,6 +279,10 @@ class System:
         self.trader = Trader(
             self.bus, self.store, self.brokers, self.prices, lambda: self.settings, self.guard.halt_reason,
             volatility=self.atr_pct,
+            # self.strategies, not the parameter: that is None in every deployed process, where
+            # the list comes from discover() at line 232. Every test passes one explicitly, so the
+            # only thing this broke was the real engine.
+            margins={s.name: s.margin_pct for s in self.strategies if getattr(s, "margin_pct", None)},
         )
         self.executor = Executor(self.bus, self.store, self.brokers)
 
@@ -325,6 +329,8 @@ class System:
             "base bars", f"Stores every closed {BASE_INTERVAL} bar: the series every higher timeframe is folded from", BASE_COLLECT_EVERY,
         )
         self.jobs_health = self.jobs.add("process health", "Records CPU, memory and loop lag per process", HEALTH_EVERY)
+        self.jobs_ai = self.jobs.add(
+            "written summary", "Reads the measured numbers back as sentences (Mistral), when switched on", 60)
         self.remote_processes: dict[str, dict[str, Any]] = {}  # role -> latest heartbeat (analyst)
 
         # Fail closed: a broker that moves real orders starts every run switched off.
@@ -368,6 +374,72 @@ class System:
         if not isinstance(event, self.UNLOGGED):
             self.store.record_event(event.to_dict())
 
+    async def write_summaries(self, every: float = 60.0) -> None:
+        """The measured market, read back as sentences, every `ai_interval_minutes`.
+
+        **This is the only thing in this system that sends anything off the machine**, which is why
+        it is gated three times over: a key in the environment, a switch in Settings, and a per-run
+        check that the numbers it would describe actually exist. Any one of them missing and it
+        does nothing and says so — no retries, no partial reports, no quiet failure.
+
+        It never decides anything. `tbai.digest` picks market fields by name, the model writes prose
+        about them, and `tbai.clean` keeps only the shape asked for."""
+        last: dict[str, float] = {}
+        while True:
+            await asyncio.sleep(every)
+            s = self.settings
+            try:
+                with self.jobs_ai.tick() as job:
+                    if not s.ai_enabled:
+                        job.note = "off in Settings"
+                        continue
+                    if not self.cfg.mistral_api_key:
+                        job.note = "no MISTRAL_API_KEY in the environment"
+                        continue
+                    gap = max(5, s.ai_interval_minutes) * 60
+                    due = [x for x in self.symbols if time.time() - last.get(x, 0) >= gap]
+                    if not due:
+                        job.note = f"next in {gap - int(time.time() - max(last.values(), default=0))}s"
+                        continue
+                    written = 0
+                    for symbol in due:
+                        last[symbol] = time.time()
+                        written += int(await self._write_summary(symbol))
+                    job.note = f"{written} of {len(due)} written"
+            except Exception:
+                log.exception("ai_summary_failed")
+
+    async def _write_summary(self, symbol: str) -> bool:
+        """One symbol. Stores the attempt either way — a summary that silently stops appearing is
+        indistinguishable from a quiet market, and a stored failure says which it was."""
+        from tradebuddy import mistral, tbai
+
+        latest = self.analysis_latest.get(symbol) or {}
+        context = latest.get("context") or {}
+        if not context.get("price"):
+            return False
+        bar_time = int(context.get("bar_time") or time.time() // SCORE_BAR_SECONDS * SCORE_BAR_SECONDS)
+        payload = tbai.digest(
+            symbol, context, latest.get("insights") or [],
+            await self.outlook(symbol), await self.market_structure(symbol),
+        )
+        model = self.settings.ai_model
+        try:
+            answer, meta = await mistral.complete(self.cfg.mistral_api_key, model, tbai.SYSTEM, payload)
+        except mistral.MistralError as exc:
+            await asyncio.to_thread(
+                self.store.record_ai_report, symbol, time.time(), bar_time, False, model,
+                error=str(exc), raw=exc.raw,
+            )
+            log.warning("ai_summary_failed symbol=%s error=%s", symbol, exc)
+            return False
+        await asyncio.to_thread(
+            self.store.record_ai_report, symbol, time.time(), bar_time, True, meta.get("model", model),
+            report=tbai.clean(answer), ms=meta.get("ms", 0),
+            tokens=(meta.get("usage") or {}).get("total_tokens", 0),
+        )
+        return True
+
     async def housekeeping(self, every: float = 3600.0) -> None:
         """Keeps the event log inside its retention, so a year of running does not fill the disk."""
         while True:
@@ -379,9 +451,11 @@ class System:
                     health = await asyncio.to_thread(self.store.prune_health)
                     claims = await asyncio.to_thread(self.store.prune_predictions)
                     base = await asyncio.to_thread(self.store.prune_bars)
+                    written = await asyncio.to_thread(self.store.prune_ai_reports)
                     job.note = (
                         f"deleted {deleted} events, {minutes} options minutes, {snapshots} snapshots, "
-                        f"{health} health rows, {claims} verdicts, {base} {BASE_INTERVAL} bars"
+                        f"{health} health rows, {claims} verdicts, {base} {BASE_INTERVAL} bars, "
+                        f"{written} written summaries"
                     )
                 if deleted or minutes:
                     log.info("events_pruned deleted=%d options_minutes=%d", deleted, minutes)
@@ -800,6 +874,7 @@ class System:
             asyncio.create_task(self.collect_bars(), name="bar-collection"),
             asyncio.create_task(self.collect_base_bars(), name="base-bar-collection"),
             asyncio.create_task(self.record_health(), name="process-health"),
+            asyncio.create_task(self.write_summaries(), name="written-summary"),
         ]
         if self.local_feed:
             self._stream_task = asyncio.create_task(self.stream.run(), name="stream")

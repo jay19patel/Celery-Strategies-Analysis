@@ -38,7 +38,11 @@ MEAN_WINDOW = 20  # what "an ordinary bar" means, for displacement and volume
 SQUEEZE_PERIOD = 20
 SQUEEZE_WINDOW = 50
 SQUEEZE_RATIO = 0.6  # band width this far under its own average is a squeeze
-RECENT_BREAKS = 6
+# Enough to cover a chart window, not a text list. At 6 the Market page showed the last six breaks
+# and the tape inherited it: over 400 stored 15m bars there were 29 breaks — 22 BOS and 7 CHoCH —
+# and the six most recent happened to all be BOS, so CHoCH simply never appeared on the chart and
+# looked like something the system could not detect.
+RECENT_BREAKS = 80
 
 
 @dataclass(frozen=True)

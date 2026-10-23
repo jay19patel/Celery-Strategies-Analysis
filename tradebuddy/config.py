@@ -30,6 +30,9 @@ class Config:
     host: str
     port: int
     api_token: str
+    # Mistral API key for the written market summary. Environment only, never the database and
+    # never an endpoint: it is the one credential that buys someone else's compute.
+    mistral_api_key: str = ""
     # 6-digit PIN for dashboard security. Set AUTH_PIN or APP_PIN in .env.
     auth_pin: str = DEFAULT_AUTH_PIN
     # Secret key for HMAC session token signing. Derived if empty.
@@ -73,6 +76,7 @@ def load_config(environ: dict[str, str] | None = None) -> Config:
     e = environ
 
     api_token = e.get("API_TOKEN", "")
+    mistral_api_key = e.get("MISTRAL_API_KEY", "")
     db_path = e.get("DB_PATH", "data/tradebuddy.db")
     # SECURITY: Read PIN from AUTH_PIN or APP_PIN; the default is safe only on loopback (see require_safe_bind)
     auth_pin = e.get("AUTH_PIN", e.get("APP_PIN", DEFAULT_AUTH_PIN))
@@ -87,6 +91,7 @@ def load_config(environ: dict[str, str] | None = None) -> Config:
         host=e.get("HOST", "127.0.0.1"),
         port=int(e.get("PORT", "8080")),
         api_token=api_token,
+        mistral_api_key=mistral_api_key,
         auth_pin=auth_pin,
         auth_secret=auth_secret,
         dashboard_loopback_only=e.get("DASHBOARD_LOOPBACK_ONLY", "").strip().lower() in ("1", "true", "yes"),

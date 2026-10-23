@@ -20,8 +20,8 @@ def ctx(candles, market=None, symbol="BTCUSD"):
 def test_discover_finds_every_strategy_once():
     names = [s.name for s in discover()]
     assert names == sorted(names) == [
-        "ema_9_15_15m", "ema_cross_15m", "mother_candle_15m", "mother_candle_1h", "pcr_options", "tb_master_15m",
-        "trade_buddy_manager_15m",
+        "ema_9_15_15m", "ema_cross_15m", "mother_candle_15m", "mother_candle_1h", "pcr_options", "scalper",
+        "tb_master_15m", "trade_buddy_manager_15m",
     ]
 
 
@@ -229,3 +229,37 @@ async def test_a_quiet_market_gives_a_tighter_stop_than_a_fast_one():
     tight = await EmaCross15m().on_candle(ctx(flat(closes, wick=0.2)))
     wide = await EmaCross15m().on_candle(ctx(flat(closes, wick=8)))
     assert tight.stop_loss_pct < wide.stop_loss_pct
+
+
+def test_only_the_scalper_arrives_switched_off():
+    """A toggle row that does not exist means "nobody has been asked", and `enabled()` reads that
+    as yes. So a strategy shipped in a release starts trading on deploy — fine for one that takes a
+    position every few days, wrong for one that fires every five minutes against a much looser
+    margin cap. Anything new that trades hard should land here, not in a release note."""
+    off = {s.name for s in discover() if not s.default_on}
+    assert off == {"scalper"}
+
+
+def test_a_strategy_that_asks_for_a_looser_cap_is_off_by_default():
+    """The two go together: the reason the cap is loose is the reason it should not start by
+    itself."""
+    for s in discover():
+        if getattr(s, "margin_pct", None):
+            assert not s.default_on, f"{s.name} sizes against its own cap and starts switched on"
+
+
+async def test_the_system_builds_the_way_the_containers_build_it(cfg, exchange):
+    """`roles.engine` constructs `System(cfg, ...)` with no `strategies`, so the list comes from
+    `discover()` inside __init__.
+
+    Every other test passes one explicitly. That is why reading the raw parameter instead of
+    `self.strategies` — None in every deployed process — passed the whole suite and then crashed
+    the engine on boot, in a loop, with the web container serving 503s.
+    """
+    from tradebuddy.system import System
+
+    from .conftest import IdleStream
+
+    system = System(cfg, strategies=None, stream_factory=IdleStream, client_factory=exchange.client)
+    assert {s.name for s in system.strategies} == {s.name for s in discover()}
+    assert system.trader.margins == {"scalper": 60.0}

@@ -31,11 +31,16 @@ PAGE_CALLS = {
         "/api/bars?symbol=BTCUSD&interval=15m&days=30&limit=400",
         "/api/options/history?symbol=BTCUSD&hours=24",
         "/api/market-structure?symbol=BTCUSD",
+        "/api/ai-report?symbol=BTCUSD",
+    ],
+    "tape": [
+        "/api/header", "/api/outlook?symbol=BTCUSD", "/api/market-structure?symbol=BTCUSD",
+        "/api/bars?symbol=BTCUSD&interval=15m&days=30&limit=400",
     ],
     "system": ["/api/metrics", "/api/database", "/api/health?hours=48", "/api/events?type=CandleClosed&limit=100"],
     "journal": ["/api/journal/month", "/api/journal/summary"],
 }
-PATHS = {"market": "/", "system": "/system", "journal": "/journal"}
+PATHS = {"market": "/", "tape": "/tape", "system": "/system", "journal": "/journal"}
 
 
 def build(page: str, db: str) -> tuple[str, dict]:

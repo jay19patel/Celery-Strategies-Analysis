@@ -240,8 +240,12 @@ async def test_the_health_job_survives_running_off_the_event_loop(cfg, exchange)
 
 
 def test_a_database_from_the_old_build_loses_its_withdrawn_tables_and_its_api_key(tmp_path):
-    """The forecaster and TB-AI are gone. Their tables are rows no code can explain, and the stored
-    Mistral key is a live credential sitting in a file nothing reads: both go on the next open."""
+    """The forecaster is gone; its table is rows no code can explain.
+
+    TB-AI came back, but the v2 table of that name is shaped differently, so it is replaced rather
+    than reused — and the stored Mistral key still goes. The key lives in the environment now: a
+    live credential in a database file is one `/api/database` bug away from being readable, and
+    nothing in this build ever needs to read it back."""
     import sqlite3
 
     path = str(tmp_path / "old.db")
@@ -258,6 +262,10 @@ def test_a_database_from_the_old_build_loses_its_withdrawn_tables_and_its_api_ke
 
     store = Store(path)
     tables = {r["name"] for r in store.db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert "forecasts" not in tables and "ai_reports" not in tables
+    assert "forecasts" not in tables
+    assert "ai_reports" in tables  # back, and rebuilt in the current shape
+    columns = {r["name"] for r in store.db.execute("PRAGMA table_info(ai_reports)")}
+    assert {"symbol", "ok", "report", "raw"} <= columns
+    assert store.ai_reports() == []  # the v2 rows went with the v2 shape
     assert set(store.load_settings()) == {"delta_api_key"}
     store.db.close()

@@ -30,13 +30,13 @@ STREAM_FIELDS = ("paper_active", "market_data", *DELTA_ROUTING_FIELDS)
 
 BOOL_FIELDS = (
     "paper_active", "delta_active", "trailing_enabled", "email_enabled",
-    "options_auto_enabled", "atr_protection",
+    "options_auto_enabled", "atr_protection", "ai_enabled",
 )
 TEXT_FIELDS = ("email_to", "email_smtp_host", "email_smtp_user")
 CHOICES = {
     "market_data": ("demo", "live"), "delta_env": ("demo", "live"), "day_timezone": ("Asia/Kolkata", "UTC"),
 }
-INT_FIELDS = ("trailing_max_steps", "email_smtp_port", "email_report_hour", "options_auto_qty")
+INT_FIELDS = ("trailing_max_steps", "email_smtp_port", "email_report_hour", "options_auto_qty", "ai_interval_minutes")
 RANGES = {
     "stop_loss_pct": (0.05, 50.0),
     "take_profit_pct": (0.05, 100.0),
@@ -59,6 +59,7 @@ RANGES = {
     "strategy_loss_limit_pct": (0.0, 100.0),
     "email_smtp_port": (1, 65535),
     "email_report_hour": (0, 23),
+    "ai_interval_minutes": (5, 120),
     "options_auto_qty": (1, 100),
     "options_auto_sl_pct": (5.0, 100.0),
     "options_auto_tp_pct": (5.0, 500.0),
@@ -133,6 +134,13 @@ class Settings:
     options_auto_qty: int = 50  # ceiling on contracts per leg
     options_auto_sl_pct: float = 30.0  # close when the loss reaches this % of the max loss
     options_auto_tp_pct: float = 40.0  # close when the profit reaches this % of the premium paid or received
+
+    # The written market summary (TB-AI). Off by default, and it stays off without MISTRAL_API_KEY
+    # in the environment — this is the only feature that sends anything off the machine, so it is
+    # switched on deliberately or not at all.
+    ai_enabled: bool = False
+    ai_model: str = "mistral-small-latest"
+    ai_interval_minutes: int = 15  # 5 is the floor; every run is a request someone pays for
 
     # Daily email report: the engine sends the day's story once a day at email_report_hour (day_timezone).
     email_enabled: bool = False

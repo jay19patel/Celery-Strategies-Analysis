@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from tradebuddy import auth, resample, verdict
+from tradebuddy import auth, provenance, resample, verdict
 from tradebuddy import structures as st  # option structures (straddles, condors)
 from tradebuddy.brokers import Broker
 from tradebuddy.codec import EVENT_TYPES
@@ -51,7 +51,7 @@ METHODS = (
     "send_email_report",
     "bars", "snapshots", "health", "outlook", "verdicts", "market_structure",
     "journal_summary", "journal_month",
-    "option_ticket", "place_structure", "structures", "close_structure", "paper_history",
+    "option_ticket", "place_structure", "structures", "close_structure", "paper_history", "ai_report",
     "verify_pin", "change_pin", "get_auth_status",
 )
 
@@ -205,6 +205,31 @@ class Api:
 
     async def paper_trades(self, limit: int = 300) -> list[dict[str, Any]]:
         return self.system.paper.trades(min(limit, 5000))
+
+    async def ai_report(self, symbol: str = "BTCUSD") -> dict[str, Any]:
+        """The newest written summary for one symbol, with why there isn't one when there isn't.
+
+        Three ways to have nothing: the feature is off, the key is missing, or the last attempts
+        failed. They need different actions from the reader, so they are reported differently
+        rather than all collapsing into an empty card."""
+        s = self.system.settings
+        latest = await asyncio.to_thread(self.system.store.latest_ai_report, symbol)
+        recent = await asyncio.to_thread(self.system.store.ai_reports, symbol, 5)
+        failures = [r for r in recent if not r["ok"]]
+        return {
+            "symbol": symbol,
+            "enabled": bool(s.ai_enabled),
+            "has_key": bool(self.system.cfg.mistral_api_key),
+            "model": s.ai_model,
+            "every_minutes": s.ai_interval_minutes,
+            "report": latest["report"] if latest else None,
+            "ts": latest["ts"] if latest else None,
+            "bar_time": latest["bar_time"] if latest else None,
+            "took_ms": latest["ms"] if latest else None,
+            "tokens": latest["tokens"] if latest else None,
+            "recent_failures": [{"ts": r["ts"], "error": r["error"]} for r in failures][:3],
+            "source": provenance.of("written"),
+        }
 
     async def metrics(self) -> dict[str, Any]:
         return self.system.metrics()

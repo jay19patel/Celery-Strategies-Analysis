@@ -75,6 +75,30 @@
     <section class="card">
       <div class="card-head border-b border-slate-100">
         <div class="card-title flex items-center gap-2">
+          <div class="w-6 h-6 rounded-md bg-amber-50 flex items-center justify-center text-amber-600"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i></div>
+          Written market summary (TB-AI)
+        </div>
+        <label class="switch sm"><input type="checkbox" id="ai_enabled"><span class="track"></span></label>
+      </div>
+      <div class="card-body space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="field-label" for="ai_model">Model</label><input id="ai_model" type="text" class="input w-full mt-1 font-mono"><div class="field-help">A Mistral model id, e.g. mistral-small-latest.</div></div>
+          <div><label class="field-label" for="ai_interval_minutes">Every (minutes)</label><input id="ai_interval_minutes" type="number" min="5" max="120" step="1" class="input w-full mt-1 font-mono"><div class="field-help">5 is the floor. Each run is a paid request per symbol.</div></div>
+        </div>
+        <div class="field-help"><b class="text-amber-700">This is the only feature that sends anything off this machine.</b>
+        Every 5-15 minutes the measured numbers on Market Data — price, volatility, the counted direction, the levels
+        above and below, the volume profile and the estimated order flow — are sent to Mistral, which writes them up as
+        sentences. <b>No balance, no position, no order, no P&amp;L and no key are ever included</b>; the fields that may
+        be sent are an allowlist in the code, not a habit. The answer is badged WRITTEN on the page because it is the one
+        thing there that cannot be rechecked against a bar: the model computes nothing, decides nothing and never places
+        an order. It stays off unless <span class="font-mono">MISTRAL_API_KEY</span> is set in <span class="font-mono">.env</span> —
+        the key is read from the environment and is never stored in the database.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head border-b border-slate-100">
+        <div class="card-title flex items-center gap-2">
           <div class="w-6 h-6 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600"><i data-lucide="git-fork" class="w-3.5 h-3.5"></i></div>
           Options Auto-Trade (paper)
         </div>
@@ -276,6 +300,9 @@
     $("market_data").value = s.market_data;
     $("trailing_enabled").checked = s.trailing_enabled;
     $("atr_protection").checked = s.atr_protection;
+    $("ai_enabled").checked = s.ai_enabled;
+    $("ai_model").value = s.ai_model || "";
+    $("ai_interval_minutes").value = s.ai_interval_minutes;
     $("options_auto_enabled").checked = s.options_auto_enabled;
     $("email_enabled").checked = s.email_enabled;
     $("email_report_hour").innerHTML = Array.from({ length: 24 }, (_, h) =>
@@ -308,6 +335,9 @@
       delta_env: env, market_data: $("market_data").value,
       trailing_enabled: $("trailing_enabled").checked, atr_protection: $("atr_protection").checked,
       day_timezone: $("day_timezone").value,
+      ai_enabled: $("ai_enabled").checked,
+      ai_model: $("ai_model").value.trim(),
+      ai_interval_minutes: +$("ai_interval_minutes").value,
       options_auto_enabled: $("options_auto_enabled").checked,
       email_enabled: $("email_enabled").checked, email_to: $("email_to").value.trim(),
       email_smtp_host: $("email_smtp_host").value.trim(),

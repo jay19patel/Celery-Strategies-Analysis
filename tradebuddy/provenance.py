@@ -3,7 +3,10 @@
 The Market page draws arithmetic, counted history and what other traders have paid, and until now
 they all looked the same: same type, same card, same confidence. They are not the same. An
 expected move from volatility is true given the inputs; a hit rate counted over 3,000 bars is true
-with an error bar; an implied volatility is a fact about what someone paid, not a forecast.
+with an error bar; an implied volatility is a fact about what someone paid, not a forecast. And a
+paragraph a language model wrote about all three is weaker again — it is the only thing here that
+cannot be rechecked against the bars it came from, which is exactly why it gets its own badge
+rather than sitting unmarked next to arithmetic.
 
 So every figure carries a source, the UI badges it, and the legend says in one line what each one
 depends on. Being able to see that the direction is counted and the distance is arithmetic — and
@@ -21,6 +24,7 @@ from typing import Any
 MATH = "math"
 COUNTED = "counted"
 IMPLIED = "implied"
+WRITTEN = "written"
 
 SOURCES: dict[str, dict[str, Any]] = {
     MATH: {
@@ -61,9 +65,26 @@ SOURCES: dict[str, dict[str, Any]] = {
             "what the market is paying for, which is why they are worth reading next to what it has been doing."
         ),
     },
+    WRITTEN: {
+        "key": WRITTEN,
+        "label": "Written by a model",
+        "badge": "WRITTEN",
+        "colour": "#b45309",
+        "depends_on": "A language model reading the numbers above. Sent to Mistral.",
+        "detail": (
+            "The only thing on this page that is not a number and cannot be rechecked against a bar. A "
+            "language model is given the measured figures — price, volatility, the counted direction, the "
+            "levels, the profile, the estimated flow — and writes them up as sentences. It computes nothing "
+            "and decides nothing, and it is told not to predict, not to recommend a trade and not to use any "
+            "number it was not given. It can still be wrong in ways the rest of this page cannot: it may "
+            "misread a figure or write a confident sentence about a quiet market. Read it as a summary of "
+            "the numbers, never as evidence for them. Off unless switched on in Settings, and it is the one "
+            "feature that sends market data off this machine."
+        ),
+    },
 }
 
-ORDER = (MATH, COUNTED, IMPLIED)
+ORDER = (MATH, COUNTED, IMPLIED, WRITTEN)
 
 # Which card on the Market page rests on what. A card can only be as dependable as its source.
 CARD_SOURCE = {
@@ -78,6 +99,7 @@ CARD_SOURCE = {
     "where": COUNTED,  # levels the traded size itself made
     "levels": MATH,  # the highs and lows themselves; nothing fitted
     "outlook": COUNTED,
+    "written": WRITTEN,
 }
 
 

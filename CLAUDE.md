@@ -71,12 +71,27 @@ analyst every 5 min: candles+OI+funding ─► insights ─► PUSH MarketAnalys
   `brokers/paper_options.py` holds them, reserves the max loss as margin and closes on
   whole-structure SL/TP or an hour before expiry — on `realisable()`, what closing would
   actually book, never the mark.
+- `strategies/scalper.py` — 5-minute scalp with the trend: 15m and 1h must agree, the bar closed
+  hard into its own range on above-average volume, and the profile's nearest level is not already
+  here. Stop a fraction of a percent, target `REWARD` times it. It is the only strategy that
+  declares `margin_pct`, which raises the **cap** (`trade_margin_pct`) and nothing else — at a
+  0.15% stop that cap decides the size before `risk_per_trade_pct` gets a say, and raising the
+  global one would widen every other strategy's positions. Sizing stays `min(by_risk, by_margin)`,
+  so a looser cap can never risk more. It also sets `default_on = False`: toggles default to ON, so
+  a strategy that lands in a release starts trading on deploy — not acceptable for one that fires
+  every five minutes and sizes hard (`tests/test_strategies.py` asserts the two go together).
 - `email_report.py` — `DailyReporter`, an engine job: the day's report by email once at `email_report_hour`.
 - `insights.py` (rules over measured numbers) and `analyst.py` (runs them every 5 minutes, one
-  `MarketAnalysis` per symbol). Analysis is advisory: nothing in it places an order. Rules only —
-  there is no trained model and no language model anywhere in this system, and a number on a page
-  is either arithmetic over its inputs or a rate counted over the stored bars. That is the whole
-  claim the Market page makes, and it is why `provenance.py` has three sources and not five.
+  `MarketAnalysis` per symbol). Analysis is advisory: nothing in it places an order. Every *number*
+  on a page is arithmetic over its inputs or a rate counted over the stored bars — there is no
+  trained model anywhere in this system and nothing is fitted.
+- `tbai.py` + `mistral.py` — the written summary, and the only thing here that talks to a language
+  model or leaves the machine. It reads the numbers the rest of the system already measured and
+  returns prose about them: it computes nothing, decides nothing, and is told not to predict, not
+  to recommend a trade and not to use a figure it was not given. `tbai.ALLOWED` is the gate on what
+  is sent and it is enforced in `digest()`, so a field added to `market_structure` next year cannot
+  start leaving by itself. Off unless switched on; badged `WRITTEN`, the fourth and weakest
+  provenance, because it is the one thing on the page that cannot be rechecked against a bar.
 - `reading.py` — the measured blocks the page and the engine still read: volume, VWAP, the volume
   profile, candle anatomy, candle-shape records, `regime_at` and `barrier_outcome`. The indicator
   blocks (RSI/MACD/ADX, per-timeframe and their agreement) and the levels block were removed with
@@ -208,10 +223,23 @@ Enforced by tests. Breaking one should fail the build.
     shown without its sample size: under `outlook.MIN_SAMPLE` the page says how many it has and no
     percentage. Direction starts at a coin and is only moved by what was counted. A verdict badge
     reads the same series as the chart it sits on.
-15. **Analysis never trades and never leaves the machine.** The analyst reads market data and
-    writes only events. Nothing on a page is a fit or a guess: every figure is arithmetic over its
-    inputs or a rate counted over the stored bars, and `provenance.py` names which. No part of the
-    system sends market data, account figures or anything else to a third-party service.
+15. **Analysis never trades.** The analyst reads market data and writes only events. Every FIGURE
+    on a page is arithmetic over its inputs or a rate counted over the stored bars — nothing is
+    fitted and nothing is guessed — and `provenance.py` names which.
+15b. **One feature sends data off the machine, and it is the only one.** The written summary
+    (`tbai.py` + `mistral.py`) posts measured market numbers to Mistral and gets sentences back.
+    It is gated three times: `MISTRAL_API_KEY` in the environment, `ai_enabled` in Settings, and a
+    per-run check that the numbers exist. What may be sent is `tbai.ALLOWED`, an allowlist
+    **enforced in `digest()`**, not a blocklist of words — "position" is ambiguous in a market
+    (`range_position_24h` is a price statistic), so a word filter would either miss real leaks or
+    block real data and a reviewer could not tell which. **No balance, position, order, P&L or
+    credential is ever in a digest**, and the key lives in the environment so nothing can read it
+    back out of the database. The model computes nothing, decides nothing and never places an
+    order; its answer is capped and shape-checked by `tbai.clean` before it is stored.
+15c. **Prose is the weakest provenance and is badged as such.** `provenance.WRITTEN` sits below
+    arithmetic, counted history and what traders paid, because it is the only thing on a page that
+    cannot be rechecked against the bars it came from. A sentence a model wrote must never be
+    rendered with the same weight as a number the system counted.
 
 ## Extension Points
 
@@ -289,9 +317,23 @@ is the other half: it runs the real page, real scripts and real library in headl
 captured payloads and photographs the result, because a stub DOM cannot run a canvas library and a
 screenshot of one shows the stub.
 
+**The tape has its own page** (`/tape`, `templates/tape.html`). It is the one thing here read by
+zooming, panning and hovering, and all three want room: as a card among a dozen it was 440px of a
+scrolling page. The chart fills the window and the controls sit in a rail down the side, because a
+button row above a chart costs the chart that height whether or not anyone is touching it. There
+is exactly **one** of these — Market Data links to it rather than drawing a second copy, since two
+charts of one market are two things to keep right and they drift. `TBTape.mount` is shared; the
+page works nothing out for itself. The hover reading goes to a **fixed panel in the rail**
+(`mount({panel})`), not a card that follows the cursor: the reading is most of why anyone hovers,
+and a floating card sits on top of the candle being pointed at — the one place the eye already is.
+It falls back to the newest bar when the pointer leaves, because a panel that empties flickers on
+every reach for the scrollbar and an empty box reads as "nothing here". Levels further than `LEVEL_REACH_ATR` are not drawn: a price
+line makes the library widen its own scale to include it, so one level five ATRs away silently
+costs the candles a third of their height — and `nearby` lists every one of them anyway.
+
 Market Data is **one view, not tabs.** It was eight — patterns, volume, indicators, open interest,
 liquidity, profile, flow, findings — and seven of them were lists of PRICES. A price belongs on a
-price axis, so they are all drawn on one chart (`TBC.tape`) against one scale: zones as shaded
+price axis, so they are all drawn on one chart (now on `/tape`) against one scale: zones as shaded
 rectangles from where they formed, every named level as a line, sweeps as hooks, the volume profile
 in the right-hand gutter, delta or volume underneath. The layer buttons choose what is visible and
 the choice is remembered; the timeframe buttons refold the same stored base (§`resample.py`).

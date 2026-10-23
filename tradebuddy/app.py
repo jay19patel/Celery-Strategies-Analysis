@@ -34,6 +34,7 @@ HERE = Path(__file__).parent
 # other pages; each number now lives on the one page that owns it.
 PAGES = [
     ("market", "/", "candlestick-chart", "Market Data", "Monitoring"),
+    ("tape", "/tape", "line-chart", "The Tape", "Monitoring"),
     ("system", "/system", "gauge", "System", "Monitoring"),
     ("events", "/events", "scroll-text", "Event Log", "Monitoring"),
     ("strategies", "/strategies", "brain-circuit", "Strategies", "Trading"),
@@ -464,6 +465,10 @@ def create_app(
     @app.get("/api/market-structure")
     async def market_structure(symbol: str = "BTCUSD") -> dict:
         return await call("market_structure", symbol=symbol)
+
+    @app.get("/api/ai-report")
+    async def ai_report(symbol: str = "BTCUSD") -> dict:
+        return await call("ai_report", symbol=symbol)
 
     @app.get("/api/verdicts")
     async def verdicts(symbol: str = "BTCUSD", days: float = 30) -> dict:

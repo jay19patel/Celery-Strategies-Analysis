@@ -89,6 +89,7 @@ class Trader:
         self, bus: EventBus, store: Store, brokers: dict[str, Broker], prices: PriceBook, settings: Callable[[], Settings],
         halt_reason: Callable[[str], str] = lambda _broker: "",
         volatility: Callable[[str], float | None] = lambda _symbol: None,
+        margins: dict[str, float] | None = None,
     ) -> None:
         self.bus = bus
         self.halt_reason = halt_reason
@@ -97,6 +98,10 @@ class Trader:
         self.prices = prices
         self.settings = settings
         self.volatility = volatility  # symbol -> ATR as a % of price, or None when none is fresh
+        # strategy name -> its own margin cap, for the few that declare one. Read from the
+        # registry at startup rather than imported here: the Trader must not depend on the
+        # strategy package, or every strategy becomes a thing that can break order routing.
+        self.margins = margins or {}
         # Gate -> reserve must not interleave between signals and manual orders, or both could
         # pass the "no open position" check for the same symbol.
         self._lock = asyncio.Lock()
@@ -128,7 +133,7 @@ class Trader:
         direction = 1 if e.side == "buy" else -1
         try:
             account = await broker.account()
-            size = await self.size_for_risk(broker, e.symbol, price, sl_pct, account, s)
+            size = await self.size_for_risk(broker, e.symbol, price, sl_pct, account, s, self.margin_for(e.strategy))
         except BrokerError as exc:
             self._skip(e, broker.name, f"could not size the order: {exc}")
             return
@@ -154,6 +159,10 @@ class Trader:
             self._skip(e, broker.name, "an order for this bar was already sent")
             return
         self.bus.publish(OrderRequested(**order))
+
+    def margin_for(self, strategy: str) -> float | None:
+        """The margin cap this strategy asked for, or None to use Settings'."""
+        return self.margins.get(strategy)
 
     # -- how far the stop is, how big the position, and whether the trade is worth taking ----------
 
@@ -212,13 +221,22 @@ class Trader:
             f"{broker.name} ({needed:.2f}% needed): the trade cannot pay for itself"
         )
 
-    async def size_for_risk(self, broker: Broker, symbol: str, price: float, sl_pct: float, account: Account, s: Settings) -> int:
+    async def size_for_risk(
+        self, broker: Broker, symbol: str, price: float, sl_pct: float, account: Account, s: Settings,
+        margin_pct: float | None = None,
+    ) -> int:
         """The position whose stop costs risk_per_trade_pct of equity, capped at trade_margin_pct of
         the available margin. The stop decides the size, so every trade risks the same amount and a
-        wider stop buys a smaller position instead of a bigger loss."""
+        wider stop buys a smaller position instead of a bigger loss.
+
+        `margin_pct` raises only the CAP, for a strategy that declared one. The risk rule is still
+        the other half of the `min`, so a looser cap can never risk more than
+        `risk_per_trade_pct` — it only stops the cap from deciding the size before the risk rule
+        has had its say, which is what happens to a scalper whose stop is a tenth of a percent."""
         risk = account.equity * s.risk_per_trade_pct / 100.0
+        cap = s.trade_margin_pct if margin_pct is None else margin_pct
         by_risk = await broker.size_for_notional(symbol, price, risk / (sl_pct / 100.0))
-        by_margin = await broker.size_for_margin(symbol, price, account.available * s.trade_margin_pct / 100.0)
+        by_margin = await broker.size_for_margin(symbol, price, account.available * cap / 100.0)
         return min(by_risk, by_margin)
 
     async def manual(

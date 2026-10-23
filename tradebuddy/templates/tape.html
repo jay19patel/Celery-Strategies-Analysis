@@ -1,0 +1,374 @@
+{% extends "base.html" %}
+{% block head %}{% endblock %}
+{% block main_class %}p-0{% endblock %}
+{% block content %}
+
+<!-- The tape, given the whole window.
+     It lived on Market Data as one card among a dozen, which is the wrong shape for the one thing
+     on this dashboard a person actually stares at. A chart is read by zooming, panning and hovering,
+     and all three want room. The controls move to a rail down the side so they are always reachable
+     without stealing height from the thing they control — a row of buttons above a chart costs the
+     chart the height, every time, whether or not anyone is touching them.
+
+     There is exactly one of these. Market Data links here rather than drawing a second copy: two
+     charts of the same market are two things to keep right, and they drift. -->
+<div class="flex flex-col lg:flex-row h-[calc(100vh-var(--topbar,3.5rem))] min-h-[560px]">
+
+  <!-- the chart -->
+  <div class="flex-1 min-w-0 flex flex-col border-r border-slate-200">
+    <div class="flex items-center justify-between gap-3 px-4 py-2 border-b border-slate-200 shrink-0">
+      <div class="flex items-baseline gap-2 min-w-0">
+        <span id="tapeSymbol" class="text-[15px] font-semibold"></span>
+        <span id="tapePrice" class="font-mono text-[15px]"></span>
+        <span id="tapeChange" class="text-[12px]"></span>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <div id="tapeFrames" class="flex gap-1"></div>
+        <span class="w-px h-4 bg-slate-200 mx-0.5"></span>
+        <div id="tapeNav" class="flex gap-1"></div>
+      </div>
+    </div>
+    <div id="tapeLayers" class="flex flex-wrap items-center gap-1.5 px-4 py-1.5 border-b border-slate-200 shrink-0"></div>
+    <div id="tapeNote" class="px-4 pt-2 shrink-0"></div>
+    <div id="tapeChart" class="flex-1 min-h-0"></div>
+    <div id="tapeLegend" class="flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] muted px-4 py-2 border-t border-slate-200 shrink-0"></div>
+  </div>
+
+  <!-- the rail -->
+  <aside class="w-full lg:w-[20rem] shrink-0 overflow-y-auto bg-slate-50/60">
+    <div class="p-3 space-y-4">
+
+      <div>
+        <div class="stat-label mb-1.5">Symbol</div>
+        <div id="tapeSyms" class="flex gap-1"></div>
+      </div>
+
+      <div>
+        <div class="flex items-baseline justify-between mb-1.5">
+          <span class="stat-label">Around price</span>
+          <span id="tapeNearbyMeta" class="text-[10px] muted"></span>
+        </div>
+        <div id="tapeLadder"></div>
+      </div>
+
+      <div>
+        <div class="stat-label mb-1.5">Right now</div>
+        <div id="tapeNow" class="space-y-2"></div>
+      </div>
+
+      <div>
+        <div class="flex items-baseline justify-between mb-1.5">
+          <span class="stat-label">Under the pointer</span>
+          <span class="text-[10px] muted">hover the chart</span>
+        </div>
+        <div id="tapeDetail" class="rounded-md border border-slate-200 bg-white p-2 text-[11px] leading-relaxed
+          h-[15rem] overflow-y-auto"></div>
+      </div>
+
+    </div>
+  </aside>
+</div>
+
+{% endblock %}
+
+
+{% block scripts %}
+<script src="/static/js/vendor/lightweight-charts.js?v={{ v }}"></script>
+<script src="/static/js/chart.js?v={{ v }}"></script>
+<script src="/static/js/tape.js?v={{ v }}"></script>
+<script>
+// ── the tape, full window ────────────────────────────────────────────────────
+// Same modules as everywhere else: TBTape draws, TBC.ladder lists, the engine computes. Nothing
+// here works anything out — a second place that decided what a level was worth would be a second
+// answer, and the two would disagree the first week.
+(() => {
+  const { $, esc } = TB;
+  let sym = new URLSearchParams(location.search).get("symbol") || "BTCUSD";
+  const SYMS = ["BTCUSD", "ETHUSD"];
+  let outlook = null, structure = null, barsCache = {}, framesMeta = {};
+  const safely = (name, fn) => { try { return fn(); } catch (e) { console.error(`${name} failed:`, e); } };
+
+  // ── the tape ───────────────────────────────────────────────────────────────
+  // One chart instead of eight tabs. The layers are what the tabs used to be, except that now
+  // they are drawn against the same price axis and can therefore be compared by eye, which is
+  // the entire reason the split was costing something.
+  const LAYERS = [
+    ["zones", "Zones", "order blocks, fair value gaps and S/R bands, shaded by how fresh they are"],
+    ["levels", "Levels", "every price the structure modules name, from the merged map"],
+    ["breaks", "Breaks", "BOS and CHoCH, on the bar they happened"],
+    ["sweeps", "Sweeps", "stops taken and price closed back inside"],
+    ["profile", "Profile", "volume by price, in the right-hand gutter, on the same scale"],
+  ];
+  // The six timeframes, folded server-side from the stored base. `days` is chosen so each shows a
+  // comparable number of bars — three days of 1m is 4,320 candles and unreadable.
+  // [timeframe, how many days to look back]. The window is deliberately far wider than the bars
+  // drawn, because `limit` is what actually decides how many you see. Anchoring the chart to
+  // "the last 3 days" meant it went blank the moment the newest stored bar was older than that —
+  // which is exactly when something is wrong and you most want to look at it. The demo database
+  // aged past its own window overnight and drew nothing.
+  const FRAMES = [["1m", 3], ["5m", 10], ["15m", 30], ["1h", 90], ["4h", 240], ["1d", 365]];
+  const TAPE_BARS = 400;
+  let tapeFrame = "15m";
+  const LAYER_KEY = "tb.market.layers";
+  let layers = (() => {
+    try { const v = JSON.parse(localStorage.getItem(LAYER_KEY)); if (Array.isArray(v)) return new Set(v); } catch { /* first visit */ }
+    return new Set(["zones", "levels", "breaks", "sweeps", "profile"]);
+  })();
+
+  function paintNav() {
+    $("tapeNav").innerHTML = [
+      ["back", "←", "older bars"], ["fwd", "→", "newer bars"],
+      ["out", "−", "zoom out"], ["in", "+", "zoom in"], ["reset", "⤢", "back to the latest 180 bars"],
+    ].map(([k, glyph, why]) =>
+      `<button class="btn btn-sm" data-nav="${k}" title="${esc(why)}" aria-label="${esc(why)}">${glyph}</button>`).join("");
+    $("tapeNav").querySelectorAll("[data-nav]").forEach((b) => (b.onclick = () => {
+      if (!tape?.ok) return;
+      ({ back: () => tape.nudge(-20), fwd: () => tape.nudge(20),
+         out: () => tape.zoom(1.5), in: () => tape.zoom(1 / 1.5), reset: () => tape.fit() })[b.dataset.nav]();
+    }));
+  }
+
+  function paintFrames() {
+    $("tapeFrames").innerHTML = FRAMES.map(([f]) =>
+      `<button class="btn btn-sm ${f === tapeFrame ? "btn-primary" : ""}" data-frame="${f}">${f}</button>`).join("");
+    $("tapeFrames").querySelectorAll("[data-frame]").forEach((b) => (b.onclick = async () => {
+      tapeFrame = b.dataset.frame;
+      paintFrames();
+      await loadTapeBars();
+      renderTape();
+      if (tape?.ok) tape.fit();
+    }));
+  }
+
+  // Zones, levels, sweeps and the profile are all computed on 15m bars by the engine. Drawn over
+  // a 1-hour or 1-day candle they still sit at the right PRICE — which is the axis they are about —
+  // so they stay on. The break markers do not: a break is dated to a 15m bar and pinning it to a
+  // daily candle would put it on a bar it was never about.
+  async function loadTapeBars() {
+    const key = `${sym}:${tapeFrame}`;
+    if (barsCache[key]) return;
+    const days = (FRAMES.find(([f]) => f === tapeFrame) || [, 30])[1];
+    const r = await TB.get(`/api/bars?symbol=${sym}&interval=${tapeFrame}&days=${days}&limit=${TAPE_BARS}`);
+    barsCache[key] = r.bars || [];
+    framesMeta[key] = { derived: r.derived, source: r.source_interval, gaps: (r.gaps || []).length };
+  }
+
+  function paintLayers() {
+    $("tapeLayers").innerHTML = `<span class="text-[10px] uppercase tracking-wide muted mr-0.5">Layers</span>`
+      + LAYERS.map(([k, label, why]) =>
+        `<button class="btn btn-sm ${layers.has(k) ? "btn-primary" : ""}" data-layer="${k}"
+          title="${esc(why)}">${esc(label)}</button>`).join("");
+    $("tapeLayers").querySelectorAll("[data-layer]").forEach((b) => (b.onclick = () => {
+      const k = b.dataset.layer;
+      layers.has(k) ? layers.delete(k) : layers.add(k);
+      try { localStorage.setItem(LAYER_KEY, JSON.stringify([...layers])); } catch { /* private mode */ }
+      paintLayers(); renderTape();
+    }));
+  }
+
+  // Zones are coloured by what they ARE; everything else by what it is. Direction is readable
+  // from where a band sits relative to price, the kind is not readable from the chart at all.
+  // What the mark means, not what colour it is. "purple = sweep" tells a reader the thing they
+  // can already see; it does not tell them a sweep is a failed break, which is the whole point.
+  const LEGEND = [
+    ["#00b852", "bull zone", "price reacted up from here before"],
+    ["#eb5757", "bear zone", "price reacted down from here before"],
+    ["#d97706", "pool / POC", "stops stacked at one price, or where most volume traded"],
+    ["#7c3aed", "sweep", "price poked through a level and closed back inside — stops taken, level held"],
+    ["#1e88e5", "option wall", "the strike with the most open interest — dealers defend it"],
+    ["#0891b2", "value area", "the band holding 70% of the day's volume"],
+    ["#64748b", "prev period", "yesterday's or last week's high, low, open or close"],
+  ];
+
+  // One chart object for the life of the page. Rebuilding it on every poll would throw away the
+  // zoom and the scroll position, which is the one thing on this page a person sets by hand.
+  let tape = null, tapeTooltip = null;
+
+  function tooltipFor(S, bars) {
+    const volAt = Object.fromEntries((bars || []).map((b) => [b.time, b.volume]));
+    const shapesAt = {};
+    for (const s of (outlook?.shapes?.latest || [])) (shapesAt[s.bar_time] ||= []).push(s.label || s.name);
+    return (bar, time, price) => {
+      const up = bar.close >= bar.open, move = 100 * (bar.close / bar.open - 1);
+      // Only what is near the pointer: a tooltip listing every level is a second chart, and
+      // Around price below already lists them all.
+      const near = !S ? [] : [...(S.nearby?.above || []), ...(S.nearby?.below || [])]
+        .filter((l) => price != null && Math.abs(l.price - price) < (S.atr || 1) * 0.3).slice(0, 3);
+      const inside = !S ? [] : (S.zones?.zones || []).filter((z) =>
+        z.state !== "invalidated" && price != null && z.low <= price && price <= z.high).slice(0, 2);
+      const shapes = shapesAt[time] || [];
+      // A line on a chart with no reason attached is a line someone drew. Every level and zone
+      // here says what put it there and what it is made of, because that is the difference
+      // between a level worth a stop and one worth nothing.
+      const ZONE_WHY = {
+        ob: "last opposite candle before a big move that also broke structure",
+        fvg: "three-bar gap price skipped and has not filled",
+        sr: "swing highs and lows clustered at one price",
+      };
+      const STATE_WHY = {
+        fresh: "never touched since it formed", tested: "price came back and it held",
+        mitigated: "price has traded most of the way through", invalidated: "gone",
+      };
+      const head = (text) => `<div style="margin-top:6px;padding-top:4px;border-top:1px solid #e2e8f0;
+        font-size:9px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8">${text}</div>`;
+      // Everything the pointer is over, in bands that say what they are. A tooltip that opens
+      // with four numbers and no heading makes the reader guess which of them is the candle.
+      const sweptHere = !S ? [] : (S.liquidity?.sweeps || []).filter((s) => s.bar_time === time);
+      return `<div style="font-weight:600;font-size:11px">${esc(TB.dateTime(time))}</div>
+        ${head("this candle")}
+        <div style="font-family:ui-monospace,monospace">O ${TB.num(bar.open, 0)} · H ${TB.num(bar.high, 0)} · L ${TB.num(bar.low, 0)}</div>
+        <div style="font-family:ui-monospace,monospace;font-weight:600">C ${TB.num(bar.close, 0)}
+          <span style="color:${up ? "#00b852" : "#eb5757"}">${move >= 0 ? "+" : ""}${move.toFixed(2)}%</span></div>
+        <div style="color:#64748b;font-size:10px">volume ${TB.compact(volAt[time] ?? null)}</div>
+        ${shapes.length ? `<div style="margin-top:3px;color:#475569">${shapes.map(esc).join(" · ")}</div>` : ""}
+        ${sweptHere.length ? head("stops taken here") + sweptHere.map((s) => `
+          <div><b>swept the ${esc(s.direction === "high" ? "highs" : "lows")} at ${TB.num(s.level, 0)}</b></div>
+          <div style="color:#64748b;font-size:10px">price traded through a level ${s.touches} highs had stacked at,
+            then closed back inside — the stops were taken and the level held${
+            s.resolved ? `. It then went ${s.worked ? "the way that implies" : "the other way"}.` : ". Too recent to say what followed."}</div>`).join("") : ""}
+        ${near.length ? head("levels at this price") + `<div>${near.map((l) =>
+            `<div><span style="font-family:ui-monospace,monospace">${TB.num(l.price, 0)}</span>
+               <b style="font-weight:600">${esc(l.label)}</b>
+               <div style="color:#64748b;font-size:10px;margin-left:2px">${esc(l.kind_label)} — ${esc(l.evidence || "")}${
+                 (l.confluence || 1) > 1 ? ` · ${l.confluence} sources agree here` : ""}</div></div>`).join("")}</div>` : ""}
+        ${inside.length ? head("zone price is inside") + `<div>${inside.map((z) =>
+            `<div><b style="font-weight:600;color:${z.direction === "bull" ? "#00b852" : "#eb5757"}">inside this ${
+               esc({ ob: "order block", fvg: "fair value gap", sr: "S/R band" }[z.kind] || z.kind)}</b>
+             <div style="color:#64748b;font-size:10px">${esc(ZONE_WHY[z.kind] || "")}</div>
+             <div style="color:#64748b;font-size:10px">${esc(z.state)} — ${esc(STATE_WHY[z.state] || "")}${
+               z.touches ? `, touched ${z.touches}x` : ""}</div></div>`).join("")}</div>` : ""}`;
+    };
+  }
+
+  const note = (text) => `<div class="read-note"><i data-lucide="info"></i><span>${esc(text)}</span></div>`;
+  let tapeDrawn = false;
+
+  function renderTape() {
+    const box = $("tapeChart");
+    if (!box) return;
+    const key = `${sym}:${tapeFrame}`, raw = barsCache[key];
+    if (!raw || !raw.length) {
+      // Only before anything has been drawn. Two loaders repaint the tape — the structure one,
+      // which fetches the bars, and the outlook one, which brings the breaks — and they race. The
+      // loser used to overwrite a drawn chart with this placeholder, so whether the page ended up
+      // showing a chart or the word "Loading" depended on which fetch returned second.
+      if (!tapeDrawn) box.innerHTML = `<div class="text-[11px] muted py-8 text-center">Loading bars…</div>`;
+      return;
+    }
+    const S = structure && structure.ready ? structure : null;
+    // The tooltip closure changes with every new structure payload; the chart is mounted once.
+    // So mount with an indirection and swap what it points at, rather than remounting.
+    if (!tape) tape = TBTape.mount(box, { height: box.clientHeight || 560, panel: $("tapeDetail"), tooltip: (b, time, price) => tapeTooltip ? tapeTooltip(b, time, price) : "" });
+    if (!tape.ok) return;
+
+    const since = raw[0].time;
+    const zones = !S || !layers.has("zones") ? [] : (S.zones.zones || []).filter((z) => z.state !== "invalidated");
+    const levels = !S || !layers.has("levels") ? [] : [...(S.nearby?.above || []), ...(S.nearby?.below || [])];
+    const f = outlook?.timeframes?.find((x) => x.interval === tapeFrame);
+    const prof = !S || !layers.has("profile") ? null : (S.profile?.session || S.profile?.composite || null);
+
+    // Breaks and sweeps are both markers on the bar they happened; the library draws them on the
+    // series, so they can never drift from their candle the way an overlay can.
+    const marks = [];
+    if (layers.has("breaks")) {
+      for (const b of (f?.structure?.breaks || [])) {
+        if (b.bar_time < since) continue;
+        marks.push({ bar_time: b.bar_time, above: b.direction !== "up", shape: b.direction === "up" ? "arrowUp" : "arrowDown",
+                     color: b.kind === "choch" ? "#d97706" : (b.direction === "up" ? "#00b852" : "#eb5757"),
+                     text: b.kind === "choch" ? "CHoCH" : "BOS" });
+      }
+    }
+    if (layers.has("sweeps") && S) {
+      // No text. There are commonly twenty sweeps in a window and the word repeated twenty times
+      // is a purple cloud with the chart behind it — the dot says where, the tooltip says what,
+      // and the outcome strip in Liquidity detail says whether they pay.
+      for (const s of (S.liquidity.sweeps || [])) {
+        if (s.bar_time < since) continue;
+        marks.push({ bar_time: s.bar_time, above: s.direction === "high", shape: "circle", color: "#7c3aed" });
+      }
+    }
+
+    // Always volume. It used to become estimated delta when a layer was ticked — the same bars in
+    // the same place measuring something else, with nothing on screen saying so.
+    const sub = raw.map((b) => ({ time: b.time, value: b.volume || 0, up: b.close >= b.open }));
+
+    tapeTooltip = tooltipFor(S, raw);
+    const naked = !S || !layers.has("profile") ? [] : (S.profile?.naked_pocs || []);
+    tape.update({ bars: raw, zones, levels, naked, profile: prof ? { levels: prof.nodes } : null, marks, sub });
+    tapeDrawn = true;
+
+    const r = framesMeta[key];
+    $("tapeLegend").innerHTML = LEGEND.map(([c, l, why]) =>
+      `<span title="${esc(why)}"><span style="display:inline-block;width:8px;height:8px;background:${c};border-radius:1px;vertical-align:middle"></span> ${esc(l)}</span>`).join("")
+      + `<span class="ml-auto whitespace-nowrap">${raw.length.toLocaleString()} ${tapeFrame}${r?.derived ? ` from ${r.source}` : ""}${
+            r?.gaps ? ` · ${r.gaps} gap${r.gaps > 1 ? "s" : ""}` : ""}${S ? ` · ${S.bars.toLocaleString()} bars scanned` : ""}</span>`;
+    const age = (Date.now() / 1000) - raw[raw.length - 1].time;
+    const stale = age > 4 * 3600;
+    $("tapeNote").innerHTML = stale
+      ? note(`The newest stored bar is ${TB.ago(raw[raw.length - 1].time)} old. This is the market as it was then, not as it is now.`)
+      : (S ? "" : note("The structure scan has not run yet — levels and zones will fill in once it does."));
+  }
+
+  // ── the rail ───────────────────────────────────────────────────────────────
+  function paintSymbols() {
+    $("tapeSyms").innerHTML = SYMS.map((s) =>
+      `<button class="btn btn-sm ${s === sym ? "btn-primary" : ""}" data-sym="${s}">${s.replace("USD", "")}</button>`).join("");
+    $("tapeSyms").querySelectorAll("[data-sym]").forEach((b) => (b.onclick = async () => {
+      sym = b.dataset.sym;
+      const url = new URL(location.href); url.searchParams.set("symbol", sym); history.replaceState(null, "", url);
+      paintSymbols();
+      tape = null; $("tapeChart").innerHTML = "";   // a new market is a new chart, not a redraw
+      await loadAll();
+    }));
+  }
+
+  function renderHead() {
+    $("tapeSymbol").textContent = sym.replace("USD", "");
+    const price = structure?.price ?? outlook?.price;
+    $("tapePrice").textContent = price ? TB.num(price, 0) : "—";
+    const row = (outlook?.summary || [])[0];
+    $("tapeChange").innerHTML = !row ? "" :
+      `<span class="${row.direction > 0 ? "up" : row.direction < 0 ? "down" : "muted"}">${esc(row.word || "")}</span>`;
+  }
+
+  function renderNearby() {
+    const n = structure?.nearby;
+    if (!n || !n.ready) {
+      $("tapeLadder").innerHTML = `<div class="text-[11px] muted">${esc(structure?.note || "No stored bars yet.")}</div>`;
+      $("tapeNow").innerHTML = ""; return;
+    }
+    $("tapeNearbyMeta").textContent = `ATR ${TB.num(n.atr, 0)}`;
+    $("tapeLadder").innerHTML = TBC.ladder(n.above, n.below, n.price, { format: (v) => TB.num(v, 0) });
+    const side = (l, which) => !l ? "" : `
+      <div class="rounded-md border border-slate-200 bg-white p-2">
+        <div class="stat-label">Next ${which}</div>
+        <div class="flex items-baseline gap-2">
+          <span class="font-mono text-[14px] font-semibold">${TB.num(l.price, 0)}</span>
+          <span class="text-[11px] ${l.distance_pct >= 0 ? "up" : "down"}">${l.distance_pct >= 0 ? "+" : ""}${l.distance_pct.toFixed(2)}%</span>
+        </div>
+        <div class="text-[10.5px] muted">${esc(l.label)} — ${esc(l.evidence || "")}</div>
+      </div>`;
+    $("tapeNow").innerHTML = side(n.next_above, "above") + side(n.next_below, "below")
+      + (n.inside?.length ? `<div class="text-[11px] muted">Price is inside ${n.inside.length} live zone${n.inside.length > 1 ? "s" : ""}.</div>` : "");
+  }
+
+  // ── loading ────────────────────────────────────────────────────────────────
+  async function loadAll() {
+    outlook = await TB.get(`/api/outlook?symbol=${sym}`);
+    structure = await TB.get(`/api/market-structure?symbol=${sym}`);
+    await loadTapeBars();
+    safely("head", renderHead);
+    safely("tape", renderTape);
+    safely("nearby", renderNearby);
+    TB.icons();
+  }
+
+  safely("symbols", paintSymbols);
+  safely("layers", paintLayers);
+  safely("frames", paintFrames);
+  safely("nav", paintNav);
+  safely("load", loadAll);
+  TB.every(loadAll, 300000);   // the engine rebuilds both reads once a bar and caches them
+})();
+</script>
+{% endblock %}

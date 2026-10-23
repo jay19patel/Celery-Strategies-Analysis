@@ -38,6 +38,8 @@ x-app: &app
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
     AUTH_PIN: ${AUTH_PIN:-242425}
     AUTH_SECRET: ${AUTH_SECRET:-}
+    # Empty unless set in .env, and the written summary stays off without it.
+    MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
   logging:
     driver: json-file
     options: { max-size: "10m", max-file: "3" }

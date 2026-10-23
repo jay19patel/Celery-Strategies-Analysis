@@ -46,6 +46,10 @@
    * The controller keeps the chart alive across updates — rebuilding it on every poll would throw
    * away the zoom and the scroll position, which is the one thing a person sets by hand.
    */
+  // How far a level may be and still be drawn. Beyond this the library's auto-scale is doing more
+  // harm (squashed candles) than the line is doing good.
+  const LEVEL_REACH_ATR = 3.0;
+
   function mount(el, opts = {}) {
     if (!HAS_LIB) {
       el.innerHTML = `<div class="text-[11px] muted py-8 text-center">The chart library did not load.
@@ -55,7 +59,7 @@
 
     el.innerHTML = "";
     el.style.position = "relative";
-    const height = opts.height || 440;
+    let height = opts.height || 440;  // reassigned by the ResizeObserver below
 
     // Behind the chart: zones and the volume-by-price gutter.
     const canvas = document.createElement("canvas");
@@ -70,14 +74,21 @@
     // build has already scanned the document, so its arbitrary-value classes (`bg-white/97`) were
     // never generated — the card rendered with no background at all and the chart showed straight
     // through the text. Anything built at runtime styles itself.
-    const tip = document.createElement("div");
-    tip.style.cssText = [
-      "position:absolute", "z-index:3", "pointer-events:none", "display:none",
-      "background:#fff", "border:1px solid #e2e8f0", "border-radius:6px",
-      "box-shadow:0 4px 14px rgba(15,23,42,.13)", "padding:6px 9px",
-      "font-size:11px", "line-height:1.45", "white-space:nowrap", "color:#0f172a",
-    ].join(";");
-    el.appendChild(tip);
+    // Where the hover detail goes. Given a `panel`, it goes THERE and no floating card is built:
+    // a box that follows the cursor sits on top of the candles you are pointing at, which is the
+    // one place you were looking. The reading is most of why you hover, so it gets a fixed home
+    // beside the chart and covers nothing.
+    const panel = opts.panel || null;
+    const tip = panel ? null : document.createElement("div");
+    if (tip) {
+      tip.style.cssText = [
+        "position:absolute", "z-index:3", "pointer-events:none", "display:none",
+        "background:#fff", "border:1px solid #e2e8f0", "border-radius:6px",
+        "box-shadow:0 4px 14px rgba(15,23,42,.13)", "padding:6px 9px",
+        "font-size:11px", "line-height:1.45", "white-space:nowrap", "color:#0f172a",
+      ].join(";");
+      el.appendChild(tip);
+    }
 
     const chart = LightweightCharts.createChart(holder, {
       height,
@@ -179,7 +190,13 @@
       // version did. The ones that earn a label are the nearest each way (what a stop or a
       // target would actually use) and anything more than one source agrees on. The rest are
       // still drawn, still in the tooltip, and all of them are listed in Around price below.
-      const ranked = [...state.levels].sort((a, b) => (a.distance_atr ?? 0) - (b.distance_atr ?? 0));
+      // Only levels within reach. A price line makes the library widen its own scale to include
+      // it, so one previous-week low five ATRs away silently costs the candles a third of their
+      // height — the chart stops being readable at exactly the prices being traded. The far ones
+      // are not lost: Around price lists every one of them with its distance.
+      const ranked = [...state.levels]
+        .filter((l) => (l.distance_atr ?? 0) <= LEVEL_REACH_ATR)
+        .sort((a, b) => (a.distance_atr ?? 0) - (b.distance_atr ?? 0));
       const named = new Set();
       for (const side of ["above", "below"]) {
         ranked.filter((l) => l.side === side).slice(0, 1).forEach((l) => named.add(l));
@@ -201,22 +218,46 @@
     }
 
     chart.timeScale().subscribeVisibleLogicalRangeChange(paintOverlay);
+    // The newest bar, so the panel says something before anyone has hovered and goes back to
+    // saying it afterwards. A panel that empties on mouse-out flickers every time you reach for
+    // the scrollbar, and an empty box reads as "nothing here" rather than "point at something".
+    function showLatest() {
+      if (!panel || !state.bars.length) return;
+      const last = state.bars[state.bars.length - 1];
+      panel.innerHTML = opts.tooltip ? opts.tooltip(last, last.time, last.close) : "";
+    }
+
     chart.subscribeCrosshairMove((param) => {
-      if (!param.point || !param.time || !state.bars.length) { tip.style.display = "none"; return; }
-      const bar = param.seriesData.get(candles);
-      if (!bar) { tip.style.display = "none"; return; }
+      const bar = param.point && param.time && state.bars.length ? param.seriesData.get(candles) : null;
+      if (!bar) {
+        if (tip) tip.style.display = "none";
+        else showLatest();
+        return;
+      }
       const price = candles.coordinateToPrice(param.point.y);
-      tip.innerHTML = opts.tooltip ? opts.tooltip(bar, param.time, price) : "";
-      if (!tip.innerHTML) { tip.style.display = "none"; return; }
+      const html = opts.tooltip ? opts.tooltip(bar, param.time, price) : "";
+      if (panel) { panel.innerHTML = html; return; }
+      tip.innerHTML = html;
+      if (!html) { tip.style.display = "none"; return; }
       tip.style.display = "block";
       const w = tip.offsetWidth, h = tip.offsetHeight;
       tip.style.left = `${Math.max(4, Math.min(el.clientWidth - w - 4, param.point.x + 14))}px`;
       tip.style.top = `${Math.max(4, Math.min(height - h - 4, param.point.y + 14))}px`;
     });
 
-    const ro = new ResizeObserver(() => { chart.applyOptions({ width: el.clientWidth }); paintOverlay(); });
+    // Height as well as width. The chart is created with a pixel height read from its container at
+    // mount time; on a page where that container is a flex child of the viewport, anything added
+    // above it — a strip of layer buttons, a stale-data note — makes the container shorter while
+    // the chart stays its original size, and the time axis ends up drawn past the bottom edge.
+    // `canvas` and `height` are kept in step too, or the overlay keeps painting at the old size.
+    const ro = new ResizeObserver(() => {
+      const h = el.clientHeight || height;
+      height = h;
+      chart.applyOptions({ width: el.clientWidth, height: h });
+      paintOverlay();
+    });
     ro.observe(el);
-    chart.applyOptions({ width: el.clientWidth });
+    chart.applyOptions({ width: el.clientWidth, height: el.clientHeight || height });
 
     return {
       ok: true,
@@ -244,6 +285,8 @@
           chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - (opts.openBars || 140)), to: n + 2 });
         }
         paintOverlay();
+        // The panel describes a bar; when a new one arrives the old description is stale.
+        showLatest();
       },
       fit() { chart.timeScale().fitContent(); },
       zoom(factor) {

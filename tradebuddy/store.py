@@ -16,6 +16,26 @@ def _number(value: Any) -> float | None:
     text to whatever later tries arithmetic on it."""
     return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
 
+AI_REPORTS_SCHEMA = """
+-- The written market summary, and every attempt that failed to produce one. Unlike every other
+-- table here this one holds prose, and prose cannot be rechecked against a bar — which is why the
+-- page badges it differently and why the raw answer is kept when parsing fails.
+CREATE TABLE IF NOT EXISTS ai_reports (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol    TEXT    NOT NULL,
+    ts        REAL    NOT NULL,
+    bar_time  INTEGER NOT NULL,       -- the bar the numbers it read belonged to
+    ok        INTEGER NOT NULL,
+    model     TEXT    NOT NULL,
+    report    TEXT,                   -- JSON, the cleaned answer; NULL when the attempt failed
+    error     TEXT    NOT NULL DEFAULT '',
+    raw       TEXT    NOT NULL DEFAULT '',   -- what it actually wrote, when that was not the JSON asked for
+    ms        INTEGER NOT NULL DEFAULT 0,
+    tokens    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ai_reports_recent ON ai_reports(symbol, ok, ts);
+"""
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -277,6 +297,7 @@ SNAPSHOT_COLUMNS = (
 )
 SNAPSHOT_DAYS = 30  # off-boundary rows; the 15-minute ones are kept for good
 HEALTH_DAYS = 30  # process load: 4 processes every 5 minutes is ~1,150 rows a day
+AI_REPORT_DAYS = 30  # written summaries: one a symbol every 15 min is ~192 a day at ~1.5 KB
 PREDICTION_DAYS = 180  # card verdicts and how they turned out: ~6 a bar a symbol, kept long enough to judge
 BAR_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14_400, "1d": 86_400}
 # The base series is the only raw timeframe stored below 15m; 5m and 3m are folded from it on
@@ -300,6 +321,7 @@ TABLE_INFO = {
     "market_snapshots": ("The analyst's numbers per bar, for base rates", "ts", f"{SNAPSHOT_DAYS} days; 15-minute rows forever"),
     "process_health": ("CPU, memory and loop lag per process", "ts", f"{HEALTH_DAYS} days"),
     "predictions": ("Every card verdict and whether it held", "ts", f"{PREDICTION_DAYS} days"),
+    "ai_reports": ("Written market summaries, and the failures", "ts", f"{AI_REPORT_DAYS} days"),
     "daily_risk": ("Start-of-day equity and halts, per broker", None, "forever (one row a day)"),
     "position_controls": ("Trailing switch and steps per open position", "updated_at", "while open"),
     "settings": ("Runtime settings (secrets included, never sent out)", None, "forever"),
@@ -330,8 +352,12 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
-        self._add_missing_columns()
+        # Retirement first, then the one table whose name a previous build also used for something
+        # shaped differently. Creating it before the drop meant building the new index over the old
+        # columns, which fails on every v2 database and on none of the tests that used a fresh one.
         self._drop_retired_tables()
+        self.db.executescript(AI_REPORTS_SCHEMA)
+        self._add_missing_columns()
 
     def _add_missing_columns(self) -> None:
         # Databases created before orders were tagged with a broker.
@@ -364,12 +390,18 @@ class Store:
     RETIRED_SETTINGS = ("ai_enabled", "mistral_api_key", "mistral_model", "ai_interval_minutes", "ai_share_account")
 
     def _drop_retired_tables(self) -> None:
-        # The market forecaster and TradeBuddy AI are gone; their tables and settings are not read
-        # by anything left. Dropping them is how a database created by an older build stops
-        # carrying rows no code can explain.
+        # The market forecaster is gone; its table is not read by anything left. Dropping it is how
+        # a database created by an older build stops carrying rows no code can explain.
+        #
+        # `ai_reports` is NOT dropped any more — the written summary is back — but the v2 table of
+        # that name has a different shape, and `CREATE TABLE IF NOT EXISTS` is a no-op against it,
+        # so the new index would be built over columns that are not there. Replace it: those rows
+        # described a report format nothing can render now.
         with self.db:
-            for table in ("forecasts", "ai_reports"):
-                self.db.execute(f"DROP TABLE IF EXISTS {table}")
+            self.db.execute("DROP TABLE IF EXISTS forecasts")
+            columns = {r["name"] for r in self.db.execute("PRAGMA table_info(ai_reports)")}
+            if columns and not {"symbol", "ok", "report"} <= columns:
+                self.db.execute("DROP TABLE ai_reports")  # recreated by AI_REPORTS_SCHEMA next
             self.db.execute(
                 f"DELETE FROM settings WHERE key IN ({','.join('?' * len(self.RETIRED_SETTINGS))})",  # noqa: S608 - fixed placeholders
                 self.RETIRED_SETTINGS,
@@ -689,6 +721,45 @@ class Store:
             (*params, limit),
         )
         return [dict(r) for r in rows][::-1]
+
+    # -- the written summary ---------------------------------------------------
+
+    def record_ai_report(
+        self, symbol: str, ts: float, bar_time: int, ok: bool, model: str,
+        report: dict[str, Any] | None = None, error: str = "", raw: str = "",
+        ms: int = 0, tokens: int = 0,
+    ) -> None:
+        """One attempt, successful or not.
+
+        Failures are stored with what the model actually wrote. A summary that silently stops
+        appearing is indistinguishable from a quiet market; a stored failure with its raw answer
+        is the difference between "the key expired" and "it wrote an essay instead of JSON"."""
+        self.db.execute(
+            "INSERT INTO ai_reports (symbol, ts, bar_time, ok, model, report, error, raw, ms, tokens)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (symbol, ts, bar_time, int(ok), model,
+             json.dumps(report) if report else None, error[:500], raw[:4000], ms, tokens),
+        )
+        self.db.commit()
+
+    def ai_reports(self, symbol: str = "", limit: int = 20) -> list[dict[str, Any]]:
+        """Newest first. The report column comes back parsed."""
+        where, args = ("WHERE symbol = ?", [symbol]) if symbol else ("", [])
+        rows = self.db.execute(
+            f"SELECT * FROM ai_reports {where} ORDER BY ts DESC LIMIT ?", [*args, min(limit, 200)],  # noqa: S608 - fixed clause
+        )
+        return [dict(r) | {"report": json.loads(r["report"]) if r["report"] else None} for r in rows]
+
+    def latest_ai_report(self, symbol: str) -> dict[str, Any] | None:
+        """The newest SUCCESSFUL summary for a symbol — what the page shows."""
+        row = self.db.execute(
+            "SELECT * FROM ai_reports WHERE symbol = ? AND ok = 1 ORDER BY ts DESC LIMIT 1", (symbol,),
+        ).fetchone()
+        return dict(row) | {"report": json.loads(row["report"])} if row else None
+
+    def prune_ai_reports(self, now: float | None = None) -> int:
+        now = time.time() if now is None else now
+        return self.db.execute("DELETE FROM ai_reports WHERE ts < ?", (now - AI_REPORT_DAYS * 86_400,)).rowcount
 
     def prune_predictions(self, now: float | None = None) -> int:
         now = time.time() if now is None else now
