@@ -273,6 +273,10 @@ class System:
             data_env=lambda: self.settings.data_env,
             options_history=lambda symbol, hours: self.options_since(UNDERLYINGS.get(symbol, symbol), time.time() - hours * 3600),
             outlook=self.outlook,
+            # The bars the strategies run on, from the table the engine already fills. Before
+            # this they came from REST once per strategy per symbol: ten calls on every 15-minute
+            # close for one series sitting on disk.
+            bars=self.stored_candles,
         )
         self.protection_lock = asyncio.Lock()  # one SL/TP change at a time: guard trails and manual edits
         self.guard = PositionGuard(self.bus, self.store, self.brokers, lambda: self.settings, self.tick_size, self.protection_lock)
@@ -803,6 +807,13 @@ class System:
             "profile": profile.read(profile_rows, source=BASE_INTERVAL if rich else BAR_RESOLUTION).to_dict(),
             "flow": orderflow.read(candles).to_dict(),
         }
+
+    def stored_candles(self, symbol: str, interval: str, count: int) -> list[Candle]:
+        """The last `count` closed bars, oldest first, from the store. Blocking — the runner calls
+        it on a thread. Empty when the store has nothing, which makes the evaluation fall back to
+        REST rather than fail."""
+        rows = self.store.bars(symbol, interval, 0.0, count)
+        return [Candle(int(r["time"]), r["open"], r["high"], r["low"], r["close"], r["volume"]) for r in rows]
 
     async def outlook(self, symbol: str) -> dict[str, Any]:
         """The directional view for one symbol, from the stored bars.

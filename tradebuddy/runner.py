@@ -76,9 +76,15 @@ def make_job(
     strategy: Strategy, event: CandleClosed, prices: dict[str, float], data_env: str,
     options_history: Callable[[str, float], list[dict[str, Any]]] | None = None,
     outlook: dict[str, Any] | None = None,
+    candles: list[Candle] | None = None,
 ) -> dict[str, Any]:
-    """Everything a worker needs, as plain JSON. A strategy that asks for options history gets the
-    engine's stored rows for this symbol's underlying in the job: the worker has no database."""
+    """Everything a worker needs, as plain JSON, including the bars.
+
+    The bars used to be fetched by the evaluation itself, once per strategy per symbol: five
+    strategies on the 15-minute close meant ten REST calls for one series the engine already had
+    on disk. They are read from the store once per symbol per bar now and sent with the job, so a
+    worker makes no market request at all — the same reasoning as `options_history` and `outlook`,
+    which were already carried this way."""
     job = {
         "strategy": strategy.name,
         "version": strategy.version,
@@ -94,6 +100,12 @@ def make_job(
         job["options_history"] = options_history(event.symbol, strategy.options_history_hours)
     if strategy.wants_outlook and outlook is not None:
         job["outlook"] = outlook
+    # Only when there is actually something to send. An empty read — a fresh database, a symbol
+    # the collector has not reached, a hole — must leave the key absent so the evaluation falls
+    # back to REST. Attaching `[]` instead would hand every strategy zero bars and fail them all
+    # with "the bar that just closed is not in the history yet", which is true and useless.
+    if candles and strategy.lookback:
+        job["candles"] = [asdict(c) for c in candles[-strategy.lookback:]]
     return job
 
 
@@ -113,12 +125,18 @@ async def evaluate(strategy: Strategy, job: dict[str, Any], market: Any, worker:
 
     candles: list[Candle] = []
     if strategy.lookback:
-        try:
-            bars = [b for b in await market.candles(symbol, resolution, strategy.lookback) if b.time <= bar_time]
-        except Exception as exc:
-            return result(error=f"candle history unavailable: {exc}")
+        sent = job.get("candles")
+        if sent is not None:
+            bars = [Candle(**c) for c in sent]
+        else:
+            # No bars in the job: an evaluator that predates them, or a store with a hole in it.
+            # Falling back to REST keeps the strategy running rather than failing it.
+            try:
+                bars = [b for b in await market.candles(symbol, resolution, strategy.lookback) if b.time <= bar_time]
+            except Exception as exc:
+                return result(error=f"candle history unavailable: {exc}")
         if (not bars or bars[-1].time < bar_time) and job.get("candle"):
-            bars.append(Candle(**job["candle"]))  # REST has not caught up with the stream yet
+            bars.append(Candle(**job["candle"]))  # the store has not caught up with the stream yet
         candles = bars[-strategy.lookback:]
         if not candles or candles[-1].time != bar_time:
             return result(error="the bar that just closed is not in the history yet")
@@ -205,6 +223,7 @@ class StrategyRunner:
         prices: Callable[[], dict[str, float]], data_env: Callable[[], str],
         options_history: Callable[[str, float], list[dict[str, Any]]] | None = None,
         outlook: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+        bars: Callable[[str, str, int], list[Candle]] | None = None,
     ) -> None:
         self.bus = bus
         self.store = store
@@ -215,6 +234,9 @@ class StrategyRunner:
         self.data_env = data_env
         self.options_history = options_history  # (symbol, hours) -> stored options rows, for the job
         self.outlook = outlook  # symbol -> the engine's directional view, for the job
+        # (symbol, interval, count) -> stored bars. Read once per symbol per close and shared by
+        # every strategy on that bar: they all want the same series, only different depths of it.
+        self.bars = bars
         self.stats: dict[str, _Stats] = {s.name: _Stats() for s in strategies}
         self._paused: set[tuple[str, str]] = set()  # (strategy, symbol) waiting for prices to return
 
@@ -227,24 +249,30 @@ class StrategyRunner:
 
     async def on_candle_closed(self, event: CandleClosed) -> None:
         prices = self.prices()
-        for s in self.strategies:
-            if s.interval == event.resolution and event.symbol in s.symbols and self.is_on(s, event.symbol):
-                stats = self.stats[s.name]
-                if event.symbol not in prices:
-                    self._pause(s, event.symbol, stats)
-                    continue
-                if (s.name, event.symbol) in self._paused:
-                    self._paused.discard((s.name, event.symbol))
-                    log.info("strategy_resumed strategy=%s symbol=%s", s.name, event.symbol)
-                stats.in_flight += 1
-                try:
-                    view = await self.outlook(event.symbol) if (s.wants_outlook and self.outlook) else None
-                    await self.evaluator.submit(s, make_job(s, event, prices, self.data_env(), self.options_history, view))
-                except Exception as exc:
-                    stats.in_flight -= 1
-                    stats.errors += 1
-                    stats.last_result = f"{event.symbol}: error — {exc}"
-                    self.bus.publish(StrategyError(strategy=s.name, symbol=event.symbol, error=f"not dispatched: {exc}"))
+        due = [s for s in self.strategies
+               if s.interval == event.resolution and event.symbol in s.symbols and self.is_on(s, event.symbol)]
+        # One read, deepest lookback, shared. Each job then carries its own slice of it.
+        series: list[Candle] | None = None
+        if self.bars is not None and (deepest := max((s.lookback for s in due), default=0)):
+            series = await asyncio.to_thread(self.bars, event.symbol, event.resolution, deepest)
+        for s in due:
+            stats = self.stats[s.name]
+            if event.symbol not in prices:
+                self._pause(s, event.symbol, stats)
+                continue
+            if (s.name, event.symbol) in self._paused:
+                self._paused.discard((s.name, event.symbol))
+                log.info("strategy_resumed strategy=%s symbol=%s", s.name, event.symbol)
+            stats.in_flight += 1
+            try:
+                view = await self.outlook(event.symbol) if (s.wants_outlook and self.outlook) else None
+                await self.evaluator.submit(
+                    s, make_job(s, event, prices, self.data_env(), self.options_history, view, series))
+            except Exception as exc:
+                stats.in_flight -= 1
+                stats.errors += 1
+                stats.last_result = f"{event.symbol}: error — {exc}"
+                self.bus.publish(StrategyError(strategy=s.name, symbol=event.symbol, error=f"not dispatched: {exc}"))
 
     def _pause(self, s: Strategy, symbol: str, stats: _Stats) -> None:
         """No live price, no evaluation: a signal could not be traded anyway. Said once per outage,

@@ -325,3 +325,43 @@ async def test_strategy_exception_is_contained(paper):
     assert "bad maths" in errors[0]["error"]
     assert paper.runner.stats["broken"].errors == 1
     assert paper.runner.stats["always_buy"].signals == 1
+
+
+async def test_the_bars_are_read_once_and_shared_by_every_strategy_on_that_close(paper, exchange):
+    """Five strategies on the 15-minute close used to mean ten REST calls for one series the
+    engine already had on disk — one per strategy per symbol, each asking the exchange for bars it
+    had just stored itself. They are read once now and carried in the job, so a Celery worker makes
+    no market request at all."""
+    from tradebuddy.delta import Candle
+
+    reads: list[tuple[str, str, int]] = []
+    stored = [Candle(BAR - i * 60, 1, 2, 0.5, 1.5, 10) for i in range(5)][::-1]
+
+    def spy(symbol: str, interval: str, count: int) -> list[Candle]:
+        reads.append((symbol, interval, count))
+        return stored
+
+    paper.runner.bars = spy
+    rest = []
+    real = paper.runner.evaluator.market.candles
+
+    async def counted(symbol, resolution, count):
+        rest.append(symbol)
+        return await real(symbol, resolution, count)
+
+    paper.runner.evaluator.market.candles = counted
+    await close_bar(paper)
+
+    assert len(reads) == 1, f"the series was read {len(reads)} times for one bar: {reads}"
+    assert rest == [], f"a strategy still went to REST for bars it was handed: {rest}"
+
+
+async def test_an_empty_store_falls_back_to_rest_rather_than_starving_the_strategies(paper, exchange):
+    """A fresh database, a symbol the collector has not reached yet, or a hole. Handing every
+    strategy an empty list would fail them all with "the bar that just closed is not in the history
+    yet" — true, and useless."""
+    exchange.history = bars([1, 2, 3, 4, 5], step=60, start=BAR - 4 * 60)
+    paper.runner.bars = lambda *_a: []
+    NeedsHistory.seen.clear()
+    await close_bar(paper)
+    assert NeedsHistory.seen == [[BAR - 120, BAR - 60, BAR]]
