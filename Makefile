@@ -1,36 +1,31 @@
-.PHONY: help up down logs install test lint fmt check token clean
+.PHONY: help dev install test lint fmt typecheck check clean
 
 help:  ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 
-up:  ## Start everything in the background (same as: docker compose up -d)
-	docker compose up -d
+dev:  ## Backend and dashboard with hot reload
+	./start.sh
 
-down:  ## Stop everything
-	docker compose down
+install:  ## Install backend and frontend dependencies
+	uv venv -p 3.13 .venv
+	uv pip install -p .venv/bin/python -e "backend[dev]"
+	cd frontend && npm install
 
-logs:  ## Follow logs
-	docker compose logs -f --tail=100
+test:  ## Backend tests
+	cd backend && ../.venv/bin/pytest
 
-install:  ## Local dev dependencies (tests, lint)
-	uv sync --extra dev
+lint:  ## Lint backend and frontend
+	.venv/bin/ruff check backend
+	cd frontend && npx eslint src
 
-test:  ## Run the tests
-	uv run pytest
+typecheck:  ## Typecheck the dashboard
+	cd frontend && npx tsc --noEmit
 
-lint:  ## Lint
-	uv run ruff check tradebuddy tests
+fmt:  ## Auto-fix backend lint
+	.venv/bin/ruff check --fix backend
 
-fmt:  ## Auto-fix lint and format
-	uv run ruff check --fix tradebuddy tests
-	uv run ruff format tradebuddy tests
-
-check: lint test  ## Everything CI runs
-
-token:  ## Generate an API_TOKEN for .env
-	@uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
+check: lint typecheck test  ## Everything CI should run
 
 clean:  ## Remove caches
 	find . -type d -name __pycache__ -not -path "./.venv/*" -exec rm -rf {} + 2>/dev/null || true
-	rm -rf .pytest_cache .ruff_cache
+	rm -rf backend/.pytest_cache backend/.ruff_cache frontend/.next
