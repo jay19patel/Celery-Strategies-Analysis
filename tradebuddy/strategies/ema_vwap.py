@@ -22,7 +22,7 @@ On every closed 5-minute bar:
     STOP        the other side of VWAP, plus a buffer. If price closes back through it the cross
                 was noise and the reason for the trade is gone — which is the only thing a stop
                 should ever mean.
-    TARGET      the next level `nearby` names, and it must pay at least `MIN_RR` times the stop.
+    TARGET      the next level `nearby` names, and it must pay at least `MIN_NET_RR` times the stop after costs.
 
 `decide()` is pure — bars and the readings in, a Decision out — so a backtest, a Celery worker and
 the dashboard all get the same answer, and every refusal carries a reason you can read back from
@@ -35,16 +35,16 @@ from dataclasses import dataclass
 from typing import Any
 
 from tradebuddy.delta import Candle
-from tradebuddy.strategies.base import Context, Signal, Strategy
+from tradebuddy.strategies.base import Context, Signal, Strategy, min_stop_pct, net_rr
 from tradebuddy.strategies.indicators import atr, ema
-from tradebuddy.strategies.scalper import MIN_RR, _way, target
+from tradebuddy.strategies.scalper import MIN_NET_RR, MIN_ROOM_ATR, _way, target
 
 DAY = 86_400
 EMA_PERIOD = 9
 LOOKBACK = 300  # 25 hours of 5m bars, so a session VWAP always has its whole day
 MAX_STRETCH_ATR = 1.0  # how far past VWAP price may already be and still be worth entering
 STOP_BUFFER_ATR = 0.25  # beyond VWAP, so the wick that made the cross does not take the trade out
-MIN_STOP_PCT = 0.10
+MIN_STOP_PCT = 0.10  # the floor is the wider of this and three round trips (`min_stop_pct`)
 MAX_STOP_PCT = 0.80
 MIN_SESSION_BARS = 6  # before this the session VWAP is two prints and a rounding error
 
@@ -85,7 +85,7 @@ def session_vwap(candles: list[Candle]) -> list[float | None]:
     return out
 
 
-def decide(candles: list[Candle], view: dict[str, Any], structure: dict[str, Any] | None = None) -> Decision:
+def decide(candles: list[Candle], view: dict[str, Any], structure: dict[str, Any] | None = None, cost_pct: float = 0.0) -> Decision:
     """Pure. The whole rule, so a backtest runs exactly what trades."""
     structure = structure or {}
     if len(candles) < EMA_PERIOD + 2:
@@ -126,8 +126,9 @@ def decide(candles: list[Candle], view: dict[str, Any], structure: dict[str, Any
     buffer_ = STOP_BUFFER_ATR * atr_now
     stop_at = (now_vwap - buffer_) if side > 0 else (now_vwap + buffer_)
     stop_pct = 100 * abs(price - stop_at) / price
-    if stop_pct < MIN_STOP_PCT:
-        return Decision(None, f"VWAP is only {stop_pct:.2f}% away — inside the spread and the fees")
+    floor = min_stop_pct(cost_pct, MIN_STOP_PCT)
+    if stop_pct < floor:
+        return Decision(None, f"VWAP is only {stop_pct:.2f}% away, inside the {floor:.2f}% the spread and the fees need")
     if stop_pct > MAX_STOP_PCT:
         return Decision(None, f"VWAP is {stop_pct:.2f}% away, wider than the {MAX_STOP_PCT:g}% this calls a scalp")
 
@@ -135,15 +136,21 @@ def decide(candles: list[Candle], view: dict[str, Any], structure: dict[str, Any
     if level is None:
         return Decision(None, "no level above to aim at" if side > 0 else "no level below to aim at")
     target_pct = 100 * abs(level - price) / price
-    rr = target_pct / stop_pct
-    if rr < MIN_RR:
-        return Decision(None, f"{what} is only {rr:.2f}:1 against a {stop_pct:.2f}% stop — under {MIN_RR:g}:1 it cannot pay for its costs")
+    # The room check `scalper` has had all along. This module imported its RR constant and not its
+    # floors, which left the faster of the two strategies the looser one: no minimum distance to
+    # the target at all, so a level a tenth of an ATR away was a tradeable target here and not there.
+    atr_pct = 100 * atr_now / price
+    if target_pct < MIN_ROOM_ATR * atr_pct:
+        return Decision(None, f"the next level is {target_pct:.2f}% away, inside the {MIN_ROOM_ATR:g} ATR ({atr_pct:.2f}%) this wants")
+    rr = net_rr(target_pct, stop_pct, cost_pct)
+    if rr < MIN_NET_RR:
+        return Decision(None, f"{what} is only {rr:.2f}:1 after costs against a {stop_pct:.2f}% stop — under {MIN_NET_RR:g}:1 it cannot pay for its costs")
 
     return Decision(
         side="buy" if side > 0 else "sell",
         reason=(f"9 EMA crossed {'above' if up else 'below'} session VWAP ({now_vwap:,.0f}) on this bar, "
                 f"price {stretch:.1f} ATR from it; stop the other side of VWAP ({stop_pct:.2f}%), "
-                f"target {what} at {rr:.1f}:1"),
+                f"target {what} at {rr:.1f}:1 after costs"),
         stop_loss_pct=round(stop_pct, 3),
         take_profit_pct=round(target_pct, 3),
     )
@@ -158,7 +165,12 @@ class EmaVwapCross(Strategy):
     is_default_sl_tp = False  # the stop is the other side of VWAP, not a percentage
     wants_outlook = True      # for the 15m read the cross has to agree with
     wants_structure = True    # for the level it aims at
-    default_on = False        # it trades every five minutes; switch it on deliberately
+    # On by default. Same reasoning as `scalper`: the reason to hold a 5-minute strategy back was
+    # that it would out-race the slower ones to the single slot per symbol, and ranking the signals
+    # removed the race. Measured over 1,000 stored 5m bars it produced no signal at all — a fresh
+    # EMA/VWAP cross that is not a chase, agrees with the 15m read and clears the cost floor is
+    # genuinely rare, which is an argument for leaving it on, not off.
+    default_on = True
 
     async def on_candle(self, ctx: Context) -> Signal | None:
-        return decide(ctx.candles, ctx.outlook or {}, ctx.structure or {}).to_signal()
+        return decide(ctx.candles, ctx.outlook or {}, ctx.structure or {}, ctx.round_trip).to_signal()

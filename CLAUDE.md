@@ -50,7 +50,14 @@ analyst every 5 min: candles+OI+funding ─► insights ─► PUSH MarketAnalys
 - `delta.py` — the only code that talks to Delta REST.
 - `stream.py` — the only code that talks to the Delta WebSocket.
 - `trading.py` — the only code that decides to trade (`Trader`, signals and manual
-  orders alike) and sends orders (`Executor`). Dashboard actions name one broker;
+  orders alike) and sends orders (`Executor`). There is one position per symbol, so every strategy
+  is competing for one slot; `Trader._settle` holds a symbol's signals for `signal_settle_seconds`
+  and sends the best **reward-to-risk after costs**, refusing the rest by name. It used to be
+  first-come, which is a race and a biased one — a strategy on a 5m bar gets three times the
+  chances of one on a 15m bar, so the FASTEST strategy took the slot whatever its trade looked
+  like, and on the deployed system one strategy that fired on every bar took 78% of all signals
+  that way. That race is why the 5m strategies shipped switched off; fixing it is what let them be
+  switched on, and **every strategy now arrives `default_on = True`**. 0 restores first-come. Dashboard actions name one broker;
   nothing acts on "all brokers" except the kill switch. It also decides how far the
   stop sits and how big the position is: `Trader.levels` (the strategy's own levels,
   else `atr_stop_mult` x the ATR the analyst measured, else Settings' percentages),
@@ -60,9 +67,29 @@ analyst every 5 min: candles+OI+funding ─► insights ─► PUSH MarketAnalys
   closed trades have lost `strategy_loss_limit_pct` of the day's starting equity on a broker
   opens nothing more there until tomorrow, while the others carry on).
 - `guard.py` — `PositionGuard`, an engine loop over every active broker: the broker-wide daily loss
-  limit (closes that broker's positions, blocks its entries until the next day) and
-  auto trailing (per-position switch and max trails in `position_controls`). It moves
-  SL/TP only through `Broker.update_protection`, under `System.protection_lock`.
+  limit (closes that broker's positions, blocks its entries until the next day),
+  auto trailing (per-position switch and max trails in `position_controls`), and the early
+  exits. It moves SL/TP only through `Broker.update_protection`, under `System.protection_lock`.
+  The exit is asked BEFORE the trail: a stop moved on a position about to close is a protection
+  change nobody acts on, logged immediately before the exit that overrode it.
+- `exits.py` — whether an open position is still worth holding, and the one module here whose
+  main finding is that it cannot do what people expect. Price a live bracketed position and
+  `EV(hold)` equals `EV(close now)` to the cent — the martingale property — and counting the
+  stored bars says the walk really is driftless: over 35,488 15m bars price was higher an hour
+  later 50.1% of the time, four hours later 50.2%, a day later 50.4%. So the probability
+  arithmetic can never on its own say "close"; it is fair by construction. What it CAN do is
+  price the decision honestly, which is worth having alone: a stop 0.42% away against a target
+  1.21% away looks like 1:2.9 and is a **74.3% chance of being stopped first**
+  (`outlook.p_stop_first` is target/(stop+target) — volatility cancels). An exit therefore has to
+  earn its reason where the coin cannot reach, and there are four such places, strongest first:
+  **INVALIDATED** (the permission the entry needed is gone — structural, no sample size),
+  **STALLED** (most of the risk spent and none of the ground made, measured as a share of the
+  position's OWN stop and target so it is scale-free), **TIMEOUT** (`p_neither`, which only bites
+  once the horizon is short enough to bind — at a 72h max hold a 15m position times out 0.0% of
+  the time, at 4h 11.8%) and **CARRY** (funding, already collected on every stored bar; a short
+  being paid to hold is never closed for it). Pure, like `structure.py` and `outlook.py`, so the
+  guard, a backtest and the dashboard get one answer. Off until `early_exit_enabled`, but the
+  odds are read and shown on every pass whether or not anything is armed to act.
 - `settings.py` — validation for every runtime setting; `System._apply` applies them.
 - `strategies/` — signal logic only, and only structure-based: **`scalper`, `tb_master`,
   `trade_buddy_manager`**. The indicator strategies (two EMA crossovers, two mother-candle
@@ -72,6 +99,19 @@ analyst every 5 min: candles+OI+funding ─► insights ─► PUSH MarketAnalys
   them: this is a directional system now. `tb_master.py` is the all-in-one: 1d bias, 1h breakout (swing) or 15m
   squeeze (scalp), confirmed by rising open interest, options walls cap the target; its `decide()` is pure so
   the backtest runs the code that trades.
+- `pulse.py` — "is anything happening right now", and the one module whose design is mostly about
+  what it refuses to say. Three questions: what the bar that just closed DID (volume against the
+  96-bar normal, range in ATRs, body share, volatility ratio, squeeze, a close through a prior
+  swing) is measured; how FAR price could travel is `outlook.p_touch` and `expected_abs_move`,
+  real arithmetic because volatility is persistent; and WHICH WAY is COUNTED — of the bars that
+  looked like this one, how many resolved up, against the share of ALL bars that did, with both
+  samples. Under `outlook.MIN_SAMPLE` no percentage at all, and none either when the bar is not
+  unusual (`worth_counting`): "at least as busy and as wide as this one" matches most of the
+  history on an ordinary bar and hands back the baseline wearing a conditional's clothes. The
+  asymmetry is the feature — a big move is detectable, its size estimable, its direction usually
+  not, and the card renders those three with deliberately unequal confidence. Cached per bar like
+  `outlook`; it reads the full stored series because on a genuinely loud bar a few thousand bars
+  give 65 matches where a year gives 1,200.
 - `options.py` — the options book and its arithmetic (ATM IV, skew, put/call, max pain, walls).
 - `email_report.py` — `DailyReporter`, an engine job: the day's report by email once at `email_report_hour`.
 - `insights.py` (rules over measured numbers) and `analyst.py` (runs them every 5 minutes, one
@@ -182,6 +222,11 @@ Enforced by tests. Breaking one should fail the build.
    one whose stop costs `risk_per_trade_pct` of equity, so a wider stop buys a smaller
    position, never a bigger loss. An exit trigger reads what closing would actually
    book, net of the spread and every fee, so a "take profit" can never record a loss.
+7c. **An exit that overrides a stop owes its reason and its odds.** Every early close is a
+   `PositionExitEarly` naming which of `exits.py`'s four rules fired and keeping the pricing it
+   fired on, so the decision can be rechecked against the bars rather than taken on trust. A rule
+   that cannot see what it needs abstains: without the excursions (Delta does not record them)
+   STALLED says so instead of guessing, and without a measured volatility nothing is priced at all.
 8. **Absence over staleness.** A WebSocket price older than 30s is no price.
 9. **Secrets stay in the process.** No endpoint returns an API key or secret;
    `Settings.public()` masks them and `SettingsChanged` carries field names only.
@@ -196,7 +241,8 @@ Enforced by tests. Breaking one should fail the build.
     thing that can tell whether the PIN is still the published default — once changed from the
     dashboard it is a hash in the database and the environment goes on saying 242425 forever.
 10. Every refusal to trade is a `TradeSkipped` event with its reason, including a
-    broker halted by its daily loss limit and a strategy halted by its own.
+    broker halted by its daily loss limit and a strategy halted by its own. Its mirror is
+    invariant 7c: every early exit carries its reason too.
 11. **Late is stale.** A strategy result that finishes more than a bar after
     its bar closed is dropped; Celery tasks expire after one bar.
 12. **ZeroMQ is not durable.** Nothing that must survive a restart travels
@@ -243,6 +289,14 @@ directional view and market-structure read through `ctx` — the same readings t
 so a strategy and the page can never disagree about where price reacts. Both arrive WITH the job,
 like the bars: a worker has no database. Keep `name` stable, bump `version` when logic
 changes. Strategies return a `Signal` or `None`; they never place orders.
+`ctx.round_trip` is what one round trip costs on the broker the signal would reach, sent with the
+job like the bars and the outlook. Gate on `base.net_rr` (reward and risk BOTH moved by the cost),
+never on `target/stop`: at a 0.14% round trip a 0.12% stop against a 0.12% target reads 1.0 gross
+and is negative net. Floors come from `base.min_stop_pct`, so a stop minimum tracks the fee instead
+of being a number that was right when it was typed. There used to be three definitions of this one
+figure — a constant in `tb_master`, `Broker.round_trip_cost_pct` for `Trader.edge_error`, and the
+Settings fee — and changing the fee moved two of them.
+
 `is_default_sl_tp = True` (default) leaves the levels to the Trader: the ATR when the analyst has
 measured one, otherwise Settings' percentages. `False` means every Signal carries both
 `stop_loss_pct` and `take_profit_pct` (within Settings' ranges), or the result is an error and
@@ -275,6 +329,12 @@ A template extending `base.html`, an entry in `PAGES` in `app.py`, and JSON
 routes that call `System`. State-changing routes take `Depends(protected)`; every route, read
 included, is already behind the PIN by the middleware (invariant 9b), so a new read needs nothing
 added to stay private. Live updates come from `TB.on(eventType, fn)`.
+
+The Market page opens with **Right now** (`pulse.py`): one state word, the numbers that earned it,
+how far price could travel, and what followed bars like this one. It sits above everything because
+it is the question asked before any of the others, and the only thing that answered it before was
+one line inside a findings list sorted by severity. Its three panels are deliberately unequal —
+measured, arithmetic, counted — and the counted one shows a bar against its baseline or nothing.
 
 Every number belongs to one page. `/` is Market Data: the market, its options and what the rules
 read in them. Balances and the paper record are on Account, open positions on Positions, the event
@@ -377,3 +437,60 @@ exchange) so they need neither Docker nor Redis.
 - Never return a credential from an endpoint.
 - Add a dependency only with a runtime owner.
 - Every behaviour change ships with a test. Say so when behaviour changes.
+
+## Working Rules
+
+These bias toward caution over speed. For a trivial task, use judgement.
+
+### Think before coding
+
+Don't assume, don't hide confusion, surface tradeoffs.
+
+- State assumptions explicitly; if uncertain, ask.
+- If a request has more than one reading, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop, name what is confusing, and ask.
+
+### Simplicity first
+
+The minimum code that solves the problem, nothing speculative.
+
+- No features beyond what was asked.
+- No abstraction for single-use code.
+- No flexibility or configurability nobody requested.
+- No error handling for impossible cases.
+- If it is 200 lines and could be 50, rewrite it.
+
+The test: would a senior engineer call this overcomplicated? If yes, simplify.
+
+### Surgical changes
+
+Touch only what you must; clean up only your own mess.
+
+- Don't "improve" adjacent code, comments or formatting.
+- Don't refactor what isn't broken.
+- Match the surrounding style, even where you would do it differently.
+- Unrelated dead code gets mentioned, not deleted.
+- Remove the imports, variables and functions YOUR change orphaned — and only those.
+
+The test: every changed line traces directly to the request.
+
+### Goal-driven execution
+
+Define success, then loop until it is verified.
+
+- "Add validation" → write tests for invalid input, then make them pass.
+- "Fix the bug" → write a test that reproduces it, then make it pass.
+- "Refactor X" → tests pass before and after.
+
+For multi-step work, state the plan as steps with their checks:
+
+```
+1. [step] → verify: [check]
+2. [step] → verify: [check]
+```
+
+Strong criteria let the work run independently; "make it work" needs constant
+clarification. These rules are working if diffs carry fewer unnecessary changes,
+fewer rewrites follow from overcomplication, and the clarifying question comes
+before the implementation rather than after the mistake.

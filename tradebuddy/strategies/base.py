@@ -40,6 +40,36 @@ class Market(Protocol):
         ...
 
 
+def net_rr(target_pct: float, stop_pct: float, cost_pct: float) -> float:
+    """Reward over risk AFTER the round trip — the only ratio that decides anything.
+
+    The gross ratio flatters every short trade and flatters a scalp most of all: at a 0.14% round
+    trip, a 0.12% stop against a 0.12% target is 1.0 gross and negative net. Both legs move, and
+    they move apart — the cost comes off the reward AND goes on to the risk, because that is what
+    the account does.
+
+    A zero cost gives the gross ratio back, so a caller with no cost sent is no worse off than
+    before. Returns 0.0 when the risk is zero or the reward cannot cover the trip.
+    """
+    if stop_pct <= 0:
+        return 0.0
+    cost = max(0.0, cost_pct)
+    reward = target_pct - cost
+    risk = stop_pct + cost
+    return max(0.0, reward / risk) if risk > 0 else 0.0
+
+
+def min_stop_pct(cost_pct: float, floor: float, multiple: float = 3.0) -> float:
+    """The closest a stop may sit: whichever is wider, the strategy's own floor or `multiple`
+    round trips.
+
+    A stop inside the costs is not a stop, it is a guaranteed fee. Deriving the floor from the
+    cost rather than hard-coding it is what stops a strategy keeping a 0.10% minimum after
+    someone doubles the fee on the Settings page.
+    """
+    return max(floor, multiple * max(0.0, cost_pct))
+
+
 @dataclass(frozen=True)
 class Context:
     symbol: str
@@ -57,6 +87,20 @@ class Context:
     # `wants_structure`. This is what makes a stop go under the swing that actually held rather
     # than a fixed percentage, and a target sit at the level price is really heading for.
     structure: dict[str, Any] = field(default_factory=dict)
+    # What one round trip costs on the broker this signal would reach, as a % of the notional:
+    # the fee and the slippage, both ways (`Broker.round_trip_cost_pct`). 0.0 when the engine did
+    # not send it, which makes `net_rr` fall back to the gross ratio.
+    #
+    # It arrives with the job because the cost belongs to the broker and the Settings, and a
+    # strategy that keeps its own copy is a strategy that goes on using last month's fee. It used
+    # to be a constant in `tb_master` and two unused floors in `scalper` and `ema_vwap`, which is
+    # three definitions of one number and no way to tell which one was live.
+    cost_pct: float = 0.0
+
+    @property
+    def round_trip(self) -> float:
+        """The round trip, floored at zero — a negative fee is a misconfiguration, not a rebate."""
+        return max(0.0, self.cost_pct)
 
 
 class Strategy(ABC):

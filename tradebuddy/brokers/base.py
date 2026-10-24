@@ -21,6 +21,12 @@ class Position:
     take_profit: float | None = None
     opened_at: float | None = None
     strategy: str | None = None
+    # The worst and best this position has been, as a % of the entry price. A broker that does not
+    # record them leaves them None and the exit rules that need them abstain rather than guess
+    # (invariant 8: absence over staleness) — they are not reconstructable from a snapshot, because
+    # a position sitting at breakeven looks identical whether it got there from above or below.
+    mae_pct: float | None = None
+    mfe_pct: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

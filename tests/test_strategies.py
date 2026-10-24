@@ -1,6 +1,6 @@
 
 from tradebuddy.delta import Candle
-from tradebuddy.settings import RANGES
+from tradebuddy.settings import RANGES, Settings
 from tradebuddy.strategies import Context, discover
 from tradebuddy.strategies.indicators import atr, ema, rsi, supertrend
 from tradebuddy.strategies.levels import from_stop
@@ -70,23 +70,20 @@ def test_from_stop_keeps_the_stop_outside_the_noise_and_inside_the_ranges():
     assert sl == RANGES["stop_loss_pct"][1] and tp == RANGES["take_profit_pct"][1]
 
 
-def test_the_fast_strategies_arrive_switched_off():
-    """A toggle row that does not exist means "nobody has been asked", and `enabled()` reads that
-    as yes. So a strategy shipped in a release starts trading on deploy — fine for one that takes a
-    position every few days, wrong for one that fires every five minutes against a much looser
-    margin cap. Anything new that trades hard should land here, not in a release note."""
-    off = {s.name for s in discover() if not s.default_on}
-    assert off == {"scalper", "ema_vwap_5m"}
-    # The rule behind the list: anything on a 5-minute bar waits to be switched on.
-    assert off == {s.name for s in discover() if s.interval == "5m"}
+def test_every_strategy_arrives_switched_on():
+    """The 5-minute strategies used to ship off, because one position per symbol plus first-come
+    routing meant the fastest strategy took the slot whatever the trade looked like — a 5m
+    strategy gets three times the chances of a 15m one.
+
+    That was a routing defect, not a verdict on the strategies, and it is fixed where it was:
+    `Trader._settle` ranks the competing signals on reward-to-risk after costs. Being fast no
+    longer wins, so there is nothing left for `default_on = False` to protect."""
+    assert [s.name for s in discover() if not s.default_on] == []
 
 
-def test_a_strategy_that_asks_for_a_looser_cap_is_off_by_default():
-    """The two go together: the reason the cap is loose is the reason it should not start by
-    itself."""
-    for s in discover():
-        if getattr(s, "margin_pct", None):
-            assert not s.default_on, f"{s.name} sizes against its own cap and starts switched on"
+def test_being_fast_does_not_win_the_slot():
+    """The guarantee the old default protected, asserted where it now lives."""
+    assert Settings().signal_settle_seconds > 0, "signals are routed first-come again"
 
 
 async def test_the_system_builds_the_way_the_containers_build_it(cfg, exchange):

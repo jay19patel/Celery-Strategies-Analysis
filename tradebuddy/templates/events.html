@@ -26,7 +26,7 @@
   const { $, esc, time, dateTime, eventBadge } = TB;
   const MAX = 500, SHOWN = 300;  // events held / lines drawn: the page stays fast after a day open
   const RANK = { info: 0, warning: 1, error: 2 };
-  const LEVEL_OF = { error: ["StrategyError", "OrderFailed", "GuardAlert", "DailyLossHalt"], warning: ["TradeSkipped", "OrderUnknown"] };
+  const LEVEL_OF = { error: ["StrategyError", "OrderFailed", "GuardAlert", "DailyLossHalt"], warning: ["TradeSkipped", "OrderUnknown", "PositionExitEarly"] };
   const HIDE = new Set(["ts", "type", "level"]);
   let events = [], paused = false, queued = 0, frame = 0;
 

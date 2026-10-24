@@ -30,7 +30,7 @@ STREAM_FIELDS = ("paper_active", "market_data", *DELTA_ROUTING_FIELDS)
 
 BOOL_FIELDS = (
     "paper_active", "delta_active", "trailing_enabled", "email_enabled",
-    "atr_protection", "ai_enabled",
+    "atr_protection", "ai_enabled", "early_exit_enabled",
 )
 TEXT_FIELDS = ("email_to", "email_smtp_host", "email_smtp_user")
 CHOICES = {
@@ -56,6 +56,13 @@ RANGES = {
     "trailing_max_steps": (0, 50),
     "daily_loss_limit_pct": (0.0, 100.0),
     "strategy_loss_limit_pct": (0.0, 100.0),
+    "exit_horizon_hours": (0.25, 168.0),
+    "exit_stalled_adverse": (0.1, 1.0),
+    "exit_stalled_progress": (0.0, 0.9),
+    "exit_stalled_min_hours": (0.0, 48.0),
+    "exit_timeout_min_resolve": (0.0, 0.9),
+    "exit_carry_max_share": (0.0, 5.0),
+    "signal_settle_seconds": (0.0, 30.0),
     "email_smtp_port": (1, 65535),
     "email_report_hour": (0, 23),
     "ai_interval_minutes": (5, 120),
@@ -120,13 +127,39 @@ class Settings:
     # already spent the day's budget; this stops it at its own share. 0 = off.
     strategy_loss_limit_pct: float = 2.0
     day_timezone: str = "Asia/Kolkata"  # when the trading day starts
-    # cannot move it either way, which is the same as not trading.
+
+    # Leaving a trade before its stop (`exits.py`). The stop and the target are the only ways out
+    # the Trader sets, and both wait for price to come to them; these are the ways out that read
+    # what the position has actually done. Off by default — it overrides the protection the entry
+    # was placed with, so it is switched on deliberately (invariant 1: fail closed).
+    early_exit_enabled: bool = False
+    # How long a position is given to resolve. This is the number that decides whether the time
+    # rule means anything at all: at the 72h max hold a 15m position has a 0.0% chance of timing
+    # out, so the barrier never binds. At 8h it starts to, at 4h it bites.
+    exit_horizon_hours: float = 8.0
+    # STALLED fires only when BOTH are true, each as a share of this position's own stop and
+    # target distances — scale-free, so the rule means the same thing on a 0.2% scalp stop and a
+    # 4% swing stop. Not fitted: the stored sample is 28 trades and sweeping it put the optimum
+    # exactly at the worst winner's excursion, which is what overfitting looks like.
+    exit_stalled_adverse: float = 0.75  # this share of the stop already spent
+    exit_stalled_progress: float = 0.25  # and at most this share of the target ever made
+    exit_stalled_min_hours: float = 1.0  # and not before this: a position needs room to breathe
+    # TIMEOUT: close when the chance of either level resolving before the horizon falls below this.
+    exit_timeout_min_resolve: float = 0.20
+    # CARRY: close when funding over the remaining horizon eats this share of what is left to win.
+    exit_carry_max_share: float = 0.50
+
+    # One position per symbol means every strategy is competing for one slot, and the winner used
+    # to be whichever published first — which rewards the strategy on the fastest bar, not the one
+    # with the best trade. Signals on a symbol are held this long, then the best reward-to-risk
+    # after costs is the one that is sent and the rest are refused by name. 0 restores first-come.
+    signal_settle_seconds: float = 1.0
 
     # The written market summary (TB-AI). Off by default, and it stays off without MISTRAL_API_KEY
     # in the environment — this is the only feature that sends anything off the machine, so it is
     # switched on deliberately or not at all.
     ai_enabled: bool = False
-    ai_model: str = "mistral-small-latest"
+    ai_model: str = "ministral-3b-2512"
     ai_interval_minutes: int = 15  # 5 is the floor; every run is a request someone pays for
 
     # Daily email report: the engine sends the day's story once a day at email_report_hour (day_timezone).

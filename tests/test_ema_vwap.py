@@ -132,7 +132,14 @@ def test_the_stop_is_the_other_side_of_vwap():
 def test_a_trade_that_cannot_pay_for_its_costs_is_refused():
     out = decide(crossing_up(), view(), structure(above=100.3))
     assert out.side is None
-    assert "cannot pay for its costs" in out.reason or "inside the spread" in out.reason
+    assert any(w in out.reason for w in ("cannot pay for its costs", "the spread and the fees need", "this wants"))
+
+
+def test_a_target_inside_one_atr_is_refused_here_too():
+    """`scalper` has always had this floor; this module imported its RR constant and not its
+    floors, which left the faster strategy the looser one."""
+    out = decide(crossing_up(), view(), structure(above=100.3))
+    assert out.side is None and "this wants" in out.reason
 
 
 def test_no_level_to_aim_at_is_a_refusal_not_a_guess():
@@ -157,8 +164,10 @@ def test_it_is_pure():
     assert decide(c, v, s) == decide(c, v, s)
 
 
-def test_it_reads_the_engines_own_readings_and_waits_to_be_switched_on():
+def test_it_reads_the_engines_own_readings_and_ships_switched_on():
     assert EmaVwapCross.wants_outlook and EmaVwapCross.wants_structure
     assert EmaVwapCross.is_default_sl_tp is False
     assert EmaVwapCross.interval == "5m"
-    assert EmaVwapCross.default_on is False
+    # It used to ship off so it could not out-race the 15m strategies to the one slot per symbol.
+    # `Trader._settle` ranks competing signals now, so speed no longer wins and it runs by default.
+    assert EmaVwapCross.default_on is True

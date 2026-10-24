@@ -261,6 +261,30 @@ class ProtectionTrailed(Event):
 
 
 @dataclass(frozen=True, kw_only=True)
+class PositionExitEarly(Event):
+    """The guard closed a position before either barrier was touched, and why.
+
+    Invariant 10 says every refusal to trade carries its reason. An exit that overrides the stop
+    the entry was protected with owes the same: `rule` names which of `exits.py`'s four fired and
+    `pricing` keeps the odds it fired on, so the decision can be rechecked against the bars later
+    rather than taken on trust.
+    """
+
+    LEVEL: ClassVar[str] = "warning"
+    broker: str
+    strategy: str
+    symbol: str
+    side: str
+    rule: str  # exits.INVALIDATED | STALLED | TIMEOUT | CARRY
+    reason: str
+    price: float
+    stop_loss: float | None
+    take_profit: float | None
+    held_hours: float
+    pricing: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, kw_only=True)
 class DailyLossHalt(Event):
     """A broker lost its daily limit: its positions are closed and it opens nothing more today."""
 

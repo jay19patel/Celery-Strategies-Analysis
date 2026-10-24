@@ -78,6 +78,7 @@ def make_job(
     outlook: dict[str, Any] | None = None,
     candles: list[Candle] | None = None,
     structure: dict[str, Any] | None = None,
+    cost_pct: float = 0.0,
 ) -> dict[str, Any]:
     """Everything a worker needs, as plain JSON, including the bars.
 
@@ -95,6 +96,11 @@ def make_job(
         "candle": asdict(event.candle) if event.candle else None,
         "data_env": data_env,
         "prices": prices,
+        # What a round trip costs on the broker this signal would be sent to, as a % of notional.
+        # Sent with the job for the same reason the bars and the outlook are: a worker has no
+        # Settings and no broker, and a strategy that hard-codes a fee goes on using it after
+        # someone changes the fee on the Settings page.
+        "cost_pct": cost_pct,
         "dispatched_at": time.time(),
     }
     if strategy.options_history_hours and options_history is not None:
@@ -145,7 +151,8 @@ async def evaluate(strategy: Strategy, job: dict[str, Any], market: Any, worker:
             return result(error="the bar that just closed is not in the history yet")
 
     try:
-        ctx = Context(symbol, resolution, bar_time, candles, market, job.get("outlook") or {}, job.get("structure") or {})
+        ctx = Context(symbol, resolution, bar_time, candles, market, job.get("outlook") or {},
+                      job.get("structure") or {}, float(job.get("cost_pct") or 0.0))
         signal = await asyncio.wait_for(strategy.on_candle(ctx), timeout)
     except Exception as exc:
         return result(error=repr(exc))
@@ -228,6 +235,7 @@ class StrategyRunner:
         outlook: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
         structure: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
         bars: Callable[[str, str, int], list[Candle]] | None = None,
+        cost_pct: Callable[[], float] | None = None,
     ) -> None:
         self.bus = bus
         self.store = store
@@ -242,6 +250,9 @@ class StrategyRunner:
         # (symbol, interval, count) -> stored bars. Read once per symbol per close and shared by
         # every strategy on that bar: they all want the same series, only different depths of it.
         self.bars = bars
+        # What one round trip costs, for the job. A callable rather than a number: the fee is a
+        # runtime setting and the runner is built once.
+        self.cost_pct = cost_pct
         self.stats: dict[str, _Stats] = {s.name: _Stats() for s in strategies}
         self._paused: set[tuple[str, str]] = set()  # (strategy, symbol) waiting for prices to return
 
@@ -273,7 +284,8 @@ class StrategyRunner:
                 view = await self.outlook(event.symbol) if (s.wants_outlook and self.outlook) else None
                 shape = await self.structure(event.symbol) if (s.wants_structure and self.structure) else None
                 await self.evaluator.submit(
-                    s, make_job(s, event, prices, self.data_env(), self.options_history, view, series, shape))
+                    s, make_job(s, event, prices, self.data_env(), self.options_history, view, series, shape,
+                                self.cost_pct() if self.cost_pct else 0.0))
             except Exception as exc:
                 stats.in_flight -= 1
                 stats.errors += 1

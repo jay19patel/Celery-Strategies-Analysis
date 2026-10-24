@@ -40,13 +40,17 @@ from __future__ import annotations
 import asyncio
 import bisect
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar
 
 from tradebuddy.delta import RESOLUTION_SECONDS, Candle
-from tradebuddy.strategies.base import Context, Signal, Strategy
+from tradebuddy.strategies.base import Context, Signal, Strategy, net_rr
 
-COST_PCT = 0.07  # per side, % of price: 0.05% taker fee + 0.02% slippage
+# The round trip the backtest below was measured at, kept ONLY as the fallback for a caller that
+# sends no cost. The live number comes from the broker through `ctx.round_trip` and overrides it:
+# this used to be the one definition the strategy carried for itself, so changing the fee on the
+# Settings page moved `Trader.edge_error` and left this gate reading last month's number.
+DEFAULT_ROUND_TRIP_PCT = 0.14  # 0.05% taker fee + 0.02% slippage, both ways
 
 # Backtest, Aug 2025 - Oct 2026, Delta India, costs included, one position per symbol, 72h max hold.
 # Filled from the research run; "out" is the last 30%, never used to choose a parameter.
@@ -204,6 +208,8 @@ class Params:
     min_stop_pct: float = 0.20
     max_stop_pct: float = 4.0
     min_net_rr: float = 1.4  # reward/risk after costs
+    # What a round trip costs, as a % of notional. Overridden per evaluation from the broker.
+    round_trip_pct: float = DEFAULT_ROUND_TRIP_PCT
     wall_buffer_atr: float = 0.25  # stop short of an options wall by this much 15m ATR
     trend_adx: float = 20.0  # for the regime label only
     range_adx: float = 18.0
@@ -246,10 +252,10 @@ class Plan:
     def target_pct(self) -> float:
         return abs(self.target - self.entry) / self.entry * 100
 
-    @property
-    def net_rr(self) -> float:
-        cost = 2 * COST_PCT
-        return (self.target_pct - cost) / (self.stop_pct + cost)
+    def net_rr(self, cost_pct: float = DEFAULT_ROUND_TRIP_PCT) -> float:
+        """Reward over risk after the round trip. A method, not a property: the cost is a runtime
+        number now, and a property would have to close over one."""
+        return net_rr(self.target_pct, self.stop_pct, cost_pct)
 
 
 def bias(f: Frame, i: int) -> int:
@@ -376,9 +382,10 @@ def decide(m: Market, p: Params = Params()) -> tuple[Plan | None, str]:
         return None, f"{label}: an options wall leaves no room to the target ({opts})"
     if not p.min_stop_pct <= plan.stop_pct <= p.max_stop_pct:
         return None, f"{plan.mode}: stop {plan.stop_pct:.2f}% outside {p.min_stop_pct}-{p.max_stop_pct}%"
-    if plan.net_rr < p.min_net_rr:
-        return None, f"{plan.mode}: reward/risk after costs {plan.net_rr:.2f} < {p.min_net_rr}"
-    tail = [f"SL {plan.stop_pct:.2f}%, TP {plan.target_pct:.2f}%, R {plan.net_rr:.2f} after costs"]
+    rr = plan.net_rr(p.round_trip_pct)
+    if rr < p.min_net_rr:
+        return None, f"{plan.mode}: reward/risk after costs {rr:.2f} < {p.min_net_rr}"
+    tail = [f"SL {plan.stop_pct:.2f}%, TP {plan.target_pct:.2f}%, R {rr:.2f} after a {p.round_trip_pct:.2f}% round trip"]
     if m.funding is not None:
         tail.append(f"funding {m.funding:.4f}%")
     if opts:
@@ -442,7 +449,8 @@ class TbMaster(Strategy):
             return None
         oi_vals = [c.close for c in (oi or []) if c.time <= ctx.bar_time]
         fund = [c.close for c in (funding or []) if c.time <= ctx.bar_time]
-        plan, why = decide(Market(f15, len(f15) - 1, fh, j, fd, k, oi_vals, fund[-1] if fund else None, opts), self.params)
+        params = replace(self.params, round_trip_pct=ctx.round_trip) if ctx.round_trip > 0 else self.params
+        plan, why = decide(Market(f15, len(f15) - 1, fh, j, fd, k, oi_vals, fund[-1] if fund else None, opts), params)
         if plan is None:
             return None
         return Signal(plan.side, why, stop_loss_pct=round(plan.stop_pct, 3), take_profit_pct=round(plan.target_pct, 3))

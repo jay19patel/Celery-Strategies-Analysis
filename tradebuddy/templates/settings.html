@@ -82,7 +82,7 @@
       </div>
       <div class="card-body space-y-4">
         <div class="grid grid-cols-2 gap-3">
-          <div><label class="field-label" for="ai_model">Model</label><input id="ai_model" type="text" class="input w-full mt-1 font-mono"><div class="field-help">A Mistral model id, e.g. mistral-small-latest.</div></div>
+          <div><label class="field-label" for="ai_model">Model</label><input id="ai_model" type="text" class="input w-full mt-1 font-mono"><div class="field-help">A Mistral model id, e.g. ministral-3b-2512.</div></div>
           <div><label class="field-label" for="ai_interval_minutes">Every (minutes)</label><input id="ai_interval_minutes" type="number" min="5" max="120" step="1" class="input w-full mt-1 font-mono"><div class="field-help">5 is the floor. Each run is a paid request per symbol.</div></div>
         </div>
         <div class="field-help"><b class="text-amber-700">This is the only feature that sends anything off this machine.</b>
@@ -202,10 +202,30 @@
           <div><label class="field-label" for="daily_loss_limit_pct">Max loss per day %</label><input id="daily_loss_limit_pct" name="daily_loss_limit_pct" type="number" step="0.5" class="input w-full mt-1 font-mono"><div class="field-help">Of equity at the start of the day. 0 = off.</div></div>
           <div><label class="field-label" for="day_timezone">Trading day starts</label>
             <select id="day_timezone" name="day_timezone" class="select w-full mt-1"><option value="Asia/Kolkata">00:00 IST (Asia/Kolkata)</option><option value="UTC">00:00 UTC</option></select></div>
+          <div class="col-span-2"><label class="field-label" for="signal_settle_seconds">Compare competing signals for</label><input id="signal_settle_seconds" name="signal_settle_seconds" type="number" step="0.25" class="input w-full mt-1 font-mono"><div class="field-help">Seconds. There is one position per symbol, so every strategy is competing for one slot. Signals on a symbol are held this long and the best <b>reward-to-risk after costs</b> is the one sent; the rest are refused by name. <b>0 goes back to first-come</b>, which rewards whichever strategy runs on the fastest bar rather than the one with the better trade.</div></div>
           <div class="col-span-2"><label class="field-label" for="strategy_loss_limit_pct">Max loss per day per strategy %</label><input id="strategy_loss_limit_pct" name="strategy_loss_limit_pct" type="number" step="0.5" class="input w-full mt-1 font-mono"><div class="field-help">Of the same start-of-day equity, counted per strategy. One strategy that keeps stopping out is stood down at its own share instead of spending the whole account's budget. 0 = off.</div></div>
         </div>
         <div class="rounded-lg bg-red-50 border border-red-100 p-3 text-[11.5px] text-red-800 leading-relaxed">
           When a broker's equity falls this far below where it started the day, <b>every position on that broker is closed at market</b> and it opens nothing more — signals or manual — until the next day. Other brokers carry on. You can resume early from the Overview page.
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div class="card-title"><i data-lucide="door-open"></i>Leaving before the stop <span class="card-sub">per position</span></div>
+        <label class="switch" title="Let the guard close a position before its stop"><input type="checkbox" id="early_exit_enabled" name="early_exit_enabled"><span class="track"></span></label>
+      </div>
+      <div class="card-body space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div class="col-span-2"><label class="field-label" for="exit_horizon_hours">Give a position this long %</label><input id="exit_horizon_hours" name="exit_horizon_hours" type="number" step="0.25" class="input w-full mt-1 font-mono"><div class="field-help">Hours. This is the number that decides whether the time rule means anything: at a 72-hour hold a 15-minute position has a <b>0%</b> chance of timing out, so the barrier never binds. At 8h it starts to, at 4h it bites.</div></div>
+          <div><label class="field-label" for="exit_stalled_adverse">Risk spent</label><input id="exit_stalled_adverse" name="exit_stalled_adverse" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">Share of its <i>own</i> stop already travelled against it (0–1).</div></div>
+          <div><label class="field-label" for="exit_stalled_progress">…and ground made</label><input id="exit_stalled_progress" name="exit_stalled_progress" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">Share of its <i>own</i> target ever made (0–1). <b>Both</b> must hold.</div></div>
+          <div><label class="field-label" for="exit_stalled_min_hours">Not before</label><input id="exit_stalled_min_hours" name="exit_stalled_min_hours" type="number" step="0.25" class="input w-full mt-1 font-mono"><div class="field-help">Hours. A position needs room to breathe.</div></div>
+          <div><label class="field-label" for="exit_timeout_min_resolve">Min chance of resolving</label><input id="exit_timeout_min_resolve" name="exit_timeout_min_resolve" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">Below this chance of reaching <i>either</i> level in the time left, close it.</div></div>
+          <div class="col-span-2"><label class="field-label" for="exit_carry_max_share">Carry may eat</label><input id="exit_carry_max_share" name="exit_carry_max_share" type="number" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">Share of what is left to win that funding may cost before the position is closed. A short being <i>paid</i> to hold is never closed for carry.</div></div>
+        </div>
+        <div class="rounded-lg bg-amber-50 border border-amber-100 p-3 text-[11.5px] text-amber-900 leading-relaxed">
+          The stop and the target both wait for price to come to them. These are the ways out that read what the position has actually done: its reason gone, its risk spent without ground made, its time up, or its carry eating it. <b>The odds on every open position are shown on the Positions page whether or not this is on</b> — a 1:3 ticket is a 75% chance of being stopped first, and that is arithmetic, not an opinion. Nothing here was fitted to a sample; these are starting values for a backtest to move.
         </div>
       </div>
     </section>
@@ -269,7 +289,10 @@
   const PHRASE = {{ live_phrase | tojson }};
   const NUMBERS = ["stop_loss_pct", "take_profit_pct", "trade_margin_pct", "risk_per_trade_pct", "min_edge_multiple", "atr_stop_mult", "atr_target_mult",
     "paper_starting_balance", "paper_leverage", "paper_fee_pct", "paper_slippage_pct", "paper_max_hold_hours",
-    "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct", "strategy_loss_limit_pct", "email_smtp_port",];
+    "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct", "strategy_loss_limit_pct",
+    "exit_horizon_hours", "exit_stalled_adverse", "exit_stalled_progress", "exit_stalled_min_hours", "exit_timeout_min_resolve", "exit_carry_max_share",
+    "signal_settle_seconds",
+    "email_smtp_port",];
   const HOSTS = { demo: "demo.delta.exchange", live: "www.delta.exchange" };
   let saved = null, env = "demo";
 
@@ -281,6 +304,7 @@
     $("market_data").value = s.market_data;
     $("trailing_enabled").checked = s.trailing_enabled;
     $("atr_protection").checked = s.atr_protection;
+    $("early_exit_enabled").checked = s.early_exit_enabled;
     $("ai_enabled").checked = s.ai_enabled;
     $("ai_model").value = s.ai_model || "";
     $("ai_interval_minutes").value = s.ai_interval_minutes;
@@ -314,6 +338,7 @@
       delta_active: document.querySelector('input[name="delta_active"]').checked,
       delta_env: env, market_data: $("market_data").value,
       trailing_enabled: $("trailing_enabled").checked, atr_protection: $("atr_protection").checked,
+      early_exit_enabled: $("early_exit_enabled").checked,
       day_timezone: $("day_timezone").value,
       ai_enabled: $("ai_enabled").checked,
       ai_model: $("ai_model").value.trim(),

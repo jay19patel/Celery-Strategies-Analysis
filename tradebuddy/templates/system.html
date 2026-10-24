@@ -89,14 +89,6 @@
   </section>
 </div>
 
-<section class="card">
-  <div class="card-head"><div class="card-title"><i data-lucide="candlestick-chart"></i>Recent candle closes</div></div>
-  <div class="scroll max-h-96">
-          <table class="tbl"><thead><tr><th>Closed</th><th>Symbol</th><th>Resolution</th><th>Bar open</th><th>Source</th><th class="r">Open</th><th class="r">High</th><th class="r">Low</th><th class="r">Close</th></tr></thead><tbody id="bars"></tbody></table>
-    
-  </div>
-</section>
-
 <div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
   <section class="card xl:col-span-3">
     <div class="card-head"><div class="card-title"><i data-lucide="globe"></i>Delta REST <span class="card-sub">market = public data · account = your Delta account</span></div></div>
@@ -280,18 +272,9 @@
     $("closedBy").innerHTML = ["websocket", "clock"].map((k) => `<div class="bg-slate-50 rounded-lg p-3"><div class="text-[11px] muted">${k}</div><div class="font-mono text-xl font-semibold">${num(by[k] || 0, 0)}</div></div>`).join("");
   }
 
-  const barRow = (e) => `<tr><td class="font-mono text-slate-500">${time(e.ts)}</td><td class="font-semibold">${esc(e.symbol)}</td><td><span class="badge">${esc(e.resolution)}</span></td>
-    <td class="font-mono">${time(e.bar_time)}</td><td><span class="badge ${e.source === "websocket" ? "badge-blue" : ""}">${esc(e.source)}</span></td>
-    <td class="r font-mono">${price(e.candle?.open)}</td><td class="r font-mono">${price(e.candle?.high)}</td><td class="r font-mono">${price(e.candle?.low)}</td><td class="r font-mono">${price(e.candle?.close)}</td></tr>`;
-  let bars = [];
-  async function loadBars() { bars = await TB.get("/api/events?type=CandleClosed&limit=100"); TB.rows("bars", bars, barRow, "No candle has closed since start", 9); }
-
-
   load();
   loadDb();
-  loadBars();
   TB.every(loadDb, 30000);
-  TB.on("CandleClosed", (e) => { bars.unshift(e); bars = bars.slice(0, 100); TB.rows("bars", bars, barRow, "", 9); });
   TB.every(load, 3000);
 })();
 </script>

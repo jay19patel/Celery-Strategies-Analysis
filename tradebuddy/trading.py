@@ -27,6 +27,7 @@ from tradebuddy.events import (
 from tradebuddy.runner import pair_key, strategy_key
 from tradebuddy.settings import RANGES, Settings
 from tradebuddy.store import ACTIVE_STATUSES, Store
+from tradebuddy.strategies.base import net_rr
 from tradebuddy.stream import PriceBook
 
 log = logging.getLogger(__name__)
@@ -101,6 +102,10 @@ class Trader:
         # Gate -> reserve must not interleave between signals and manual orders, or both could
         # pass the "no open position" check for the same symbol.
         self._lock = asyncio.Lock()
+        # Signals waiting to be compared against each other, per symbol. See `_settle`.
+        self._pending: dict[str, list[SignalGenerated]] = {}
+        self._settling: set[str] = set()
+        self._settle_tasks: set[asyncio.Task] = set()
 
     async def on_signal(self, e: SignalGenerated) -> None:
         s = self.settings()
@@ -110,9 +115,75 @@ class Trader:
         if not self.store.enabled(pair_key(e.strategy, e.symbol)):
             self._skip(e, "", f"{e.symbol} is switched off for this strategy")
             return
+        if s.signal_settle_seconds <= 0:
+            await self._send(e, s)
+            return
+        # Hold the symbol open for a moment so competing signals can be compared. Returning
+        # immediately rather than sleeping here on purpose: this handler has the bus's queue
+        # behind it, and a handler that waits stops every other symbol's signals too.
+        self._pending.setdefault(e.symbol, []).append(e)
+        if e.symbol not in self._settling:
+            self._settling.add(e.symbol)
+            task = asyncio.create_task(self._settle(e.symbol, s.signal_settle_seconds))
+            self._settle_tasks.add(task)
+            task.add_done_callback(self._settle_tasks.discard)
+
+    async def _settle(self, symbol: str, wait: float) -> None:
+        """Route the best signal on `symbol`, and say what each of the others lost to.
+
+        One position per symbol means the strategies are competing for one slot, and until now the
+        winner was whichever happened to publish first. That is a race, and it is biased: a
+        strategy on a 5-minute bar gets three times the chances of one on a 15-minute bar, so the
+        FASTEST strategy wins the slot rather than the one with the best trade. On the old
+        deployment one strategy that fired on literally every bar took 78% of all signals that way.
+
+        Ranked on reward-to-risk after costs, which is the only number every strategy produces and
+        the only one that is comparable across them."""
+        try:
+            await asyncio.sleep(wait)
+            group = self._pending.pop(symbol, [])
+            if not group:
+                return
+            s = self.settings()
+            if len(group) == 1:
+                await self._send(group[0], s)
+                return
+            ranked = sorted(group, key=lambda e: self._rank(e, s), reverse=True)
+            best = ranked[0]
+            for loser in ranked[1:]:
+                self._skip(
+                    loser, "",
+                    f"{best.strategy} had the better trade on {symbol} this bar "
+                    f"({self._rank(best, s):.2f}:1 after costs against {self._rank(loser, s):.2f}:1)",
+                )
+            await self._send(best, s)
+        finally:
+            self._settling.discard(symbol)
+
+    def _rank(self, e: SignalGenerated, s: Settings) -> float:
+        """Reward over risk after the round trip, on the levels this signal would actually get.
+
+        `levels` is used rather than the signal's own fields because a strategy that leaves them to
+        the Trader still has levels — the ATR's or Settings' — and they have to be comparable with
+        a strategy that set its own, or the one that names its stop is penalised for doing so."""
+        sl_pct, tp_pct, _basis = self.levels(e.symbol, e.stop_loss_pct, e.take_profit_pct, s)
+        cost = max((b.round_trip_cost_pct() for b in self.brokers.values()), default=0.0)
+        return net_rr(tp_pct, sl_pct, cost)
+
+    async def _send(self, e: SignalGenerated, s: Settings) -> None:
         for name in s.active_brokers:
             async with self._lock:
                 await self._route(e, self.brokers[name], s)
+
+    async def flush(self) -> None:
+        """Settle every waiting symbol now. For shutdown and for tests, which must not sleep."""
+        for task in list(self._settle_tasks):
+            task.cancel()
+        self._settle_tasks.clear()
+        for symbol in list(self._pending):
+            self._settling.discard(symbol)
+            self._pending.setdefault(symbol, [])
+            await self._settle(symbol, 0.0)
 
     async def _route(self, e: SignalGenerated, broker: Broker, s: Settings) -> None:
         reason = await self._blocked(broker, e.symbol) or self.strategy_halt(broker.name, e.strategy, s)

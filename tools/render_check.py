@@ -27,13 +27,14 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # harness rather than silently rendering an empty panel.
 PAGE_CALLS = {
     "market": [
-        "/api/header", "/api/analysis", "/api/outlook?symbol=BTCUSD", "/api/verdicts?symbol=BTCUSD&days=30",
+        "/api/header", "/api/analysis", "/api/pulse?symbol=BTCUSD",
+        "/api/outlook?symbol=BTCUSD", "/api/verdicts?symbol=BTCUSD&days=30",
         "/api/bars?symbol=BTCUSD&interval=15m&days=30&limit=400",
         "/api/options/history?symbol=BTCUSD&hours=24",
         "/api/market-structure?symbol=BTCUSD",
         "/api/ai-report?symbol=BTCUSD",
     ],
-    "system": ["/api/metrics", "/api/database", "/api/events?type=CandleClosed&limit=100"],
+    "system": ["/api/metrics", "/api/database"],
     "journal": ["/api/journal/month", "/api/journal/summary"],
 }
 PATHS = {"market": "/", "system": "/system", "journal": "/journal"}

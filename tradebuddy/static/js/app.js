@@ -53,7 +53,7 @@
   const EVENT_BADGE = {
     SignalGenerated: "badge-blue", OrderPlaced: "badge-green", PositionClosed: "badge-green", TradeSkipped: "badge-amber",
     OrderUnknown: "badge-amber", OrderFailed: "badge-red", StrategyError: "badge-red", SettingsChanged: "badge-blue", ToggleChanged: "",
-    ProtectionTrailed: "badge-green", DailyLossHalt: "badge-solid-red", GuardAlert: "badge-red", MarketAnalysis: "badge-blue",
+    ProtectionTrailed: "badge-green", PositionExitEarly: "badge-amber", DailyLossHalt: "badge-solid-red", GuardAlert: "badge-red", MarketAnalysis: "badge-blue",
   };
   const eventBadge = (t) => `<span class="badge ${EVENT_BADGE[t] ?? ""}">${esc(t)}</span>`;
 

@@ -304,6 +304,53 @@
   let ticketTimer = null;
   function debounceTicket() { clearTimeout(ticketTimer); ticketTimer = setTimeout(() => refreshTicket(false), 350); }
 
+  // ── what holding is actually worth ────────────────────────────────────────
+  // The reward-to-risk on a ticket is the most flattering number in trading and the one every
+  // screen shows: 1:3 reads like an opinion about the market and is in fact arithmetic —
+  // target/(stop+target) of those trades are stopped first, and it has to be, or it would be free
+  // money. The engine prices every open position on every guard pass (`exits.py`); this draws it.
+  function oddsPanel(p) {
+    const x = p.exit;
+    if (!x || !x.pricing) return "";
+    const q = x.pricing;
+    const pc = (v) => `${num(v * 100, 0)}%`;
+    const sign = (v) => `${v > 0 ? "+" : ""}${num(v, 2)}%`;
+    const field = (label, value, cls = "") => `<div><div class="text-[10.5px] uppercase tracking-wide text-slate-400 font-semibold">${label}</div><div class="font-mono text-[12px] ${cls}">${value}</div></div>`;
+    // A rule that fired is only acted on when the feature is armed; say which, so a reading that
+    // says "close" next to a position that is still open is not read as the guard being broken.
+    const verdict = x.action === "close"
+      ? `<span class="badge ${x.armed ? "badge-solid-red" : "badge-amber"}">${x.armed ? "CLOSING" : "WOULD CLOSE"} · ${esc(x.rule)}</span>`
+      : '<span class="badge badge-green">HOLDING</span>';
+    const bar = (label, value, cls) =>
+      `<div class="flex items-center gap-2 text-[11px]"><span class="w-16 text-slate-400 uppercase tracking-wide font-semibold text-[10px]">${label}</span>
+       <span class="flex-1 h-1.5 rounded bg-slate-200 overflow-hidden"><span class="block h-full ${cls}" style="width:${num(value * 100, 1)}%"></span></span>
+       <span class="font-mono w-10 r">${pc(value)}</span></div>`;
+    return `<div class="mt-3 pt-3 border-t border-slate-200">
+      <div class="flex items-center gap-2 flex-wrap mb-2">
+        <span class="text-[10.5px] uppercase tracking-wide text-slate-400 font-semibold">What holding is worth</span>
+        ${verdict}
+        <span class="muted text-[11px]">${esc(x.reason)}</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5">
+        <div class="space-y-1.5">
+          ${bar("Target", q.p_target, "bg-emerald-500")}
+          ${bar("Stop", q.p_stop, "bg-rose-500")}
+          ${bar("Times out", q.p_timeout, "bg-slate-400")}
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          ${field("Close now", sign(q.value_now))}
+          ${field("If stopped", sign(q.value_stop), q.value_stop >= 0 ? "up" : "down")}
+          ${field("If target", sign(q.value_target), "up")}
+        </div>
+      </div>
+      <div class="mt-2 text-[11px] muted">
+        Reads as <span class="font-mono">${num(q.reward_risk, 1)}:1</span> — and is a
+        <span class="font-mono">${pc(q.p_stop / Math.max(q.p_stop + q.p_target, 1e-9))}</span> chance of the stop first.
+        ${num(q.hours_left, 1)}h left of the horizon.
+      </div>
+    </div>`;
+  }
+
   // ── positions ─────────────────────────────────────────────────────────────
   let loading = false;
   const openPos = new Set();  // positions whose detail row is showing; survives the 3s refresh
@@ -360,6 +407,7 @@
             ${field("Distance to TP", p.tp_distance_pct == null ? "—" : `${num(p.tp_distance_pct, 2)}%`)}
             ${field("Trails done", c ? `${c.steps} of ${c.max_steps}${c.trailing ? "" : " (off)"}` : "—")}
           </div>
+          ${oddsPanel(p)}
           ${p.client_order_id ? `<div class="mt-2 text-[11px] muted font-mono">order ${esc(p.client_order_id)}</div>` : ""}
         </td></tr>`;
       }, `No open ${broker} positions`, 12);
@@ -452,7 +500,7 @@
   brokerTabs((b) => { broker = b; $("posBroker").textContent = `on ${b}`; load(); });
   paintSide(); paintBrokers(); setMode("pct");
   setTimeout(() => { if (TB.canEdit) refreshTicket(); }, 300);  // after the header has the symbol list
-  TB.on(["PositionUpdate", "PositionClosed", "OrderPlaced", "OrderFailed", "ProtectionTrailed", "DailyLossHalt", "SettingsChanged"], TB.debounce(load, 200));
+  TB.on(["PositionUpdate", "PositionClosed", "OrderPlaced", "OrderFailed", "ProtectionTrailed", "PositionExitEarly", "DailyLossHalt", "SettingsChanged"], TB.debounce(load, 200));
   TB.on("AuthChanged", () => { load(); if (TB.canEdit) refreshTicket(false); });
   TB.every(load, 3000);
   TB.every(() => { if (!sending && TB.canEdit) return refreshTicket(false); }, 15000);

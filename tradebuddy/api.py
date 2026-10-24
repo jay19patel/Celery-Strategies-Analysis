@@ -48,7 +48,7 @@ METHODS = (
     "test_delta", "toggle", "close_all", "close_position", "protection", "paper_reset", "place_order", "order_ticket",
     "set_position_control", "risk", "risk_resume", "analysis", "options_history", "database",
     "send_email_report",
-    "bars", "snapshots", "outlook", "verdicts", "market_structure",
+    "bars", "snapshots", "outlook", "verdicts", "market_structure", "pulse",
     "journal_summary", "journal_month",
     "paper_history", "ai_report",
     "verify_pin", "change_pin", "get_auth_status",
@@ -154,6 +154,10 @@ class Api:
             c = controls.get(p.symbol)
             row["control"] = {k: c[k] for k in ("trailing", "max_steps", "steps")} | {"trailing": bool(c["trailing"])} if c else None
             row["roe_pct"] = p.unrealized_pnl / p.margin * 100 if p.margin else None
+            # What holding this is actually worth, and the odds behind it. The guard prices every
+            # position on every pass whether or not it is armed to act, because a 1:3 ticket that
+            # is really a 75% chance of being stopped is worth showing either way.
+            row["exit"] = self.system.guard.exits.get((b.name, p.symbol))
             row |= await self._position_extras(b, p)
             out.append(row)
         return out  # option structures have their own list (structures()), not mixed in here
@@ -294,6 +298,14 @@ class Api:
         actually worked out. The engine builds and caches it, so the page and any strategy that
         reads it are looking at one reading rather than two that drifted apart."""
         return await self.system.outlook(symbol)
+
+    async def pulse(self, symbol: str = "BTCUSD") -> dict[str, Any]:
+        """Is a big move happening on this symbol, how big it could be, and what usually follows.
+
+        Three questions and only two answers: the measurement and the size are arithmetic, the
+        direction is COUNTED against its own baseline and withheld entirely under
+        `outlook.MIN_SAMPLE`. The page is expected to render that asymmetry, not flatten it."""
+        return await self.system.pulse(symbol)
 
     async def market_structure(self, symbol: str = "BTCUSD") -> dict[str, Any]:
         """Where the stops are, which zones are still live, where the volume actually traded, and

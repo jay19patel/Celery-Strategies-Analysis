@@ -12,8 +12,9 @@ from __future__ import annotations
 import pytest
 
 from tradebuddy.delta import Candle
+from tradebuddy.strategies.base import net_rr
 from tradebuddy.strategies.scalper import (
-    MIN_RR,
+    MIN_NET_RR,
     MIN_STOP_PCT,
     MIN_VOLUME_RATIO,
     PUSH,
@@ -96,7 +97,19 @@ def test_a_wider_swing_buys_a_wider_stop():
 def test_a_stop_inside_the_costs_is_refused():
     out = decide(taken(span=0.004), view(), structure())
     assert out.side is None
-    assert "inside the spread" in out.reason
+    assert "the spread and the fees need" in out.reason
+
+
+def test_the_stop_floor_follows_the_fee_it_has_to_clear():
+    """A stop inside three round trips is refused however small MIN_STOP_PCT is.
+
+    The floor used to be a constant, so doubling the fee on the Settings page left this strategy
+    taking the same trades at twice the cost."""
+    bars, levels = taken(span=0.30), structure(above=102.0)
+    cheap = decide(bars, view(), levels, cost_pct=0.0)
+    dear = decide(bars, view(), levels, cost_pct=0.5)  # 3 x 0.5% = a 1.5% floor
+    assert cheap.side is not None
+    assert dear.side is None and "the spread and the fees need" in dear.reason
 
 
 def test_a_stop_too_wide_to_be_a_scalp_is_refused():
@@ -139,7 +152,7 @@ def test_a_trade_that_cannot_make_its_risk_back_is_refused():
 def test_the_reward_quoted_is_the_one_actually_taken():
     out = decide(taken(), view(), structure(above=101.5))
     assert out.side == "buy"
-    assert out.take_profit_pct / out.stop_loss_pct >= MIN_RR
+    assert net_rr(out.take_profit_pct, out.stop_loss_pct, 0.0) >= MIN_NET_RR
 
 
 def test_no_level_to_aim_at_is_a_refusal_not_a_guess():
@@ -211,7 +224,9 @@ def test_the_strategy_reads_the_engines_own_readings():
     assert Scalper.wants_outlook and Scalper.wants_structure
     assert Scalper.is_default_sl_tp is False
     assert Scalper.interval == "5m"
-    assert Scalper.default_on is False
+    # See `test_it_reads_the_engines_own_readings_and_ships_switched_on` in test_ema_vwap: the
+    # race this used to dodge is gone, because the routing ranks instead of racing.
+    assert Scalper.default_on is True
 
 
 async def test_a_looser_cap_can_never_risk_more_than_the_risk_rule_allows(cfg, exchange):

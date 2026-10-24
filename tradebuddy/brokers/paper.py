@@ -152,7 +152,7 @@ class PaperBroker:
                 broker=self.name, symbol=p["symbol"], side=p["side"], size=p["size"], entry_price=p["entry_price"],
                 mark_price=mark, unrealized_pnl=self._upnl(p, mark), margin=p["margin"],
                 liquidation_price=p["liquidation_price"], stop_loss=p["stop_loss"], take_profit=p["take_profit"],
-                opened_at=p["opened_at"], strategy=p["strategy"],
+                opened_at=p["opened_at"], strategy=p["strategy"], mae_pct=p["mae_pct"], mfe_pct=p["mfe_pct"],
             ))
         return out
 

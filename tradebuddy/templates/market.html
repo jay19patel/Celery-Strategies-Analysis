@@ -7,6 +7,33 @@
 <div id="priceCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
 
 
+<!-- ══ Is anything happening? ════════════════════════════════════════════════════════════
+     Above everything, because it is the question you ask before any of the others, and until now
+     the only thing on the page that answered it was one line inside a findings list sorted by
+     severity — which is where you find it after you already knew to look.
+
+     Three questions, and the card is built so you cannot miss that only two of them have answers:
+     what the bar DID is measured, how far it COULD go is arithmetic, which way it MIGHT go is
+     counted against its own baseline and shown as nothing at all under the minimum sample. The
+     third panel is deliberately the quietest of the three. -->
+<section class="card" id="pulseCard">
+  <div class="card-head flex-wrap gap-2">
+    <div class="card-title"><i data-lucide="activity"></i>Right now
+      <span class="card-sub">is a move happening, how big it could be, and what usually follows</span></div>
+    <span id="pulseState"></span>
+    <span id="pulseMeta" class="text-[11px] muted ml-auto"></span>
+  </div>
+  <div class="card-body space-y-3">
+    <div id="pulseHeadline" class="text-sm"></div>
+    <div id="pulseWhy" class="flex flex-wrap gap-1.5"></div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div><div class="stat-label mb-1.5">How far it could travel <span id="src_pulse_size"></span></div><div id="pulseSize"></div></div>
+      <div><div class="stat-label mb-1.5">Which way, counted <span id="src_pulse_way"></span></div><div id="pulseWay"></div></div>
+    </div>
+  </div>
+</section>
+
+
 <!-- The page's one answer, above everything, then the evidence for it on ONE chart.
      This page used to be eight tabs. Seven of them were lists of PRICES — pools, zones, reference
      levels, value-area edges, option walls — and a price belongs on a price axis, not in a table
@@ -343,7 +370,7 @@
     if (!data) return;
     const d = data.symbols[sym] || {}, o = d.options;
     $("symTabs").innerHTML = SYMS.map((s) => `<button class="btn btn-sm ${s === sym ? "btn-primary" : ""}" data-sym="${s}">${s.replace("USD", "")}</button>`).join("");
-    $("symTabs").querySelectorAll("[data-sym]").forEach((b) => (b.onclick = () => { sym = b.dataset.sym; expiry = null; render(); loadHist(); loadOutlook(); }));
+    $("symTabs").querySelectorAll("[data-sym]").forEach((b) => (b.onclick = () => { sym = b.dataset.sym; expiry = null; render(); loadHist(); loadPulse(); loadOutlook(); }));
     $("srcBadge").innerHTML = TBA.sourceBadge(o);
     $("kpis").innerHTML = TBA.kpis(d);
     $("insights").innerHTML = TBA.insights(d);
@@ -652,20 +679,28 @@
                    ranging: "bg-slate-100 text-slate-600", coiled: "bg-amber-50 text-amber-700",
                    unclear: "bg-slate-100 text-slate-400" };
     const list = (title, items) => !items?.length ? "" : `
-      <div><div class="stat-label mb-1">${title}</div>
-        <ul class="space-y-1">${items.map((x) => `<li class="text-[12.5px] flex gap-1.5">
-          <span class="muted">—</span><span>${esc(x)}</span></li>`).join("")}</ul></div>`;
+      <div class="space-y-1">
+        <div class="stat-label">${title}</div>
+        <ul class="space-y-1.5">${items.map((x) => `<li class="text-[12px] text-slate-700 flex items-start gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-slate-400 mt-1.5 shrink-0"></span><span>${esc(x)}</span></li>`).join("")}</ul>
+      </div>`;
     box.innerHTML = `
       <div class="flex flex-wrap items-center gap-2">
-        <span class="px-1.5 py-0.5 rounded text-[11px] font-semibold ${TONE[r.state] || TONE.unclear}">${esc(r.state)}</span>
-        <span class="text-[10.5px] muted">confidence ${esc(r.confidence)}</span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider font-mono ${TONE[r.state] || TONE.unclear}">${esc(r.state)}</span>
+        <span class="text-[11px] font-mono muted">confidence ${esc(r.confidence)}</span>
       </div>
-      <div class="text-[14px] font-semibold leading-snug mt-1">${esc(r.headline)}</div>
-      <p class="text-[12.5px] leading-relaxed">${esc(r.summary)}</p>
+      <div class="text-[14.5px] font-semibold text-slate-900 leading-snug mt-1">${esc(r.headline)}</div>
+      <p class="text-[12.5px] text-slate-700 leading-relaxed">${esc(r.summary)}</p>
       ${list("Around price", r.levels)}
-      ${r.flow ? `<div><div class="stat-label mb-1">Flow</div><p class="text-[12.5px]">${esc(r.flow)}</p></div>` : ""}
+      ${r.flow ? `<div class="rounded-md border border-slate-200/80 bg-slate-50/60 p-2.5">
+        <div class="stat-label mb-1">Flow</div>
+        <p class="text-[12px] text-slate-700 leading-relaxed">${esc(r.flow)}</p>
+      </div>` : ""}
       ${list("What would change this", r.watch)}
-      <p class="text-[10.5px] muted mt-1">Written by ${esc(v.model)} from the figures on this page. It computes
+      ${r.conclusion ? `<div class="rounded-md border-l-4 border-amber-500 border-y border-r border-amber-200 bg-amber-50/70 p-3 mt-1">
+        <div class="stat-label text-amber-800 mb-1">Conclusion</div>
+        <p class="text-[12.5px] text-amber-950 leading-relaxed font-medium">${esc(r.conclusion)}</p></div>` : ""}
+      <p class="text-[10.5px] muted mt-1.5 pt-1.5 border-t border-slate-100">Written by <span class="font-mono text-slate-600">${esc(v.model)}</span> from the figures on this page. It computes
       nothing and decides nothing, and unlike every other card here it cannot be rechecked against a bar.</p>`;
   }
 
@@ -876,10 +911,83 @@
       insights: "counted", outlook: "counted", summary: "counted",
       volume: "counted", indicators: "math", shapes: "counted", horizons: "math", agreement: "math",
       where: "counted", levels: "math",
+      pulse_size: "math", pulse_way: "counted",
     })) {
       const el = $(`src_${card}`);
       if (el) el.innerHTML = srcBadgeFor(key);
     }
+  }
+
+  // ── right now: is a move happening, how big, which way ────────────────────
+  // The card's whole job is to keep three questions visually unequal, because they are unequal.
+  // "What did the bar do" and "how far could it travel" are arithmetic. "Which way" is counted,
+  // and on this market it counts out to a coin — so it is rendered as a comparison against its own
+  // baseline, never as a standalone percentage, and as plain text when the sample is too thin.
+  const PULSE_STATE = {
+    breakout:  ["BREAKOUT",  "bg-amber-100 text-amber-900 ring-1 ring-amber-300"],
+    expanding: ["BIG MOVE",  "bg-amber-50 text-amber-800 ring-1 ring-amber-200"],
+    coiled:    ["COILED",    "bg-sky-50 text-sky-700"],
+    active:    ["BUSY",      "bg-slate-100 text-slate-600"],
+    quiet:     ["QUIET",     "bg-slate-50 text-slate-400"],
+  };
+
+  function renderPulse() {
+    const p = pulse;
+    if (!p) return;
+    const [label, cls] = PULSE_STATE[p.state] || PULSE_STATE.quiet;
+    $("pulseState").innerHTML = `<span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wide ${cls}">${label}</span>`;
+    $("pulseHeadline").innerHTML = `<b>${esc(p.headline)}</b>${p.note ? ` <span class="muted">${esc(p.note)}</span>` : ""}`;
+    $("pulseMeta").textContent = p.bar_time ? `bar ${TB.time(p.bar_time)}` : "";
+    $("pulseWhy").innerHTML = (p.reasons || []).map((r) =>
+      `<span class="px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200 text-[11px] font-mono">${esc(r)}</span>`).join("");
+    // How far — real arithmetic over measured volatility.
+    const s = p.size || {};
+    if (!s.ready) {
+      $("pulseSize").innerHTML = `<div class="text-[11px] muted">${esc(s.note || "not enough bars")}</div>`;
+    } else {
+      $("pulseSize").innerHTML = `
+        <div class="text-[11px] muted mb-1.5">Typical move over the next ${TB.num(s.hours, 0)}h is
+          <b class="text-slate-700 font-mono">${TB.num(s.typical_move_pct, 2)}%</b> (${TB.price(s.typical_move_usd)}) —
+          two bars in three finish inside <span class="font-mono">${TB.price(s.band_68[0])}–${TB.price(s.band_68[1])}</span>.</div>
+        <table class="tbl text-[11px]"><thead><tr><th>Move</th><th class="r">Up to</th><th class="r">Down to</th>
+          <th class="r">Touch either way</th></tr></thead><tbody>
+          ${(s.touch || []).map((t) => `<tr>
+            <td class="font-mono">±${TB.num(t.move_pct, 2)}%</td>
+            <td class="r font-mono up">${TB.price(t.up)}</td>
+            <td class="r font-mono down">${TB.price(t.down)}</td>
+            <td class="r"><span class="inline-flex items-center gap-1.5">
+              <span class="w-14 h-1.5 rounded bg-slate-200 overflow-hidden"><span class="block h-full bg-slate-500" style="width:${TB.num(100 * t.either_way, 1)}%"></span></span>
+              <span class="font-mono w-9 r">${TB.num(100 * t.either_way, 0)}%</span></span></td></tr>`).join("")}
+        </tbody></table>`;
+    }
+
+    // Which way — counted, and usually a refusal. That is the honest output, not a failure.
+    $("pulseWay").innerHTML = (p.way || []).map((w) => {
+      if (w.conditional == null) {
+        return `<div class="rounded-md border border-slate-200 bg-slate-50/60 p-2 mb-1.5">
+          <div class="text-[11px]"><b>Next ${TB.num(w.horizon_hours, 0)}h:</b> <span class="muted">no percentage</span></div>
+          <div class="text-[10.5px] muted mt-0.5">${esc(w.note || "")}</div></div>`;
+      }
+      const edge = 100 * w.edge;
+      // Under a point of difference is noise at any sample this system will ever have.
+      const real = Math.abs(edge) >= 1.0;
+      return `<div class="rounded-md border border-slate-200 p-2 mb-1.5">
+        <div class="flex items-baseline justify-between gap-2">
+          <div class="text-[11px]"><b>Next ${TB.num(w.horizon_hours, 0)}h</b> — bars like this one closed higher</div>
+          <div class="font-mono text-sm ${real ? (edge > 0 ? "up" : "down") : ""}">${TB.num(100 * w.conditional, 1)}%</div>
+        </div>
+        <div class="flex items-center gap-2 mt-1">
+          <span class="relative flex-1 h-2 rounded bg-slate-200 overflow-hidden">
+            <span class="block h-full ${edge > 0 ? "bg-bull-text/70" : "bg-bear-text/70"}" style="width:${TB.num(100 * w.conditional, 1)}%"></span>
+            <span class="absolute inset-y-0 w-px bg-slate-700" style="left:${TB.num(100 * w.baseline, 1)}%" title="baseline"></span>
+          </span>
+          <span class="text-[10.5px] muted font-mono whitespace-nowrap">vs ${TB.num(100 * w.baseline, 1)}% all bars</span>
+        </div>
+        <div class="text-[10.5px] muted mt-1">
+          ${edge > 0 ? "+" : ""}${TB.num(edge, 1)} points over baseline · ${TB.compact(w.matched)} like-this of ${TB.compact(w.sample)} stored
+          ${real ? "" : ` · <b>under a point is a coin</b>`}
+        </div></div>`;
+    }).join("") || '<div class="text-[11px] muted">nothing counted yet</div>';
   }
 
   // ── outlook: three timeframes, the distances, and the counted odds ─────────
@@ -897,7 +1005,7 @@
     "flat": "bg-slate-100 text-slate-600", "unknown": "bg-slate-50 text-slate-400",
   };
   const safely = (name, fn) => { try { return fn(); } catch (e) { console.error(`${name} failed:`, e); } };
-  let outlook = null, barsCache = {}, framesMeta = {};
+  let outlook = null, pulse = null, barsCache = {}, framesMeta = {};
 
   // A badge says what THIS card is saying right now. It used to carry the card's record as well —
   // "+3 pts over 412" repeated on a dozen badges, too small to read and too short to explain
@@ -1161,6 +1269,11 @@
     renderNearby();
   }
 
+  async function loadPulse() {
+    pulse = await TB.get(`/api/pulse?symbol=${sym}`);
+    renderPulse();
+  }
+
   async function loadOutlook() {
     outlook = await TB.get(`/api/outlook?symbol=${sym}`);
     renderSources(outlook.sources);
@@ -1175,12 +1288,13 @@
   safely("layers", paintLayers);
   safely("frames", paintFrames);
   safely("nav", paintNav);
-  for (const [name, fn] of [["header", load], ["options history", loadHist], ["outlook", loadOutlook],
+  for (const [name, fn] of [["header", load], ["right now", loadPulse], ["options history", loadHist], ["outlook", loadOutlook],
                             ["market structure", loadStructure], ["written summary", loadAi]]) {
     safely(name, fn);
   }
   TB.every(load, 60000);
   TB.every(loadHist, 60000);
+  TB.every(loadPulse, 60000);     // cheap and cached per bar; polled often so a break shows up fast
   TB.every(loadOutlook, 300000);  // nothing in it changes until the next 15-minute bar closes
   TB.every(loadStructure, 300000);
   TB.every(loadAi, 300000);  // same: the engine rebuilds it once a bar and caches it

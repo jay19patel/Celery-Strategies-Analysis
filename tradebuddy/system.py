@@ -15,7 +15,7 @@ from typing import Any, Protocol
 import psutil
 from fastapi import WebSocket
 
-from tradebuddy import liquidity, nearby, orderflow, outlook, profile, reading, verdict, zones
+from tradebuddy import liquidity, nearby, orderflow, outlook, profile, pulse, reading, verdict, zones
 from tradebuddy.brokers import Broker, DeltaBroker, PaperBroker
 from tradebuddy.config import Config
 from tradebuddy.delta import Candle, DeltaClient
@@ -58,7 +58,7 @@ from tradebuddy.store import BAR_SECONDS, BASE_INTERVAL, Store
 from tradebuddy.strategies import Strategy, discover
 from tradebuddy.strategies.indicators import atr
 from tradebuddy.stream import BarCloser, DeltaStream, PriceBook
-from tradebuddy.trading import TRADING_DEFAULT, Executor, Trader, atr_pct_from, trading_key
+from tradebuddy.trading import ATR_MAX_AGE, TRADING_DEFAULT, Executor, Trader, atr_pct_from, trading_key
 
 log = logging.getLogger(__name__)
 
@@ -243,6 +243,7 @@ class System:
         self.analysis_latest: dict[str, dict[str, Any]] = {}
         self._outlook: dict[str, tuple[int, dict[str, Any]]] = {}  # symbol -> (bar_time, view); rebuilt once a bar
         self._structure: dict[str, tuple[int, dict[str, Any]]] = {}  # the same, for the market-structure read
+        self._pulse: dict[str, tuple[int, dict[str, Any]]] = {}  # and for "is anything happening right now"
         for e in self.store.recent_events(20, types=["MarketAnalysis"]):  # survive a restart
             self.analysis_latest.setdefault(e["symbol"], e)
         self._options_minute: dict[str, int] = {}
@@ -277,9 +278,20 @@ class System:
             # this they came from REST once per strategy per symbol: ten calls on every 15-minute
             # close for one series sitting on disk.
             bars=self.stored_candles,
+            # One definition of what a trade costs, from the broker that would take it. The paper
+            # broker is the one every signal reaches (Delta is opt-in and off by default), and its
+            # figure is the Settings fee and slippage both ways — the same number
+            # `Trader.edge_error` gates on, so the strategy and the gate can no longer disagree.
+            cost_pct=lambda: self.paper.round_trip_cost_pct(),
         )
         self.protection_lock = asyncio.Lock()  # one SL/TP change at a time: guard trails and manual edits
-        self.guard = PositionGuard(self.bus, self.store, self.brokers, lambda: self.settings, self.tick_size, self.protection_lock)
+        self.guard = PositionGuard(
+            self.bus, self.store, self.brokers, lambda: self.settings, self.tick_size, self.protection_lock,
+            # The exit rules read the engine's own readings rather than working their own out, for
+            # the same reason a strategy does: two answers to "which way is this market pointing"
+            # is how a system stops being trusted.
+            view_of=self.outlook, vol_of=self.realised_vol, funding_of=self.funding_pct,
+        )
         self.trader = Trader(
             self.bus, self.store, self.brokers, self.prices, lambda: self.settings, self.guard.halt_reason,
             volatility=self.atr_pct,
@@ -417,7 +429,7 @@ class System:
         bar_time = int(context.get("bar_time") or time.time() // SCORE_BAR_SECONDS * SCORE_BAR_SECONDS)
         payload = tbai.digest(
             symbol, context, latest.get("insights") or [],
-            await self.outlook(symbol), await self.market_structure(symbol),
+            await self.outlook(symbol), await self.market_structure(symbol), await self.pulse(symbol),
         )
         model = self.settings.ai_model
         try:
@@ -756,6 +768,25 @@ class System:
         rows = self.store.bars(symbol, interval, 0.0, count)
         return [Candle(int(r["time"]), r["open"], r["high"], r["low"], r["close"], r["volume"]) for r in rows]
 
+    async def pulse(self, symbol: str) -> dict[str, Any]:
+        """Is a big move happening on this symbol, how big it could be, and what usually follows.
+
+        The counted half needs every bar on disk — "bars like this one" is a rare set, and on a
+        genuinely loud bar a few thousand bars give 65 matches where a year gives 1,200, which is
+        the difference between a refusal and an answer. So it reads the same depth the outlook
+        does and is cached the same way: once a bar, off the loop, because it is a scan."""
+        rows = await asyncio.to_thread(self.store.bars, symbol, BAR_RESOLUTION, 0.0, OUTLOOK_BARS)
+        if not rows:
+            return pulse.read(symbol, []).to_dict()
+        last = int(rows[-1]["time"])
+        cached = self._pulse.get(symbol)
+        if cached and cached[0] == last:
+            return cached[1]
+        candles = [Candle(int(r["time"]), r["open"], r["high"], r["low"], r["close"], r["volume"]) for r in rows]
+        view = (await asyncio.to_thread(pulse.read, symbol, candles)).to_dict()
+        self._pulse[symbol] = (last, view)
+        return view
+
     async def outlook(self, symbol: str) -> dict[str, Any]:
         """The directional view for one symbol, from the stored bars.
 
@@ -786,6 +817,33 @@ class System:
         """How far this symbol typically moves in a bar, as a % of price, for the Trader's stop and
         target. The analyst's latest market context, while it is recent enough to still describe now."""
         return atr_pct_from(self.analysis_latest.get(symbol), time.time())
+
+    def realised_vol(self, symbol: str, interval: str = BAR_RESOLUTION) -> float | None:
+        """Annualised realised volatility on `interval`, as a fraction (0.27 = 27%).
+
+        From the cached outlook rather than measured again here: `outlook.read_timeframe` already
+        computes it over the stored bars, the guard asks every three seconds, and a second
+        measurement would be a second answer. None until the first outlook for this symbol has
+        been built, which makes the exit rules abstain instead of pricing a horizon on a guess."""
+        cached = self._outlook.get(symbol)
+        if not cached:
+            return None
+        for frame in cached[1].get("timeframes") or []:
+            if frame.get("interval") == interval:
+                rv = frame.get("rv")
+                return float(rv) if isinstance(rv, int | float) and not isinstance(rv, bool) and rv > 0 else None
+        return None
+
+    def funding_pct(self, symbol: str) -> float | None:
+        """The funding rate the analyst last measured, as a % per 8h. Positive: longs pay shorts.
+
+        Stale is no reading (invariant 8): the same age limit the ATR uses, because a funding rate
+        from two hours ago says nothing about what holding costs now."""
+        analysis = self.analysis_latest.get(symbol)
+        if not analysis or time.time() - float(analysis.get("ts") or 0.0) > ATR_MAX_AGE:
+            return None
+        rate = (analysis.get("context") or {}).get("funding_pct")
+        return float(rate) if isinstance(rate, int | float) and not isinstance(rate, bool) else None
 
     def market_status(self) -> dict[str, Any]:
         """Is there live market data for every symbol a strategy trades? Without it strategies are
@@ -846,6 +904,10 @@ class System:
     async def drain(self) -> None:
         """Wait until the bus and any inline evaluations are idle (tests, shutdown)."""
         while True:
+            await self.bus.drain()
+            # Signals held back to be compared against each other must be settled too, or a test
+            # that closes a bar and asks for the order gets an empty table and a passing bus.
+            await self.trader.flush()
             await self.bus.drain()
             drain = getattr(self.evaluator, "drain", None)
             if drain is None or not getattr(self.evaluator, "_tasks", None):

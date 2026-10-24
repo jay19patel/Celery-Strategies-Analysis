@@ -104,7 +104,7 @@ def test_the_answer_is_cut_down_to_the_shape_asked_for():
     page otherwise made of checkable numbers."""
     out = tbai.clean({**ANSWER, "extra": "ignore me", "summary": "x" * 5000,
                       "levels": ["a", "b", "c", "d", "e"], "watch": "not a list"})
-    assert set(out) == {"headline", "state", "summary", "levels", "flow", "watch", "confidence"}
+    assert set(out) == {"headline", "state", "summary", "levels", "flow", "watch", "conclusion", "confidence"}
     assert len(out["summary"]) <= 800
     assert len(out["levels"]) == 3
     assert out["watch"] == []

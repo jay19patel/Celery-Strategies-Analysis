@@ -432,6 +432,10 @@ def create_app(
     async def market_structure(symbol: str = "BTCUSD") -> dict:
         return await call("market_structure", symbol=symbol)
 
+    @app.get("/api/pulse")
+    async def pulse_route(symbol: str = "BTCUSD") -> dict:
+        return await call("pulse", symbol=symbol)
+
     @app.get("/api/ai-report")
     async def ai_report(symbol: str = "BTCUSD") -> dict:
         return await call("ai_report", symbol=symbol)

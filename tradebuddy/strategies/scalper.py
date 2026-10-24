@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from tradebuddy.delta import Candle
-from tradebuddy.strategies.base import Context, Signal, Strategy
+from tradebuddy.strategies.base import Context, Signal, Strategy, min_stop_pct, net_rr
 from tradebuddy.strategies.indicators import atr
 
 LOOKBACK = 60  # 5 hours of 5m bars: enough for an ATR, a volume average and a swing
@@ -42,8 +42,12 @@ MIN_VOLUME_RATIO = 1.15  # the bar carried more than its recent average
 PUSH = 0.65  # the close sat this far up (or down) its own range
 SWING_BARS = 10  # how far back to look for the low (or high) the move came from
 STOP_BUFFER_ATR = 0.15  # beyond the swing, so the wick that made it does not take the trade out
-MIN_RR = 1.0  # a trade that cannot make its risk back is not worth the fees
+# After the round trip, not before it. The gross ratio was passing trades that could not pay:
+# at a 0.14% round trip a 0.12% stop against a 0.12% target reads 1.0 gross and is negative net.
+MIN_NET_RR = 1.0
 # A stop has to clear the spread and the costs, and stay small enough that this is still a scalp.
+# The floor is the wider of this and three round trips (`min_stop_pct`), so it tracks the fee
+# instead of being a number that was right when it was typed.
 MIN_STOP_PCT = 0.12
 MAX_STOP_PCT = 0.80
 MIN_ROOM_ATR = 1.0  # the target must be at least this far away, in ATRs
@@ -117,7 +121,7 @@ def flow_against(structure: dict[str, Any], side: int) -> float | None:
     return float(ratio) * (1 if side > 0 else -1)
 
 
-def decide(candles: list[Candle], view: dict[str, Any], structure: dict[str, Any] | None = None) -> Decision:
+def decide(candles: list[Candle], view: dict[str, Any], structure: dict[str, Any] | None = None, cost_pct: float = 0.0) -> Decision:
     """Pure. The whole rule, so a backtest runs exactly what trades."""
     structure = structure or {}
     if len(candles) < VOLUME_WINDOW + 2:
@@ -161,8 +165,9 @@ def decide(candles: list[Candle], view: dict[str, Any], structure: dict[str, Any
     buffer_ = STOP_BUFFER_ATR * atr_now
     stop_at = (turn - buffer_) if side > 0 else (turn + buffer_)
     stop_pct = 100 * abs(price - stop_at) / price
-    if stop_pct < MIN_STOP_PCT:
-        return Decision(None, f"the swing is only {stop_pct:.2f}% away — inside the spread and the fees")
+    floor = min_stop_pct(cost_pct, MIN_STOP_PCT)
+    if stop_pct < floor:
+        return Decision(None, f"the swing is only {stop_pct:.2f}% away, inside the {floor:.2f}% the spread and the fees need")
     if stop_pct > MAX_STOP_PCT:
         return Decision(None, f"the swing is {stop_pct:.2f}% away, wider than the {MAX_STOP_PCT:g}% this calls a scalp")
 
@@ -173,15 +178,15 @@ def decide(candles: list[Candle], view: dict[str, Any], structure: dict[str, Any
     target_pct = 100 * abs(level - price) / price
     if target_pct < MIN_ROOM_ATR * atr_pct:
         return Decision(None, f"the next level is {target_pct:.2f}% away, inside the {MIN_ROOM_ATR:g} ATR ({atr_pct:.2f}%) this wants")
-    rr = target_pct / stop_pct
-    if rr < MIN_RR:
-        return Decision(None, f"{what} is only {rr:.2f}:1 against a {stop_pct:.2f}% stop — under {MIN_RR:g}:1 it cannot pay for its costs")
+    rr = net_rr(target_pct, stop_pct, cost_pct)
+    if rr < MIN_NET_RR:
+        return Decision(None, f"{what} is only {rr:.2f}:1 after costs against a {stop_pct:.2f}% stop — under {MIN_NET_RR:g}:1 it cannot pay for its costs")
 
     return Decision(
         side="buy" if side > 0 else "sell",
         reason=(f"5m close {push:.0%} {'up' if side > 0 else 'down'} its range on {ratio:.2f}x volume, 15m and 1h both "
                 f"{'up' if side > 0 else 'down'}; stop behind the {SWING_BARS}-bar {'low' if side > 0 else 'high'} "
-                f"({stop_pct:.2f}%), target {what} at {rr:.1f}:1"),
+                f"({stop_pct:.2f}%), target {what} at {rr:.1f}:1 after costs"),
         stop_loss_pct=round(stop_pct, 3),
         take_profit_pct=round(target_pct, 3),
     )
@@ -200,8 +205,13 @@ class Scalper(Strategy):
     # `trade_margin_pct` would decide the size before `risk_per_trade_pct` got a say; raising the
     # global cap would widen every other strategy's positions. Sizing stays min(by_risk, by_margin).
     margin_pct = 60.0
-    # Off until switched on: it trades every five minutes and sizes against a much looser cap.
-    default_on = False
+    # On by default, like every other strategy here. It was held off because it runs on a
+    # 5-minute bar and would take the one slot per symbol away from the 15-minute strategies by
+    # sheer frequency — but that was the ROUTING being first-come, not this strategy being
+    # untrustworthy. Signals are ranked on reward-to-risk after costs now
+    # (`Trader._settle`), so being fast no longer wins the slot and there is nothing left to
+    # protect the others from. Measured over the stored bars it signals on 1.7-3.6% of bars.
+    default_on = True
 
     async def on_candle(self, ctx: Context) -> Signal | None:
-        return decide(ctx.candles, ctx.outlook or {}, ctx.structure or {}).to_signal()
+        return decide(ctx.candles, ctx.outlook or {}, ctx.structure or {}, ctx.round_trip).to_signal()

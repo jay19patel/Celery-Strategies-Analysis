@@ -106,3 +106,43 @@ async def test_settings_survive_restart_but_delta_trading_does_not(cfg, exchange
     assert second.settings.active_brokers == ["paper", "delta"] and second.settings.take_profit_pct == 3
     assert second.trading_on("delta") is False
     assert second.trading_on("paper") is False  # paper's switch is the user's choice and persists
+
+
+# -- leaving before the stop ----------------------------------------------------------------
+
+
+def test_the_early_exit_is_off_until_it_is_asked_for():
+    """Invariant 1. It overrides the protection the entry was placed with."""
+    assert Settings().early_exit_enabled is False
+
+
+def test_the_exit_thresholds_are_range_checked():
+    for bad in ({"exit_horizon_hours": 0}, {"exit_stalled_adverse": 1.5}, {"exit_stalled_progress": 1.0},
+                {"exit_timeout_min_resolve": 1.0}, {"exit_carry_max_share": -1}, {"exit_stalled_min_hours": 100}):
+        with pytest.raises(SettingsError):
+            apply_changes(Settings(), bad)
+
+
+def test_the_exit_settings_round_trip_through_the_database():
+    changed = {"early_exit_enabled": True, "exit_horizon_hours": 4.0, "exit_stalled_adverse": 0.6,
+               "exit_stalled_progress": 0.15, "exit_stalled_min_hours": 0.5,
+               "exit_timeout_min_resolve": 0.35, "exit_carry_max_share": 0.4}
+    stored = apply_changes(Settings(), changed)
+    for name, value in changed.items():
+        assert getattr(from_stored({k: getattr(stored, k) for k in changed}), name) == value
+
+
+def test_every_setting_has_an_input_on_the_settings_page():
+    """The Extension Points rule in CLAUDE.md says a new setting needs a field, a range and an
+    input. Nothing enforced the third, so a setting could be added, validated, stored and have no
+    way to reach it — which is the same as not existing."""
+    import re
+    from pathlib import Path
+
+    from tradebuddy.settings import FIELD_TYPES, SECRET_FIELDS
+
+    page = Path("tradebuddy/templates/settings.html").read_text()
+    # By name, not by markup: `delta_env` is a pair of tab buttons and `paper_active` a disabled
+    # hidden input, and both are reachable. The check is "can this be set from the page at all".
+    missing = [f for f in FIELD_TYPES if f not in SECRET_FIELDS and not re.search(rf"\b{f}\b", page)]
+    assert missing == [], f"no input on the Settings page for: {', '.join(missing)}"
