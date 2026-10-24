@@ -43,10 +43,10 @@ class Settings(BaseSettings):
     db_path: str = "data/tradebuddy.db"
 
     # --- Redis ---
-    redis_url: str = "redis://redis:6379/0"
+    redis_url: str = "redis://127.0.0.1:6379/0"
 
     # --- Celery ---
-    celery_broker_url: str = "redis://redis:6379/0"
+    celery_broker_url: str = "redis://127.0.0.1:6379/0"
 
     # --- Auth ---
     auth_pin: str = "242425"
