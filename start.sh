@@ -16,13 +16,13 @@ echo "=================================================="
 # Ensure data directory exists
 mkdir -p data
 
-# 1. Start Redis container if not already running
-if command -v docker &> /dev/null; then
+# 1. Check Redis availability (host or container)
+if lsof -i :6379 -sTCP:LISTEN >/dev/null 2>&1 || nc -z 127.0.0.1 6379 2>/dev/null; then
+    echo "✅ Redis service already listening on localhost:6379."
+elif command -v docker &> /dev/null; then
     if ! docker ps --format '{{.Names}}' | grep -q "tradebuddy-redis"; then
         echo "📦 Starting Redis container on port 6379..."
         docker run -d --name tradebuddy-redis -p 127.0.0.1:6379:6379 redis:7-alpine redis-server --save "" --appendonly no 2>/dev/null || true
-    else
-        echo "✅ Redis container already running."
     fi
 fi
 
