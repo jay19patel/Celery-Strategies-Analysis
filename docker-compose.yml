@@ -1,95 +1,71 @@
-# TradeBuddy
+# TradeBuddy Pro Full-Stack Architecture
 #
-#   docker compose up            then open http://127.0.0.1:8080
+# Services:
+#   - redis: Redis 7 in-memory cache & PubSub broker
+#   - backend: FastAPI REST API & WebSocket server (port 8000)
+#   - celery-worker: Asynchronous strategy worker queue
+#   - frontend: Next.js modern trading terminal (port 3000)
 #
-# Every `up` rebuilds the image, so code changes are picked up. More strategy
-# workers: docker compose up --scale worker=4
-#
-# feed · engine · web · analyst · Celery workers, joined by ZeroMQ; Redis is the Celery
-# broker. Only the dashboard is published, and only on this machine's
-# loopback. The ZeroMQ ports carry commands and API keys and stay inside the
-# compose network.
-
-x-app: &app
-  # No shared image tag: four services building one tag in parallel collide on
-  # the first run. Each gets its own tag; BuildKit's cache makes that one build.
-  build: .
-  pull_policy: build
-  init: true
-  restart: unless-stopped
-  # Only the database is shared with the host. The source is NOT bind-mounted: the engine is one
-  # long-lived process while Celery children re-import on every respawn, so a mounted checkout lets
-  # the two drift onto different strategy versions and every result is dropped as a version mismatch.
-  # Code changes reach both the same way: `docker compose up` rebuilds the image and restarts them.
-  volumes:
-    - ./data:/app/data
-  environment: &env
-    DB_PATH: /app/data/tradebuddy.db
-    CELERY_BROKER_URL: redis://redis:6379/0
-    ZMQ_FEED_BIND: tcp://0.0.0.0:5555
-    ZMQ_FEED_URL: tcp://feed:5555
-    ZMQ_EVENTS_BIND: tcp://0.0.0.0:5556
-    ZMQ_EVENTS_URL: tcp://engine:5556
-    ZMQ_RPC_BIND: tcp://0.0.0.0:5557
-    ZMQ_RPC_URL: tcp://engine:5557
-    ZMQ_RESULTS_BIND: tcp://0.0.0.0:5558
-    ZMQ_RESULTS_URL: tcp://engine:5558
-    TZ: UTC
-    LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    AUTH_PIN: ${AUTH_PIN:-242425}
-    AUTH_SECRET: ${AUTH_SECRET:-}
-    # Empty unless set in .env, and the written summary stays off without it.
-    MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
-  logging:
-    driver: json-file
-    options: { max-size: "10m", max-file: "3" }
+# Quick Start:
+#   docker compose up --build
 
 services:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       retries: 10
 
-  engine:
-    <<: *app
-    command: ["engine"]
-    depends_on:
-      redis: { condition: service_healthy }
-
-  feed:
-    <<: *app
-    command: ["feed"]
-    depends_on: [engine]
-
-  worker:
-    <<: *app
-    command: ["worker", "--concurrency", "4"]
-    depends_on:
-      redis: { condition: service_healthy }
-
-  # Market analysis every 5 minutes: rule-based insights per symbol, from the stored bars and the
-  # options book. Fill the bars table first with:
-  #   docker compose run --rm analyst backfill --days 365
-  analyst:
-    <<: *app
-    command: ["analyst"]
-    depends_on: [engine]
-
-  web:
-    <<: *app
-    command: ["web"]
-    environment:
-      <<: *env
-      HOST: 0.0.0.0
-      # Says "the ports line below publishes on the host's loopback only", nothing more. It cannot
-      # see a reverse proxy put in front of that port later — if you add one, the dashboard is on
-      # the internet and AUTH_PIN is the only thing between it and your positions. Change the PIN.
-      DASHBOARD_LOOPBACK_ONLY: "true"
-      API_TOKEN: ${API_TOKEN:-}  # optional; a header token for scripts, alongside the PIN session
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"
-    depends_on: [engine]
+      - "127.0.0.1:8000:8000"
+    environment:
+      DB_PATH: /app/data/tradebuddy.db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      AUTH_PIN: "242425"
+      LOG_LEVEL: INFO
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["celery", "-A", "app.infrastructure.celery.worker.celery_app", "worker", "--loglevel=info", "-Q", "strategies", "--concurrency=2"]
+    restart: unless-stopped
+    environment:
+      DB_PATH: /app/data/tradebuddy.db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      LOG_LEVEL: INFO
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api
+      NEXT_PUBLIC_WS_URL: ws://localhost:8000/ws
+    depends_on:
+      - backend

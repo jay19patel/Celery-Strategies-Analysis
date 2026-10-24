@@ -1,4 +1,0 @@
-<div class="tabs" id="brokerTabs">
-  {% if all_tab and active_brokers|length > 1 %}<button data-broker="">All</button>{% endif %}
-  {% for b in active_brokers %}<button data-broker="{{ b }}">{{ b|capitalize }}</button>{% endfor %}
-</div>
