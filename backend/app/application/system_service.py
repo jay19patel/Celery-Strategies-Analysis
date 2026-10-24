@@ -6,7 +6,10 @@ import os
 import time
 from typing import Any
 
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 from app.application.base_service import BaseService
 from app.infrastructure.database.repositories.event_repo import EventRepository
@@ -42,12 +45,23 @@ class SystemService(BaseService):
 
     def get_system_health(self) -> dict[str, Any]:
         """Collect host system metrics (CPU, RAM, disk, uptime)."""
+        uptime = round(time.time() - self._start_time, 2)
+        if psutil is None:
+            return {
+                "status": "healthy",
+                "uptime_seconds": uptime,
+                "cpu_percent": 0.0,
+                "memory_usage_mb": 0.0,
+                "total_system_memory_gb": 0.0,
+                "available_memory_percent": 100.0,
+            }
+
         process = psutil.Process(os.getpid())
         mem_info = process.memory_info()
 
         return {
             "status": "healthy",
-            "uptime_seconds": round(time.time() - self._start_time, 2),
+            "uptime_seconds": uptime,
             "cpu_percent": psutil.cpu_percent(interval=None),
             "memory_usage_mb": round(mem_info.rss / (1024 * 1024), 2),
             "total_system_memory_gb": round(psutil.virtual_memory().total / (1024**3), 2),
