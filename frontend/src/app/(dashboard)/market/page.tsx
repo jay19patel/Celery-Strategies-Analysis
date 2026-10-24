@@ -223,9 +223,14 @@ export default function MarketDeskPage() {
                   <Badge variant={pulse.loud ? "solid" : "default"} className="uppercase text-[10px]">
                     {pulse.state || "Active"}
                   </Badge>
-                  {pulse.way && (
+                  {typeof pulse.way === "string" && pulse.way && (
                     <Badge variant={pulse.way === "up" ? "profit" : pulse.way === "down" ? "loss" : "outline"}>
                       {pulse.way.toUpperCase()}
+                    </Badge>
+                  )}
+                  {Array.isArray(pulse.way) && pulse.way.length > 0 && pulse.way[0]?.edge !== null && pulse.way[0]?.edge !== undefined && (
+                    <Badge variant={pulse.way[0].edge > 0 ? "profit" : pulse.way[0].edge < 0 ? "loss" : "outline"} className="text-[10px]">
+                      {pulse.way[0].edge > 0 ? `+${(pulse.way[0].edge * 100).toFixed(1)}% edge` : `${(pulse.way[0].edge * 100).toFixed(1)}% edge`}
                     </Badge>
                   )}
                 </div>
@@ -481,7 +486,7 @@ export default function MarketDeskPage() {
                     <div className="flex items-center justify-between">
                       <span className="font-mono text-[11px] text-muted-foreground uppercase">{v.measure}</span>
                       <Badge variant={isBull ? "profit" : isBear ? "loss" : "default"} className="text-[10px]">
-                        {v.stance.replace("_", " ").toUpperCase()}
+                        {String(v.stance || "").replace("_", " ").toUpperCase()}
                       </Badge>
                     </div>
                     <CardTitle className="text-sm font-semibold">{v.label}</CardTitle>

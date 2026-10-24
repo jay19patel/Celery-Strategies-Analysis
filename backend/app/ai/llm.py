@@ -16,9 +16,15 @@ import logging
 import time
 from typing import Any
 
+import os
+
 import litellm
 
 from app.settings import Settings
+
+# LiteLLM looks for GEMINI_API_KEY when calling gemini/*
+if not os.environ.get("GEMINI_API_KEY") and os.environ.get("GOOGLE_API_KEY"):
+    os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
 
 log = logging.getLogger(__name__)
 litellm.drop_params = True  # a provider without JSON mode gets the request without it, not an error

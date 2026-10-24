@@ -588,10 +588,18 @@ export interface MarketPulse {
   price: number;
   measured: Record<string, unknown>;
   reasons: string[];
-  size: string;
-  way: string;
+  size: Record<string, unknown> | string;
+  way: {
+    horizon_hours?: number;
+    baseline?: number | null;
+    conditional?: number | null;
+    edge?: number | null;
+    sample?: number;
+    matched?: number;
+    note?: string;
+  }[] | string;
   note: string;
-  sources: string[];
+  sources: Record<string, string> | string[];
   loud: boolean;
 }
 
