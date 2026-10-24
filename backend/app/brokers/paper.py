@@ -16,6 +16,7 @@ from app.core.db import session
 from app.core.models import Leg, OrderRecord, PaperAccount, Structure
 from app.errors import BrokerError, Refused
 from app.market.feed import MarketFeed
+from app.market.options import PERP_SLIPPAGE, UNDERLYING_OF
 from app.options.assess import FeeRate, leg_fee
 from app.settings import Settings
 
@@ -49,38 +50,55 @@ class PaperBroker:
             structures = s.exec(select(Structure).where(Structure.broker == self.name, col(Structure.status).in_(HELD))).all()
             ids = [st.id for st in structures]
             legs = s.exec(select(Leg).where(col(Leg.structure_id).in_(ids))).all() if ids else []
-        value, stale = 0.0, []
+        value, notional, stale = 0.0, 0.0, []
         for leg in legs:
             if leg.entry_price is None or leg.exit_price is not None:
                 continue
-            q = self.feed.quote(leg.symbol)
-            mark = q.mark if q and q.mark is not None else leg.entry_price
-            if q is None:
+            touch = self._touch(leg.symbol)
+            mark = touch[2] if touch else leg.entry_price
+            if touch is None:
                 stale.append(leg.symbol)
-            value += (1 if leg.side == "buy" else -1) * mark * leg.size * leg.contract_value
+            sign = 1 if leg.side == "buy" else -1
+            value += sign * mark * leg.size * leg.contract_value
+            if leg.kind == "perp":  # its notional is not spent cash: shown back in the wallet
+                notional += sign * leg.entry_price * leg.size * leg.contract_value
         margin = sum(st.margin for st in structures)
         equity = acct.cash + value
         return Account(
             broker=self.name, currency="USD", equity=round(equity, 6), available=round(equity - margin, 6),
-            margin_used=round(margin, 6), cash=round(acct.cash, 6),
+            margin_used=round(margin, 6), cash=round(acct.cash + notional, 6),
             extra={"starting_balance": acct.starting_balance, "fees_paid": round(acct.fees_paid, 6), "created_at": acct.created_at, "unpriced_legs": stale},
         )
 
-    async def execute(self, order: LegOrder) -> Fill:
-        q = self.feed.quote(order.symbol)
+    def _touch(self, symbol: str) -> tuple[float | None, float | None, float, float, float] | None:
+        """(bid, ask, mark, the spot fees are charged on, slippage) for an option or a perpetual."""
+        if symbol in UNDERLYING_OF:
+            perp = self.feed.perp(UNDERLYING_OF[symbol])
+            if perp is None:
+                return None
+            return perp.stats.get("bid") or None, perp.stats.get("ask") or None, perp.mark, perp.mark, PERP_SLIPPAGE
+        q = self.feed.quote(symbol)
         if q is None or not q.mark:
+            return None
+        return q.bid, q.ask, q.mark, q.spot or self.feed.spot(q.underlying) or 0.0, self.settings().paper_slippage_pct / 100
+
+    async def execute(self, order: LegOrder) -> Fill:
+        touch = self._touch(order.symbol)
+        if touch is None:
             raise BrokerError(f"paper: no fresh quote for {order.symbol}")
-        slip = self.settings().paper_slippage_pct / 100
+        bid, ask, mark, spot, slip = touch
         if order.side == "buy":
-            price = q.ask or q.mark * (1 + slip)
+            price = ask or mark * (1 + slip)
             beyond = price > order.limit_price
         else:
-            price = q.bid or q.mark * (1 - slip)
+            price = bid or mark * (1 - slip)
             beyond = price < order.limit_price
         if beyond:
             raise BrokerError(f"paper: {order.symbol} would {order.side} at {price:,.2f}, beyond the limit {order.limit_price:,.2f}")
         units = order.size * order.contract_value
-        fee = leg_fee(price, units, q.spot or self.feed.spot(q.underlying) or 0.0, await self.fee_rate(order.symbol))
+        fee = leg_fee(price, units, spot, await self.fee_rate(order.symbol))
+        # An option's premium changes hands; a perpetual's notional does too, here, and comes back on
+        # the close — the same arithmetic, so equity = cash + every held leg at its mark either way.
         cash = (price if order.side == "sell" else -price) * units - fee
         return self._book(order, price, fee, cash)
 

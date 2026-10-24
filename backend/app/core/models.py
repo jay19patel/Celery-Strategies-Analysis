@@ -56,6 +56,11 @@ class Structure(SQLModel, table=True):
     error: str = ""
     decision_id: int | None = None
     request_id: str = ""
+    # A directional position on the perpetual: one "perp" leg, closed when the mark reaches the
+    # level its strategy set. Options structures leave these None and exit on P&L.
+    stop_price: float | None = None
+    target_price: float | None = None
+    reason: str = ""  # why it was opened: the strategy's own sentence
 
 
 class Leg(SQLModel, table=True):
@@ -63,8 +68,8 @@ class Leg(SQLModel, table=True):
     structure_id: str = Field(index=True, foreign_key="structure.id")
     idx: int
     symbol: str
-    kind: str  # call | put
-    strike: float
+    kind: str  # call | put | perp
+    strike: float  # 0 for a perp
     side: str  # buy | sell (the opening side)
     size: int  # contracts
     contract_value: float
@@ -149,3 +154,68 @@ class DayRisk(SQLModel, table=True):
     day: str = Field(primary_key=True)
     start_equity: float
     halted: str = ""
+
+
+class OptionsHistory(SQLModel, table=True):
+    """One row per underlying per minute: what the ATM IV and put/call charts draw, and what
+    `pcr_options` compares the book with. Kept 30 days."""
+
+    underlying: str = Field(primary_key=True)
+    ts: float = Field(primary_key=True)
+    spot: float | None = None
+    atm_iv: float | None = None
+    near_atm_iv: float | None = None
+    skew_25d: float | None = None
+    pcr_oi: float | None = None
+    pcr_volume: float | None = None
+    call_oi: float | None = None
+    put_oi: float | None = None
+    max_pain: float | None = None
+    implied_move_pct: float | None = None
+
+
+class Prediction(SQLModel, table=True):
+    """A Market Desk card's claim, written down when it was made and marked once its horizon passed,
+    beside what saying nothing would have scored (`analysis.verdict`)."""
+
+    symbol: str = Field(primary_key=True)
+    source: str = Field(primary_key=True)  # which card
+    bar_time: int = Field(primary_key=True)
+    ts: float
+    horizon_hours: float
+    stance: str
+    measure: str
+    label: str
+    confidence: float
+    price: float
+    numbers: Any = Field(default=None, sa_column=Column(JSON))
+    settled_at: float | None = Field(default=None, index=True)
+    actual_return: float | None = None
+    actual_vol: float | None = None
+    prior_vol: float | None = None
+    actual_excursion: float | None = None
+    regime: str | None = None
+    exit_reason: str | None = None
+    r_multiple: float | None = None
+    correct: int | None = None
+    baseline_correct: int | None = None
+
+
+class SignalLog(SQLModel, table=True):
+    """A directional strategy's answer on a closed bar that said something: a signal (and what each
+    broker did with it) or an error. Bars where it saw nothing are not stored, only shown live."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    ts: float = Field(index=True)
+    strategy: str = Field(index=True)
+    symbol: str
+    interval: str
+    bar_time: int
+    side: str = ""
+    action: str  # open | skip | error
+    reason: str = ""
+    entry: float | None = None
+    stop: float | None = None
+    target: float | None = None
+    rr: float | None = None
+    orders: Any = Field(default=None, sa_column=Column(JSON))

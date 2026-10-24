@@ -32,6 +32,7 @@ STRATEGY_KEYS = (
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@+\-]{2,120}$")
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
+Directional = Literal["ema_vwap", "pcr_options", "supertrend"]
 Strategy = Literal[
     "iron_condor", "iron_butterfly", "short_strangle", "short_straddle",
     "long_straddle", "bull_put_spread", "bear_call_spread",
@@ -57,8 +58,12 @@ class Settings(BaseModel):
     paper_slippage_pct: float = Field(2.0, ge=0, le=25)
 
     # -- auto-trader -----------------------------------------------------------------------
+    # The per-broker switches cover everything automatic; under them, the options auto-trader and
+    # each directional strategy can be switched on its own.
     auto_paper: bool = True
     auto_delta: bool = False
+    auto_options: bool = True
+    directional_strategies: list[Directional] = Field(default_factory=lambda: ["ema_vwap", "pcr_options", "supertrend"])
     auto_interval_minutes: int = Field(15, ge=5, le=240)
     # Defined-risk structures only by default: their worst case is known before entry.
     auto_strategies: list[Strategy] = Field(
@@ -72,6 +77,11 @@ class Settings(BaseModel):
     min_pop_pct: float = Field(55.0, ge=0, le=95)  # probability of profit at expiry, from the ATM IV
     min_credit_width_pct: float = Field(10.0, ge=0, le=60)  # credit / widest spread on defined-risk credits
     max_spread_pct: float = Field(30.0, ge=1, le=100)  # each leg's bid/ask spread as % of its mark
+
+    # -- perpetual (directional strategies) --------------------------------------------------
+    paper_leverage: float = Field(10.0, ge=1, le=100)
+    trade_margin_pct: float = Field(25.0, ge=1, le=100)  # most of the available margin one position may use
+    perp_max_hold_hours: float = Field(24.0, ge=1, le=720)
 
     # -- risk ------------------------------------------------------------------------------
     risk_per_trade_pct: float = Field(2.0, ge=0.1, le=20)  # worst case of one structure, % of equity
@@ -137,7 +147,7 @@ class Settings(BaseModel):
             raise ValueError("must be email addresses separated by commas")
         return v
 
-    @field_validator("underlyings", "auto_strategies")
+    @field_validator("underlyings", "auto_strategies", "directional_strategies")
     @classmethod
     def _unique(cls, v: list[str]) -> list[str]:
         return list(dict.fromkeys(v))

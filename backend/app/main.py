@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import ai, auth, auto, market, portfolio, settings, system, trading, ws
+from app.api.routes import ai, auth, auto, desk, market, portfolio, settings, strategies, system, trading, ws
 from app.config import Config, get_config
 from app.core import security
 from app.core.db import init_db
@@ -56,7 +56,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     async def app_error(_: Request, exc: AppError) -> JSONResponse:
         return JSONResponse({"error": str(exc)}, status_code=exc.status)
 
-    for module in (auth, market, trading, portfolio, auto, ai, settings, system):
+    for module in (auth, market, desk, strategies, trading, portfolio, auto, ai, settings, system):
         app.include_router(module.router, prefix="/api")
     app.include_router(ws.router)
     return app

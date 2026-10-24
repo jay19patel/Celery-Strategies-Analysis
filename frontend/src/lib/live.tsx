@@ -9,9 +9,9 @@ import { toast } from "sonner";
 
 import { fetcher } from "@/lib/api";
 import { signed } from "@/lib/format";
-import type { LiveEvent } from "@/lib/types";
+import type { LiveEvent, LivePrice } from "@/lib/types";
 
-type Prices = Record<string, { spot: number | null; mark: number | null; change_24h_pct: number | null }>;
+type Prices = Record<string, LivePrice>;
 
 interface Live {
   connected: boolean;
@@ -32,7 +32,9 @@ const REFRESH: Record<string, string[]> = {
   KillSwitch: ["/trading", "/portfolio"],
   AutoDecision: ["/auto", "/portfolio/journal"],
   AiBrief: ["/ai"],
-  SettingsChanged: ["/settings", "/auto", "/portfolio", "/ai", "/market"],
+  SettingsChanged: ["/settings", "/auto", "/portfolio", "/ai", "/market", "/strategies"],
+  Signal: ["/strategies", "/trading", "/portfolio"],
+  MarketAnalysis: ["/desk"],
   PaperReset: ["/portfolio", "/trading"],
 };
 

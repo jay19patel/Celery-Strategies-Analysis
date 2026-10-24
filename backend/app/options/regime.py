@@ -61,7 +61,7 @@ def measure(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any]) ->
         "z_24h": z_24h,
         "ema_fast_1h": ema_fast,
         "ema_slow_1h": ema_slow,
-        "rsi_1h": rsi(h_closes, 14),
+        "rsi_1h": (rsi(h_closes, 14) or [None])[-1],
         "range_position_24h": (spot - low_24h) / (high_24h - low_24h) if high_24h and low_24h and high_24h > low_24h else None,
         "implied_move_pct": summary.get("implied_move_pct"),
         "max_pain": max_pain,

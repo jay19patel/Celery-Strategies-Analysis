@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -27,10 +28,12 @@ from app.core.events import EventHub
 from app.core.models import Leg, OrderRecord, Structure
 from app.errors import BrokerError, BrokerTimeout, NotFound, Refused
 from app.market.feed import MarketFeed
+from app.market.options import PERP_SLIPPAGE, PERPETUALS, UNDERLYING_OF
 from app.options.assess import leg_fee
 from app.options.pricing import LegSpec, analyze, intrinsic, margin_required, net_premium
 from app.options.strategies import CATALOG, Plan
 from app.settings import Settings
+from app.strategies import REGISTRY
 from app.trading.desk import Desk
 from app.trading.risk import halt_reason, trading_day
 
@@ -40,6 +43,26 @@ UNWIND_SLACK = 0.25
 RESOLVE_DELAYS = (1.0, 3.0, 10.0)
 HELD = ("opening", "open", "closing", "error")
 MIN_MANUAL_HOURS = 0.5
+# A perpetual's book is deep: an entry at most 0.2% through the touch, a close at most 1%.
+PERP_ENTRY_SLACK = 0.002
+PERP_CLOSE_SLACK = 0.01
+
+
+def is_perp(symbol: str) -> bool:
+    return symbol in UNDERLYING_OF
+
+
+def is_directional(st: Structure) -> bool:
+    """A position on the perpetual, closed at its strategy's levels rather than on P&L."""
+    return st.stop_price is not None
+
+
+def label_of(st: Structure) -> str:
+    if is_directional(st):
+        strategy = REGISTRY.get(st.strategy)
+        return strategy.label if strategy else "Perpetual"
+    spec = CATALOG.get(st.strategy)
+    return spec.label if spec else "Custom"
 
 
 def structure_id(broker: str, request_id: str) -> str:
@@ -53,7 +76,10 @@ def leg_sign(side: str) -> int:
 
 def exit_thresholds(st: Structure) -> tuple[float | None, float | None]:
     """The P&L at which the guard takes profit and stops out. A credit takes profit at a share of its
-    maximum profit and stops at a multiple of the credit; a debit at shares of what it cost."""
+    maximum profit and stops at a multiple of the credit; a debit at shares of what it cost. A
+    directional position's are what its target and stop prices are worth."""
+    if is_directional(st):
+        return st.max_profit, None if st.max_loss is None else -st.max_loss
     if st.entry_cash > 0:
         base = st.max_profit if st.max_profit is not None else st.entry_cash
         return base * st.take_profit_pct / 100, -st.entry_cash * st.stop_loss_pct / 100
@@ -71,6 +97,19 @@ class TradingService:
         self.settings: Any = settings  # () -> Settings
         self.hub = hub
         self.lock = asyncio.Lock()
+
+    def book(self, symbol: str) -> tuple[float | None, float | None, float] | None:
+        """(bid, ask, mark) for an option contract or a perpetual, or None when it is not fresh."""
+        if is_perp(symbol):
+            perp = self.feed.perp(UNDERLYING_OF[symbol])
+            if perp is None:
+                return None
+            return perp.stats.get("bid") or None, perp.stats.get("ask") or None, perp.mark
+        q = self.feed.quote(symbol)
+        return (q.bid, q.ask, q.mark) if q and q.mark else None
+
+    def slippage(self, symbol: str) -> float:
+        return PERP_SLIPPAGE if is_perp(symbol) else self.settings().paper_slippage_pct / 100
 
     # -- reads ---------------------------------------------------------------------------------
 
@@ -117,7 +156,6 @@ class TradingService:
         """What closing every held leg now would book — at the bid for a long, the ask for a short, net
         of every fee — and the same at the marks. The guard acts on the first; it never books a
         'profit' the order book would not pay."""
-        slip = self.settings().paper_slippage_pct / 100
         book = mid = sum(-leg_sign(leg.side) * (leg.entry_price or 0) * leg.size * leg.contract_value - leg.entry_fee for leg in legs if leg.entry_price is not None)
         missing: list[str] = []
         spot = self.feed.spot(st.underlying) or 0.0
@@ -130,14 +168,16 @@ class TradingService:
                 book += cash
                 mid += cash
                 continue
-            q = self.feed.quote(leg.symbol)
-            if q is None or not q.mark:
+            quote = self.book(leg.symbol)
+            if quote is None:
                 missing.append(leg.symbol)
                 continue
-            price = (q.bid or q.mark * (1 - slip)) if leg.side == "buy" else (q.ask or q.mark * (1 + slip))
+            bid, ask, mark = quote
+            slip = self.slippage(leg.symbol)
+            price = (bid or mark * (1 - slip)) if leg.side == "buy" else (ask or mark * (1 + slip))
             fee = leg_fee(price, units, spot, self.desk.cached_fee(leg.symbol))
             book += leg_sign(leg.side) * price * units - fee
-            mid += leg_sign(leg.side) * q.mark * units
+            mid += leg_sign(leg.side) * mark * units
         return {"pnl": None if missing else round(book, 6), "pnl_mid": None if missing else round(mid, 6), "missing": missing, "spot": spot or None}
 
     def view(self, st: Structure, legs: list[Leg]) -> dict[str, Any]:
@@ -145,12 +185,12 @@ class TradingService:
         live = self.valuation(st, legs) if st.status in HELD else None
         out_legs = []
         for leg in legs:
-            q = self.feed.quote(leg.symbol) if st.status in HELD else None
-            out_legs.append(leg.model_dump() | {"mark": q.mark if q else None, "bid": q.bid if q else None, "ask": q.ask if q else None})
-        spec = CATALOG.get(st.strategy)
+            q = self.book(leg.symbol) if st.status in HELD else None
+            out_legs.append(leg.model_dump() | {"bid": q[0] if q else None, "ask": q[1] if q else None, "mark": q[2] if q else None})
         return st.model_dump() | {
-            "label": spec.label if spec else "Custom",
-            "kind": "credit" if st.entry_cash > 0 else "debit",
+            "label": label_of(st),
+            "instrument": "perp" if is_directional(st) else "options",
+            "kind": ("long" if legs and legs[0].side == "buy" else "short") if is_directional(st) else ("credit" if st.entry_cash > 0 else "debit"),
             "legs": out_legs,
             "live": live,
             "take_profit_usd": None if tp is None else round(tp, 6),
@@ -165,10 +205,9 @@ class TradingService:
         with session() as s:
             return list(s.exec(select(Structure).where(Structure.broker == broker, col(Structure.status).in_(HELD))).all())
 
-    async def gate(self, broker: str, plan: Plan, qty: int, source: str) -> tuple[Broker, dict[str, Any]]:
-        """Every rule an entry must pass, the same for a click and the auto-trader. Returns the broker
-        and the assessment at `qty`; raises Refused naming the first rule that fails."""
-        s: Settings = self.settings()
+    def _ready(self, broker: str, s: Settings) -> tuple[Broker, list[Structure]]:
+        """The rules every entry passes first: an active, ready, unhalted broker with nothing unresolved.
+        Returns the broker and what it holds."""
         if broker not in s.active_brokers or broker not in self.brokers:
             raise Refused(f"{broker} is not an active broker")
         b = self.brokers[broker]
@@ -179,6 +218,14 @@ class TradingService:
         held = self._held(broker)
         if stuck := [st for st in held if st.status != "open"]:
             raise Refused(f"{broker} has an unresolved structure {stuck[0].id} ({stuck[0].status}): close or resolve it first")
+        return b, held
+
+    async def gate(self, broker: str, plan: Plan, qty: int, source: str) -> tuple[Broker, dict[str, Any]]:
+        """Every rule an entry must pass, the same for a click and the auto-trader. Returns the broker
+        and the assessment at `qty`; raises Refused naming the first rule that fails."""
+        s: Settings = self.settings()
+        b, held = self._ready(broker, s)
+        held = [st for st in held if not is_directional(st)]  # positions on the perpetual are gated on their own
         if len(held) >= s.max_open_structures:
             raise Refused(f"{broker} already holds {len(held)} structures (max {s.max_open_structures})")
         if sum(st.underlying == plan.underlying for st in held) >= s.max_per_underlying:
@@ -241,10 +288,7 @@ class TradingService:
         """Fill every leg, bought ones first. Returns (error, outcome unknown) — ("", False) when all filled."""
         for i in sorted(range(len(legs)), key=lambda i: legs[i].side != "buy"):
             leg = legs[i]
-            q = self.feed.quote(leg.symbol)
-            ref = ((q.ask if leg.side == "buy" else q.bid) or q.mark) if q else None
-            ref = ref or plan.legs[i].price
-            limit = ref * (1 + ENTRY_SLACK) if leg.side == "buy" else ref * (1 - ENTRY_SLACK)
+            limit = self._limit(leg.symbol, leg.side, ENTRY_SLACK, PERP_ENTRY_SLACK, fallback=plan.legs[i].price)
             fill, error, unknown = await self._send(b, st, leg, "open", leg.side, leg.size, limit)
             if fill:
                 leg.entry_price, leg.entry_fee = fill.price, fill.fee
@@ -291,6 +335,110 @@ class TradingService:
         self.hub.publish(
             "StructureFailed", f"{self._title(st)} on {st.broker} not opened: {error}", "warning",
             structure_id=st.id, broker=st.broker, source=st.source, pnl=st.pnl,
+        )
+
+    # -- directional (the perpetual) -----------------------------------------------------------
+
+    def perp_size(self, equity: float, available: float, entry: float, stop: float, contract_value: float, fee_rate: float) -> int:
+        """Contracts whose loss at the strategy's stop, fees both ways included, is `risk_per_trade_pct`
+        of equity — a wider stop buys a smaller position, never a bigger loss — and whose margin fits
+        `trade_margin_pct` of what is available."""
+        s: Settings = self.settings()
+        per_contract = abs(entry - stop) * contract_value + 2 * fee_rate * entry * contract_value
+        if per_contract <= 0 or entry <= 0:
+            return 0
+        by_risk = math.floor(equity * s.risk_per_trade_pct / 100 / per_contract)
+        by_margin = math.floor(available * s.trade_margin_pct / 100 * s.paper_leverage / (entry * contract_value))
+        return max(0, min(by_risk, by_margin, s.max_lots))
+
+    async def gate_directional(self, broker: str, symbol: str, side: str, qty: int, stop: float, target: float) -> tuple[Broker, float, float]:
+        """The rules a position on the perpetual passes. Returns the broker, the price and the contract value."""
+        s: Settings = self.settings()
+        b, held = self._ready(broker, s)
+        if any(is_directional(st) and PERPETUALS[st.underlying] == symbol for st in held):
+            raise Refused(f"{broker} already holds a {symbol} position: one per symbol")
+        if not 1 <= qty <= s.max_lots:
+            raise Refused(f"quantity must be 1 to {s.max_lots} contracts")
+        quote = self.book(symbol)
+        if quote is None:
+            raise Refused(f"no fresh {symbol} price")
+        price = (quote[1] if side == "buy" else quote[0]) or quote[2]
+        long = side == "buy"
+        if not ((stop < price < target) if long else (target < price < stop)):
+            raise Refused(f"a {'long' if long else 'short'} needs its stop {'below' if long else 'above'} and its target "
+                          f"{'above' if long else 'below'} the price {price:,.2f} (stop {stop:,.2f}, target {target:,.2f})")
+        cv = await self.desk.contract_value(symbol)
+        try:
+            account = await b.account()
+        except BrokerError as exc:
+            raise Refused(f"{broker}: cannot read the account, so no trade ({exc})") from exc
+        margin = price * qty * cv / s.paper_leverage
+        if margin > account.available * s.trade_margin_pct / 100:
+            raise Refused(f"{qty} contracts need {margin:,.2f} of margin, over {s.trade_margin_pct:g}% of the {account.available:,.2f} available")
+        return b, price, cv
+
+    async def open_directional(
+        self, broker: str, underlying: str, side: str, qty: int, stop: float, target: float,
+        strategy: str, source: str, request_id: str, reason: str = "",
+    ) -> dict[str, Any]:
+        """A position on the perpetual with its strategy's own stop and target. The guard closes it
+        when the mark reaches either, or at `perp_max_hold_hours`."""
+        if underlying not in PERPETUALS:
+            raise NotFound(f"unknown underlying {underlying!r}")
+        if side not in ("buy", "sell"):
+            raise Refused("side must be buy or sell")
+        symbol = PERPETUALS[underlying]
+        sid = structure_id(broker, request_id)
+        async with self.lock:
+            with session() as s:
+                if s.get(Structure, sid) is not None:
+                    return self.structure(sid)
+            b, price, cv = await self.gate_directional(broker, symbol, side, qty, stop, target)
+            cfg: Settings = self.settings()
+            now = time.time()
+            st = Structure(
+                id=sid, broker=broker, underlying=underlying, strategy=strategy, source=source, status="opening",
+                expiry=now + cfg.perp_max_hold_hours * 3600, qty=qty, entry_spot=price, opened_at=now, request_id=request_id,
+                stop_price=stop, target_price=target, reason=reason[:500], take_profit_pct=0.0, stop_loss_pct=0.0,
+                margin=round(price * qty * cv / cfg.paper_leverage, 6),
+            )
+            leg = Leg(structure_id=sid, idx=0, symbol=symbol, kind="perp", strike=0.0, side=side, size=qty, contract_value=cv)
+            self._save(st)
+            self._save(leg)
+            limit = self._limit(symbol, side, ENTRY_SLACK, PERP_ENTRY_SLACK)
+            fill, error, unknown = await self._send(b, st, leg, "open", side, qty, limit or price)
+            if fill:
+                leg.entry_price, leg.entry_fee, leg.size = fill.price, fill.fee, fill.size
+                self._save(leg)
+                self._opened_directional(st, leg)
+            elif unknown:
+                st.status, st.error = "error", f"{error} — the order's outcome is unknown; check the exchange, then close this position"
+                self._save(st)
+                self.hub.publish("StructureError", f"{self._title(st)} on {broker}: {st.error}", "error", structure_id=st.id, broker=broker)
+            else:
+                self._finish(st, [leg], "failed", f"entry failed: {error}")
+                self.hub.publish("StructureFailed", f"{self._title(st)} on {broker} not opened: {error}", "warning",
+                                 structure_id=st.id, broker=broker, source=source, pnl=st.pnl)
+            return self.view(st, [leg])
+
+    def _opened_directional(self, st: Structure, leg: Leg) -> None:
+        units = leg.size * leg.contract_value
+        entry = leg.entry_price or 0.0
+        exit_fee = leg.entry_fee  # the close pays about what the entry did
+        st.status = "open"
+        st.qty = leg.size
+        st.entry_spot = entry
+        st.entry_cash = round(-leg_sign(leg.side) * entry * units, 6)
+        st.fees = round(leg.entry_fee, 6)
+        st.max_loss = round(abs(entry - (st.stop_price or entry)) * units + leg.entry_fee + exit_fee, 6)
+        st.max_profit = round(abs((st.target_price or entry) - entry) * units - leg.entry_fee - exit_fee, 6)
+        st.margin = round(entry * units / self.settings().paper_leverage, 6)
+        self._save(st)
+        self.hub.publish(
+            "StructureOpened",
+            f"{self._title(st)} opened on {st.broker} at {entry:,.2f}: stop {st.stop_price:,.2f}, target {st.target_price:,.2f}",
+            structure_id=st.id, broker=st.broker, source=st.source, strategy=st.strategy, underlying=st.underlying,
+            max_loss=st.max_loss, max_profit=st.max_profit, qty=st.qty,
         )
 
     # -- close ---------------------------------------------------------------------------------
@@ -376,14 +524,12 @@ class TradingService:
         held = [leg for leg in legs if leg.entry_price is not None and leg.exit_price is None]
         for leg in sorted(held, key=lambda leg: leg.side != "sell"):
             side = "buy" if leg.side == "sell" else "sell"
-            q = self.feed.quote(leg.symbol)
-            ref = ((q.ask if side == "buy" else q.bid) or q.mark) if q else None
-            if not ref:
+            limit = self._limit(leg.symbol, side, slack, PERP_CLOSE_SLACK)
+            if limit is None:
                 problems.append(f"{leg.symbol}: no fresh quote to {side} at")
                 if leg.side == "sell":
                     break
                 continue
-            limit = ref * (1 + slack) if side == "buy" else ref * (1 - slack)
             fill, error, _unknown = await self._send(b, st, leg, purpose, side, leg.size, limit, reduce_only=True)
             if fill and fill.size == leg.size:
                 leg.exit_price, leg.exit_fee = fill.price, fill.fee
@@ -402,6 +548,17 @@ class TradingService:
             if leg.side == "sell":
                 break
         return problems
+
+    def _limit(self, symbol: str, side: str, slack: float, perp_slack: float, fallback: float | None = None) -> float | None:
+        """The worst price an order accepts: the touch it trades against, plus slack — a perpetual's
+        own, much tighter one. None when there is nothing fresh to price it from."""
+        quote = self.book(symbol)
+        ref = ((quote[1] if side == "buy" else quote[0]) or quote[2]) if quote else None
+        ref = ref or fallback
+        if not ref:
+            return None
+        k = perp_slack if is_perp(symbol) else slack
+        return ref * (1 + k) if side == "buy" else ref * (1 - k)
 
     async def _resolve_unknown(self, b: Broker, st: Structure, legs: list[Leg]) -> None:
         """Before closing a structure in error, settle what its unknown orders actually did."""
@@ -503,9 +660,10 @@ class TradingService:
 
     @staticmethod
     def _title(st: Structure) -> str:
-        spec = CATALOG.get(st.strategy)
+        if is_directional(st):
+            return f"{label_of(st)} {'long' if st.entry_cash < 0 else 'short'} {PERPETUALS[st.underlying]} ×{st.qty}"
         day = datetime.fromtimestamp(st.expiry, UTC).strftime("%d %b")
-        return f"{spec.label if spec else 'Custom'} {st.underlying} {day} ×{st.qty}"
+        return f"{label_of(st)} {st.underlying} {day} ×{st.qty}"
 
     @staticmethod
     def _save(*objs: Any) -> None:

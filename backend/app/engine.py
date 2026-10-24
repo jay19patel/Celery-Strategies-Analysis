@@ -9,6 +9,7 @@ Fail closed at start: auto-trading on Delta is switched off every time the engin
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -17,13 +18,14 @@ from sqlmodel import col, delete
 
 from app.ai.analyst import Analyst
 from app.ai.llm import LLM
+from app.analysis.service import MarketDesk
 from app.brokers.base import Broker
 from app.brokers.delta import DeltaBroker
 from app.brokers.paper import PaperBroker
 from app.config import Config
 from app.core.db import kv_get, kv_set, session
 from app.core.events import EventHub
-from app.core.models import AiBrief, Decision, EventLog
+from app.core.models import AiBrief, Decision, EventLog, SignalLog
 from app.core.scheduler import Scheduler
 from app.errors import AppError, BrokerError
 from app.market.delta import DeltaClient
@@ -43,6 +45,7 @@ from app.trading.autotrader import AutoTrader
 from app.trading.desk import Desk
 from app.trading.guard import Guard
 from app.trading.risk import halt_reason, set_halt
+from app.trading.runner import StrategyRunner
 from app.trading.service import TradingService
 
 log = logging.getLogger(__name__)
@@ -73,6 +76,8 @@ class Engine:
         self.llm = LLM(self.settings)
         self.analyst = Analyst(self.llm, self.settings, self.hub)
         self.auto = AutoTrader(self.desk, self.trading, self.analyst, self.settings, self.hub)
+        self.market = MarketDesk(self.feed, self.settings, self.hub)
+        self.runner = StrategyRunner(self.trading, self.market, self.settings, self.hub)
         self.notifier = Notifier(self.settings)
         self.hub.subscribe("notifier", self.notifier.on_event)
 
@@ -99,12 +104,17 @@ class Engine:
     def _schedule(self) -> None:
         s, sch = self._settings, self.scheduler
         sch.every("market.refresh", "Option chains and prices (REST)", OPTIONS_REFRESH, self.feed.refresh, run_now=True)
-        sch.every("market.bars", "Store 15m bars", 300, self.feed.collect_bars, run_now=True)
+        sch.every("market.bars", "Store 15m bars (a year)", 300, self.feed.collect_bars, run_now=True)
+        sch.every("market.base", "Store 1m base bars (30 days)", 30, lambda: self.feed.collect_bars("1m"), run_now=True)
+        sch.every("options.history", "Record the options book each minute", 60, self.market.record_options)
+        sch.every("market.analyst", "Market analysis and insights", 300, self.market.analyse)
+        sch.every("market.verdicts", "Mark the cards' past claims", 900, self.market.settle)
+        sch.every("strategies.run", "Directional strategies on closed bars", 20, self.runner.run)
         sch.every("guard.structures", "Exits: take profit, stop loss, expiry", 5, self.guard.check_structures)
         sch.every("guard.daily", "Daily loss limit", 30, self.guard.check_daily_loss)
-        sch.every("auto.cycle", "Auto-trader decision", s.auto_interval_minutes * 60, self.auto.cycle)
+        sch.every("auto.cycle", "Auto options decision", s.auto_interval_minutes * 60, self.auto.cycle)
         sch.every("ai.brief", "AI market brief", s.ai_brief_minutes * 60, self.brief_job)
-        sch.daily("report.daily", "Daily report", s.daily_report_hour, 0, s.day_timezone, self.daily_report)
+        sch.daily("report.daily", "Daily report", s.daily_report_hour, 0, s.day_timezone, self.scheduled_report)
         sch.every("live.prices", "Live prices to dashboards", 2, self.push_prices)
         sch.every("housekeeping", "Prune old events and decisions", 3600, self.housekeeping)
 
@@ -176,10 +186,11 @@ class Engine:
                 out[name] = {"error": str(exc)}
         return out
 
+    async def scheduled_report(self) -> str:
+        return await self.daily_report() if self._settings.daily_report else "off"
+
     async def daily_report(self) -> str:
         s = self._settings
-        if not s.daily_report:
-            return "off"
         text = report.build(s, await self.accounts(), self.trading.structures("open"))
         results = await self.notifier.send("Daily report", text)
         self.hub.publish("DailyReport", "daily report: " + (", ".join(f"{k} {v}" for k, v in results.items()) or "no channel enabled"))
@@ -191,7 +202,16 @@ class Engine:
         prices = {}
         for u in self._settings.underlyings:
             perp = self.feed.perp(u)
-            prices[u] = {"spot": self.feed.spot(u), "mark": perp.mark if perp else None, "change_24h_pct": (perp.stats or {}).get("change_24h_pct") if perp else None}
+            stats = perp.stats if perp else {}
+            book = self.market.summary(u) or {}
+            day = book.get("day") or {}
+            prices[u] = {
+                "spot": self.feed.spot(u), "mark": perp.mark if perp else None,
+                "change_24h_pct": stats.get("change_24h_pct"), "high_24h": stats.get("high_24h"), "low_24h": stats.get("low_24h"),
+                "funding_rate_pct": stats.get("funding_rate_pct"), "oi_usd": stats.get("oi_usd"),
+                "bid": stats.get("bid"), "ask": stats.get("ask"),
+                "atm_iv": day.get("atm_iv"), "pcr_oi": book.get("pcr_oi"), "max_pain": (book.get("nearest") or {}).get("max_pain"),
+            }
         self.hub.publish("Prices", persist=False, prices=prices, at=time.time())
 
     async def housekeeping(self) -> str:
@@ -200,8 +220,10 @@ class Engine:
             events = s.exec(delete(EventLog).where(col(EventLog.ts) < now - EVENT_RETENTION_DAYS * 86_400)).rowcount
             briefs = s.exec(delete(AiBrief).where(col(AiBrief.ts) < now - EVENT_RETENTION_DAYS * 86_400)).rowcount
             decisions = s.exec(delete(Decision).where(col(Decision.ts) < now - DECISION_RETENTION_DAYS * 86_400)).rowcount
+            s.exec(delete(SignalLog).where(col(SignalLog.ts) < now - DECISION_RETENTION_DAYS * 86_400))
             s.commit()
-        return f"pruned {events} events, {briefs} briefs, {decisions} decisions"
+        bars = await asyncio.to_thread(self.feed.prune_bars)
+        return f"pruned {events} events, {briefs} briefs, {decisions} decisions, {bars} bars"
 
     # -- status --------------------------------------------------------------------------------
 

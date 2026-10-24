@@ -75,15 +75,21 @@ class FakeFeed(MarketFeed):
                 bid=q.bid * factor if q.bid else None, ask=q.ask * factor if q.ask else None,
             )
 
-    def bars(self, symbol: str, limit: int = 3000) -> list[dict[str, Any]]:  # type: ignore[override]
+    def set_perp(self, mark: float, bid: float | None = None, ask: float | None = None) -> None:
+        self.perps["BTCUSD"] = PerpQuote("BTCUSD", mark, mark, time.time(), {"bid": bid, "ask": ask})
+
+    def bars(self, symbol: str, limit: int = 3000, interval: str = "15m", since: float = 0.0) -> list[dict[str, Any]]:  # type: ignore[override]
+        """A seeded random walk at `realised` volatility, ending at the last closed bar of `interval`."""
+        step = {"15m": 900, "1m": 60}[interval]
         rng = random.Random(7)
-        sigma = self.realised / math.sqrt(365 * 24 / 0.25)
-        price, start, out = 80_000.0, int(time.time()) // 900 * 900 - 800 * 900, []
-        for i in range(800):
+        sigma = self.realised / math.sqrt(365 * 24 * 3600 / step)
+        count = 800 if interval == "15m" else 3400
+        price, start, out = 80_000.0, int(time.time()) // step * step - count * step, []
+        for i in range(count):
             close = price * math.exp(rng.gauss(0, sigma))
-            out.append({"time": start + i * 900, "open": price, "high": max(price, close), "low": min(price, close), "close": close, "volume": 1.0})
+            out.append({"time": start + i * step, "open": price, "high": max(price, close), "low": min(price, close), "close": close, "volume": 1.0})
             price = close
-        return out[-limit:]
+        return [b for b in out if b["time"] >= since][-limit:]
 
 
 @pytest.fixture(autouse=True)

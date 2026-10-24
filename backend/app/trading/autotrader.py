@@ -78,6 +78,8 @@ class AutoTrader:
         return [b for b in s.active_brokers if s.auto_on(b)]
 
     async def cycle(self) -> str:
+        if not self.settings().auto_options:
+            return "options auto-trading is switched off"
         brokers = self.brokers()
         if not brokers:
             return "auto-trading is off on every active broker"

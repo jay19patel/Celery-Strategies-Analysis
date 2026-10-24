@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import func
-from sqlmodel import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlmodel import col, delete, select
 from websockets.asyncio.client import connect
 
 from app.core.db import session
@@ -35,9 +36,11 @@ log = logging.getLogger(__name__)
 PRICE_TTL = 30.0
 QUOTE_TTL = 120.0
 OPTIONS_REFRESH = 30.0
-BAR_INTERVAL = "15m"
-BAR_SECONDS = 900
-BAR_HISTORY_DAYS = 30
+# The two series stored: the 15m one the regime, outlook and pulse count over (a year, so a
+# "bars like this one" base rate has a sample), and the 1m base every shorter frame and the volume
+# profile are folded from. Everything else is folded, never fetched separately (`analysis.resample`).
+SERIES = {"15m": 365, "1m": 30}  # interval -> days kept
+SERIES_SECONDS = {"15m": 900, "1m": 60}
 
 
 def _f(value: Any) -> float | None:
@@ -184,29 +187,55 @@ class MarketFeed:
 
     # -- stored bars (a scheduler job) -----------------------------------------------------
 
-    async def collect_bars(self) -> str:
+    async def collect_bars(self, interval: str = "15m") -> str:
+        """Every closed bar the store is missing at either end of the series' history: newer than
+        the newest stored, and older than the oldest back to the history's start. Resumable and
+        idempotent — a stored bar is never rewritten, because a silently revised past is worse for
+        a base rate than a missing one. Holes in the middle are left as holes."""
+        step, days = SERIES_SECONDS[interval], SERIES[interval]
         now = int(time.time())
+        horizon = now - days * 86_400
         added = 0
         for underlying in self.underlyings:
             symbol = PERPETUALS[underlying]
             with session() as s:
-                last = s.exec(select(func.max(Bar.time)).where(Bar.symbol == symbol, Bar.interval == BAR_INTERVAL)).one()
-            start = (last + BAR_SECONDS) if last else now - BAR_HISTORY_DAYS * 86_400
-            if now - start < BAR_SECONDS:
-                continue
-            candles = await self.rest.candles(symbol, BAR_INTERVAL, start, now)
-            with session() as s:
-                for c in candles:
-                    if c.time >= start:  # a stored bar is never rewritten
-                        s.merge(Bar(symbol=symbol, interval=BAR_INTERVAL, time=c.time, open=c.open, high=c.high, low=c.low, close=c.close, volume=c.volume))
-                        added += 1
-                s.commit()
-        return f"{added} bars stored"
+                first, last = s.exec(
+                    select(func.min(Bar.time), func.max(Bar.time)).where(Bar.symbol == symbol, Bar.interval == interval)
+                ).one()
+            spans = [(horizon, now)] if last is None else [(last + step, now), (horizon, first - step)]
+            for start, end in spans:
+                if end - start >= step:
+                    added += await self._store(symbol, interval, start, end)
+        return f"{added} {interval} bars stored"
+
+    async def _store(self, symbol: str, interval: str, start: int, end: int) -> int:
+        candles = await self.rest.candles(symbol, interval, start, end)
+        rows = [
+            {"symbol": symbol, "interval": interval, "time": c.time, "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume}
+            for c in candles if start <= c.time <= end
+        ]
+        with session() as s:
+            for i in range(0, len(rows), 1000):  # SQLite caps the variables in one statement
+                s.exec(sqlite_insert(Bar).values(rows[i : i + 1000]).on_conflict_do_nothing())
+            s.commit()
+        return len(rows)
 
     @staticmethod
-    def bars(symbol: str, limit: int = 3000) -> list[dict[str, Any]]:
+    def prune_bars() -> int:
+        """Each series keeps its own history: a year of 15m bars, a month of 1m bars."""
+        removed = 0
         with session() as s:
-            rows = s.exec(select(Bar).where(Bar.symbol == symbol, Bar.interval == BAR_INTERVAL).order_by(Bar.time.desc()).limit(limit)).all()
+            for interval, days in SERIES.items():
+                removed += s.exec(delete(Bar).where(Bar.interval == interval, col(Bar.time) < time.time() - days * 86_400)).rowcount or 0
+            s.commit()
+        return removed
+
+    @staticmethod
+    def bars(symbol: str, limit: int = 3000, interval: str = "15m", since: float = 0.0) -> list[dict[str, Any]]:
+        """Stored closed bars, oldest first."""
+        with session() as s:
+            q = select(Bar).where(Bar.symbol == symbol, Bar.interval == interval, col(Bar.time) >= since)
+            rows = s.exec(q.order_by(col(Bar.time).desc()).limit(limit)).all()
         return [r.model_dump(exclude={"symbol", "interval"}) for r in reversed(rows)]
 
     # -- WebSocket ---------------------------------------------------------------------------

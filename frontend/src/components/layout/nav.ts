@@ -1,4 +1,4 @@
-import { Activity, Bot, CalendarDays, Layers, LineChart, ListChecks, Settings, Sparkles, type LucideIcon } from "lucide-react";
+import { Activity, Bot, CalendarDays, Crosshair, Layers, LineChart, ListChecks, Radar, Settings, Sparkles, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -11,7 +11,9 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     group: "Trading",
     items: [
       { href: "/", label: "Options Desk", icon: Sparkles },
-      { href: "/auto", label: "Auto Trader", icon: Bot },
+      { href: "/market", label: "Market Desk", icon: Radar },
+      { href: "/strategies", label: "Strategies", icon: Crosshair },
+      { href: "/auto", label: "Auto Options", icon: Bot },
       { href: "/positions", label: "Positions", icon: Layers },
     ],
   },

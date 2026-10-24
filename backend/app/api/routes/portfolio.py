@@ -14,7 +14,7 @@ from app.api.deps import EngineDep
 from app.core.db import session
 from app.core.models import Decision, EventLog, Structure
 from app.errors import NotFound, Refused
-from app.trading.risk import day_start, trading_day
+from app.trading.risk import day_record, day_start, trading_day
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
@@ -25,7 +25,22 @@ class Resume(BaseModel):
 
 @router.get("/accounts")
 async def accounts(engine: EngineDep) -> dict[str, Any]:
-    return {"accounts": await engine.accounts(), "brokers": engine.broker_status()}
+    """Each active broker's account, its status, and its trading day: the equity it started at
+    (what the daily loss limit measures from) and why it halted, if it did."""
+    tz = engine.settings().day_timezone
+    today = {}
+    for name in engine.settings().active_brokers:
+        row = day_record(name, tz)
+        today[name] = {"day": trading_day(tz), "start_equity": row.start_equity if row else None, "halted": row.halted if row else ""}
+    return {"accounts": await engine.accounts(), "brokers": engine.broker_status(), "today": today}
+
+
+@router.post("/report")
+async def send_report(engine: EngineDep) -> dict[str, Any]:
+    """Today's report, now, to every enabled notification channel."""
+    if not engine.notifier.enabled(engine.settings()):
+        raise Refused("no notification channel is enabled and complete (Settings → Notifications)")
+    return {"results": await engine.daily_report()}
 
 
 @router.get("/stats")

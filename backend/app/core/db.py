@@ -41,8 +41,29 @@ def init_db(path: str) -> Engine:
         cur.close()
 
     SQLModel.metadata.create_all(engine)
+    _add_missing_columns(engine)
     _engine = engine
     return engine
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    """`create_all` makes missing tables, never missing columns. A column added to a model later is
+    added here to an existing database, with its default, so an upgrade needs no manual step."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table in SQLModel.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            have = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in have:
+                    continue
+                default = column.default.arg if column.default is not None and not callable(column.default.arg) else None
+                literal = "" if default is None else f" DEFAULT {default!r}" if isinstance(default, str) else f" DEFAULT {default}"
+                ddl = f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column.type.compile(engine.dialect)}{literal}'
+                conn.execute(text(ddl))
 
 
 @contextmanager

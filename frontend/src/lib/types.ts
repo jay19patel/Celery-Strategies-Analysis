@@ -206,7 +206,7 @@ export interface Leg {
   structure_id: string;
   idx: number;
   symbol: string;
-  kind: OptionKind;
+  kind: OptionKind | "perp";
   strike: number;
   side: Side;
   size: number;
@@ -249,7 +249,12 @@ export interface Structure {
   label: string;
   source: "auto" | "manual";
   status: StructureStatus;
-  kind: "credit" | "debit";
+  /** options structures exit on P&L; a perp position at its strategy's stop and target prices */
+  instrument: "options" | "perp";
+  kind: "credit" | "debit" | "long" | "short";
+  stop_price: number | null;
+  target_price: number | null;
+  reason: string;
   expiry: number;
   expiry_label: string;
   hours_left: number;
@@ -302,6 +307,8 @@ export interface BrokerStatus {
 export interface Accounts {
   accounts: Partial<Record<Broker, Account | { error: string }>>;
   brokers: BrokerStatus[];
+  /** each broker's trading day: the equity the daily loss limit measures from, and any halt */
+  today: Partial<Record<Broker, { day: string; start_equity: number | null; halted: string }>>;
 }
 
 export interface Summary {
@@ -510,3 +517,210 @@ export interface Bar {
   close: number;
   volume: number;
 }
+
+export interface LivePrice {
+  spot: number | null;
+  mark: number | null;
+  change_24h_pct: number | null;
+  high_24h: number | null;
+  low_24h: number | null;
+  funding_rate_pct: number | null;
+  oi_usd: number | null;
+  bid: number | null;
+  ask: number | null;
+  atm_iv: number | null;
+  pcr_oi: number | null;
+  max_pain: number | null;
+}
+
+export interface DirectionalDecision {
+  side: Side | null;
+  reason: string;
+  entry: number | null;
+  stop: number | null;
+  target: number | null;
+  rr: number | null;
+}
+
+export interface DirectionalStrategy {
+  name: string;
+  label: string;
+  summary: string;
+  stop_rule: string;
+  target_rule: string;
+  interval: string;
+  lookback: number;
+  enabled: boolean;
+  /** what it decided on the last closed bar, per symbol */
+  latest: { strategy: string; symbol: string; bar_time: number; at: number; reason: string; decision: DirectionalDecision | null }[];
+}
+
+export interface DirectionalStatus {
+  strategies: DirectionalStrategy[];
+  job: JobStatus | null;
+  auto_options: boolean;
+  brokers: BrokerStatus[];
+}
+
+export interface SignalRow {
+  id: number;
+  ts: number;
+  strategy: string;
+  symbol: string;
+  interval: string;
+  bar_time: number;
+  side: Side | "";
+  action: "open" | "skip" | "error";
+  reason: string;
+  entry: number | null;
+  stop: number | null;
+  target: number | null;
+  rr: number | null;
+  orders: Record<string, { structure_id?: string; status?: string; qty?: number; error?: string; refused?: string }> | null;
+}
+
+export interface MarketPulse {
+  ready: boolean;
+  state: string;
+  headline: string;
+  symbol: string;
+  bar_time: number;
+  price: number;
+  measured: Record<string, unknown>;
+  reasons: string[];
+  size: string;
+  way: string;
+  note: string;
+  sources: string[];
+  loud: boolean;
+}
+
+export interface OutlookSummaryItem {
+  scale: string;
+  interval: string;
+  label: string;
+  good_for: string;
+  direction: number;
+  trend: string;
+  horizon_hours: number;
+  horizon_label: string;
+  move_pct: number;
+  move_usd: number;
+  band: [number, number];
+  probability: number | null;
+  baseline: number | null;
+  direction_source: string;
+  move_source: string;
+  sample: number;
+  edge: number | null;
+  note: string;
+}
+
+export interface MarketOutlook {
+  symbol: string;
+  ready: boolean;
+  price: number;
+  bar_time: number;
+  bars: number;
+  days: number;
+  realised_vol: Record<string, number | null>;
+  timeframes: Record<string, unknown>[];
+  alignment: Record<string, unknown>;
+  horizons: Record<string, unknown>;
+  summary: OutlookSummaryItem[];
+  direction: number;
+  patterns: Record<string, unknown>[];
+  sources: string[];
+}
+
+export interface NearbyLevelItem {
+  price: number;
+  label: string;
+  confluence: number;
+  distance_pct?: number;
+}
+
+export interface MarketStructure {
+  symbol: string;
+  ready: boolean;
+  bar_time: number;
+  bars: number;
+  atr: number;
+  price: number;
+  liquidity: {
+    ready?: boolean;
+    pools?: { price: number; type: string; volume?: number }[];
+    [key: string]: unknown;
+  };
+  zones: {
+    ready?: boolean;
+    supply?: { top: number; bottom: number; strength: number }[];
+    demand?: { top: number; bottom: number; strength: number }[];
+    [key: string]: unknown;
+  };
+  profile: {
+    ready?: boolean;
+    poc?: number;
+    vah?: number;
+    val?: number;
+    source?: string;
+    [key: string]: unknown;
+  };
+  flow: {
+    bias?: string;
+    delta?: number;
+    cvd?: number;
+    [key: string]: unknown;
+  };
+  levels: {
+    supports?: number[];
+    resistances?: number[];
+    [key: string]: unknown;
+  };
+  nearby: {
+    above?: NearbyLevelItem[];
+    below?: NearbyLevelItem[];
+  };
+}
+
+export interface VerdictItem {
+  key: string;
+  stance: string;
+  label: string;
+  detail: string;
+  confidence: number;
+  horizon_hours: number;
+  numbers: Record<string, unknown>;
+  measure: string;
+  scorable: boolean;
+  source: string;
+  symbol: string;
+}
+
+export interface MarketVerdicts {
+  symbol: string;
+  days: number;
+  verdicts: VerdictItem[];
+  record: {
+    cards: Record<string, unknown>[];
+    total: number;
+    min_marked: number;
+    tests: number;
+  };
+  history: Record<string, unknown>[];
+}
+
+export interface MarketAnalysisResponse {
+  underlying: string;
+  symbol: string;
+  price: number | null;
+  index: number | null;
+  stats: PerpStats | null;
+  options: Record<string, unknown> | null;
+  analysis: {
+    ts: number;
+    context: Record<string, unknown>;
+    insights: { key: string; label: string; detail: string; stance: string; importance: string }[];
+  } | null;
+}
+

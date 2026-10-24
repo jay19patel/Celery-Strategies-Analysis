@@ -12,7 +12,10 @@ from typing import Any
 EXPIRY_HOUR_UTC = 12  # Delta India BTC/ETH options settle at 12:00 UTC (17:30 IST)
 YEAR_HOURS = 365 * 24
 PERPETUALS = {"BTC": "BTCUSD", "ETH": "ETHUSD"}
+UNDERLYING_OF = {perp: u for u, perp in PERPETUALS.items()}
+PERP_SLIPPAGE = 0.0005  # applied to a perpetual's mark when a side of its book is empty
 CHAIN_WIDTH = 0.15  # strikes within ±15% of spot are sent to the dashboard
+CHAIN_EXPIRIES = 4  # nearest expiries sent with their chain in a summary
 
 
 @dataclass(frozen=True)
@@ -31,7 +34,9 @@ class OptionQuote:
     theta: float | None = None
     vega: float | None = None
     oi: float = 0.0  # in the underlying
+    oi_usd: float = 0.0
     volume: float = 0.0  # 24h, in the underlying
+    turnover_usd: float = 0.0  # 24h
     spot: float | None = None  # the index the option settles on
     contract_value: float = 0.001
     at: float = 0.0  # when it was received
@@ -81,7 +86,8 @@ def parse_ticker(msg: dict[str, Any], now: float | None = None) -> OptionQuote |
         mark=_f(msg.get("mark_price")), bid=bid if bid else None, ask=ask if ask else None,
         iv=_f(quotes.get("mark_iv")) or _f(msg.get("mark_vol")),
         delta=_f(greeks.get("delta")), gamma=_f(greeks.get("gamma")), theta=_f(greeks.get("theta")), vega=_f(greeks.get("vega")),
-        oi=_f(msg.get("oi")) or 0.0, volume=_f(msg.get("volume")) or 0.0,
+        oi=_f(msg.get("oi")) or 0.0, oi_usd=_f(msg.get("oi_value_usd")) or 0.0,
+        volume=_f(msg.get("volume")) or 0.0, turnover_usd=_f(msg.get("turnover_usd")) or 0.0,
         spot=_f(msg.get("spot_price")) or _f(greeks.get("spot")),
         contract_value=_f(msg.get("contract_value")) or (0.01 if underlying == "ETH" else 0.001),
         at=time.time() if now is None else now,
@@ -191,3 +197,51 @@ def pick_expiry(quotes: list[OptionQuote], min_hours: float, max_hours: float, n
         if min_hours <= hours <= max_hours:
             return expiry
     return None
+
+
+def summarize(underlying: str, quotes: list[OptionQuote], spot: float | None, now: float | None = None) -> dict[str, Any] | None:
+    """The whole book for one underlying: totals, per-expiry numbers, term structure, near-spot
+    chains. The shape the analysis modules (insights, nearby, verdict) read."""
+    now = time.time() if now is None else now
+    live = [q for q in quotes if q.underlying == underlying and q.expiry > now]
+    if not live:
+        return None
+    spot = spot or next((q.spot for q in live if q.spot), None)
+    if not spot:
+        return None
+    grouped = by_expiry(live, now)
+    expiries = [expiry_summary(qs, spot, now) for qs in grouped.values()]
+    call_oi = sum(q.oi for q in live if q.kind == "call")
+    put_oi = sum(q.oi for q in live if q.kind == "put")
+    # The nearest expiry at least 20h out answers "what does the market expect over the next day".
+    day = next((e for e in expiries if e["hours"] >= 20), expiries[-1])
+    return {
+        "underlying": underlying,
+        "spot": spot,
+        "at": now,
+        "contracts": len(live),
+        "call_oi": round(call_oi, 4),
+        "put_oi": round(put_oi, 4),
+        "pcr_oi": _ratio(put_oi, call_oi),
+        "pcr_volume": _ratio(sum(q.volume for q in live if q.kind == "put"), sum(q.volume for q in live if q.kind == "call")),
+        "oi_usd": round(sum(q.oi_usd for q in live), 2),
+        "turnover_usd": round(sum(q.turnover_usd for q in live), 2),
+        "nearest": expiries[0],
+        "day": day,
+        "term": [{"label": e["label"], "hours": e["hours"], "atm_iv": e["atm_iv"]} for e in expiries],
+        "expiries": expiries[:CHAIN_EXPIRIES],
+        "chains": {str(int(e["expiry"])): chain_rows(grouped[e["expiry"]], spot) for e in expiries[:CHAIN_EXPIRIES]},
+    }
+
+
+def history_row(summary: dict[str, Any]) -> dict[str, Any]:
+    """The few numbers worth keeping every minute: the ATM IV and put/call charts, and what
+    `pcr_options` compares the book with."""
+    day, near = summary["day"], summary["nearest"]
+    return {
+        "underlying": summary["underlying"], "ts": summary["at"], "spot": summary["spot"],
+        "atm_iv": day["atm_iv"], "near_atm_iv": near["atm_iv"], "skew_25d": day["skew_25d"],
+        "pcr_oi": summary["pcr_oi"], "pcr_volume": summary["pcr_volume"],
+        "call_oi": summary["call_oi"], "put_oi": summary["put_oi"],
+        "max_pain": near["max_pain"], "implied_move_pct": day["implied_move_pct"],
+    }

@@ -115,6 +115,13 @@ class Desk:
                 return FeeRate(*DEFAULT_FEE)  # not cached: the next call tries the spec again
         return self._fees[symbol]
 
+    async def contract_value(self, symbol: str) -> float:
+        """Underlying per contract, from the product spec (BTCUSD and BTC options: 0.001 BTC)."""
+        try:
+            return float((await self.feed.rest.product(symbol)).get("contract_value") or 0) or (0.01 if "ETH" in symbol else 0.001)
+        except Exception:
+            return 0.01 if "ETH" in symbol else 0.001
+
     def cached_fee(self, symbol: str) -> FeeRate:
         """The fee rate without a network call: what `fee_rate` read before, else the conservative default."""
         return self._fees.get(symbol, FeeRate(*DEFAULT_FEE))

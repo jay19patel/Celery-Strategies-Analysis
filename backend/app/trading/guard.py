@@ -1,6 +1,7 @@
 """The guard: an engine job over every open structure, and one over every broker's day.
 
-Per structure, strongest reason first:
+A position on the perpetual leaves when the mark reaches its strategy's stop or target, or after
+`perp_max_hold_hours`. Per options structure, strongest reason first:
   1. past expiry and still open  -> settle at intrinsic on the index
   2. inside `exit_before_expiry_minutes` -> close (settlement and pin risk are not worth the last hour)
   3. P&L at the take-profit or the stop-loss -> close
@@ -27,7 +28,7 @@ from app.core.models import Leg, Structure
 from app.errors import BrokerError
 from app.settings import Settings
 from app.trading.risk import set_halt, start_day
-from app.trading.service import TradingService, exit_thresholds
+from app.trading.service import TradingService, exit_thresholds, is_directional
 
 
 class Guard:
@@ -57,6 +58,8 @@ class Guard:
         return f"{len(rows)} open, {acted} exited"
 
     def exit_reason(self, st: Structure, legs: list[Leg], s: Settings, now: float) -> str | None:
+        if is_directional(st):
+            return self._directional_exit(st, legs, now)
         if now >= st.expiry:
             return "expired"
         minutes_left = (st.expiry - now) / 60
@@ -72,6 +75,24 @@ class Guard:
             return f"take profit: {pnl:+,.2f} reached {st.take_profit_pct:g}% target {tp:+,.2f}"
         if sl is not None and pnl <= sl:
             return f"stop loss: {pnl:+,.2f} reached {st.stop_loss_pct:g}% stop {sl:+,.2f}"
+        return None
+
+    def _directional_exit(self, st: Structure, legs: list[Leg], now: float) -> str | None:
+        """A position on the perpetual leaves at its strategy's levels, read on the mark — the price the
+        exchange triggers stops on — or when it has been held as long as it may be."""
+        if now >= st.expiry:
+            return f"max hold reached ({(now - st.opened_at) / 3600:.1f}h)"
+        quote = self.trading.book(legs[0].symbol) if legs else None
+        if quote is None:
+            return None
+        if (pnl := self.trading.valuation(st, legs)["pnl"]) is not None:
+            self._mark(st, pnl)
+        mark, long = quote[2], legs[0].side == "buy"
+        stop, target = st.stop_price or 0.0, st.target_price or 0.0
+        if (mark <= stop) if long else (mark >= stop):
+            return f"stop loss: mark {mark:,.2f} reached the strategy's stop {stop:,.2f}"
+        if target and ((mark >= target) if long else (mark <= target)):
+            return f"target: mark {mark:,.2f} reached {target:,.2f}"
         return None
 
     @staticmethod
