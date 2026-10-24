@@ -648,6 +648,13 @@ class System:
 
     async def on_options(self, e: OptionsSnapshot) -> None:
         self.options_latest[e.symbol] = {"source": e.source, "at": e.ts, "summary": e.summary}
+        chains = (e.summary or {}).get("chains") or {}
+        for rows in chains.values():
+            for row in rows:
+                if (c := row.get("call")) and c.get("symbol") and c.get("mark"):
+                    self.prices.set_price(c["symbol"], float(c["mark"]))
+                if (p := row.get("put")) and p.get("symbol") and p.get("mark"):
+                    self.prices.set_price(p["symbol"], float(p["mark"]))
         minute = int(e.ts // 60)
         if self._options_minute.get(e.underlying) != minute:  # one stored row per minute
             self._options_minute[e.underlying] = minute

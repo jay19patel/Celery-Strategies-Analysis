@@ -51,6 +51,7 @@ METHODS = (
     "bars", "snapshots", "outlook", "verdicts", "market_structure", "pulse",
     "journal_summary", "journal_month",
     "paper_history", "ai_report",
+    "options_desk", "options_order",
     "verify_pin", "change_pin", "get_auth_status",
 )
 
@@ -259,6 +260,101 @@ class Api:
         hours = min(max(hours, 1), 24 * 30)
         step = 60 if hours <= 24 else 900  # a minute apart for a day, a bar apart beyond
         return self.system.store.options_history(UNDERLYINGS[symbol], time.time() - hours * 3600, step)
+
+    async def options_desk(self, symbol: str = "BTCUSD") -> dict[str, Any]:
+        """Comprehensive options data, chain, and multi-leg setups for the Options Desk."""
+        from dataclasses import asdict
+        from tradebuddy.options import OptionQuote
+        from tradebuddy.strategies.iron_condor import select_iron_condor, select_straddle, select_strangle
+
+        s = self.system
+        spot = s.prices.price(symbol)
+        opt_data = s.options_latest.get(symbol) or {}
+        summary = opt_data.get("summary") or {}
+        if not spot and summary.get("spot"):
+            spot = float(summary["spot"])
+
+        underlying = UNDERLYINGS.get(symbol, "BTC")
+        quotes = s.options_book.for_underlying(underlying) if s.options_book else []
+
+        if not quotes and summary.get("chains"):
+            for exp_key, rows in summary["chains"].items():
+                for row in rows:
+                    for side_key in ("call", "put"):
+                        if leg := row.get(side_key):
+                            quotes.append(
+                                OptionQuote(
+                                    symbol=leg.get("symbol", ""),
+                                    underlying=underlying,
+                                    kind=side_key,
+                                    strike=float(row.get("strike", 0)),
+                                    expiry=float(exp_key),
+                                    mark=float(leg["mark"]) if leg.get("mark") else None,
+                                    bid=float(leg["bid"]) if leg.get("bid") else None,
+                                    ask=float(leg["ask"]) if leg.get("ask") else None,
+                                    mark_iv=float(leg["iv"]) if leg.get("iv") else None,
+                                    delta=float(leg["delta"]) if leg.get("delta") else None,
+                                    oi=float(leg["oi"]) if leg.get("oi") else 0.0,
+                                )
+                            )
+
+        condor = select_iron_condor(quotes, spot) if spot and quotes else None
+        straddle = select_straddle(quotes, spot) if spot and quotes else None
+        strangle = select_strangle(quotes, spot) if spot and quotes else None
+
+        return {
+            "symbol": symbol,
+            "underlying": underlying,
+            "spot": spot,
+            "stats": (s.prices.snapshot().get(symbol) or {}).get("stats"),
+            "summary": summary,
+            "setups": {
+                "iron_condor": asdict(condor) if condor else None,
+                "straddle": asdict(straddle) if straddle else None,
+                "strangle": asdict(strangle) if strangle else None,
+            },
+        }
+
+    async def options_order(
+        self,
+        broker: str,
+        strategy: str,
+        legs: list[dict[str, Any]],
+        request_id: str,
+    ) -> dict[str, Any]:
+        """Execute one or more options legs as a coordinated structure."""
+        if not legs:
+            raise ApiError(400, "no legs provided")
+        self._broker(broker)
+        results, errors = [], []
+        for i, leg in enumerate(legs):
+            sym = leg.get("symbol")
+            side = leg.get("side", "buy")
+            size = int(leg.get("size") or 1)
+            leg_req = f"{request_id}-{i}"
+            try:
+                order = await self.system.trader.manual(
+                    broker=broker,
+                    symbol=sym,
+                    side=side,
+                    size=size,
+                    stop_loss=None,
+                    take_profit=None,
+                    request_id=leg_req,
+                    margin_pct=None,
+                )
+                results.append(order)
+            except Exception as exc:
+                errors.append(f"{sym} {side}: {exc}")
+        if not results:
+            raise ApiError(409, "; ".join(errors) or "failed to place option legs")
+        return {
+            "strategy": strategy,
+            "broker": broker,
+            "executed_legs": len(results),
+            "orders": results,
+            "errors": errors,
+        }
 
     async def bars(self, symbol: str = "BTCUSD", interval: str = "15m", days: float = 7, limit: int = 5000) -> dict[str, Any]:
         """Candles with their open interest and funding, oldest first, and where the gaps are.

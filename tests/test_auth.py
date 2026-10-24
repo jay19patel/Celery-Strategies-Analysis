@@ -188,7 +188,7 @@ def test_authenticated_access_granted_with_cookie(cfg, exchange):
     # Pages render unlocked, Settings included
     home_res = client.get("/")
     assert home_res.status_code == 200
-    assert "Market Data · TradeBuddy" in home_res.text
+    assert "Options Desk · TradeBuddy" in home_res.text
     assert " data-locked " not in home_res.text and 'id="lockBtn"' in home_res.text
     assert client.get("/settings", follow_redirects=False).status_code == 200
     assert client.get("/api/settings").status_code == 200

@@ -1,0 +1,544 @@
+{% extends "base.html" %}
+{% block head %}{% endblock %}
+
+{% block content %}
+<div class="space-y-4 max-w-[1680px] mx-auto">
+
+  <!-- ── 1. Telemetry & Market Bar ───────────────────────────────────────── -->
+  <div class="card p-3 flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <div id="symTabs" class="flex gap-1.5">
+        <button class="btn btn-sm btn-primary" data-sym="BTCUSD">BTC/USDT</button>
+        <button class="btn btn-sm" data-sym="ETHUSD">ETH/USDT</button>
+      </div>
+      <span class="w-px h-5 bg-slate-200"></span>
+      <div class="flex items-baseline gap-2">
+        <span class="text-xl font-bold font-mono text-slate-900" id="spotPrice">—</span>
+        <span class="text-xs font-semibold font-mono" id="spotChange">—</span>
+      </div>
+    </div>
+
+    <!-- Key Options Telemetry KPIs -->
+    <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
+      <div class="px-2.5 py-1 rounded bg-slate-50 border border-slate-200" title="Expected 1-sigma move to expiry">
+        <span class="text-slate-400 text-[10.5px] uppercase">Expected Move:</span>
+        <span id="kpiExpMove" class="font-semibold text-slate-700">—</span>
+      </div>
+      <div class="px-2.5 py-1 rounded bg-slate-50 border border-slate-200" title="At-the-money Implied Volatility">
+        <span class="text-slate-400 text-[10.5px] uppercase">ATM IV:</span>
+        <span id="kpiAtmIv" class="font-semibold text-slate-700">—</span>
+      </div>
+      <div class="px-2.5 py-1 rounded bg-slate-50 border border-slate-200" title="Put/Call Ratio Open Interest">
+        <span class="text-slate-400 text-[10.5px] uppercase">PCR (OI):</span>
+        <span id="kpiPcr" class="font-semibold text-slate-700">—</span>
+      </div>
+      <div class="px-2.5 py-1 rounded bg-slate-50 border border-slate-200" title="Max Pain settlement strike">
+        <span class="text-slate-400 text-[10.5px] uppercase">Max Pain:</span>
+        <span id="kpiMaxPain" class="font-semibold text-slate-700">—</span>
+      </div>
+      <div class="px-2.5 py-1 rounded bg-slate-50 border border-slate-200" title="Call & Put Open Interest Walls">
+        <span class="text-slate-400 text-[10.5px] uppercase">Walls:</span>
+        <span id="kpiWalls" class="font-semibold text-slate-700">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2. Expiry Selector Strip ────────────────────────────────────────── -->
+  <div class="card p-2.5 flex flex-wrap items-center justify-between gap-3 bg-slate-50/60">
+    <div class="flex items-center gap-2">
+      <span class="stat-label flex items-center gap-1"><i data-lucide="calendar" class="w-3.5 h-3.5"></i>Expiry:</span>
+      <div id="expiryTabs" class="flex flex-wrap gap-1.5 font-mono text-xs"></div>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] font-mono muted" id="expiryHours"></span>
+      <span class="w-px h-4 bg-slate-200"></span>
+      <span class="text-[11px] font-mono text-slate-500">Settles daily 17:30 IST (12:00 UTC)</span>
+    </div>
+  </div>
+
+  <!-- ── 3. Strategy Builder: Iron Condor / Straddle / Strangle ───────────── -->
+  <section class="card border-l-4 border-l-brand-500" id="builderCard">
+    <div class="card-head flex-wrap gap-2">
+      <div class="card-title">
+        <i data-lucide="layers" class="text-brand-500"></i>Strategy Builder
+        <span class="card-sub">non-directional theta decay execution</span>
+      </div>
+      <div class="tabs" id="strategyTabs">
+        <button class="on" data-strat="iron_condor">Iron Condor (Defined Risk)</button>
+        <button data-strat="straddle">Short Straddle (ATM)</button>
+        <button data-strat="strangle">Short Strangle (OTM)</button>
+      </div>
+    </div>
+    <div class="card-body space-y-4">
+      <div id="setupDetails" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 text-xs font-mono"></div>
+
+      <!-- Strategy Actions & Sizing -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex items-center gap-2">
+            <label class="field-label" for="condorBroker">Broker:</label>
+            <select id="condorBroker" class="select font-mono text-xs py-1">
+              <option value="paper">Paper Trading</option>
+              <option value="delta">Delta Exchange (Live)</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="field-label" for="condorQty">Quantity (Contracts):</label>
+            <input id="condorQty" type="number" min="1" max="1000" value="1" class="input font-mono text-xs w-20 py-1">
+          </div>
+          <div class="text-[11px] font-mono text-slate-500" id="condorMarginEstimate"></div>
+        </div>
+
+        <button id="btnExecuteStrategy" class="btn btn-primary font-semibold flex items-center gap-2 shadow-sm">
+          <i data-lucide="play" class="w-4 h-4"></i>Execute Strategy
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 4. Live Options Chain Table ─────────────────────────────────────── -->
+  <section class="card">
+    <div class="card-head flex-wrap gap-2">
+      <div class="card-title">
+        <i data-lucide="table" class="text-slate-500"></i>Options Chain
+        <span class="card-sub">click any Bid/Ask for single-leg ticket</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="text-[11px] font-mono text-slate-500">Calls (Left) · Puts (Right)</div>
+        <span class="w-px h-4 bg-slate-200"></span>
+        <label class="text-[11px] font-medium flex items-center gap-1.5 cursor-pointer">
+          <input type="checkbox" id="chkNearSpot" checked class="rounded border-slate-300">
+          <span>Near spot only (±12%)</span>
+        </label>
+      </div>
+    </div>
+    <div class="scroll">
+      <table class="tbl text-xs font-mono">
+        <thead>
+          <tr class="bg-slate-50 text-slate-500 text-[10.5px]">
+            <th colspan="5" class="text-center border-r border-slate-200 py-1.5 bg-blue-50/40 text-blue-800 font-semibold">CALLS</th>
+            <th class="text-center py-1.5 font-bold text-slate-800 bg-slate-100">STRIKE</th>
+            <th colspan="5" class="text-center border-l border-slate-200 py-1.5 bg-purple-50/40 text-purple-800 font-semibold">PUTS</th>
+          </tr>
+          <tr class="text-[11px]">
+            <!-- Calls -->
+            <th class="r">Delta</th>
+            <th class="r">IV</th>
+            <th class="r">OI</th>
+            <th class="r">Bid</th>
+            <th class="r border-r border-slate-200">Ask</th>
+            <!-- Strike -->
+            <th class="text-center font-bold bg-slate-50">Price</th>
+            <!-- Puts -->
+            <th class="border-l border-slate-200">Bid</th>
+            <th>Ask</th>
+            <th class="r">OI</th>
+            <th class="r">IV</th>
+            <th class="r">Delta</th>
+          </tr>
+        </thead>
+        <tbody id="chainRows">
+          <tr><td colspan="11" class="empty">Loading options chain...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<!-- ── Single Leg Trade Modal ──────────────────────────────────────────── -->
+<div id="legModal" class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm hidden items-center justify-center p-4">
+  <div class="card max-w-md w-full shadow-xl bg-white p-5 space-y-4">
+    <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+      <div class="flex items-center gap-2">
+        <span id="modalBadge" class="badge"></span>
+        <h3 class="text-sm font-bold font-mono text-slate-900" id="modalSymbol">—</h3>
+      </div>
+      <button id="btnModalClose" class="text-slate-400 hover:text-slate-600 p-1"><i data-lucide="x" class="w-4 h-4"></i></button>
+    </div>
+
+    <div class="space-y-3 text-xs font-mono">
+      <div class="grid grid-cols-2 gap-2 p-2.5 rounded bg-slate-50 border border-slate-100">
+        <div><span class="muted text-[10.5px]">Strike:</span> <b id="modalStrike">—</b></div>
+        <div><span class="muted text-[10.5px]">Mark Price:</span> <b id="modalMark">—</b></div>
+        <div><span class="muted text-[10.5px]">Delta:</span> <span id="modalDelta">—</span></div>
+        <div><span class="muted text-[10.5px]">IV:</span> <span id="modalIv">—</span></div>
+      </div>
+
+      <div class="space-y-2">
+        <label class="field-label">Action:</label>
+        <div class="flex gap-2">
+          <button id="btnActionBuy" class="flex-1 py-1.5 rounded font-semibold text-xs border border-emerald-500 bg-emerald-50 text-emerald-800">Buy</button>
+          <button id="btnActionSell" class="flex-1 py-1.5 rounded font-semibold text-xs border border-slate-200 text-slate-600">Sell (Short)</button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="field-label" for="modalBroker">Broker:</label>
+          <select id="modalBroker" class="select font-mono w-full mt-1 text-xs">
+            <option value="paper">Paper Trading</option>
+            <option value="delta">Delta Exchange</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label" for="modalSize">Contracts:</label>
+          <input id="modalSize" type="number" min="1" value="1" class="input font-mono w-full mt-1 text-xs">
+        </div>
+      </div>
+    </div>
+
+    <div class="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+      <button id="btnModalCancel" class="btn text-xs">Cancel</button>
+      <button id="btnModalSubmit" class="btn btn-primary text-xs font-semibold">Place Order</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const { $, esc, num, price } = TB;
+  let sym = "BTCUSD", currentDesk = null, activeExpiry = null, activeStrat = "iron_condor";
+  let modalLeg = null, modalAction = "buy";
+
+  // ── 1. Fetch & Paint Desk ──────────────────────────────────────────────
+  async function loadDesk() {
+    try {
+      const data = await TB.get(`/api/options/desk?symbol=${sym}`);
+      currentDesk = data;
+      renderHeader();
+      renderExpiries();
+      renderStrategySetup();
+      renderChain();
+    } catch (e) {
+      console.error("options_desk load failed:", e);
+    }
+  }
+
+  function renderHeader() {
+    if (!currentDesk) return;
+    const spot = currentDesk.spot;
+    $("spotPrice").textContent = spot ? `$${TB.price(spot)}` : "—";
+    const stats = currentDesk.stats || {};
+    const chg = stats.change_24h_pct;
+    $("spotChange").textContent = chg != null ? `${chg >= 0 ? "+" : ""}${TB.num(chg, 2)}%` : "";
+    $("spotChange").className = `text-xs font-semibold font-mono ${chg >= 0 ? "up" : "down"}`;
+
+    const summary = currentDesk.summary || {};
+    const day = summary.day || {};
+    const near = summary.nearest || {};
+    $("kpiExpMove").textContent = day.implied_move_pct ? `±${day.implied_move_pct}%` : "—";
+    $("kpiAtmIv").textContent = day.atm_iv ? `${TB.num(day.atm_iv * 100, 1)}%` : "—";
+    $("kpiPcr").textContent = summary.pcr_oi ? TB.num(summary.pcr_oi, 2) : "—";
+    $("kpiMaxPain").textContent = near.max_pain ? `$${TB.price(near.max_pain)}` : "—";
+    $("kpiWalls").innerHTML = (day.put_wall && day.call_wall)
+      ? `<span class="down">$${TB.num(day.put_wall, 0)}</span> / <span class="up">$${TB.num(day.call_wall, 0)}</span>`
+      : "—";
+  }
+
+  function renderExpiries() {
+    const summary = currentDesk?.summary || {};
+    const expiries = summary.expiries || [];
+    if (!expiries.length) return;
+    if (!activeExpiry) activeExpiry = String(parseInt(expiries[0].expiry));
+
+    $("expiryTabs").innerHTML = expiries.map((e) => {
+      const key = String(parseInt(e.expiry));
+      const on = key === activeExpiry;
+      return `<button class="btn btn-sm ${on ? "btn-primary" : ""}" data-exp="${key}">
+        ${esc(e.label)} <span class="text-[10px] opacity-75">(${TB.num(e.hours, 0)}h)</span>
+      </button>`;
+    }).join("");
+
+    const currentExp = expiries.find((e) => String(parseInt(e.expiry)) === activeExpiry);
+    $("expiryHours").textContent = currentExp ? `Expires in ${TB.num(currentExp.hours, 1)} hours` : "";
+  }
+
+  // ── 2. Strategy Builder ────────────────────────────────────────────────
+  function renderStrategySetup() {
+    const box = $("setupDetails");
+    const setups = currentDesk?.setups || {};
+    const setup = setups[activeStrat];
+
+    if (!setup) {
+      box.innerHTML = `<div class="col-span-full py-4 text-center muted">No quotes available to form ${activeStrat.replace("_", " ")} for this expiry.</div>`;
+      $("btnExecuteStrategy").disabled = true;
+      return;
+    }
+
+    $("btnExecuteStrategy").disabled = false;
+
+    if (activeStrat === "iron_condor") {
+      box.innerHTML = `
+        <div class="p-2.5 rounded bg-slate-50 border border-slate-200">
+          <div class="stat-label">Call Spread (Bear)</div>
+          <div class="text-sm font-semibold mt-1 text-slate-800">Sell $${TB.num(setup.short_call.strike, 0)} · Buy $${TB.num(setup.long_call.strike, 0)}</div>
+          <div class="text-[10.5px] muted mt-0.5">Short Call Delta: ${setup.short_call.delta ? TB.num(setup.short_call.delta, 2) : "—"}</div>
+        </div>
+        <div class="p-2.5 rounded bg-slate-50 border border-slate-200">
+          <div class="stat-label">Put Spread (Bull)</div>
+          <div class="text-sm font-semibold mt-1 text-slate-800">Sell $${TB.num(setup.short_put.strike, 0)} · Buy $${TB.num(setup.long_put.strike, 0)}</div>
+          <div class="text-[10.5px] muted mt-0.5">Short Put Delta: ${setup.short_put.delta ? TB.num(setup.short_put.delta, 2) : "—"}</div>
+        </div>
+        <div class="p-2.5 rounded bg-emerald-50/60 border border-emerald-200">
+          <div class="stat-label text-emerald-800">Net Credit / Max Profit</div>
+          <div class="text-sm font-bold text-emerald-700 mt-1">$${setup.net_credit} per unit</div>
+          <div class="text-[10.5px] text-emerald-600 mt-0.5">Max Loss: $${setup.max_loss} (strictly capped)</div>
+        </div>
+        <div class="p-2.5 rounded bg-slate-50 border border-slate-200">
+          <div class="stat-label">Profit Safe Range</div>
+          <div class="text-sm font-semibold text-slate-800 mt-1">$${TB.num(setup.lower_breakeven, 0)} – $${TB.num(setup.upper_breakeven, 0)}</div>
+          <div class="text-[10.5px] muted mt-0.5">Buffer from spot: ±${setup.buffer_pct}%</div>
+        </div>`;
+    } else if (activeStrat === "straddle") {
+      box.innerHTML = `
+        <div class="p-2.5 rounded bg-slate-50 border border-slate-200">
+          <div class="stat-label">ATM Strike</div>
+          <div class="text-sm font-semibold mt-1 text-slate-800">$${TB.num(setup.atm_strike, 0)}</div>
+          <div class="text-[10.5px] muted mt-0.5">Sell 50Δ Call & 50Δ Put</div>
+        </div>
+        <div class="p-2.5 rounded bg-emerald-50/60 border border-emerald-200">
+          <div class="stat-label text-emerald-800">Total Premium Collected</div>
+          <div class="text-sm font-bold text-emerald-700 mt-1">$${setup.total_credit} per unit</div>
+          <div class="text-[10.5px] text-emerald-600 mt-0.5">Maximum possible profit</div>
+        </div>
+        <div class="p-2.5 rounded bg-slate-50 border border-slate-200 col-span-2">
+          <div class="stat-label">Breakevens</div>
+          <div class="text-sm font-semibold text-slate-800 mt-1">$${TB.num(setup.lower_breakeven, 0)} – $${TB.num(setup.upper_breakeven, 0)}</div>
+          <div class="text-[10.5px] muted mt-0.5">Requires market to remain inside breakevens until settlement</div>
+        </div>`;
+    } else if (activeStrat === "strangle") {
+      box.innerHTML = `
+        <div class="p-2.5 rounded bg-slate-50 border border-slate-200">
+          <div class="stat-label">Short Legs</div>
+          <div class="text-sm font-semibold mt-1 text-slate-800">Sell Put $${TB.num(setup.short_put.strike, 0)} · Sell Call $${TB.num(setup.short_call.strike, 0)}</div>
+          <div class="text-[10.5px] muted mt-0.5">Target 20-Delta OTM strikes</div>
+        </div>
+        <div class="p-2.5 rounded bg-emerald-50/60 border border-emerald-200">
+          <div class="stat-label text-emerald-800">Total Credit</div>
+          <div class="text-sm font-bold text-emerald-700 mt-1">$${setup.total_credit} per unit</div>
+          <div class="text-[10.5px] text-emerald-600 mt-0.5">Wider range than Straddle</div>
+        </div>
+        <div class="p-2.5 rounded bg-slate-50 border border-slate-200 col-span-2">
+          <div class="stat-label">Breakevens</div>
+          <div class="text-sm font-semibold text-slate-800 mt-1">$${TB.num(setup.lower_breakeven, 0)} – $${TB.num(setup.upper_breakeven, 0)}</div>
+          <div class="text-[10.5px] muted mt-0.5">Price must stay between breakevens to retain full premium</div>
+        </div>`;
+    }
+  }
+
+  // ── 3. Options Chain Table ─────────────────────────────────────────────
+  function renderChain() {
+    const summary = currentDesk?.summary || {};
+    const chains = summary.chains || {};
+    const rows = chains[activeExpiry] || [];
+    const spot = currentDesk?.spot || 0;
+    const nearOnly = $("chkNearSpot")?.checked;
+
+    if (!rows.length) {
+      $("chainRows").innerHTML = `<tr><td colspan="11" class="empty">No strikes available for this expiry</td></tr>`;
+      return;
+    }
+
+    const filtered = nearOnly ? rows.filter((r) => Math.abs(r.strike - spot) <= 0.12 * spot) : rows;
+
+    $("chainRows").innerHTML = filtered.map((r) => {
+      const isAtm = Math.abs(r.strike - spot) <= 500;
+      const c = r.call || {}, p = r.put || {};
+      const cDelta = c.delta != null ? TB.num(c.delta, 2) : "—";
+      const pDelta = p.delta != null ? TB.num(p.delta, 2) : "—";
+      const cIv = c.iv ? `${TB.num(c.iv * 100, 1)}%` : "—";
+      const pIv = p.iv ? `${TB.num(p.iv * 100, 1)}%` : "—";
+      const cBid = c.bid ? `$${TB.price(c.bid)}` : "—";
+      const cAsk = c.ask ? `$${TB.price(c.ask)}` : "—";
+      const pBid = p.bid ? `$${TB.price(p.bid)}` : "—";
+      const pAsk = p.ask ? `$${TB.price(p.ask)}` : "—";
+
+      return `<tr class="${isAtm ? "bg-amber-50/40 font-semibold" : ""}">
+        <td class="r text-slate-500">${cDelta}</td>
+        <td class="r text-slate-500">${cIv}</td>
+        <td class="r text-slate-500">${c.oi ? TB.num(c.oi, 1) : "0"}</td>
+        <td class="r"><button class="btn-leg text-blue-600 hover:underline" data-sym="${esc(c.symbol || "")}" data-side="sell" data-kind="call" data-strike="${r.strike}" data-mark="${c.mark || 0}" data-delta="${cDelta}" data-iv="${cIv}">${cBid}</button></td>
+        <td class="r border-r border-slate-200"><button class="btn-leg text-blue-600 hover:underline font-bold" data-sym="${esc(c.symbol || "")}" data-side="buy" data-kind="call" data-strike="${r.strike}" data-mark="${c.mark || 0}" data-delta="${cDelta}" data-iv="${cIv}">${cAsk}</button></td>
+        
+        <td class="text-center font-bold font-mono ${isAtm ? "bg-amber-100/60 text-amber-900" : "bg-slate-50 text-slate-900"}">$${TB.num(r.strike, 0)}</td>
+        
+        <td class="border-l border-slate-200"><button class="btn-leg text-purple-600 hover:underline" data-sym="${esc(p.symbol || "")}" data-side="sell" data-kind="put" data-strike="${r.strike}" data-mark="${p.mark || 0}" data-delta="${pDelta}" data-iv="${pIv}">${pBid}</button></td>
+        <td><button class="btn-leg text-purple-600 hover:underline font-bold" data-sym="${esc(p.symbol || "")}" data-side="buy" data-kind="put" data-strike="${r.strike}" data-mark="${p.mark || 0}" data-delta="${pDelta}" data-iv="${pIv}">${pAsk}</button></td>
+        <td class="r text-slate-500">${p.oi ? TB.num(p.oi, 1) : "0"}</td>
+        <td class="r text-slate-500">${pIv}</td>
+        <td class="r text-slate-500">${pDelta}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  // ── 4. Multi-Leg Execution Handler ──────────────────────────────────────
+  async function executeStrategy() {
+    const setup = currentDesk?.setups?.[activeStrat];
+    if (!setup) return;
+    const broker = $("condorBroker").value;
+    const qty = parseInt($("condorQty").value) || 1;
+
+    let legs = [];
+    if (activeStrat === "iron_condor") {
+      legs = [
+        { symbol: setup.short_call.symbol, side: "sell", size: qty },
+        { symbol: setup.long_call.symbol, side: "buy", size: qty },
+        { symbol: setup.short_put.symbol, side: "sell", size: qty },
+        { symbol: setup.long_put.symbol, side: "buy", size: qty },
+      ];
+    } else if (activeStrat === "straddle") {
+      legs = [
+        { symbol: setup.call_leg.symbol, side: "sell", size: qty },
+        { symbol: setup.put_leg.symbol, side: "sell", size: qty },
+      ];
+    } else if (activeStrat === "strangle") {
+      legs = [
+        { symbol: setup.short_call.symbol, side: "sell", size: qty },
+        { symbol: setup.short_put.symbol, side: "sell", size: qty },
+      ];
+    }
+
+    const btn = $("btnExecuteStrategy");
+    btn.disabled = true;
+    btn.innerHTML = `<span class="inline-block animate-spin mr-1">●</span> Executing...`;
+
+    try {
+      const res = await TB.post("/api/options/order", {
+        broker: broker,
+        strategy: activeStrat,
+        legs: legs,
+      });
+      alert(`Success! Executed ${res.executed_legs} legs for ${activeStrat.replace("_", " ")} on ${broker}.`);
+    } catch (e) {
+      alert(`Execution failed: ${e.message || e}`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="play" class="w-4 h-4"></i>Execute Strategy`;
+      TB.icons();
+    }
+  }
+
+  // ── 5. Single Leg Order Modal ──────────────────────────────────────────
+  function openLegModal(btn) {
+    modalLeg = {
+      symbol: btn.dataset.sym,
+      kind: btn.dataset.kind,
+      strike: btn.dataset.strike,
+      mark: btn.dataset.mark,
+      delta: btn.dataset.delta,
+      iv: btn.dataset.iv,
+    };
+    modalAction = btn.dataset.side || "buy";
+
+    $("modalSymbol").textContent = modalLeg.symbol || "—";
+    $("modalBadge").textContent = (modalLeg.kind || "").toUpperCase();
+    $("modalBadge").className = `badge ${modalLeg.kind === "call" ? "badge-blue" : "badge-amber"}`;
+    $("modalStrike").textContent = `$${TB.num(modalLeg.strike, 0)}`;
+    $("modalMark").textContent = `$${modalLeg.mark}`;
+    $("modalDelta").textContent = modalLeg.delta;
+    $("modalIv").textContent = modalLeg.iv;
+    updateModalActionStyles();
+
+    $("legModal").classList.remove("hidden");
+    $("legModal").classList.add("flex");
+  }
+
+  function updateModalActionStyles() {
+    if (modalAction === "buy") {
+      $("btnActionBuy").className = "flex-1 py-1.5 rounded font-semibold text-xs border border-emerald-500 bg-emerald-50 text-emerald-800";
+      $("btnActionSell").className = "flex-1 py-1.5 rounded font-semibold text-xs border border-slate-200 text-slate-600";
+      $("btnModalSubmit").textContent = "Place Buy Order";
+    } else {
+      $("btnActionBuy").className = "flex-1 py-1.5 rounded font-semibold text-xs border border-slate-200 text-slate-600";
+      $("btnActionSell").className = "flex-1 py-1.5 rounded font-semibold text-xs border border-rose-500 bg-rose-50 text-rose-800";
+      $("btnModalSubmit").textContent = "Place Sell (Short) Order";
+    }
+  }
+
+  async function submitModalOrder() {
+    if (!modalLeg || !modalLeg.symbol) return;
+    const broker = $("modalBroker").value;
+    const size = parseInt($("modalSize").value) || 1;
+
+    try {
+      await TB.post("/api/options/order", {
+        broker: broker,
+        strategy: "single",
+        legs: [{ symbol: modalLeg.symbol, side: modalAction, size: size }],
+      });
+      alert(`Order placed: ${modalAction.toUpperCase()} ${size}x ${modalLeg.symbol} on ${broker}`);
+      $("legModal").classList.add("hidden");
+      $("legModal").classList.remove("flex");
+    } catch (e) {
+      alert(`Order failed: ${e.message || e}`);
+    }
+  }
+
+  // ── Event Listeners ────────────────────────────────────────────────────
+  $("symTabs")?.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    $("symTabs").querySelectorAll("button").forEach((btn) => btn.className = "btn btn-sm");
+    b.className = "btn btn-sm btn-primary";
+    sym = b.dataset.sym;
+    loadDesk();
+  });
+
+  $("strategyTabs")?.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    $("strategyTabs").querySelectorAll("button").forEach((btn) => btn.classList.remove("on"));
+    b.classList.add("on");
+    activeStrat = b.dataset.strat;
+    renderStrategySetup();
+  });
+
+  $("expiryTabs")?.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    activeExpiry = b.dataset.exp;
+    renderExpiries();
+    renderStrategySetup();
+    renderChain();
+  });
+
+  $("chkNearSpot")?.addEventListener("change", renderChain);
+  $("btnExecuteStrategy")?.addEventListener("click", executeStrategy);
+
+  $("chainRows")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".btn-leg");
+    if (!btn || !btn.dataset.sym) return;
+    openLegModal(btn);
+  });
+
+  $("btnModalClose")?.addEventListener("click", () => {
+    $("legModal").classList.add("hidden");
+    $("legModal").classList.remove("flex");
+  });
+  $("btnModalCancel")?.addEventListener("click", () => {
+    $("legModal").classList.add("hidden");
+    $("legModal").classList.remove("flex");
+  });
+  $("btnActionBuy")?.addEventListener("click", () => { modalAction = "buy"; updateModalActionStyles(); });
+  $("btnActionSell")?.addEventListener("click", () => { modalAction = "sell"; updateModalActionStyles(); });
+  $("btnModalSubmit")?.addEventListener("click", submitModalOrder);
+
+  // Live WebSocket updates
+  TB.on("OptionsSnapshot", (e) => {
+    if (e.symbol === sym && currentDesk) {
+      currentDesk.summary = e.summary;
+      renderHeader();
+      renderExpiries();
+      renderStrategySetup();
+      renderChain();
+    }
+  });
+
+  loadDesk();
+  TB.every(loadDesk, 15000);
+})();
+</script>
+{% endblock %}

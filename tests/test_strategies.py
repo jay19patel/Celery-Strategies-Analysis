@@ -14,9 +14,7 @@ def ctx(candles, market=None, symbol="BTCUSD"):
 
 def test_discover_finds_every_strategy_once():
     names = [s.name for s in discover()]
-    assert names == sorted(names) == [
-        "ema_vwap_5m", "scalper", "tb_master_15m", "trade_buddy_manager_15m",
-    ]
+    assert names == ["iron_condor_daily"]
 
 
 def test_ema_matches_hand_calculation():
@@ -100,20 +98,44 @@ async def test_the_system_builds_the_way_the_containers_build_it(cfg, exchange):
 
     system = System(cfg, strategies=None, stream_factory=IdleStream, client_factory=exchange.client)
     assert {s.name for s in system.strategies} == {s.name for s in discover()}
-    assert system.trader.margins == {"scalper": 60.0}
+    assert system.trader.margins == {}
 
 
-async def test_the_page_shows_a_strategy_the_way_the_runner_treats_it(cfg, exchange):
-    """A toggle row that has never been written means "nobody has been asked", and `enabled()`
-    answers with whatever default it is handed. The runner hands it `default_on`; this view used
-    to hand it nothing, so the scalper appeared switched ON on the Strategies page while the
-    engine was quietly not running it."""
-    from tradebuddy.system import System
+def test_select_iron_condor_builds_hedged_spread():
+    from tradebuddy.options import OptionQuote
+    from tradebuddy.strategies.iron_condor import select_iron_condor
 
-    from .conftest import IdleStream
+    spot = 68000.0
+    quotes = [
+        OptionQuote(symbol="C-BTC-69500-D", underlying="BTC", kind="call", strike=69500, expiry=1700000000, mark=150.0, delta=0.18),
+        OptionQuote(symbol="C-BTC-70500-D", underlying="BTC", kind="call", strike=70500, expiry=1700000000, mark=50.0, delta=0.08),
+        OptionQuote(symbol="P-BTC-66500-D", underlying="BTC", kind="put", strike=66500, expiry=1700000000, mark=140.0, delta=-0.18),
+        OptionQuote(symbol="P-BTC-65500-D", underlying="BTC", kind="put", strike=65500, expiry=1700000000, mark=45.0, delta=-0.07),
+    ]
+    condor = select_iron_condor(quotes, spot, target_delta=0.18)
+    assert condor is not None
+    assert condor.short_call.strike == 69500
+    assert condor.long_call.strike == 70500
+    assert condor.short_put.strike == 66500
+    assert condor.long_put.strike == 65500
+    assert condor.net_credit == (150 + 140) - (50 + 45)  # 195.0
+    assert condor.max_loss == 1000.0 - 195.0  # 805.0
 
-    system = System(cfg, strategies=discover(), stream_factory=IdleStream, client_factory=exchange.client)
-    shown = {s["name"]: s["enabled"] for s in system.strategies_view()}
-    for s in discover():
-        runs = system.runner.is_on(s, s.symbols[0])
-        assert shown[s.name] == runs, f"{s.name}: page says {shown[s.name]}, runner says {runs}"
+
+def test_select_straddle_and_strangle():
+    from tradebuddy.options import OptionQuote
+    from tradebuddy.strategies.iron_condor import select_straddle, select_strangle
+
+    spot = 68000.0
+    quotes = [
+        OptionQuote(symbol="C-BTC-68000-D", underlying="BTC", kind="call", strike=68000, expiry=1700000000, mark=400.0, delta=0.50),
+        OptionQuote(symbol="P-BTC-68000-D", underlying="BTC", kind="put", strike=68000, expiry=1700000000, mark=380.0, delta=-0.50),
+        OptionQuote(symbol="C-BTC-69500-D", underlying="BTC", kind="call", strike=69500, expiry=1700000000, mark=150.0, delta=0.20),
+        OptionQuote(symbol="P-BTC-66500-D", underlying="BTC", kind="put", strike=66500, expiry=1700000000, mark=140.0, delta=-0.20),
+    ]
+    straddle = select_straddle(quotes, spot)
+    assert straddle is not None and straddle.atm_strike == 68000 and straddle.total_credit == 780.0
+
+    strangle = select_strangle(quotes, spot, target_delta=0.20)
+    assert strangle is not None and strangle.short_call.strike == 69500 and strangle.short_put.strike == 66500
+

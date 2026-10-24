@@ -28,20 +28,14 @@ from tradebuddy.system import Broadcaster, System
 HERE = Path(__file__).parent
 
 # (id, path, lucide icon, title, nav group)
-# Market Data is the landing page: the market comes before anything done about it. The sidebar
-# groups appear in the order their first page does here, so Monitoring leads. There was an Overview
-# above all of this that repeated the account, the open positions and the market cards from three
-# other pages; each number now lives on the one page that owns it.
+# Options Desk is the landing page: options chains, Greeks, and non-directional execution.
 PAGES = [
-    ("market", "/", "candlestick-chart", "Market Data", "Monitoring"),
-    ("system", "/system", "gauge", "System", "Monitoring"),
-    ("events", "/events", "scroll-text", "Event Log", "Monitoring"),
-    ("strategies", "/strategies", "brain-circuit", "Strategies", "Trading"),
-    ("signals", "/signals", "activity", "Signals", "Trading"),
-    ("account", "/account", "wallet", "Account", "Portfolio"),
+    ("options", "/", "sparkles", "Options Desk", "Trading"),
     ("positions", "/positions", "layers", "Positions", "Portfolio"),
     ("orders", "/orders", "list-checks", "Orders", "Portfolio"),
+    ("account", "/account", "wallet", "Account", "Portfolio"),
     ("journal", "/journal", "calendar-days", "Trading Journal", "Portfolio"),
+    ("system", "/system", "gauge", "System", "Admin"),
     ("settings", "/settings", "settings", "Settings", "Admin"),
 ]
 
@@ -104,10 +98,17 @@ class ManualOrder(BaseModel):
     take_profit: float | None = Field(default=None, gt=0)
 
 
-class StructurePick(BaseModel):
-    action: Literal["buy", "sell"]
-    kind: Literal["call", "put"]
-    strike: float = Field(gt=0)
+class OptionsOrderLeg(BaseModel):
+    symbol: str
+    side: Literal["buy", "sell"]
+    size: int = Field(default=1, ge=1)
+
+
+class OptionsOrderRequest(BaseModel):
+    broker: str = "paper"
+    strategy: str = "single"  # "iron_condor" | "straddle" | "strangle" | "single"
+    legs: list[OptionsOrderLeg]
+    request_id: str = Field(default="", max_length=64)
 
 
 
@@ -331,16 +332,39 @@ def create_app(
 
     @app.get("/market", include_in_schema=False)
     async def market_redirect() -> RedirectResponse:
-        """Market Data is the root now. Old links and bookmarks keep working."""
         return RedirectResponse(url="/")
 
     @app.get("/overview", include_in_schema=False)
     async def overview_redirect() -> RedirectResponse:
         return RedirectResponse(url="/")
 
+    @app.get("/signals", include_in_schema=False)
+    async def signals_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/")
+
+    @app.get("/events", include_in_schema=False)
+    async def events_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/system")
+
+    @app.get("/strategies", include_in_schema=False)
+    async def strategies_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/")
+
     @app.get("/paper", include_in_schema=False)
     async def paper_redirect() -> RedirectResponse:
         return RedirectResponse(url="/account?broker=paper")
+
+    # -- options desk -------------------------------------------------------
+
+    @app.get("/api/options/desk")
+    async def options_desk(symbol: str = "BTCUSD") -> dict:
+        return await call("options_desk", symbol=symbol)
+
+    @app.post("/api/options/order", dependencies=[Depends(protected)])
+    async def place_options_order(body: OptionsOrderRequest) -> dict:
+        import uuid
+        req_id = body.request_id or f"opt-{uuid.uuid4().hex[:12]}"
+        return await call("options_order", broker=body.broker, strategy=body.strategy, legs=[l.model_dump() for l in body.legs], request_id=req_id)
 
     # -- read ---------------------------------------------------------------
 

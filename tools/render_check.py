@@ -26,18 +26,11 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # What each page asks for. A page that fetches something not listed here fails loudly in the
 # harness rather than silently rendering an empty panel.
 PAGE_CALLS = {
-    "market": [
-        "/api/header", "/api/analysis", "/api/pulse?symbol=BTCUSD",
-        "/api/outlook?symbol=BTCUSD", "/api/verdicts?symbol=BTCUSD&days=30",
-        "/api/bars?symbol=BTCUSD&interval=15m&days=30&limit=400",
-        "/api/options/history?symbol=BTCUSD&hours=24",
-        "/api/market-structure?symbol=BTCUSD",
-        "/api/ai-report?symbol=BTCUSD",
-    ],
+    "options": ["/api/header", "/api/options/desk?symbol=BTCUSD"],
     "system": ["/api/metrics", "/api/database"],
     "journal": ["/api/journal/month", "/api/journal/summary"],
 }
-PATHS = {"market": "/", "system": "/system", "journal": "/journal"}
+PATHS = {"options": "/", "system": "/system", "journal": "/journal"}
 
 
 def build(page: str, db: str) -> tuple[str, dict]:
@@ -77,7 +70,7 @@ def build(page: str, db: str) -> tuple[str, dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--page", default="market", choices=sorted(PAGE_CALLS))
+    parser.add_argument("--page", default="options", choices=sorted(PAGE_CALLS))
     parser.add_argument("--db", default="data/demo.db", help="database to render against")
     parser.add_argument("--dump", metavar="ID", help="print one panel's HTML instead of the byte table")
     args = parser.parse_args()

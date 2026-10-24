@@ -41,6 +41,9 @@ class PriceBook:
     async def on_tick(self, event: Tick) -> None:
         self._prices[event.symbol] = (event.price, time.monotonic())
 
+    def set_price(self, symbol: str, price: float) -> None:
+        self._prices[symbol] = (price, time.monotonic())
+
     async def on_stats(self, event: MarketStats) -> None:
         self._stats[event.symbol] = {k: v for k, v in event.to_dict().items() if k not in ("type", "symbol")}
 

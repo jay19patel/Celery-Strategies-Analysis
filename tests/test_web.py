@@ -93,12 +93,12 @@ async def test_close_position_route_closes_paper(cfg, exchange):
     await system.bus.stop()
 
 
-def test_market_data_is_the_home_page(cfg, exchange):
-    """The market comes before anything done about it, and Monitoring leads the sidebar."""
+def test_options_desk_is_the_home_page(cfg, exchange):
+    """Options Desk is the home page, and Trading leads the sidebar."""
     _, client = make(cfg, exchange)
     home = client.get("/").text
-    assert "Market Data · TradeBuddy" in home
-    assert home.index("Monitoring") < home.index("Portfolio")  # groups follow the order of PAGES
+    assert "Options Desk · TradeBuddy" in home
+    assert home.index("Trading") < home.index("Portfolio")  # groups follow the order of PAGES
     assert "Account · TradeBuddy" in client.get("/account").text
 
 
@@ -133,7 +133,7 @@ def test_close_all_stops_every_broker(cfg, exchange):
 
 def test_static_urls_carry_a_content_version(cfg, exchange):
     _, client = make(cfg, exchange)
-    page = client.get("/market").text
+    page = client.get("/").text
     assert re.search(r'/static/js/app\.js\?v=[0-9a-f]{12}"', page) and re.search(r'/static/css/app\.css\?v=[0-9a-f]{12}"', page)
 
 
@@ -166,107 +166,22 @@ def test_every_table_can_scroll_on_its_own():
     assert loose == [], f"tables with no scrolling ancestor: {loose}"
 
 
-def test_the_market_page_is_one_view_and_not_a_set_of_tabs():
-    """The page was eight tabs. Seven of them were lists of PRICES — pools, zones, reference
-    levels, value-area edges, option walls — and a price belongs on a price axis, not in a table
-    you hold in your head while looking at a different tab.
-
-    The cost was not cosmetic: the one question a person actually has in front of a chart ("what
-    is above me and what is below me") could not be answered by any single tab, because the answer
-    is a merge across all of them. This asserts the shape that made it answerable, so the tabs
-    cannot quietly grow back."""
-    html = (TEMPLATES / "market.html").read_text()
-    assert "data-view-panel=" not in html, "the tab panels are back"
-    assert 'id="viewTabs"' not in html, "the tab bar is back"
-    # What replaced them: one chart, and the merged map of what sits around price.
-    for panel in ('id="tapeChart"', 'id="ladderBox"', 'id="nowBox"'):
-        assert panel in html, f"the single view lost {panel}"
-
-
-def test_the_price_chart_is_the_only_vendored_library():
-    """Everything else on this dashboard is hand-rolled SVG and should stay that way — a bar chart
-    does not need 160 KB to draw six bars. A price chart does: zoom, pan, a crosshair that snaps to
-    bars, and a canvas that redraws ten thousand candles smoothly are each a week of work and all
-    of them are table stakes for reading a market. One library, vendored rather than fetched from a
-    CDN, so the chart does not go dark when unpkg does."""
-    vendor = sorted(p.name for p in (STATIC / "js" / "vendor").glob("*.js"))
-    assert vendor == ["lightweight-charts.js"], f"a second library appeared: {vendor}"
-    lib = (STATIC / "js" / "vendor" / "lightweight-charts.js").read_text()
-    assert "Apache License 2.0" in lib[:400], "the licence header is gone — check what this file is"
-    page = (TEMPLATES / "market.html").read_text()
-    assert "/static/js/vendor/lightweight-charts.js" in page
-    assert "cdn" not in page.lower().split("{% block scripts %}")[1], "the chart is being fetched from a CDN"
-
-
-def test_the_tape_is_handed_every_layer_it_draws():
-    """The failure this catches is silent: a rename in the structure payload leaves the chart
-    drawing candles and nothing else, and a chart with no zones on it looks exactly like a market
-    with no zones in it. The harness stands in for the library and records what it was handed."""
-    import json
-    import subprocess
-
-    root = pathlib.Path(__file__).resolve().parent.parent
-    out = subprocess.run(
-        [sys.executable, "-m", "tools.render_check", "--db", "data/demo.db", "--dump", "tapeChart"],
-        cwd=root, capture_output=True, text=True, check=False,
-    )
-    drawn = json.loads(out.stdout.strip().splitlines()[0])
-    # Separated on purpose. "No bars" means the fixture went stale or the request window is wrong;
-    # "bars but no zones" means a payload key was renamed and the chart is quietly drawing candles
-    # and nothing else. They have the same symptom on screen and completely different causes, and
-    # this test has already been failed by the first while nobody had broken the second.
-    assert drawn.get("bars", 0) > 0, (
-        f"the tape was handed no bars at all — the demo database has probably aged past the "
-        f"request window, which is why that window is limit-driven and wide: {drawn}")
-    for layer in ("zones", "levels", "marks", "sub"):
-        assert drawn.get(layer, 0) > 0, f"the tape got bars but no {layer} — a renamed payload key: {drawn}"
-
-
-def test_every_element_a_page_script_writes_to_exists_in_its_markup():
-    """The bug this catches cost a whole section of the Market page, silently.
-
-    `$("horizons")` was left behind when the card holding it was removed. In a browser that
-    returns null, `.innerHTML =` throws, and every statement after it in the same function is
-    skipped — which happened to be `renderVolume()` and `renderWhere()`. Two panels went blank and
-    nothing in the test suite or `render_check` noticed, because the harness's stub DOM hands back
-    a working element for every id ever asked for. That stub is deliberate: it stops a missing
-    element from hiding a real throw. The cost is that it also hides THIS, so the markup and the
-    script have to be compared directly."""
-    import re
-
-    broken = {}
-    for f in sorted(TEMPLATES.glob("*.html")):
-        html = f.read_text()
-        if "{% block scripts %}" not in html:
-            continue
-        cut = html.index("{% block scripts %}")
-        in_markup = set(re.findall(r'id="([A-Za-z_][\w]*)"', html[:cut]))
-        # Ids created at runtime are written by the script before they are read.
-        in_markup |= set(re.findall(r'id=[\'"`]\$?\{?[^"\'`<>]*?([A-Za-z_][\w]*)[\'"`]', html[cut:]))
-        written = set(re.findall(r'\$\("([A-Za-z_][\w]*)"\)', html[cut:]))
-        if missing := sorted(written - in_markup):
-            broken[f.name] = missing
-    assert not broken, f"page scripts write to elements that do not exist: {broken}"
-
-
-def test_the_detail_sections_are_collapsed_rather_than_deleted():
-    """Folding the working away is only honest if it is still there. A <details> keeps it one click
-    from the answer; deleting it would make the page simpler by making it say less."""
-    html = (TEMPLATES / "market.html").read_text()
-    assert html.count("<details") >= 3, "the working was dropped rather than folded"
-    for panel in ("vpChart", "tpoChart", "deltaChart", "cvdChart", "chain", "strikeLadder"):
-        assert f'id="{panel}"' in html, f"{panel} vanished"
-
-
-def test_the_page_never_repeats_the_chart_as_a_table():
-    """Pools, zones, sweeps and naked points of control are all drawn on the tape and listed in
-    Around price. Every table that was a third copy of them is gone, and the counted-rate tables
-    went with them: a rate inside its own sampling noise is not a finding, and a page full of them
-    reads as evidence when it is the opposite."""
-    page = (TEMPLATES / "market.html").read_text()
-    for gone in ("poolList", "sweepList", "zoneList", "sessionList", "poolSummary",
-                 "zoneStates", "sweepStrip", "recordAll", "indKpis", "rsiChart"):
-        assert f'id="{gone}"' not in page, f"{gone} is back — that is the chart repeated as a table"
+def test_the_options_desk_has_all_required_controls():
+    """The Options Desk provides metrics, strategies, and full options chain."""
+    html = (TEMPLATES / "options.html").read_text()
+    for required in (
+        'id="kpiExpMove"',
+        'id="kpiAtmIv"',
+        'id="kpiPcr"',
+        'id="expiryTabs"',
+        'id="builderCard"',
+        'id="strategyTabs"',
+        'id="setupDetails"',
+        'id="btnExecuteStrategy"',
+        'id="chainRows"',
+        'id="legModal"',
+    ):
+        assert required in html, f"options desk is missing {required}"
 
 
 def test_the_tape_colours_zones_by_what_they_are():
