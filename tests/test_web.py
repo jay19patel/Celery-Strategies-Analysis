@@ -410,3 +410,49 @@ def test_every_page_script_is_valid_javascript():
                 line = next((x for x in out.stderr.splitlines() if "Error" in x), out.stderr[:120])
                 broken[f"{f.name} script {i}"] = line.strip()
     assert not broken, f"page scripts that do not parse: {broken}"
+
+
+def test_cancel_pending_order_and_cancel_all(cfg, exchange):
+    system, client = make(cfg, exchange)
+    client.post("/api/auth/login", json={"pin": cfg.auth_pin or "242425"})
+
+    system.store.reserve_order(
+        client_order_id="test-cancel-cid-1",
+        broker="paper",
+        strategy="manual",
+        symbol="BTCUSD",
+        side="buy",
+        size=1,
+        price=80000.0,
+        stop_loss=78000.0,
+        take_profit=84000.0,
+    )
+    system.store.reserve_order(
+        client_order_id="test-cancel-cid-2",
+        broker="paper",
+        strategy="manual",
+        symbol="ETHUSD",
+        side="buy",
+        size=2,
+        price=3000.0,
+        stop_loss=2900.0,
+        take_profit=3200.0,
+    )
+
+    res = client.post("/api/orders/test-cancel-cid-1/cancel")
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["status"] == "cancelled"
+    assert data["client_order_id"] == "test-cancel-cid-1"
+
+    o1 = system.store.order("test-cancel-cid-1")
+    assert o1["status"] == "cancelled"
+
+    res_all = client.post("/api/orders/cancel-all?broker=paper")
+    assert res_all.status_code == 200, res_all.text
+    assert res_all.json()["count"] == 1
+    assert "test-cancel-cid-2" in res_all.json()["cancelled"]
+
+    o2 = system.store.order("test-cancel-cid-2")
+    assert o2["status"] == "cancelled"
+

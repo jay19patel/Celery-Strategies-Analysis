@@ -197,6 +197,50 @@ class Api:
     async def open_orders(self, broker: str | None = None) -> list[dict[str, Any]]:
         return await self._call(self._broker(broker).open_orders())
 
+    async def cancel_order(self, client_order_id: str) -> dict[str, Any]:
+        """Cancel a pending/open order by its client_order_id."""
+        order = self.system.store.order(client_order_id)
+        if not order:
+            raise ApiError(404, f"Order {client_order_id} not found")
+        if order["status"] not in ("pending", "open", "unknown"):
+            raise ApiError(400, f"Cannot cancel order in status '{order['status']}'")
+
+        broker_name = order.get("broker") or "paper"
+        broker = self.system.brokers.get(broker_name)
+        if broker and hasattr(broker, "cancel_order"):
+            try:
+                await broker.cancel_order(order_id=order.get("order_id") or "", client_order_id=client_order_id)
+            except Exception as e:
+                log.warning("Broker cancel error for %s: %s", client_order_id, e)
+
+        self.system.store.update_order(client_order_id, "cancelled", error="Cancelled by user")
+        if self.system.bus:
+            from tradebuddy.events import OrderUpdate
+
+            self.system.bus.publish(
+                OrderUpdate(
+                    client_order_id=client_order_id,
+                    order_id=order.get("order_id") or "",
+                    symbol=order.get("symbol") or "",
+                    state="cancelled",
+                )
+            )
+        return {"status": "cancelled", "client_order_id": client_order_id}
+
+    async def cancel_all_pending(self, broker: str | None = None) -> dict[str, Any]:
+        """Cancel all pending/open orders for a broker or across all brokers."""
+        orders = self.system.store.recent_orders(limit=1000, broker=broker)
+        pending = [o for o in orders if o.get("status") in ("pending", "open", "unknown")]
+        cancelled = []
+        for o in pending:
+            cid = o["client_order_id"]
+            try:
+                await self.cancel_order(cid)
+                cancelled.append(cid)
+            except Exception as e:
+                log.warning("Failed to cancel %s: %s", cid, e)
+        return {"cancelled": cancelled, "count": len(cancelled)}
+
     async def account(self, broker: str | None = None) -> dict[str, Any]:
         return (await self._call(self._broker(broker).account())).to_dict()
 
@@ -266,11 +310,8 @@ class Api:
         from dataclasses import asdict
         from tradebuddy.options import OptionQuote
         from tradebuddy.strategies.iron_condor import (
-            select_call_spread,
-            select_iron_condor,
-            select_put_spread,
-            select_straddle,
-            select_strangle,
+            analyze_daily_regime,
+            build_all_setups,
         )
 
         s = self.system
@@ -304,11 +345,27 @@ class Api:
                                 )
                             )
 
-        condor = select_iron_condor(quotes, spot) if spot and quotes else None
-        straddle = select_straddle(quotes, spot) if spot and quotes else None
-        strangle = select_strangle(quotes, spot) if spot and quotes else None
-        call_spread = select_call_spread(quotes, spot) if spot and quotes else None
-        put_spread = select_put_spread(quotes, spot) if spot and quotes else None
+        # Group quotes by expiry
+        quotes_by_expiry: dict[str, list[OptionQuote]] = {}
+        for q in quotes:
+            exp_key = str(int(q.expiry))
+            quotes_by_expiry.setdefault(exp_key, []).append(q)
+
+        setups_by_expiry: dict[str, dict[str, Any]] = {}
+        for exp_key, exp_quotes in quotes_by_expiry.items():
+            setups_by_expiry[exp_key] = build_all_setups(exp_quotes, spot or 0.0)
+
+        first_exp = sorted(quotes_by_expiry.keys())[0] if quotes_by_expiry else None
+        setups_dict = setups_by_expiry.get(first_exp) if first_exp else build_all_setups(quotes, spot or 0.0)
+
+        bars_15m = s.store.bars(symbol, "15m", limit=3000) if s.store else []
+        regime = analyze_daily_regime(
+            spot=spot or 0.0,
+            candles_15m=bars_15m,
+            stats=(s.prices.snapshot().get(symbol) or {}).get("stats"),
+            summary=summary,
+            setups=setups_dict,
+        )
 
         return {
             "symbol": symbol,
@@ -316,13 +373,9 @@ class Api:
             "spot": spot,
             "stats": (s.prices.snapshot().get(symbol) or {}).get("stats"),
             "summary": summary,
-            "setups": {
-                "iron_condor": asdict(condor) if condor else None,
-                "straddle": asdict(straddle) if straddle else None,
-                "strangle": asdict(strangle) if strangle else None,
-                "call_spread": asdict(call_spread) if call_spread else None,
-                "put_spread": asdict(put_spread) if put_spread else None,
-            },
+            "setups": setups_dict,
+            "setups_by_expiry": setups_by_expiry,
+            "regime": asdict(regime),
         }
 
     def _find_option_mark(self, sym: str) -> float | None:

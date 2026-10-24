@@ -408,6 +408,9 @@ class Executor:
             self._schedule_lookup(broker, e.client_order_id)
         except BrokerError as exc:
             self._failed(e.client_order_id, str(exc))
+        except Exception as exc:
+            log.exception("unexpected_place_order_error client_order_id=%s", e.client_order_id)
+            self._failed(e.client_order_id, f"Execution error: {exc}")
         else:
             self._placed(e.client_order_id, raw)
 

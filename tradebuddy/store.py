@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     entry_fee         REAL NOT NULL,
     stop_loss         REAL,
     take_profit       REAL,
-    liquidation_price REAL NOT NULL,
+    liquidation_price REAL,
     opened_at         REAL NOT NULL,
     -- How far the trade went the wrong way and the right way while it was open, as % of the entry.
     -- Without these, a losing trade cannot say whether the signal was wrong or the stop was too tight.
@@ -430,6 +430,34 @@ class Store:
             for column in ("mae_pct", "mfe_pct"):
                 if column not in existing:
                     self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} REAL NOT NULL DEFAULT 0")
+        # Ensure paper_positions allows NULL for liquidation_price (options have defined risk and no liquidation)
+        pos_cols = {r["name"]: dict(r) for r in self.db.execute("PRAGMA table_info(paper_positions)")}
+        if pos_cols.get("liquidation_price", {}).get("notnull") == 1:
+            with self.db:
+                self.db.execute("CREATE TABLE IF NOT EXISTS _mig_paper_pos AS SELECT * FROM paper_positions")
+                self.db.execute("DROP TABLE paper_positions")
+                self.db.execute("""
+                    CREATE TABLE paper_positions (
+                        symbol            TEXT PRIMARY KEY,
+                        client_order_id   TEXT NOT NULL UNIQUE,
+                        strategy          TEXT NOT NULL,
+                        side              TEXT NOT NULL,
+                        size              REAL NOT NULL,
+                        contract_value    REAL NOT NULL,
+                        entry_price       REAL NOT NULL,
+                        leverage          REAL NOT NULL,
+                        margin            REAL NOT NULL,
+                        entry_fee         REAL NOT NULL,
+                        stop_loss         REAL,
+                        take_profit       REAL,
+                        liquidation_price REAL,
+                        opened_at         REAL NOT NULL,
+                        mae_pct           REAL NOT NULL DEFAULT 0,
+                        mfe_pct           REAL NOT NULL DEFAULT 0
+                    )
+                """)
+                self.db.execute("INSERT OR IGNORE INTO paper_positions SELECT * FROM _mig_paper_pos")
+                self.db.execute("DROP TABLE _mig_paper_pos")
 
     # Settings an older build stored that nothing reads now. `mistral_api_key` is the reason this
     # is a delete and not a shrug: a withdrawn feature must not leave a live credential in the file.

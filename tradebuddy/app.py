@@ -393,6 +393,14 @@ def create_app(
     async def place_order(body: ManualOrder) -> dict:
         return await call("place_order", **body.model_dump())
 
+    @app.post("/api/orders/{client_order_id}/cancel", dependencies=[Depends(protected)])
+    async def cancel_order(client_order_id: str) -> dict:
+        return await call("cancel_order", client_order_id=client_order_id)
+
+    @app.post("/api/orders/cancel-all", dependencies=[Depends(protected)])
+    async def cancel_all_orders(broker: str | None = None) -> dict:
+        return await call("cancel_all_pending", broker=broker)
+
     @app.get("/api/order-ticket")
     async def order_ticket(symbol: str, side: Literal["buy", "sell"] = "buy", margin_pct: float | None = None) -> dict:
         return await call("order_ticket", symbol=symbol, side=side, margin_pct=margin_pct)

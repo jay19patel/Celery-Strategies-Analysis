@@ -148,6 +148,10 @@ class PaperBroker:
                                  "side": exit_side, "type": kind, "size": p["size"], "price": price, "state": "open"})
         return legs
 
+    async def cancel_order(self, order_id: str = "", client_order_id: str | None = None) -> dict[str, Any]:
+        """Cancel a pending paper order."""
+        return {"cancelled": True, "order_id": order_id, "client_order_id": client_order_id}
+
     # -- positions ----------------------------------------------------------
 
     async def positions(self) -> list[Position]:
@@ -243,7 +247,7 @@ class PaperBroker:
         max_hold = self.settings().paper_max_hold_hours
         self._track_excursion(pos, price)
 
-        if (price <= liq) if long else (price >= liq):
+        if liq is not None and ((price <= liq) if long else (price >= liq)):
             self._close(pos, liq, "liquidation")
         elif sl and ((price <= sl) if long else (price >= sl)):
             self._close(pos, sl, "stop loss hit")

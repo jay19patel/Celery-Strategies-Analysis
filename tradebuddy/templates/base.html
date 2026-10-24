@@ -73,6 +73,14 @@
     <header class="h-14 bg-white/90 backdrop-blur border-b border-slate-200 flex items-center gap-3 px-4 lg:px-6">
       <button id="menuBtn" class="lg:hidden p-1.5 rounded-md hover:bg-slate-100" aria-label="Menu"><i data-lucide="menu" class="w-5 h-5"></i></button>
       <h1 class="text-[15px] font-semibold truncate">{{ title }}</h1>
+      <div id="headerSpotBar" class="hidden sm:flex items-center gap-2 pl-3 ml-1 border-l border-slate-200 text-xs font-mono">
+        <span class="flex items-center gap-1.5 font-bold text-slate-800">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span id="headerSpotSym">BTC</span>:
+          <span id="headerSpotPx" class="text-sm font-bold text-slate-900">—</span>
+        </span>
+        <span id="headerSpotChg" class="text-[11.5px] font-semibold text-slate-500">—</span>
+      </div>
       <div class="flex-1"></div>
       <span class="locked-only badge !hidden md:!inline-flex" title="Anyone can watch. Unlock with your PIN to trade or change anything."><i data-lucide="eye" class="w-3 h-3"></i>READ-ONLY</span>
       <div id="brokerSwitches" class="flex items-center gap-2"></div>

@@ -56,19 +56,83 @@
     </div>
   </div>
 
-  <!-- ── 3. Strategy Builder: Iron Condor / Straddle / Strangle ───────────── -->
+  <!-- ── 3. Automatic Strategy Decision Logic (1-Day Big Timeframe Regime) ── -->
+  <section class="card border-l-4 border-l-emerald-500 shadow-sm" id="regimeSection">
+    <div class="card-head flex-wrap gap-2">
+      <div class="card-title">
+        <i data-lucide="sparkles" class="text-emerald-500"></i>Automatic Strategy Decision Logic
+        <span class="card-sub font-mono">1-Day Big Timeframe Regime &amp; Volatility Engine</span>
+      </div>
+      <div id="regimeTopBadge" class="flex items-center gap-1.5"></div>
+    </div>
+    <div class="card-body space-y-3 pt-2">
+      <!-- 4-Metric Strip -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 font-mono text-xs">
+        <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+          <div class="text-[10px] uppercase font-bold text-slate-400">1D Trend &amp; Momentum</div>
+          <div id="regimeTrend" class="font-bold text-slate-900 mt-0.5 text-[12px] truncate">—</div>
+          <div id="regimeRsi" class="text-[10.5px] text-slate-500 mt-0.5">RSI(14): — · EMA20: —</div>
+        </div>
+        <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+          <div class="text-[10px] uppercase font-bold text-slate-400">Volatility Edge (IV vs RV)</div>
+          <div id="regimeVolSpread" class="font-bold text-emerald-700 mt-0.5 text-[12px]">—</div>
+          <div id="regimeVolSub" class="text-[10.5px] text-slate-500 mt-0.5">ATM IV: — · 1D RV: —</div>
+        </div>
+        <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+          <div class="text-[10px] uppercase font-bold text-slate-400">1D Bounds &amp; Exp Move</div>
+          <div id="regimeExpMove" class="font-bold text-slate-900 mt-0.5 text-[12px]">—</div>
+          <div id="regimeAtr" class="text-[10.5px] text-slate-500 mt-0.5">1D ATR: — (—%)</div>
+        </div>
+        <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+          <div class="text-[10px] uppercase font-bold text-slate-400">Desk Positioning</div>
+          <div id="regimeDeskPos" class="font-bold text-slate-900 mt-0.5 text-[12px]">—</div>
+          <div id="regimeMaxPain" class="text-[10.5px] text-slate-500 mt-0.5">Max Pain: — · PCR: —</div>
+        </div>
+      </div>
+
+      <!-- Decision Rationale Box -->
+      <div class="p-2.5 rounded-lg bg-emerald-50/80 border border-emerald-200 text-[11.5px] flex items-start gap-2.5">
+        <i data-lucide="sparkles" class="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5"></i>
+        <div>
+          <span class="font-bold text-emerald-950">Automatic Strategy Decision Logic:</span>
+          <span id="regimeRationale" class="text-emerald-900 ml-1">Analyzing 1-day candles and options chain volatility edge...</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 4. Strategy Builder: Iron Condor / Straddles / Spreads ───────────── -->
   <section class="card border-l-4 border-l-brand-500" id="builderCard">
     <div class="card-head flex-wrap gap-2">
       <div class="card-title">
         <i data-lucide="layers" class="text-brand-500"></i>Strategy Builder
-        <span class="card-sub">non-directional theta decay execution</span>
+        <span class="card-sub">non-directional theta decay &amp; volatility breakout execution</span>
       </div>
-      <div class="tabs" id="strategyTabs">
-        <button class="on" data-strat="iron_condor">Iron Condor (Defined Risk)</button>
-        <button data-strat="straddle">Short Straddle (ATM)</button>
-        <button data-strat="strangle">Short Strangle (OTM)</button>
-        <button data-strat="call_spread">Bull Call Spread (Defined Risk)</button>
-        <button data-strat="put_spread">Bear Put Spread (Defined Risk)</button>
+      <div class="tabs flex flex-wrap gap-2" id="strategyTabs">
+        <button class="on flex items-center gap-2" data-strat="iron_condor">
+          <span>Iron Condor (Defined Risk)</span>
+          <span class="badge text-[10px] font-bold" id="badge_iron_condor">—</span>
+        </button>
+        <button class="flex items-center gap-2" data-strat="straddle">
+          <span>Short Straddle (ATM)</span>
+          <span class="badge text-[10px] font-bold" id="badge_straddle">—</span>
+        </button>
+        <button class="flex items-center gap-2" data-strat="long_straddle">
+          <span>Long Straddle (Vol Breakout)</span>
+          <span class="badge text-[10px] font-bold" id="badge_long_straddle">—</span>
+        </button>
+        <button class="flex items-center gap-2" data-strat="strangle">
+          <span>Short Strangle (OTM)</span>
+          <span class="badge text-[10px] font-bold" id="badge_strangle">—</span>
+        </button>
+        <button class="flex items-center gap-2" data-strat="call_spread">
+          <span>Bull Call Spread (Defined Risk)</span>
+          <span class="badge text-[10px] font-bold" id="badge_call_spread">—</span>
+        </button>
+        <button class="flex items-center gap-2" data-strat="put_spread">
+          <span>Bear Put Spread (Defined Risk)</span>
+          <span class="badge text-[10px] font-bold" id="badge_put_spread">—</span>
+        </button>
       </div>
     </div>
     <div class="card-body space-y-4">
@@ -155,7 +219,15 @@
         <i data-lucide="table" class="text-slate-500"></i>Live Options Chain
         <span class="card-sub">click BUY or SELL on any strike for instant order placement</span>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-3">
+        <!-- Live Spot Price Pill inside Options Chain Header -->
+        <div class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-100 border border-slate-200 font-mono text-xs">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span class="text-slate-500">Spot:</span>
+          <b class="text-slate-900" id="chainSpotPx">—</b>
+          <span id="chainSpotChg" class="text-[11px] font-semibold text-slate-500"></span>
+        </div>
+        <span class="w-px h-4 bg-slate-200"></span>
         <div class="text-[11px] font-mono text-slate-500">Calls (Left) · Puts (Right)</div>
         <span class="w-px h-4 bg-slate-200"></span>
         <label class="text-[11px] font-medium flex items-center gap-1.5 cursor-pointer">
@@ -164,8 +236,8 @@
         </label>
       </div>
     </div>
-    <div class="scroll">
-      <table class="tbl text-xs font-mono">
+    <div class="scroll overflow-x-auto">
+      <table class="tbl text-xs font-mono min-w-[1000px]">
         <thead>
           <tr class="bg-slate-50 text-slate-500 text-[10.5px]">
             <th colspan="5" class="text-center border-r border-slate-200 py-1.5 bg-blue-50/40 text-blue-800 font-semibold">CALLS</th>
@@ -317,6 +389,18 @@
       $("spotChange").className = `text-xs font-semibold font-mono ${chg >= 0 ? "up" : "down"}`;
     }
 
+    // Sync spot price to Options Chain header and sticky navbar
+    if ($("chainSpotPx")) $("chainSpotPx").textContent = spot ? `$${TB.price(spot)}` : "—";
+    if ($("chainSpotChg") && chg != null) {
+      $("chainSpotChg").textContent = `${chg >= 0 ? "+" : ""}${TB.num(chg, 2)}%`;
+      $("chainSpotChg").className = `text-[11px] font-semibold ${chg >= 0 ? "text-emerald-600" : "text-rose-600"}`;
+    }
+    if ($("headerSpotPx")) $("headerSpotPx").textContent = spot ? `$${TB.price(spot)}` : "—";
+    if ($("headerSpotChg") && chg != null) {
+      $("headerSpotChg").textContent = `${chg >= 0 ? "+" : ""}${TB.num(chg, 2)}%`;
+      $("headerSpotChg").className = `text-[11.5px] font-semibold ${chg >= 0 ? "text-emerald-600" : "text-rose-600"}`;
+    }
+
     const expMove = summary.expected_move;
     $("kpiExpMove").textContent = expMove ? `±$${num(expMove, 0)}` : "—";
     $("kpiAtmIv").textContent = summary.atm_iv ? `${num(summary.atm_iv * 100, 1)}%` : "—";
@@ -347,9 +431,47 @@
 
   // ── 2. Strategy Builder (Rich V2-Style Payoff & Metrics) ───────────────
   function renderStrategySetup() {
+    // 1. Paint 1-Day Big Timeframe Regime & Suitability Badges
+    const regime = currentDesk?.regime || {};
+    const scores = regime.strategy_scores || {};
+    const strats = ["iron_condor", "straddle", "long_straddle", "strangle", "call_spread", "put_spread"];
+
+    for (const s of strats) {
+      const bEl = $(`badge_${s}`);
+      if (!bEl) continue;
+      const score = scores[s] != null ? scores[s] : 50;
+      if (score >= 75) {
+        bEl.className = "px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs";
+        bEl.textContent = `★ ${score}% BEST FIT`;
+      } else if (score >= 50) {
+        bEl.className = "px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 shadow-xs";
+        bEl.textContent = `● ${score}% NEUTRAL`;
+      } else {
+        bEl.className = "px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200 shadow-xs";
+        bEl.textContent = `${score}% LOW`;
+      }
+    }
+
+    if ($("regimeTrend")) $("regimeTrend").textContent = regime.trend || "Range-Bound";
+    if ($("regimeRsi")) $("regimeRsi").textContent = `RSI(14): ${regime.daily_rsi != null ? regime.daily_rsi : "—"} · EMA(20): $${TB.num(regime.daily_ema20 || 0, 0)}`;
+    if ($("regimeVolSpread")) {
+      const vs = regime.vol_spread != null ? regime.vol_spread : 0;
+      $("regimeVolSpread").textContent = `${vs >= 0 ? "+" : ""}${TB.num(vs, 1)}% (${regime.vol_verdict || "Edge"})`;
+      $("regimeVolSpread").className = `font-bold text-[12px] mt-0.5 ${vs >= 2 ? "text-emerald-700" : vs <= -2 ? "text-blue-700" : "text-slate-800"}`;
+    }
+    if ($("regimeVolSub")) $("regimeVolSub").textContent = `ATM IV: ${regime.atm_iv != null ? regime.atm_iv : "—"}% · 1D RV: ${regime.realized_vol_24h != null ? regime.realized_vol_24h : "—"}%`;
+    if ($("regimeExpMove")) $("regimeExpMove").textContent = `±$${TB.num(regime.expected_move || 0, 0)} ($${TB.num(regime.expected_low || 0, 0)} - $${TB.num(regime.expected_high || 0, 0)})`;
+    if ($("regimeAtr")) $("regimeAtr").textContent = `1D ATR: $${TB.num(regime.daily_atr || 0, 0)} (${TB.num(regime.daily_atr_pct || 0, 1)}%)`;
+    if ($("regimeDeskPos")) $("regimeDeskPos").textContent = `Max Pain: $${TB.num(regime.max_pain || 0, 0)}`;
+    if ($("regimeMaxPain")) $("regimeMaxPain").textContent = `PCR(OI): ${TB.num(regime.pcr_oi || 0, 2)} · 24h: ${regime.change_24h_pct >= 0 ? "+" : ""}${TB.num(regime.change_24h_pct || 0, 2)}%`;
+    if ($("regimeRationale")) $("regimeRationale").textContent = regime.decision_rationale || "—";
+    if ($("regimeTopBadge")) {
+      $("regimeTopBadge").innerHTML = `<span class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-600 text-white shadow-xs">★ BOT PICK: ${regime.top_strategy ? regime.top_strategy.toUpperCase().replace("_", " ") : "IRON CONDOR"} (${regime.top_score || 88}%)</span>`;
+    }
+
     const box = $("setupDetails");
-    const setups = currentDesk?.setups || {};
-    const setup = setups[activeStrat];
+    const expirySetups = currentDesk?.setups_by_expiry?.[activeExpiry] || currentDesk?.setups || {};
+    const setup = expirySetups[activeStrat];
     const qty = parseInt($("condorQty")?.value) || 1;
     const spot = currentDesk?.spot || 0;
 
@@ -524,6 +646,81 @@
               </tr>
               <tr>
                 <td class="py-1.5 px-3 text-rose-600 font-bold">SELL (ATM Put)</td>
+                <td class="py-1.5 px-3 text-slate-700">${esc(setup.put_leg.symbol)}</td>
+                <td class="py-1.5 px-3 text-right font-bold">$${TB.num(setup.put_leg.strike, 0)}</td>
+                <td class="py-1.5 px-3 text-right">$${setup.put_leg.mark}</td>
+                <td class="py-1.5 px-3 text-right text-slate-500">${setup.put_leg.delta ? TB.num(setup.put_leg.delta, 2) : "—"}</td>
+                <td class="py-1.5 px-3 text-right text-slate-500">${setup.put_leg.iv ? TB.num(setup.put_leg.iv * 100, 1) + "%" : "—"}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>`;
+    } else if (activeStrat === "long_straddle") {
+      const totalDebit = (setup.net_debit * qty).toFixed(2);
+      const totalMaxLoss = (setup.max_loss * qty).toFixed(2);
+      $("condorMarginEstimate").textContent = `Max Profit: Unlimited · Max Risk (Premium Paid): -$${totalMaxLoss}`;
+
+      box.innerHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3">
+            <div class="stat-label text-emerald-800">Expected Profit</div>
+            <div class="text-lg font-bold font-mono text-emerald-700 mt-1">Unlimited</div>
+            <div class="text-[10.5px] text-emerald-600 mt-0.5">Huge upside rally or downside crash</div>
+          </div>
+          <div class="rounded-xl border border-rose-200 bg-rose-50/50 p-3">
+            <div class="stat-label text-rose-800">Max Loss (Premium Paid)</div>
+            <div class="text-lg font-bold font-mono text-rose-700 mt-1">-$${totalMaxLoss}</div>
+            <div class="text-[10.5px] text-rose-600 mt-0.5">$${setup.net_debit} per unit · strictly defined debit</div>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+            <div class="stat-label">Strategy Type</div>
+            <div class="text-lg font-bold font-mono text-brand-600 mt-1">Vol Breakout</div>
+            <div class="text-[10.5px] muted mt-0.5">Same strike BUY ATM Call + Put</div>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+            <div class="stat-label">Profits Outside Breakevens</div>
+            <div class="text-sm font-bold font-mono text-slate-800 mt-1.5">&lt; $${TB.num(setup.lower_breakeven, 0)} or &gt; $${TB.num(setup.upper_breakeven, 0)}</div>
+            <div class="text-[10.5px] text-slate-500 mt-0.5">Spot now: $${TB.num(spot, 0)}</div>
+          </div>
+        </div>
+
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+          <div class="flex justify-between items-center text-[11px] font-mono">
+            <span class="up font-semibold text-emerald-700">Profits below: $${TB.num(setup.lower_breakeven, 0)}</span>
+            <span class="text-slate-800 font-bold bg-white px-2 py-0.5 rounded shadow-sm border border-slate-200">Same Rate (Strike): $${TB.num(setup.atm_strike, 0)}</span>
+            <span class="up font-semibold text-emerald-700">Profits above: $${TB.num(setup.upper_breakeven, 0)}</span>
+          </div>
+          <div class="relative h-2.5 rounded-full bg-gradient-to-r from-emerald-400 via-rose-300 to-emerald-400">
+            <span class="absolute -top-1 w-1 h-4.5 bg-slate-800 rounded" style="left:50%; transform:translateX(-50%);" title="ATM Strike Center"></span>
+          </div>
+          <div class="text-center text-[10.5px] font-mono text-slate-700">
+            Unlimited profit on explosive move in either direction; maximum loss capped at total premium paid ($${totalDebit})
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-slate-200 overflow-hidden">
+          <table class="w-full text-[11.5px] font-mono">
+            <thead class="bg-slate-50 text-slate-500 border-b border-slate-200 text-[10.5px]">
+              <tr>
+                <th class="py-1.5 px-3 text-left">Action</th>
+                <th class="py-1.5 px-3 text-left">Contract Symbol</th>
+                <th class="py-1.5 px-3 text-right">Strike</th>
+                <th class="py-1.5 px-3 text-right">Mark Price</th>
+                <th class="py-1.5 px-3 text-right">Delta</th>
+                <th class="py-1.5 px-3 text-right">IV</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 bg-white">
+              <tr>
+                <td class="py-1.5 px-3 text-emerald-600 font-bold">BUY (ATM Call)</td>
+                <td class="py-1.5 px-3 text-slate-700">${esc(setup.call_leg.symbol)}</td>
+                <td class="py-1.5 px-3 text-right font-bold">$${TB.num(setup.call_leg.strike, 0)}</td>
+                <td class="py-1.5 px-3 text-right">$${setup.call_leg.mark}</td>
+                <td class="py-1.5 px-3 text-right text-slate-500">${setup.call_leg.delta ? TB.num(setup.call_leg.delta, 2) : "—"}</td>
+                <td class="py-1.5 px-3 text-right text-slate-500">${setup.call_leg.iv ? TB.num(setup.call_leg.iv * 100, 1) + "%" : "—"}</td>
+              </tr>
+              <tr>
+                <td class="py-1.5 px-3 text-emerald-600 font-bold">BUY (ATM Put)</td>
                 <td class="py-1.5 px-3 text-slate-700">${esc(setup.put_leg.symbol)}</td>
                 <td class="py-1.5 px-3 text-right font-bold">$${TB.num(setup.put_leg.strike, 0)}</td>
                 <td class="py-1.5 px-3 text-right">$${setup.put_leg.mark}</td>
@@ -922,9 +1119,10 @@
     }
 
     const filtered = nearOnly ? rows.filter((r) => Math.abs(r.strike - spot) <= 0.12 * spot) : rows;
+    const minDiff = filtered.length ? Math.min(...filtered.map((x) => Math.abs(x.strike - spot))) : 999999;
 
     $("chainRows").innerHTML = filtered.map((r) => {
-      const isAtm = Math.abs(r.strike - spot) <= 500;
+      const isAtm = Math.abs(r.strike - spot) === minDiff;
       const c = r.call || {}, p = r.put || {};
       const cDelta = c.delta != null ? TB.num(c.delta, 2) : "—";
       const pDelta = p.delta != null ? TB.num(p.delta, 2) : "—";
@@ -935,38 +1133,38 @@
       const pBid = p.bid ? `$${TB.price(p.bid)}` : "—";
       const pAsk = p.ask ? `$${TB.price(p.ask)}` : "—";
 
-      return `<tr class="${isAtm ? "bg-amber-50/50 font-semibold" : "hover:bg-slate-50"}">
+      return `<tr class="${isAtm ? "bg-amber-100/70 font-semibold border-y-2 border-amber-400" : "hover:bg-slate-50"}">
         <td class="r text-slate-500">${cDelta}</td>
         <td class="r text-slate-500">${cIv}</td>
         <td class="r text-slate-500">${c.oi ? TB.num(c.oi, 1) : "0"}</td>
         
         <!-- Call Bid (Sell) -->
         <td class="r">
-          <button class="btn-leg px-2 py-0.5 rounded text-[10.5px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors" data-sym="${esc(c.symbol || "")}" data-side="sell" data-kind="call" data-strike="${r.strike}" data-mark="${c.mark || 0}" data-delta="${cDelta}" data-iv="${cIv}">
+          <button class="btn-leg px-2.5 py-1 rounded text-[11px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors shadow-xs" data-sym="${esc(c.symbol || "")}" data-side="sell" data-kind="call" data-strike="${r.strike}" data-mark="${c.mark || 0}" data-delta="${cDelta}" data-iv="${cIv}">
             SELL ${cBid}
           </button>
         </td>
         <!-- Call Ask (Buy) -->
         <td class="r border-r border-slate-200">
-          <button class="btn-leg px-2 py-0.5 rounded text-[10.5px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-300 transition-colors" data-sym="${esc(c.symbol || "")}" data-side="buy" data-kind="call" data-strike="${r.strike}" data-mark="${c.mark || 0}" data-delta="${cDelta}" data-iv="${cIv}">
+          <button class="btn-leg px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-300 transition-colors shadow-xs" data-sym="${esc(c.symbol || "")}" data-side="buy" data-kind="call" data-strike="${r.strike}" data-mark="${c.mark || 0}" data-delta="${cDelta}" data-iv="${cIv}">
             BUY ${cAsk}
           </button>
         </td>
         
         <!-- Strike Price (Center) -->
-        <td class="text-center font-bold font-mono ${isAtm ? "bg-amber-100 text-amber-900 ring-1 ring-amber-300" : "bg-slate-50 text-slate-900"}">
+        <td class="text-center font-bold font-mono ${isAtm ? "bg-amber-100 text-amber-950 font-extrabold" : "bg-slate-50 text-slate-900"}">
           $${TB.num(r.strike, 0)}
         </td>
         
         <!-- Put Bid (Sell) -->
         <td class="border-l border-slate-200">
-          <button class="btn-leg px-2 py-0.5 rounded text-[10.5px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors" data-sym="${esc(p.symbol || "")}" data-side="sell" data-kind="put" data-strike="${r.strike}" data-mark="${p.mark || 0}" data-delta="${pDelta}" data-iv="${pIv}">
+          <button class="btn-leg px-2.5 py-1 rounded text-[11px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors shadow-xs" data-sym="${esc(p.symbol || "")}" data-side="sell" data-kind="put" data-strike="${r.strike}" data-mark="${p.mark || 0}" data-delta="${pDelta}" data-iv="${pIv}">
             SELL ${pBid}
           </button>
         </td>
         <!-- Put Ask (Buy) -->
         <td>
-          <button class="btn-leg px-2 py-0.5 rounded text-[10.5px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-300 transition-colors" data-sym="${esc(p.symbol || "")}" data-side="buy" data-kind="put" data-strike="${r.strike}" data-mark="${p.mark || 0}" data-delta="${pDelta}" data-iv="${pIv}">
+          <button class="btn-leg px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-300 transition-colors shadow-xs" data-sym="${esc(p.symbol || "")}" data-side="buy" data-kind="put" data-strike="${r.strike}" data-mark="${p.mark || 0}" data-delta="${pDelta}" data-iv="${pIv}">
             BUY ${pAsk}
           </button>
         </td>
@@ -979,7 +1177,8 @@
 
   // ── 5. Multi-Leg Execution Handler ──────────────────────────────────────
   async function executeStrategy() {
-    const setup = currentDesk?.setups?.[activeStrat];
+    const expirySetups = currentDesk?.setups_by_expiry?.[activeExpiry] || currentDesk?.setups || {};
+    const setup = expirySetups[activeStrat];
     if (!setup) return;
     const broker = $("condorBroker").value;
     const qty = parseInt($("condorQty").value) || 1;
@@ -996,6 +1195,11 @@
       legs = [
         { symbol: setup.call_leg.symbol, side: "sell", size: qty, price: setup.call_leg.mark },
         { symbol: setup.put_leg.symbol, side: "sell", size: qty, price: setup.put_leg.mark },
+      ];
+    } else if (activeStrat === "long_straddle") {
+      legs = [
+        { symbol: setup.call_leg.symbol, side: "buy", size: qty, price: setup.call_leg.mark },
+        { symbol: setup.put_leg.symbol, side: "buy", size: qty, price: setup.put_leg.mark },
       ];
     } else if (activeStrat === "strangle") {
       legs = [

@@ -325,6 +325,15 @@
     setDot("sbPrivate", h.feed_authenticated);
     if (!delta) $("sbPrivate").className = "dot";
     $("sbPrivateText").textContent = delta ? (h.feed_authenticated ? "Delta private channels" : "Delta private channels off") : "Delta not active";
+    const btc = h.prices?.["BTCUSD"] || h.prices?.["BTC"];
+    if (btc && $("headerSpotPx")) {
+      $("headerSpotPx").textContent = `$${price(btc.price)}`;
+      const rawChg = btc.stats?.change_24h_pct;
+      if (rawChg != null && $("headerSpotChg")) {
+        $("headerSpotChg").textContent = `${rawChg >= 0 ? "+" : ""}${num(rawChg, 2)}%`;
+        $("headerSpotChg").className = `text-[11.5px] font-semibold ${rawChg >= 0 ? "text-emerald-600" : "text-rose-600"}`;
+      }
+    }
     const now = Date.now();
     for (const [sym, p] of Object.entries(h.prices)) if (p.fresh) lastTickAt[sym] ??= now - p.age_seconds * 1000;
     renderMarquee(h.prices);
@@ -349,7 +358,9 @@
   function renderMarquee(prices) {
     const box = $("marquee"), track = $("marqueeTrack");
     if (!box) return;
-    const syms = Object.keys(prices).sort();
+    const syms = Object.keys(prices)
+      .filter((s) => !s.startsWith("C-") && !s.startsWith("P-") && !s.includes("-"))
+      .sort();
     box.classList.toggle("hidden", !syms.length);
     if (!syms.length) return;
     if (syms.join(",") !== marqueeSymbols) {

@@ -170,3 +170,29 @@ async def test_the_excursion_follows_the_market_not_the_fill(system):
     trade = system.paper.trades()[0]
     assert trade["reason"] == "stop loss hit" and trade["exit_price"] == 99_000
     assert trade["mae_pct"] == pytest.approx(-2.0)
+
+
+async def test_option_position_open_has_no_liquidation_and_handles_ticks(system):
+    opt_symbol = "C-BTC-100000-251026"
+    await tick(system, opt_symbol, 500)
+    # 10 contracts * 0.001 BTC * $500 = $5 notional; 1x leverage -> $5 margin; fee 0.1% = $0.005
+    res = await system.paper.place_order(opt_symbol, "buy", 10, "c_opt", strategy="iron_condor")
+    assert res["state"] == "closed"
+    [pos] = await system.paper.positions()
+    assert pos.symbol == opt_symbol
+    assert pos.liquidation_price is None
+    assert pos.margin == pytest.approx(5.0)
+
+    # Ticks should update excursions without crashing on null liquidation
+    await tick(system, opt_symbol, 550)
+    [pos] = await system.paper.positions()
+    assert pos.mfe_pct == pytest.approx(10.0)
+
+    # Manual close works cleanly
+    close_res = await system.paper.close_position(opt_symbol, "strategy close")
+    assert close_res["closed"] == [opt_symbol]
+    assert await system.paper.positions() == []
+    [trade] = system.paper.trades()
+    assert trade["symbol"] == opt_symbol
+    assert trade["reason"] == "strategy close"
+

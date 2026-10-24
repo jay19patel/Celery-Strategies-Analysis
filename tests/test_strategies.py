@@ -189,3 +189,86 @@ async def test_options_order_execution_without_stop_loss(cfg, exchange):
     assert body["orders"][0]["symbol"] == "C-BTC-80800-251026"
     assert body["orders"][0]["stop_loss"] is None
 
+
+def test_analyze_daily_regime_scores_and_decision():
+    from tradebuddy.strategies.iron_condor import analyze_daily_regime
+
+    spot = 80000.0
+    summary = {
+        "atm_iv": 0.42,
+        "pcr_oi": 0.95,
+        "max_pain": 80000.0,
+        "expected_move": 1600.0,
+    }
+    stats = {
+        "change_24h_pct": 0.25,
+        "high": 80800.0,
+        "low": 79200.0,
+    }
+    regime = analyze_daily_regime(spot=spot, stats=stats, summary=summary)
+    assert regime.timeframe == "1-Day (24h)"
+    assert regime.spot == 80000.0
+    assert regime.trend == "Range-Bound Consolidation"
+    assert regime.top_strategy in ("iron_condor", "strangle")
+    assert regime.top_score >= 70
+    assert "iron_condor" in regime.strategy_scores
+    assert "call_spread" in regime.strategy_scores
+    assert regime.expected_move > 0
+    assert len(regime.decision_rationale) > 20
+
+
+async def test_options_desk_endpoint_returns_regime(cfg, exchange):
+    from fastapi.testclient import TestClient
+    from tradebuddy.app import local_app
+    from tradebuddy.system import System
+    from .conftest import IdleStream
+
+    system = System(cfg, strategies=discover(), stream_factory=IdleStream, client_factory=exchange.client)
+    client = TestClient(local_app(system))
+    client.post("/api/auth/login", json={"pin": cfg.auth_pin or "242425"})
+
+    res = client.get("/api/options/desk?symbol=BTCUSD")
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert "regime" in data
+    regime = data["regime"]
+    assert regime["timeframe"] == "1-Day (24h)"
+    assert "strategy_scores" in regime
+    assert "iron_condor" in regime["strategy_scores"]
+    assert "long_straddle" in regime["strategy_scores"]
+    assert "top_strategy" in regime
+    assert "setups_by_expiry" in data
+
+
+def test_select_long_straddle_and_all_setups():
+    from tradebuddy.options import OptionQuote
+    from tradebuddy.strategies.iron_condor import build_all_setups, select_long_straddle
+
+    quotes = [
+        OptionQuote(symbol="C-BTC-80000-251026", underlying="BTC", kind="call", strike=80000, expiry=1792864800, mark=500, bid=490, ask=510, delta=0.5),
+        OptionQuote(symbol="P-BTC-80000-251026", underlying="BTC", kind="put", strike=80000, expiry=1792864800, mark=450, bid=440, ask=460, delta=-0.5),
+        OptionQuote(symbol="C-BTC-82000-251026", underlying="BTC", kind="call", strike=82000, expiry=1792864800, mark=200, bid=190, ask=210, delta=0.25),
+        OptionQuote(symbol="P-BTC-78000-251026", underlying="BTC", kind="put", strike=78000, expiry=1792864800, mark=180, bid=170, ask=190, delta=-0.25),
+    ]
+    spot = 80000.0
+    ls = select_long_straddle(quotes, spot)
+    assert ls is not None
+    assert ls.atm_strike == 80000.0
+    assert ls.call_leg.action == "buy" and ls.call_leg.symbol == "C-BTC-80000-251026"
+    assert ls.put_leg.action == "buy" and ls.put_leg.symbol == "P-BTC-80000-251026"
+    assert ls.net_debit == 950.0  # 500 + 450
+    assert ls.max_loss == 950.0
+    assert ls.max_profit == "Unlimited"
+    assert ls.lower_breakeven == 80000.0 - 950.0
+    assert ls.upper_breakeven == 80000.0 + 950.0
+
+    all_setups = build_all_setups(quotes, spot)
+    assert "long_straddle" in all_setups
+    assert all_setups["long_straddle"] is not None
+    assert "straddle" in all_setups
+    assert "call_spread" in all_setups
+    assert all_setups["call_spread"] is not None
+    assert "put_spread" in all_setups
+    assert all_setups["put_spread"] is not None
+
+

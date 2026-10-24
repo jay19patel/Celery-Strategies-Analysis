@@ -106,6 +106,14 @@ class DeltaBroker:
             for o in await self.client.open_orders()
         ]
 
+    async def cancel_order(self, order_id: str = "", client_order_id: str | None = None) -> dict[str, Any]:
+        if order_id:
+            try:
+                return await self.client.request("DELETE", f"/v2/orders/{order_id}", auth=True)
+            except Exception as e:
+                raise BrokerError(f"delta: cancel order failed: {e}") from e
+        return {"cancelled": False, "error": "no order_id"}
+
     async def update_protection(self, symbol: str, stop_loss: float, take_profit: float | None) -> None:
         position = next((p for p in await self.positions() if p.symbol == symbol), None)
         if position is None:
