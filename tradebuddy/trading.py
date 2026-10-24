@@ -308,7 +308,7 @@ class Trader:
 
     async def manual(
         self, broker: str, symbol: str, side: str, size: int | None, stop_loss: float | None, take_profit: float | None,
-        request_id: str, margin_pct: float | None = None,
+        request_id: str, margin_pct: float | None = None, strategy: str = MANUAL,
     ) -> dict[str, Any]:
         """An order from the dashboard. It passes the same gate as a signal (trading switch, daily limit,
         fresh price, nothing in flight, no open position read from the broker) and is sent by the Executor,
@@ -319,7 +319,7 @@ class Trader:
         Raises TradeRefused."""
 
         def refuse(reason: str) -> TradeRefused:
-            self.bus.publish(TradeSkipped(strategy=MANUAL, symbol=symbol, side=side, broker=broker, reason=reason))
+            self.bus.publish(TradeSkipped(strategy=strategy, symbol=symbol, side=side, broker=broker, reason=reason))
             return TradeRefused(reason)
 
         if broker not in self.settings().active_brokers:
@@ -332,7 +332,8 @@ class Trader:
             raise refuse(f"margin_pct must be above 0 and at most 100 (got {margin_pct!r})")
         if size is not None and (isinstance(size, bool) or not isinstance(size, int | float) or size != int(size) or size < 1):
             raise refuse(f"size must be a whole number of contracts, at least 1 (got {size!r})")
-        if not stop_loss:
+        is_option = symbol.startswith(("C-", "P-"))
+        if not stop_loss and not is_option:
             raise refuse("a stop loss is required: entries are always protected")
         if not request_id:
             raise refuse("request_id is required")
@@ -357,7 +358,7 @@ class Trader:
                 if size < 1:
                     raise refuse(f"{margin_pct:g}% of available margin ({account.available:.2f}) buys no whole contract")
             order = {
-                "client_order_id": cid, "broker": broker, "strategy": MANUAL, "symbol": symbol, "side": side,
+                "client_order_id": cid, "broker": broker, "strategy": strategy, "symbol": symbol, "side": side,
                 "size": int(size), "price": price, "stop_loss": stop_loss, "take_profit": take_profit,
             }
             if self.store.reserve_order(**order):

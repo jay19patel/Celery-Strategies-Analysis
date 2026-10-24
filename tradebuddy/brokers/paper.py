@@ -104,20 +104,26 @@ class PaperBroker:
         d = self._direction(pos_side)
         fill = price * (1 + d * s.paper_slippage_pct / 100)
         notional = size * contract_value * fill
-        margin = notional / s.paper_leverage
+        is_option = symbol.startswith(("C-", "P-"))
+        if is_option:
+            leverage = 1.0
+            margin = notional
+            liquidation = None
+        else:
+            leverage = s.paper_leverage
+            margin = notional / leverage
+            liquidation = fill * (1 - d / leverage)
         fee = notional * s.paper_fee_pct / 100
         acct = self._account_row()
         available = acct["balance"] - sum(p["margin"] for p in self._rows())
         if margin + fee > available:
             raise BrokerError(f"paper: insufficient margin (needs {margin + fee:.2f}, available {available:.2f})")
 
-        # Liquidation when the loss eats the margin: entry * (1 -/+ 1/leverage).
-        liquidation = fill * (1 - d / s.paper_leverage)
         with self.db:
             self.db.execute(
                 "INSERT INTO paper_positions (symbol, client_order_id, strategy, side, size, contract_value, entry_price, leverage,"
                 " margin, entry_fee, stop_loss, take_profit, liquidation_price, opened_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (symbol, client_order_id, strategy, pos_side, size, contract_value, fill, s.paper_leverage, margin, fee,
+                (symbol, client_order_id, strategy, pos_side, size, contract_value, fill, leverage, margin, fee,
                  stop_loss, take_profit, liquidation, time.time()),
             )
             self.db.execute("UPDATE paper_account SET balance = balance - ?, fees_paid = fees_paid + ? WHERE id = 1", (fee, fee))
@@ -388,6 +394,7 @@ class PaperBroker:
             risk = abs(t["entry_price"] - t["stop_loss"]) * t["size"] * t["contract_value"] if t["stop_loss"] else None
             t["risk_usd"] = round(risk, 4) if risk else None
             t["r_multiple"] = round(t["pnl"] / risk, 2) if risk else None
+            t["legs"] = []
         strategies = [r[0] for r in self.db.execute("SELECT DISTINCT strategy FROM paper_trades ORDER BY strategy")]
         return {
             "rows": rows, "total": agg["n"], "page": page, "pages": pages, "per_page": per_page, "strategies": strategies,

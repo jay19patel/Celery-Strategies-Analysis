@@ -102,6 +102,7 @@ class OptionsOrderLeg(BaseModel):
     symbol: str
     side: Literal["buy", "sell"]
     size: int = Field(default=1, ge=1)
+    price: float | None = Field(default=None, ge=0)
 
 
 class OptionsOrderRequest(BaseModel):

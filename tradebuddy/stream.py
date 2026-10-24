@@ -49,7 +49,10 @@ class PriceBook:
 
     def price(self, symbol: str) -> float | None:
         entry = self._prices.get(symbol)
-        if entry is None or time.monotonic() - entry[1] > self.ttl:
+        if entry is None:
+            return None
+        ttl = 300.0 if symbol.startswith(("C-", "P-")) else self.ttl
+        if time.monotonic() - entry[1] > ttl:
             return None
         return entry[0]
 

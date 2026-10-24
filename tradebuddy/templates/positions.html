@@ -374,20 +374,59 @@
         const d = (v) => (v == null ? "" : `<span class="muted text-[10px]">(${v > 0 ? "+" : ""}${num(v, 2)}%)</span>`);
         const field = (label, value, cls = "") => `<div><div class="text-[10.5px] uppercase tracking-wide text-slate-400 font-semibold">${label}</div><div class="font-mono text-[12px] ${cls}">${value}</div></div>`;
         const fees = (p.entry_fee ?? 0) + (p.exit_fee_est ?? 0);
-        return `<tr class="cursor-pointer hover:bg-slate-50" data-pos="${esc(p.symbol)}">
-          <td><i data-lucide="chevron-right" data-chev class="w-3.5 h-3.5 muted transition-transform ${shown ? "rotate-90" : ""}"></i></td>
-          <td class="py-3"><div class="font-semibold">${esc(p.symbol)}</div><div class="text-[10.5px] muted font-mono">${p.notional == null ? "" : money(p.notional)}${p.leverage ? ` · ${num(p.leverage, 1)}x` : ""}</div></td>
-          <td>${side(p.side)}</td>
-          <td class="r font-mono">${num(p.size, 0)}<div class="text-[10px] muted">${p.contract_value ? `${num(p.size * p.contract_value, 4)} units` : "contracts"}</div></td>
-          <td class="r font-mono">${price(p.entry_price)}<div class="text-[10.5px] ${pnlClass(p.move_pct)}">${p.move_pct == null ? "" : `${p.move_pct > 0 ? "+" : ""}${num(p.move_pct, 2)}%`}</div></td>
-          <td class="r font-mono">${price(p.mark_price)}<div class="text-[10px] muted" title="liquidation price">liq ${price(p.liquidation_price)} ${d(p.liq_distance_pct)}</div></td>
-          <td class="r font-mono ${pnlClass(p.unrealized_pnl)}" title="margin ${money(p.margin)}">${signed(p.unrealized_pnl)}<div class="text-[10px]">${pct(p.roe_pct)} on ${money(p.margin)}</div>${p.r_now == null ? "" : `<div class="text-[10px]">${num(p.r_now, 2)}R</div>`}</td>
-          <td class="min-w-[140px]">${levelsBar(p)}</td>
+
+        const isOption = p.symbol && (p.symbol.startsWith("C-") || p.symbol.startsWith("P-"));
+        let optKind = "", optStrike = 0, optExpLoss = null, optExpGain = null, optBe = null;
+        if (isOption) {
+          const parts = p.symbol.split("-");
+          optKind = parts[0] === "C" ? "CALL" : "PUT";
+          optStrike = parseFloat(parts[2]) || 0;
+          const isLong = p.side === "buy" || p.side === "long";
+          const cv = p.contract_value || 1.0;
+          const sz = p.size || 1;
+          const entry = p.entry_price || 0;
+          if (isLong) {
+            optExpLoss = entry * sz * cv;
+            optExpGain = optKind === "CALL" ? null : Math.max(0, (optStrike - entry) * sz * cv);
+            optBe = optKind === "CALL" ? optStrike + entry : optStrike - entry;
+          } else {
+            optExpGain = entry * sz * cv;
+            optExpLoss = p.margin || (entry * sz * cv * 1.5);
+            optBe = optKind === "CALL" ? optStrike + entry : optStrike - entry;
+          }
+        }
+
+        const optBar = isOption ? `
+          <div class="relative h-2 rounded-full bg-gradient-to-r from-rose-200 via-slate-200 to-emerald-200 my-1" title="Breakeven $${price(optBe)}">
+            <span class="absolute -top-1 w-0.5 h-4 bg-slate-800" style="left:50%" title="Breakeven $${price(optBe)}"></span>
+          </div>
+          <div class="flex justify-between font-mono text-[10px] text-slate-500">
+            <span>BE $${price(optBe)}</span>
+            <span>${(p.side === "buy" || p.side === "long") ? "0 Liq Risk" : "Defined Margin"}</span>
+          </div>` : levelsBar(p);
+
+        const optSlTpCol = isOption ? `
+          <td class="r font-mono text-xs">
+            <div class="up font-semibold">Max: ${optExpGain == null ? "Unlimited" : `+$${num(optExpGain, 2)}`}</div>
+            <div class="down font-semibold">Risk: -$${num(optExpLoss, 2)}</div>
+            <div class="text-[10px] muted">BE $${price(optBe)}</div>
+          </td>` : `
           <td class="r font-mono text-xs cursor-pointer group needs-edit" title="${TB.canEdit ? "Edit SL / TP" : "Unlock to edit SL / TP"}" data-edit="${esc(p.symbol)}" data-sl="${p.stop_loss ?? ""}" data-tp="${p.take_profit ?? ""}" data-entry="${p.entry_price}" data-side="${esc(p.side)}">
              <div class="up group-hover:underline">TP ${p.take_profit ? `${price(p.take_profit)} ${d(p.tp_distance_pct)}` : "—"}${p.reward_usd == null ? "" : ` <span class="text-[10px]">${signed(p.reward_usd)}</span>`}</div>
              <div class="down group-hover:underline mt-1">SL ${p.stop_loss ? `${price(p.stop_loss)} ${d(p.sl_distance_pct)}` : "—"}${p.risk_usd == null ? "" : ` <span class="text-[10px]">${signed(p.risk_usd)}</span>`}</div>
              ${p.reward_risk == null ? "" : `<div class="text-[10px] muted mt-0.5">R:R ${num(p.reward_risk, 2)}</div>`}
-          </td>
+          </td>`;
+
+        return `<tr class="cursor-pointer hover:bg-slate-50" data-pos="${esc(p.symbol)}">
+          <td><i data-lucide="chevron-right" data-chev class="w-3.5 h-3.5 muted transition-transform ${shown ? "rotate-90" : ""}"></i></td>
+          <td class="py-3"><div class="font-semibold">${esc(p.symbol)}</div><div class="text-[10.5px] muted font-mono">${p.notional == null ? "" : money(p.notional)}${isOption ? ` · Option ${optKind}` : (p.leverage ? ` · ${num(p.leverage, 1)}x` : "")}</div></td>
+          <td>${side(p.side)}</td>
+          <td class="r font-mono">${num(p.size, 0)}<div class="text-[10px] muted">${p.contract_value ? `${num(p.size * p.contract_value, 4)} units` : "contracts"}</div></td>
+          <td class="r font-mono">${price(p.entry_price)}<div class="text-[10.5px] ${pnlClass(p.move_pct)}">${p.move_pct == null ? "" : `${p.move_pct > 0 ? "+" : ""}${num(p.move_pct, 2)}%`}</div></td>
+          <td class="r font-mono">${price(p.mark_price)}<div class="text-[10px] muted" title="liquidation price">${isOption ? `strike $${price(optStrike)}` : `liq ${price(p.liquidation_price)} ${d(p.liq_distance_pct)}`}</div></td>
+          <td class="r font-mono ${pnlClass(p.unrealized_pnl)}" title="margin ${money(p.margin)}">${signed(p.unrealized_pnl)}<div class="text-[10px]">${pct(p.roe_pct)} on ${money(p.margin)}</div>${p.r_now == null ? "" : `<div class="text-[10px]">${num(p.r_now, 2)}R</div>`}</td>
+          <td class="min-w-[140px]">${optBar}</td>
+          ${optSlTpCol}
           <td>${trail}</td>
           <td class="font-mono text-[11px]">${p.strategy === "manual" ? '<span class="badge badge-blue">MANUAL</span>' : p.strategy ? `<span class="badge">AUTO</span> ${esc(p.strategy)}` : "—"}
             <div class="muted mt-0.5">${p.opened_at ? duration(Date.now() / 1000 - p.opened_at) : ""}</div></td>
@@ -398,9 +437,9 @@
             ${field("Notional", p.notional == null ? "—" : money(p.notional))}
             ${field("Margin · leverage", `${money(p.margin)}${p.leverage ? ` · ${num(p.leverage, 1)}x` : ""}`)}
             ${field("Contract value", p.contract_value ? `${num(p.contract_value, 6)} × ${num(p.size, 0)}` : "—")}
-            ${field("Loss at SL", p.risk_usd == null ? "—" : signed(p.risk_usd), "down")}
-            ${field("Gain at TP", p.reward_usd == null ? "—" : signed(p.reward_usd), "up")}
-            ${field("Liquidation", `${price(p.liquidation_price)} ${d(p.liq_distance_pct)}`)}
+            ${field(isOption ? "Max Loss" : "Loss at SL", isOption ? `-$${num(optExpLoss, 2)}` : (p.risk_usd == null ? "—" : signed(p.risk_usd)), "down")}
+            ${field(isOption ? "Expected Profit" : "Gain at TP", isOption ? (optExpGain == null ? "Unlimited" : `+$${num(optExpGain, 2)}`) : (p.reward_usd == null ? "—" : signed(p.reward_usd)), "up")}
+            ${field(isOption ? "Breakeven" : "Liquidation", isOption ? `$${price(optBe)}` : `${price(p.liquidation_price)} ${d(p.liq_distance_pct)}`)}
             ${field("Fees (in + est. out)", p.entry_fee == null ? "—" : `${money(p.entry_fee, 4)} + ${money(p.exit_fee_est ?? 0, 4)}`)}
             ${field("Net if closed now", p.entry_fee == null ? "—" : signed(p.unrealized_pnl - fees), pnlClass(p.unrealized_pnl - fees))}
             ${field("Distance to SL", p.sl_distance_pct == null ? "—" : `${num(p.sl_distance_pct, 2)}%`)}

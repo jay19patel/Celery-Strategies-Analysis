@@ -249,7 +249,7 @@ class PositionGuard:
         # The same lock the trailing and the manual edits take: one change to a position at a time.
         async with self.lock:
             try:
-                await broker.close_position(p.symbol)
+                await broker.close_position(p.symbol, reason=f"guard: {decision.rule}")
             except BrokerError as exc:
                 self._failed_at[key] = time.time()
                 self.bus.publish(GuardAlert(

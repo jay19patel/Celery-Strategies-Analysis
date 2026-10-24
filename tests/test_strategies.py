@@ -139,3 +139,53 @@ def test_select_straddle_and_strangle():
     strangle = select_strangle(quotes, spot, target_delta=0.20)
     assert strangle is not None and strangle.short_call.strike == 69500 and strangle.short_put.strike == 66500
 
+
+def test_select_call_and_put_spreads():
+    from tradebuddy.options import OptionQuote
+    from tradebuddy.strategies.iron_condor import select_call_spread, select_put_spread
+
+    spot = 68000.0
+    quotes = [
+        OptionQuote(symbol="C-BTC-68000-D", underlying="BTC", kind="call", strike=68000, expiry=1700000000, mark=400.0, delta=0.50),
+        OptionQuote(symbol="C-BTC-70000-D", underlying="BTC", kind="call", strike=70000, expiry=1700000000, mark=120.0, delta=0.25),
+        OptionQuote(symbol="P-BTC-68000-D", underlying="BTC", kind="put", strike=68000, expiry=1700000000, mark=380.0, delta=-0.50),
+        OptionQuote(symbol="P-BTC-66000-D", underlying="BTC", kind="put", strike=66000, expiry=1700000000, mark=110.0, delta=-0.25),
+    ]
+    cs = select_call_spread(quotes, spot, short_delta_target=0.25)
+    assert cs is not None
+    assert cs.long_call.strike == 68000 and cs.short_call.strike == 70000
+    assert cs.net_debit == 280.0  # 400 - 120
+    assert cs.max_profit == 1720.0  # 2000 - 280
+    assert cs.max_loss == 280.0
+    assert cs.breakeven == 68280.0
+
+    ps = select_put_spread(quotes, spot, short_delta_target=0.25)
+    assert ps is not None
+    assert ps.long_put.strike == 68000 and ps.short_put.strike == 66000
+    assert ps.net_debit == 270.0  # 380 - 110
+    assert ps.max_profit == 1730.0  # 2000 - 270
+    assert ps.max_loss == 270.0
+    assert ps.breakeven == 67730.0
+
+
+async def test_options_order_execution_without_stop_loss(cfg, exchange):
+    from fastapi.testclient import TestClient
+    from tradebuddy.app import local_app
+    from tradebuddy.system import System
+    from .conftest import IdleStream
+
+    system = System(cfg, strategies=discover(), stream_factory=IdleStream, client_factory=exchange.client)
+    client = TestClient(local_app(system))
+    client.post("/api/auth/login", json={"pin": cfg.auth_pin or "242425"})
+
+    res = client.post("/api/options/order", json={
+        "broker": "paper",
+        "strategy": "single",
+        "legs": [{"symbol": "C-BTC-80800-251026", "side": "buy", "size": 1, "price": 450.0}],
+    })
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["executed_legs"] == 1
+    assert body["orders"][0]["symbol"] == "C-BTC-80800-251026"
+    assert body["orders"][0]["stop_loss"] is None
+

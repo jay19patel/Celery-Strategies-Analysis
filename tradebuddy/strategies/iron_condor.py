@@ -55,6 +55,7 @@ class StraddleSetup:
     call_leg: OptionLeg
     put_leg: OptionLeg
     total_credit: float
+    max_loss: float
     lower_breakeven: float
     upper_breakeven: float
 
@@ -67,8 +68,37 @@ class StrangleSetup:
     short_call: OptionLeg
     short_put: OptionLeg
     total_credit: float
+    max_loss: float
     lower_breakeven: float
     upper_breakeven: float
+
+
+@dataclass(frozen=True)
+class CallSpreadSetup:
+    underlying: str
+    spot: float
+    expiry: float
+    long_call: OptionLeg
+    short_call: OptionLeg
+    net_debit: float
+    max_profit: float
+    max_loss: float
+    breakeven: float
+    spread_width: float
+
+
+@dataclass(frozen=True)
+class PutSpreadSetup:
+    underlying: str
+    spot: float
+    expiry: float
+    long_put: OptionLeg
+    short_put: OptionLeg
+    net_debit: float
+    max_profit: float
+    max_loss: float
+    breakeven: float
+    spread_width: float
 
 
 def select_iron_condor(
@@ -174,6 +204,7 @@ def select_straddle(quotes: list[OptionQuote], spot: float) -> StraddleSetup | N
         call_leg=to_leg(call, "sell"),
         put_leg=to_leg(put, "sell"),
         total_credit=round(credit, 2),
+        max_loss=round(credit * 1.5, 2),
         lower_breakeven=round(atm_strike - credit, 2),
         upper_breakeven=round(atm_strike + credit, 2),
     )
@@ -209,8 +240,105 @@ def select_strangle(
         short_call=to_leg(short_c, "sell"),
         short_put=to_leg(short_p, "sell"),
         total_credit=round(credit, 2),
+        max_loss=round(credit * 1.5, 2),
         lower_breakeven=round(short_p.strike - credit, 2),
         upper_breakeven=round(short_c.strike + credit, 2),
+    )
+
+
+def select_call_spread(
+    quotes: list[OptionQuote],
+    spot: float,
+    short_delta_target: float = 0.25,
+) -> CallSpreadSetup | None:
+    """Finds ATM long call and ~25-delta short call (bull call spread)."""
+    if not quotes or spot <= 0:
+        return None
+    calls = [q for q in quotes if q.kind == "call" and q.mark and q.mark > 0]
+    if not calls:
+        return None
+    strikes = sorted({q.strike for q in calls})
+    atm_strike = min(strikes, key=lambda s: abs(s - spot))
+    long_c = next((q for q in calls if q.strike == atm_strike), None)
+    if not long_c:
+        return None
+    otm_calls = [q for q in calls if q.strike > long_c.strike and q.delta is not None]
+    if not otm_calls:
+        return None
+    short_c = min(otm_calls, key=lambda q: abs(abs(q.delta or 0.0) - short_delta_target))
+    net_debit = (long_c.mark or 0.0) - (short_c.mark or 0.0)
+    if net_debit <= 0:
+        return None
+    spread_width = short_c.strike - long_c.strike
+    max_profit = max(0.0, spread_width - net_debit)
+    max_loss = net_debit
+    breakeven = long_c.strike + net_debit
+
+    def to_leg(q: OptionQuote, action: str) -> OptionLeg:
+        return OptionLeg(
+            symbol=q.symbol, kind=q.kind, action=action, strike=q.strike,
+            expiry=q.expiry, mark=q.mark or 0.0, delta=q.delta, iv=q.mark_iv, oi=q.oi,
+        )
+
+    return CallSpreadSetup(
+        underlying=long_c.underlying,
+        spot=spot,
+        expiry=long_c.expiry,
+        long_call=to_leg(long_c, "buy"),
+        short_call=to_leg(short_c, "sell"),
+        net_debit=round(net_debit, 2),
+        max_profit=round(max_profit, 2),
+        max_loss=round(max_loss, 2),
+        breakeven=round(breakeven, 2),
+        spread_width=round(spread_width, 2),
+    )
+
+
+def select_put_spread(
+    quotes: list[OptionQuote],
+    spot: float,
+    short_delta_target: float = 0.25,
+) -> PutSpreadSetup | None:
+    """Finds ATM long put and ~25-delta short put (bear put spread)."""
+    if not quotes or spot <= 0:
+        return None
+    puts = [q for q in quotes if q.kind == "put" and q.mark and q.mark > 0]
+    if not puts:
+        return None
+    strikes = sorted({q.strike for q in puts})
+    atm_strike = min(strikes, key=lambda s: abs(s - spot))
+    long_p = next((q for q in puts if q.strike == atm_strike), None)
+    if not long_p:
+        return None
+    otm_puts = [q for q in puts if q.strike < long_p.strike and q.delta is not None]
+    if not otm_puts:
+        return None
+    short_p = min(otm_puts, key=lambda q: abs(abs(q.delta or 0.0) - short_delta_target))
+    net_debit = (long_p.mark or 0.0) - (short_p.mark or 0.0)
+    if net_debit <= 0:
+        return None
+    spread_width = long_p.strike - short_p.strike
+    max_profit = max(0.0, spread_width - net_debit)
+    max_loss = net_debit
+    breakeven = long_p.strike - net_debit
+
+    def to_leg(q: OptionQuote, action: str) -> OptionLeg:
+        return OptionLeg(
+            symbol=q.symbol, kind=q.kind, action=action, strike=q.strike,
+            expiry=q.expiry, mark=q.mark or 0.0, delta=q.delta, iv=q.mark_iv, oi=q.oi,
+        )
+
+    return PutSpreadSetup(
+        underlying=long_p.underlying,
+        spot=spot,
+        expiry=long_p.expiry,
+        long_put=to_leg(long_p, "buy"),
+        short_put=to_leg(short_p, "sell"),
+        net_debit=round(net_debit, 2),
+        max_profit=round(max_profit, 2),
+        max_loss=round(max_loss, 2),
+        breakeven=round(breakeven, 2),
+        spread_width=round(spread_width, 2),
     )
 
 

@@ -116,7 +116,7 @@ class DeltaBroker:
         if result.get("errors"):
             raise BrokerError("delta: new SL/TP placed, but " + "; ".join(result["errors"]))
 
-    async def close_position(self, symbol: str) -> dict[str, Any]:
+    async def close_position(self, symbol: str, reason: str = "") -> dict[str, Any]:
         position = next((p for p in await self.positions() if p.symbol == symbol), None)
         if position is None:
             raise BrokerError(f"no open {symbol} position")

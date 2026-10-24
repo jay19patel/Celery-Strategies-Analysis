@@ -265,7 +265,13 @@ class Api:
         """Comprehensive options data, chain, and multi-leg setups for the Options Desk."""
         from dataclasses import asdict
         from tradebuddy.options import OptionQuote
-        from tradebuddy.strategies.iron_condor import select_iron_condor, select_straddle, select_strangle
+        from tradebuddy.strategies.iron_condor import (
+            select_call_spread,
+            select_iron_condor,
+            select_put_spread,
+            select_straddle,
+            select_strangle,
+        )
 
         s = self.system
         spot = s.prices.price(symbol)
@@ -301,6 +307,8 @@ class Api:
         condor = select_iron_condor(quotes, spot) if spot and quotes else None
         straddle = select_straddle(quotes, spot) if spot and quotes else None
         strangle = select_strangle(quotes, spot) if spot and quotes else None
+        call_spread = select_call_spread(quotes, spot) if spot and quotes else None
+        put_spread = select_put_spread(quotes, spot) if spot and quotes else None
 
         return {
             "symbol": symbol,
@@ -312,8 +320,24 @@ class Api:
                 "iron_condor": asdict(condor) if condor else None,
                 "straddle": asdict(straddle) if straddle else None,
                 "strangle": asdict(strangle) if strangle else None,
+                "call_spread": asdict(call_spread) if call_spread else None,
+                "put_spread": asdict(put_spread) if put_spread else None,
             },
         }
+
+    def _find_option_mark(self, sym: str) -> float | None:
+        """Find mark price for an option symbol from cached snapshots."""
+        for snap in self.system.options_latest.values():
+            chains = (snap.get("summary") or {}).get("chains") or {}
+            for rows in chains.values():
+                for row in rows:
+                    c = row.get("call") or {}
+                    if c.get("symbol") == sym and c.get("mark") is not None:
+                        return float(c["mark"])
+                    p = row.get("put") or {}
+                    if p.get("symbol") == sym and p.get("mark") is not None:
+                        return float(p["mark"])
+        return None
 
     async def options_order(
         self,
@@ -331,6 +355,17 @@ class Api:
             sym = leg.get("symbol")
             side = leg.get("side", "buy")
             size = int(leg.get("size") or 1)
+            leg_price = leg.get("price")
+            if sym:
+                if leg_price is not None:
+                    try:
+                        self.system.prices.set_price(sym, float(leg_price))
+                    except (ValueError, TypeError):
+                        pass
+                if self.system.prices.price(sym) is None:
+                    mark = self._find_option_mark(sym)
+                    if mark is not None:
+                        self.system.prices.set_price(sym, mark)
             leg_req = f"{request_id}-{i}"
             try:
                 order = await self.system.trader.manual(
@@ -342,6 +377,7 @@ class Api:
                     take_profit=None,
                     request_id=leg_req,
                     margin_pct=None,
+                    strategy=strategy,
                 )
                 results.append(order)
             except Exception as exc:
