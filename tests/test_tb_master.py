@@ -253,7 +253,6 @@ def test_every_strategy_says_where_its_levels_come_from():
     from tradebuddy.strategies import discover
 
     own = {s.name for s in discover() if not s.is_default_sl_tp}
-    # Every price-structure strategy puts its stop where its own idea stops being true. Only
-    # pcr_options, which reads options flow and has no level of its own, leaves it to the Trader.
-    assert own == {"ema_9_15_15m", "ema_cross_15m", "mother_candle_15m", "mother_candle_1h", "scalper",
-                   "tb_master_15m", "trade_buddy_manager_15m"}
+    # Every strategy left puts its stop where its own idea stops being true. The ones that leaned
+    # on Settings' fixed percentages were the indicator strategies, and they are gone.
+    assert own == {s.name for s in discover()}, "a strategy is leaving its stop to Settings"

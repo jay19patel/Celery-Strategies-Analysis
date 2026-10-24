@@ -63,20 +63,7 @@
       </table>
     </div>
   </section>
-  <section class="card hidden" id="structuresCard">
-    <div class="card-head">
-      <div class="card-title"><i data-lucide="shapes"></i>Performance by option structure
-        <span class="card-sub">the same trades, counted by what was built instead of by who built it</span></div>
-    </div>
-    <div class="card-body pb-0"><div class="h-56"><canvas id="structureChart"></canvas></div></div>
-    <div class="scroll">
-      <table class="tbl">
-        <thead><tr><th>Structure</th><th>Underlying</th><th class="r">Trades</th><th class="r">Win rate</th><th class="r">Net P&amp;L</th><th class="r">Avg per trade</th><th class="r">Best · worst</th><th class="r">Avg hold</th><th class="r">Fees</th><th>Opened by</th></tr></thead>
-        <tbody id="byStructure"></tbody>
-      </table>
-    </div>
-  </section>
-
+  
   <section class="card" id="tradesCard">
     <div class="card-head flex-wrap gap-2">
       <div class="card-title"><i data-lucide="history"></i>Closed trades <span id="histTotal" class="card-sub"></span></div>
@@ -108,7 +95,7 @@
 (() => {
   const { $, esc, num, price, money, signed, pnlClass, dateTime, side, duration } = TB;
   let broker = null;
-  let equityChart, reasonChart, strategyChart, structureChart;
+  let equityChart, reasonChart, strategyChart;
   const UP = "#00b852", DOWN = "#eb5757";
   // One horizontal bar per row, green above water and red below, so which line is draining the
   // account is the first thing the eye lands on instead of a number in the fourth column.
@@ -200,26 +187,6 @@
         $("strategyChartBox").classList.toggle("hidden", !sRows.length);
         if (sRows.length) strategyChart = pnlBars(strategyChart, "strategyChart", sRows, "Net P&L");
 
-        const structures = stats.by_structure || [];
-        $("structuresCard").classList.toggle("hidden", !structures.length);
-        if (structures.length) {
-          structureChart = pnlBars(structureChart, "structureChart", structures.map((r) => ({
-            label: r.name, pnl: r.pnl,
-            hint: `${r.trades} trade${r.trades === 1 ? "" : "s"} · ${num(r.win_rate, 1)}% won · ${r.underlyings.join(", ")}`,
-          })), "Net P&L");
-          TB.rows("byStructure", structures, (r) => `<tr>
-            <td><div class="font-medium">${esc(r.name)}</div>
-              <div class="text-[10px] muted">${r.credit ? "credit · premium received" : "debit · premium paid"}</div></td>
-            <td class="font-mono text-[11.5px]">${esc(r.underlyings.join(" · "))}</td>
-            <td class="r font-mono">${r.trades}<div class="text-[10px] muted">${r.wins}W · ${r.losses}L</div></td>
-            <td class="r font-mono">${num(r.win_rate, 1)}%</td>
-            <td class="r font-mono font-semibold ${pnlClass(r.pnl)}">${signed(r.pnl, 4)}</td>
-            <td class="r font-mono ${pnlClass(r.expectancy)}">${r.expectancy == null ? "—" : signed(r.expectancy, 4)}</td>
-            <td class="r font-mono"><span class="up">${signed(r.best, 4)}</span><div class="down">${signed(r.worst, 4)}</div></td>
-            <td class="r font-mono muted">${r.avg_hold_seconds == null ? "—" : duration(r.avg_hold_seconds)}</td>
-            <td class="r font-mono muted">${money(r.fees, 4)}</td>
-            <td class="font-mono text-[11.5px] muted">${esc(r.strategies.join(", "))}</td></tr>`, "No option structures closed yet", 10);
-        }
 
         document.querySelectorAll("[data-strategy]").forEach((el) => (el.onclick = () => {
           hist.strategy = hist.strategy === el.dataset.strategy ? "" : el.dataset.strategy;

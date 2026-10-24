@@ -14,7 +14,7 @@ import pytest
 from tradebuddy.api import Api
 from tradebuddy.delta import Candle
 from tradebuddy.events import MarketAnalysis
-from tradebuddy.store import HEALTH_DAYS, SNAPSHOT_DAYS, Store
+from tradebuddy.store import SNAPSHOT_DAYS, Store
 
 from .test_pipeline import make
 
@@ -167,36 +167,6 @@ def test_off_boundary_snapshots_are_pruned_and_boundary_ones_are_kept(tmp_path):
 # -- process load -----------------------------------------------------------------
 
 
-async def test_process_load_is_kept_so_yesterday_has_an_answer(cfg, exchange):
-    """The monitor has always measured CPU, memory and loop lag every two seconds and stored none
-    of it, so the System page could only ever show the current instant."""
-    system = await make(cfg, exchange)
-    system.remote_processes["analyst"] = {
-        "process": {"role": "analyst", "process_cpu_pct": 4.0, "process_memory_mb": 105.0, "loop_lag_max_ms": 7.0},
-        "jobs": [], "status": {}, "at": time.time(),
-    }
-    now = time.time()
-    assert system._record_health_once(now - 600) == "2 processes"
-    system._record_health_once(now - 300)
-
-    series = (await Api(system).health(hours=48))["processes"]
-    assert set(series) == {"all", "analyst"}
-    assert [p["memory_mb"] for p in series["analyst"]] == [105.0, 105.0]
-    assert series["analyst"][0]["ts"] < series["analyst"][1]["ts"]  # oldest first
-
-
-def test_old_health_rows_are_pruned(tmp_path):
-    store = Store(str(tmp_path / "t.db"))
-    now = time.time()
-    store.record_health("engine", now - (HEALTH_DAYS + 1) * 86_400, 10.0, 100.0, 1.0)
-    store.record_health("engine", now, 11.0, 101.0, 2.0)
-    assert store.prune_health(now) == 1
-    assert [r["cpu_pct"] for r in store.health()] == [11.0]
-
-
-# -- the reads the dashboard makes ------------------------------------------------
-
-
 async def test_the_bars_route_reports_its_gaps(cfg, exchange):
     system = await make(cfg, exchange)
     every = bars(10, start=int(time.time()) - 10 * STEP)
@@ -213,30 +183,6 @@ async def test_the_reads_clamp_their_window(cfg, exchange, days, expected):
     system = await make(cfg, exchange)
     assert (await Api(system).bars("BTCUSD", "15m", days=days))["days"] == expected
     assert (await Api(system).snapshots("BTCUSD", days=days))["days"] == expected
-
-
-async def test_the_health_job_survives_running_off_the_event_loop(cfg, exchange):
-    """The reading is taken on the loop and only the writing goes to a thread.
-
-    Monitor counts the loop's own tasks, and asyncio.all_tasks() raises when there is no running
-    loop — so taking the whole snapshot inside asyncio.to_thread made this job fail every five
-    minutes with "no running event loop" and record nothing. It reached production because the
-    test called the sync helper directly, from a test that had a loop.
-    """
-    import asyncio
-
-    system = await make(cfg, exchange)
-    processes = system._health_snapshot()
-    assert processes and processes[0]["role"]
-
-    # Exactly how the job runs it: the write, on a worker thread, with no loop of its own.
-    note = await asyncio.to_thread(system._write_health, processes, time.time())
-    assert note.endswith("processes")
-    assert system.store.health(0), "nothing was recorded"
-
-    # And the snapshot itself must still be taken where a loop exists.
-    with pytest.raises(RuntimeError, match="no running event loop"):
-        await asyncio.to_thread(system._health_snapshot)
 
 
 def test_a_database_from_the_old_build_loses_its_withdrawn_tables_and_its_api_key(tmp_path):
@@ -269,3 +215,36 @@ def test_a_database_from_the_old_build_loses_its_withdrawn_tables_and_its_api_ke
     assert store.ai_reports() == []  # the v2 rows went with the v2 shape
     assert set(store.load_settings()) == {"delta_api_key"}
     store.db.close()
+
+
+def test_the_store_survives_many_threads_reading_at_once(tmp_path):
+    """`check_same_thread=False` lets any thread use the connection; it does not make concurrent
+    use safe.
+
+    The engine reads the store from `asyncio.to_thread` workers in a dozen places — bar
+    collection, the structure scan, the candles handed to strategies. Two of them landing together
+    on one cursor does not raise anything honest: a SELECT comes back as None, or a valid
+    parameter is rejected as "bad parameter or other API misuse". Both appeared in the engine
+    within a minute of starting, and neither is a failure a test would normally think to look for.
+    """
+    import concurrent.futures as cf
+
+    from tradebuddy.delta import Candle
+
+    store = Store(str(tmp_path / "t.db"))
+    store.record_bars("BTCUSD", "15m", [Candle(1_700_000_000 + i * 900, 1, 2, 0.5, 1.5, 10) for i in range(200)])
+
+    errors: list[str] = []
+
+    def hammer(n: int) -> None:
+        try:
+            for _ in range(40):
+                assert store.last_bar_time("BTCUSD", "15m") > 0
+                assert len(store.bars("BTCUSD", "15m", 0.0, 50)) == 50
+                store.enabled(f"strategy:s{n}")
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
+
+    with cf.ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(hammer, range(8)))
+    assert errors == [], f"concurrent reads broke the connection: {errors[:3]}"

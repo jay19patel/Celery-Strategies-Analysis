@@ -17,23 +17,6 @@
   </section>
 </div>
 
-<section class="card min-w-0">
-  <div class="card-head flex-wrap gap-2">
-    <div class="card-title"><i data-lucide="activity"></i>Process load
-      <span class="card-sub">CPU, memory and loop lag over time — the table above is only this instant</span></div>
-    <div class="flex items-center gap-2">
-      <span id="healthNote" class="text-[11px] muted"></span>
-      <select id="healthHours" class="text-xs border border-slate-200 rounded px-1.5 py-1">
-        <option value="6">6h</option><option value="24">24h</option><option value="48" selected>48h</option><option value="168">7d</option>
-      </select>
-    </div>
-  </div>
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 px-4 pb-3 pt-1">
-    <div><div class="stat-label mb-1">CPU</div><div id="cpuChart"></div></div>
-    <div><div class="stat-label mb-1">Memory</div><div id="memChart"></div></div>
-    <div><div class="stat-label mb-1">Event-loop lag <span class="muted">· worst in each window</span></div><div id="lagChart"></div></div>
-  </div>
-</section>
 
 <section class="card min-w-0">
   <div class="card-head flex-wrap gap-2">
@@ -304,35 +287,10 @@
   async function loadBars() { bars = await TB.get("/api/events?type=CandleClosed&limit=100"); TB.rows("bars", bars, barRow, "No candle has closed since start", 9); }
 
 
-  // ── process load over time ─────────────────────────────────────────────────
-  // The Processes table above is a snapshot: it can say CPU is 4% now and nothing about whether
-  // that is normal. This is the same three numbers, kept (process_health) and drawn.
-  async function loadHealth() {
-    const hours = Number($("healthHours").value);
-    const h = await TB.get(`/api/health?hours=${hours}`);
-    const roles = Object.keys(h.processes).sort();
-    const series = (key) => roles.map((role) => ({
-      name: role,
-      points: h.processes[role].map((p) => ({ x: p.ts, y: p[key] })),
-    }));
-    // A row is written every 5 minutes; past three times that the process was not reporting, and
-    // joining the line across it would draw load the box never had.
-    const opts = { gapSeconds: 900, height: 140 };
-    $("cpuChart").innerHTML = TBC.timeLine(series("cpu_pct"), { ...opts, label: "CPU per process", format: (v) => `${num(v, 0)}%` });
-    $("memChart").innerHTML = TBC.timeLine(series("memory_mb"), { ...opts, label: "Memory per process", format: (v) => `${num(v, 0)}MB` });
-    $("lagChart").innerHTML = TBC.timeLine(series("loop_lag_max_ms"), { ...opts, label: "Event-loop lag per process", format: (v) => `${num(v, 0)}ms` });
-    const n = roles.reduce((a, r) => a + h.processes[r].length, 0);
-    $("healthNote").textContent = n ? `${count(n)} readings · kept ${h.keep_days} days` : `nothing yet — a reading every 5 min`;
-  }
-
-  $("healthHours").addEventListener("change", loadHealth);
-
   load();
   loadDb();
-  loadHealth();
   loadBars();
   TB.every(loadDb, 30000);
-  TB.every(loadHealth, 60000);
   TB.on("CandleClosed", (e) => { bars.unshift(e); bars = bars.slice(0, 100); TB.rows("bars", bars, barRow, "", 9); });
   TB.every(load, 3000);
 })();

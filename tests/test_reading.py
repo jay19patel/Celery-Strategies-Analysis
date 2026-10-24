@@ -238,3 +238,54 @@ def test_the_regime_separates_a_trend_from_a_range():
     assert reading.regime_at(bars, 5) == "unknown"  # too early to say, and it says so
 
 
+
+
+# -- the levels everyone is watching, and whether anyone turned up ----------------------
+
+
+def level_bars(n: int = 120, *, last_volume: float = 10.0) -> list[Candle]:
+    """A flat series with a controllable last bar's volume."""
+    out = [Candle(1_700_006_400 + i * 900, 100, 101, 99, 100, 10.0) for i in range(n - 1)]
+    out.append(Candle(1_700_006_400 + (n - 1) * 900, 100, 101, 99, 100.9, last_volume))
+    return out
+
+
+def test_a_level_is_in_play_only_when_price_is_near_it():
+    """"In play" is a statement about where price is, not about what it will do."""
+    block = reading.levels_block(level_bars())
+    today = next(w for w in block["windows"] if w["key"] == "1d")
+    assert today["high"] == 101 and today["low"] == 99
+    assert "high" in today["in_play"]  # 100.9 is 0.1% under 101
+    assert block["price"] == 100.9
+
+
+def test_the_volume_ratio_is_reported_beside_the_level_not_mixed_into_it():
+    """A level reached on ordinary volume is price drifting into it; the same level on twice the
+    average is somebody taking it. Both numbers have to be visible for the difference to be."""
+    quiet = reading.levels_block(level_bars(last_volume=3.0))
+    busy = reading.levels_block(level_bars(last_volume=30.0))
+    assert quiet["volume_ratio"] == pytest.approx(0.3, abs=0.01)
+    assert busy["volume_ratio"] == pytest.approx(3.0, abs=0.01)
+    # The level itself is identical in both — the volume never moves it.
+    assert quiet["windows"] == busy["windows"]
+
+
+def test_where_price_sits_between_the_extremes_is_a_share_of_the_range():
+    mid = [Candle(1_700_006_400 + i * 900, 100, 102, 98, 100, 10.0) for i in range(60)]
+    block = reading.levels_block(mid)
+    today = next(w for w in block["windows"] if w["key"] == "1d")
+    assert today["position"] == pytest.approx(0.5, abs=0.01)  # 100 between 98 and 102
+
+
+def test_it_refuses_rather_than_averaging_over_nothing():
+    assert reading.levels_block([])["ready"] is False
+    assert reading.levels_block(level_bars(5))["ready"] is False
+
+
+def test_every_window_names_the_bars_it_counted():
+    """A 52-week high measured over nine days is not a 52-week high, and the only way to tell is
+    for the window to say how many bars it actually had."""
+    block = reading.levels_block(level_bars(120))
+    for w in block["windows"]:
+        assert w["bars"] <= 120
+        assert w["bars"] > 0

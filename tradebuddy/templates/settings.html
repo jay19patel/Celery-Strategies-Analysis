@@ -96,25 +96,7 @@
       </div>
     </section>
 
-    <section class="card">
-      <div class="card-head border-b border-slate-100">
-        <div class="card-title flex items-center gap-2">
-          <div class="w-6 h-6 rounded-md bg-emerald-50 flex items-center justify-center text-emerald-600"><i data-lucide="git-fork" class="w-3.5 h-3.5"></i></div>
-          Options Auto-Trade (paper)
-        </div>
-        <label class="switch sm"><input type="checkbox" id="options_auto_enabled"><span class="track"></span></label>
-      </div>
-      <div class="card-body space-y-4">
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div><label class="field-label" for="options_auto_risk_pct">Risk %</label><input id="options_auto_risk_pct" type="number" min="0.05" max="10" step="0.05" class="input w-full mt-1 font-mono"><div class="field-help">Max loss as % of equity.</div></div>
-          <div><label class="field-label" for="options_auto_qty">Max contracts / leg</label><input id="options_auto_qty" type="number" min="1" max="100" step="1" class="input w-full mt-1 font-mono"><div class="field-help">Ceiling on the size above.</div></div>
-          <div><label class="field-label" for="options_auto_sl_pct">Stop loss %</label><input id="options_auto_sl_pct" type="number" min="5" max="100" step="1" class="input w-full mt-1 font-mono"></div>
-          <div><label class="field-label" for="options_auto_tp_pct">Target %</label><input id="options_auto_tp_pct" type="number" min="5" max="500" step="1" class="input w-full mt-1 font-mono"></div>
-        </div>
-        <div class="field-help">Every minute the engine opens the structure the options-market rule picks: IV cheap (bottom 25% of its 7-day range) → long straddle or strangle; IV rich (top 25%) and no event priced into the nearest expiry → iron condor; otherwise nothing. Stop loss is a % of the structure's max loss, target a % of the premium paid or received, on the whole structure. One per underlying, at most 3 a day, 30 minutes apart, closed an hour before expiry. Rules only; paper only. The kill switch and the daily loss limit stop it.</div>
-      </div>
-    </section>
-
+    
     <section class="card">
       <div class="card-head border-b border-slate-100">
         <div class="card-title flex items-center gap-2">
@@ -287,8 +269,7 @@
   const PHRASE = {{ live_phrase | tojson }};
   const NUMBERS = ["stop_loss_pct", "take_profit_pct", "trade_margin_pct", "risk_per_trade_pct", "min_edge_multiple", "atr_stop_mult", "atr_target_mult",
     "paper_starting_balance", "paper_leverage", "paper_fee_pct", "paper_slippage_pct", "paper_max_hold_hours",
-    "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct", "strategy_loss_limit_pct", "email_smtp_port",
-    "options_auto_qty", "options_auto_risk_pct", "options_auto_sl_pct", "options_auto_tp_pct"];
+    "trailing_trigger_pct", "trailing_extend_pct", "trailing_lock_pct", "trailing_max_steps", "daily_loss_limit_pct", "strategy_loss_limit_pct", "email_smtp_port",];
   const HOSTS = { demo: "demo.delta.exchange", live: "www.delta.exchange" };
   let saved = null, env = "demo";
 
@@ -303,7 +284,6 @@
     $("ai_enabled").checked = s.ai_enabled;
     $("ai_model").value = s.ai_model || "";
     $("ai_interval_minutes").value = s.ai_interval_minutes;
-    $("options_auto_enabled").checked = s.options_auto_enabled;
     $("email_enabled").checked = s.email_enabled;
     $("email_report_hour").innerHTML = Array.from({ length: 24 }, (_, h) =>
       `<option value="${h}">${String(h).padStart(2, "0")}:00 (${h % 12 || 12} ${h < 12 ? "AM" : "PM"})</option>`).join("");
@@ -338,7 +318,6 @@
       ai_enabled: $("ai_enabled").checked,
       ai_model: $("ai_model").value.trim(),
       ai_interval_minutes: +$("ai_interval_minutes").value,
-      options_auto_enabled: $("options_auto_enabled").checked,
       email_enabled: $("email_enabled").checked, email_to: $("email_to").value.trim(),
       email_smtp_host: $("email_smtp_host").value.trim(),
       email_smtp_port: Number($("email_smtp_port").value) || 587,

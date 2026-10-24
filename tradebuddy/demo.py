@@ -42,7 +42,6 @@ SYMBOLS = ("BTCUSD", "ETHUSD")
 START = {"BTCUSD": 82_000.0, "ETHUSD": 3_100.0}
 UNDERLYING = {"BTCUSD": "BTC", "ETHUSD": "ETH"}
 BAR = 900
-ROLES = ("all", "feed", "analyst", "worker")
 
 
 class Refused(RuntimeError):
@@ -282,14 +281,6 @@ def seed(path: str = DEFAULT_PATH, days: int = 120, force: bool = False, now: fl
                 written["verdicts"] += 1
         written["verdicts marked"] += _settle(store, symbol, bars, now)
 
-    for role in ROLES:
-        base = {"all": 6.0, "feed": 3.0, "analyst": 12.0, "worker": 4.0}[role]
-        mem = {"all": 148.0, "feed": 96.0, "analyst": 210.0, "worker": 105.0}[role]
-        rng = random.Random(hash(role) & 0xFFFF)
-        for i in range(2 * 288):  # two days, a reading every five minutes
-            ts = now - (2 * 288 - i) * 300
-            store.record_health(role, ts, round(max(0.1, rng.gauss(base, base / 3)), 1),
-                                round(mem + rng.gauss(0, 4), 1), round(abs(rng.gauss(2, 2)), 2))
     # commit(), not execute("COMMIT"): a store method that manages its own transaction
     # (save_settings does, with `with self.db:`) may already have closed the one opened above, and
     # an explicit COMMIT then raises "no transaction is active". commit() is a no-op in that case.

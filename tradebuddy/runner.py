@@ -77,6 +77,7 @@ def make_job(
     options_history: Callable[[str, float], list[dict[str, Any]]] | None = None,
     outlook: dict[str, Any] | None = None,
     candles: list[Candle] | None = None,
+    structure: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Everything a worker needs, as plain JSON, including the bars.
 
@@ -100,6 +101,8 @@ def make_job(
         job["options_history"] = options_history(event.symbol, strategy.options_history_hours)
     if strategy.wants_outlook and outlook is not None:
         job["outlook"] = outlook
+    if strategy.wants_structure and structure is not None:
+        job["structure"] = structure
     # Only when there is actually something to send. An empty read — a fresh database, a symbol
     # the collector has not reached, a hole — must leave the key absent so the evaluation falls
     # back to REST. Attaching `[]` instead would hand every strategy zero bars and fail them all
@@ -142,7 +145,7 @@ async def evaluate(strategy: Strategy, job: dict[str, Any], market: Any, worker:
             return result(error="the bar that just closed is not in the history yet")
 
     try:
-        ctx = Context(symbol, resolution, bar_time, candles, market, job.get("outlook") or {})
+        ctx = Context(symbol, resolution, bar_time, candles, market, job.get("outlook") or {}, job.get("structure") or {})
         signal = await asyncio.wait_for(strategy.on_candle(ctx), timeout)
     except Exception as exc:
         return result(error=repr(exc))
@@ -223,6 +226,7 @@ class StrategyRunner:
         prices: Callable[[], dict[str, float]], data_env: Callable[[], str],
         options_history: Callable[[str, float], list[dict[str, Any]]] | None = None,
         outlook: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+        structure: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
         bars: Callable[[str, str, int], list[Candle]] | None = None,
     ) -> None:
         self.bus = bus
@@ -234,6 +238,7 @@ class StrategyRunner:
         self.data_env = data_env
         self.options_history = options_history  # (symbol, hours) -> stored options rows, for the job
         self.outlook = outlook  # symbol -> the engine's directional view, for the job
+        self.structure = structure  # symbol -> the engine's market-structure read, for the job
         # (symbol, interval, count) -> stored bars. Read once per symbol per close and shared by
         # every strategy on that bar: they all want the same series, only different depths of it.
         self.bars = bars
@@ -266,8 +271,9 @@ class StrategyRunner:
             stats.in_flight += 1
             try:
                 view = await self.outlook(event.symbol) if (s.wants_outlook and self.outlook) else None
+                shape = await self.structure(event.symbol) if (s.wants_structure and self.structure) else None
                 await self.evaluator.submit(
-                    s, make_job(s, event, prices, self.data_env(), self.options_history, view, series))
+                    s, make_job(s, event, prices, self.data_env(), self.options_history, view, series, shape))
             except Exception as exc:
                 stats.in_flight -= 1
                 stats.errors += 1

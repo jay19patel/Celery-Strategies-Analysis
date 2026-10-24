@@ -53,6 +53,10 @@ class Context:
     # scan over a year of bars and because the strategy must read the same reading the dashboard
     # shows — two versions of "which way is this market going" is how a system stops being trusted.
     outlook: dict[str, Any] = field(default_factory=dict)
+    # The engine's market-structure read (System.market_structure). Empty unless the strategy sets
+    # `wants_structure`. This is what makes a stop go under the swing that actually held rather
+    # than a fixed percentage, and a target sit at the level price is really heading for.
+    structure: dict[str, Any] = field(default_factory=dict)
 
 
 class Strategy(ABC):
@@ -70,6 +74,12 @@ class Strategy(ABC):
     # Hand the engine's directional view to on_candle through ctx.outlook. Same reasoning as
     # options_history_hours: the worker has no database, and the reading must be the shared one.
     wants_outlook: ClassVar[bool] = False
+    # Hand the engine's market-structure read to on_candle through ctx.structure: the live zones,
+    # the resting pools and the sweeps that took them, the volume profile, the estimated flow, and
+    # `nearby` — every level above and below with how many sources name it. Same reasoning as
+    # wants_outlook: a worker has no database, and a strategy that worked its own levels out would
+    # be a second answer to "where does price react", which is how a system stops being trusted.
+    wants_structure: ClassVar[bool] = False
     # Margin cap for this strategy's orders, as a % of the broker's available margin, overriding
     # Settings' trade_margin_pct. For a scalper and nothing else: its stop is a fraction of a
     # percent, so the risk-based size is large and the normal cap binds long before the risk rule

@@ -58,7 +58,7 @@ from tradebuddy.store import BAR_SECONDS, BASE_INTERVAL, Store
 from tradebuddy.strategies import Strategy, discover
 from tradebuddy.strategies.indicators import atr
 from tradebuddy.stream import BarCloser, DeltaStream, PriceBook
-from tradebuddy.trading import AUTO_EVERY, TRADING_DEFAULT, AutoStructures, Executor, Trader, atr_pct_from, trading_key
+from tradebuddy.trading import TRADING_DEFAULT, Executor, Trader, atr_pct_from, trading_key
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +82,6 @@ BAR_CATCHUP_MAX = 500  # one pass covers ~5 days of outage; older than that, use
 # leaves the feed's subscription set exactly as the strategies define it.
 BASE_COLLECT_EVERY = 60.0
 BASE_CATCHUP_MAX = 1000  # ~17 hours of outage in one pass; beyond that the backfill fills it in
-HEALTH_EVERY = 300.0  # one row per process per 5 minutes
 OPTIONS_MINUTE_STEP = 60  # what the ATM IV and put/call cards chart, and so what their verdicts read
 OUTLOOK_BARS = 40_000  # a year of 15-minute bars is 35,040
 # What the market-structure read scans. Not the whole year: pools, zones and sweeps are about
@@ -273,6 +272,7 @@ class System:
             data_env=lambda: self.settings.data_env,
             options_history=lambda symbol, hours: self.options_since(UNDERLYINGS.get(symbol, symbol), time.time() - hours * 3600),
             outlook=self.outlook,
+            structure=self.market_structure,
             # The bars the strategies run on, from the table the engine already fills. Before
             # this they came from REST once per strategy per symbol: ten calls on every 15-minute
             # close for one series sitting on disk.
@@ -318,13 +318,6 @@ class System:
             self.options_feed.job = self.jobs.add("options snapshot", "Summarises the options book per underlying (REST if the socket is quiet)", self.options_feed.every)
         if self.analyst:
             self.analyst.job = self.jobs.add("market analysis", "Rule-based insights per symbol", self.analyst.every)
-        self.jobs_option_exits = self.jobs.add("paper option exits", "Stop loss, take profit and pre-expiry close of paper option structures", 5)
-        self.auto_options = AutoStructures(
-            self.trader, self.store, lambda: self.settings,
-            snapshots=lambda: {sym: v["summary"] for sym, v in self.options_latest.items() if v.get("summary")},
-            history=lambda underlying, since: self.store.options_history(underlying, since, 300),
-        )
-        self.auto_options.job = self.jobs.add("options auto-trade", "Opens the suggested option structure on paper, when switched on", AUTO_EVERY)
         self.reporter = DailyReporter(self)
         self.reporter.job = self.jobs.add("daily email", "Emails the day's report once, at the hour set in Settings", self.reporter.every)
         self.jobs_verdict_score = self.jobs.add("verdict scoring", "Writes back what the market did over each matured card claim's horizon", SCORE_EVERY)
@@ -332,7 +325,6 @@ class System:
         self.jobs_base_bars = self.jobs.add(
             "base bars", f"Stores every closed {BASE_INTERVAL} bar: the series every higher timeframe is folded from", BASE_COLLECT_EVERY,
         )
-        self.jobs_health = self.jobs.add("process health", "Records CPU, memory and loop lag per process", HEALTH_EVERY)
         self.jobs_ai = self.jobs.add(
             "written summary", "Reads the measured numbers back as sentences (Mistral), when switched on", 60)
         self.remote_processes: dict[str, dict[str, Any]] = {}  # role -> latest heartbeat (analyst)
@@ -401,7 +393,7 @@ class System:
                         job.note = "no MISTRAL_API_KEY in the environment"
                         continue
                     gap = max(5, s.ai_interval_minutes) * 60
-                    due = [x for x in self.symbols if time.time() - last.get(x, 0) >= gap]
+                    due = [x for x in self.history_symbols if time.time() - last.get(x, 0) >= gap]
                     if not due:
                         job.note = f"next in {gap - int(time.time() - max(last.values(), default=0))}s"
                         continue
@@ -452,13 +444,12 @@ class System:
                     deleted = await asyncio.to_thread(self.store.prune_events)
                     minutes = await asyncio.to_thread(self.store.prune_options)
                     snapshots = await asyncio.to_thread(self.store.prune_snapshots)
-                    health = await asyncio.to_thread(self.store.prune_health)
                     claims = await asyncio.to_thread(self.store.prune_predictions)
                     base = await asyncio.to_thread(self.store.prune_bars)
                     written = await asyncio.to_thread(self.store.prune_ai_reports)
                     job.note = (
                         f"deleted {deleted} events, {minutes} options minutes, {snapshots} snapshots, "
-                        f"{health} health rows, {claims} verdicts, {base} {BASE_INTERVAL} bars, "
+                        f"{claims} verdicts, {base} {BASE_INTERVAL} bars, "
                         f"{written} written summaries"
                     )
                 if deleted or minutes:
@@ -546,42 +537,6 @@ class System:
             written += await asyncio.to_thread(self.store.record_bars, symbol, BASE_INTERVAL, candles)
         note = f"{written} {BASE_INTERVAL} bars"
         return f"{note}, no data for {', '.join(failed)}" if failed else note
-
-    async def record_health(self, every: float = HEALTH_EVERY) -> None:
-        """Process load, kept. The monitor has always measured it and stored none of it, so the
-        System page could only ever show right now."""
-        while True:
-            try:
-                with self.jobs_health.tick() as job:
-                    # The reading is taken here and only the writing goes to a thread. Monitor
-                    # counts the loop's own tasks, and asyncio.all_tasks() raises off the loop —
-                    # taking the whole snapshot in the thread made this job fail every five
-                    # minutes with "no running event loop" and record nothing at all.
-                    processes = self._health_snapshot()
-                    job.note = await asyncio.to_thread(self._write_health, processes, time.time())
-            except Exception:
-                log.exception("health_recording_failed")
-            await asyncio.sleep(every)
-
-    def _health_snapshot(self) -> list[dict[str, Any]]:
-        """Every process's load, as of now. Must run on the event loop."""
-        return [
-            self.monitor.snapshot(),
-            *([self.remote_feed.process] if self.remote_feed and self.remote_feed.process else []),
-            *[b["process"] for b in self.remote_processes.values()],
-        ]
-
-    def _write_health(self, processes: list[dict[str, Any]], now: float) -> str:
-        """Store what was measured. Pure SQLite, safe on a thread."""
-        for p in processes:
-            self.store.record_health(
-                p.get("role") or "?", now, p.get("process_cpu_pct"), p.get("process_memory_mb"), p.get("loop_lag_max_ms"),
-            )
-        return f"{len(processes)} processes"
-
-    def _record_health_once(self, now: float | None = None) -> str:
-        """One pass, for tests and for a manual run."""
-        return self._write_health(self._health_snapshot(), time.time() if now is None else now)
 
     async def score_verdicts(self, every: float = SCORE_EVERY) -> None:
         """What the market actually did over each matured card claim's horizon.
@@ -671,21 +626,6 @@ class System:
             )
             marked += 1
         return marked
-
-    async def option_exits(self, every: float = 5.0) -> None:
-        """Paper option structures: combined SL/TP on the latest chain, and the close before expiry."""
-        while True:
-            try:
-                with self.jobs_option_exits.tick() as job:
-                    if self.paper.options.count():
-                        async with self.protection_lock:
-                            closed = self.paper.options.check()
-                        job.note = f"closed {', '.join(closed)}" if closed else f"{self.paper.options.count()} open"
-                    else:
-                        job.note = "none open"
-            except Exception:
-                log.exception("option_exits_failed")
-            await asyncio.sleep(every)
 
     async def _reconcile(self) -> None:
         try:
@@ -806,6 +746,7 @@ class System:
             "zones": zones.read(candles, atr_now, BAR_RESOLUTION).to_dict(),
             "profile": profile.read(profile_rows, source=BASE_INTERVAL if rich else BAR_RESOLUTION).to_dict(),
             "flow": orderflow.read(candles).to_dict(),
+            "levels": reading.levels_block(candles),
         }
 
     def stored_candles(self, symbol: str, interval: str, count: int) -> list[Candle]:
@@ -879,12 +820,9 @@ class System:
             asyncio.create_task(self.guard.run(), name="guard"),
             asyncio.create_task(self.housekeeping(), name="housekeeping"),
             asyncio.create_task(self.reporter.run(), name="daily-email"),
-            asyncio.create_task(self.option_exits(), name="option-exits"),
-            asyncio.create_task(self.auto_options.run(), name="auto-options"),
             asyncio.create_task(self.score_verdicts(), name="verdict-scoring"),
             asyncio.create_task(self.collect_bars(), name="bar-collection"),
             asyncio.create_task(self.collect_base_bars(), name="base-bar-collection"),
-            asyncio.create_task(self.record_health(), name="process-health"),
             asyncio.create_task(self.write_summaries(), name="written-summary"),
         ]
         if self.local_feed:
@@ -1042,8 +980,13 @@ class System:
                 "lookback": s.lookback,
                 "is_default_sl_tp": s.is_default_sl_tp,
                 "doc": (type(s).__doc__ or sys.modules[type(s).__module__].__doc__ or "").strip(),
-                "enabled": self.store.enabled(strategy_key(s.name)),
-                "symbols": [{"symbol": sym, "enabled": self.store.enabled(pair_key(s.name, sym))} for sym in s.symbols],
+                # `s.default_on`, not the bare default: the runner reads it that way, and a page
+                # that shows a strategy switched ON while the engine treats it as OFF is a switch
+                # lying about its own state.
+                "enabled": self.store.enabled(strategy_key(s.name), s.default_on),
+                "default_on": s.default_on,
+                "symbols": [{"symbol": sym, "enabled": self.store.enabled(pair_key(s.name, sym), s.default_on)}
+                            for sym in s.symbols],
                 "stats": vars(self.runner.stats[s.name]),
             }
             for s in self.strategies

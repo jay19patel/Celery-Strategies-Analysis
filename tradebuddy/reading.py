@@ -424,5 +424,62 @@ LEVEL_WINDOWS = (
     {"key": "52w", "bars": 35_040, "label": "52 weeks"},
 )
 IN_PLAY_PCT = 1.0  # within this of an extreme and the level is live rather than history
+LEVEL_VOLUME_WINDOW = 20  # bars the "is anyone turning up" ratio is measured against
+
+
+def levels_block(candles: list[Candle], windows: tuple[dict[str, Any], ...] = LEVEL_WINDOWS) -> dict[str, Any]:
+    """The highs and lows other people are watching, and whether anyone is turning up at them.
+
+    The high of the day is not interesting because it is high. It is interesting because every
+    stop above it is resting there and everyone can see it, which is a fact about other people
+    rather than about the price. So each window reports its extremes, where price sits between
+    them, and how far away each one is.
+
+    The part that makes it actionable is the last column. A level reached on ordinary volume is
+    price drifting into it; the same level reached on twice the usual volume is somebody taking
+    it. The ratio is measured against this market's own recent bars, so it means the same thing
+    in a quiet week and a violent one, and it is reported beside the level rather than mixed into
+    it — this says "here is the level and here is who turned up", never "therefore buy".
+
+    Pure arithmetic over the bars it names: no fit, no guess, and every figure recomputable from
+    the candles handed in.
+    """
+    if len(candles) < LEVEL_VOLUME_WINDOW + 1:
+        return {"ready": False, "note": f"needs {LEVEL_VOLUME_WINDOW + 1} bars, has {len(candles)}"}
+    price = candles[-1].close
+    recent = [c.volume for c in candles[-LEVEL_VOLUME_WINDOW - 1 : -1]]
+    average = sum(recent) / len(recent) if recent else 0.0
+    ratio = round(candles[-1].volume / average, 2) if average > 0 else None
+
+    out = []
+    for w in windows:
+        bars = candles[-int(w["bars"]) :]
+        if len(bars) < 2:
+            continue
+        low, high = min(c.low for c in bars), max(c.high for c in bars)
+        span = high - low
+        to_high = 100 * (high / price - 1)
+        to_low = 100 * (low / price - 1)
+        # Which extreme is live. Both can be, in a range tight enough.
+        near = []
+        if abs(to_high) <= IN_PLAY_PCT:
+            near.append("high")
+        if abs(to_low) <= IN_PLAY_PCT:
+            near.append("low")
+        out.append({
+            "key": w["key"], "label": w["label"], "bars": len(bars),
+            "low": round(low, 2), "high": round(high, 2),
+            "position": round((price - low) / span, 3) if span > 0 else None,
+            "to_low_pct": round(to_low, 3), "to_high_pct": round(to_high, 3),
+            "in_play": near,
+        })
+    return {
+        "ready": True,
+        "price": round(price, 2),
+        "volume_ratio": ratio,
+        "volume_window": LEVEL_VOLUME_WINDOW,
+        "in_play_pct": IN_PLAY_PCT,
+        "windows": out,
+    }
 
 

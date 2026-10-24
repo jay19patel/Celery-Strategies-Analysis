@@ -4,7 +4,6 @@ import dataclasses
 import pathlib
 import re
 import sys
-import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -132,28 +131,6 @@ def test_close_all_stops_every_broker(cfg, exchange):
     assert system.trading_on("paper") is False and system.trading_on("delta") is False
 
 
-def test_the_system_page_draws_process_load_and_event_rates(cfg, exchange):
-    """A number stored and never drawn is a number nobody reads. The Processes table is one
-    instant; these are the same three numbers over time, from process_health."""
-    _, client = make(cfg, exchange)
-    page = client.get("/system").text
-    assert all(f'id="{c}"' in page for c in ("cpuChart", "memChart", "lagChart", "eventBars"))
-    # The kit has to be parsed before the inline script, which draws on load.
-    assert page.index("/static/js/chart.js") < page.index("loadHealth")
-    assert client.get("/static/js/chart.js").status_code == 200
-
-
-async def test_the_health_route_answers_the_system_page(cfg, exchange):
-    system, client = make(cfg, exchange)
-    now = time.time()
-    for i in range(5):
-        system.store.record_health("all", now - i * 300, 3.0 + i, 120.0, 1.5)
-        system.store.record_health("analyst", now - i * 300, 9.0, 105.0, 7.0)
-    body = client.get("/api/health?hours=48").json()
-    assert set(body["processes"]) == {"all", "analyst"}
-    assert [p["cpu_pct"] for p in body["processes"]["all"]] == [7.0, 6.0, 5.0, 4.0, 3.0]  # oldest first
-
-
 def test_static_urls_carry_a_content_version(cfg, exchange):
     _, client = make(cfg, exchange)
     page = client.get("/market").text
@@ -201,13 +178,9 @@ def test_the_market_page_is_one_view_and_not_a_set_of_tabs():
     html = (TEMPLATES / "market.html").read_text()
     assert "data-view-panel=" not in html, "the tab panels are back"
     assert 'id="viewTabs"' not in html, "the tab bar is back"
-    # What replaced them: the merged map of what sits around price, and a link to the chart. The
-    # chart itself moved to /tape, where it gets the whole window — and it is linked to rather
-    # than copied, because two charts of one market are two things to keep right.
-    for panel in ('id="ladderBox"', 'id="nowBox"'):
+    # What replaced them: one chart, and the merged map of what sits around price.
+    for panel in ('id="tapeChart"', 'id="ladderBox"', 'id="nowBox"'):
         assert panel in html, f"the single view lost {panel}"
-    assert 'href="/tape"' in html, "Market Data no longer links to the chart"
-    assert 'id="tapeChart"' not in html, "the chart is drawn twice — it lives on /tape now"
 
 
 def test_the_price_chart_is_the_only_vendored_library():
@@ -228,15 +201,13 @@ def test_the_price_chart_is_the_only_vendored_library():
 def test_the_tape_is_handed_every_layer_it_draws():
     """The failure this catches is silent: a rename in the structure payload leaves the chart
     drawing candles and nothing else, and a chart with no zones on it looks exactly like a market
-    with no zones in it. The harness stands in for the library and records what it was handed.
-
-    Runs against /tape, which is where the chart lives now."""
+    with no zones in it. The harness stands in for the library and records what it was handed."""
     import json
     import subprocess
 
     root = pathlib.Path(__file__).resolve().parent.parent
     out = subprocess.run(
-        [sys.executable, "-m", "tools.render_check", "--page", "tape", "--db", "data/demo.db", "--dump", "tapeChart"],
+        [sys.executable, "-m", "tools.render_check", "--db", "data/demo.db", "--dump", "tapeChart"],
         cwd=root, capture_output=True, text=True, check=False,
     )
     drawn = json.loads(out.stdout.strip().splitlines()[0])
@@ -492,3 +463,35 @@ def test_the_missing_helper_check_catches_the_bug_it_was_written_for():
     assert page_locals("function paintNav() {} safely('nav', paintNav);")[1] == set()
     # And the bare word in an event name is not a call to a helper called `load`.
     assert page_locals('addEventListener("load", () => {});')[1] == set()
+
+
+def test_every_page_script_is_valid_javascript():
+    """A SyntaxError takes the WHOLE script block with it, so the page loads and does nothing.
+
+    This has now happened three times, every time from the same move: deleting a feature by
+    filtering out the lines that mention it, which cuts statements in half and leaves their bodies
+    orphaned. `node --check` catches in milliseconds what cost a round trip through docker build
+    and a user saying "data nahi aa raha" each time.
+
+    Jinja blocks are skipped — `{% %}` is not JavaScript and never reaches the browser as such.
+    """
+    import re
+    import subprocess
+    import tempfile
+
+    broken = {}
+    for f in sorted(TEMPLATES.glob("*.html")):
+        html = f.read_text()
+        for i, m in enumerate(re.finditer(r"<script>([\s\S]*?)</script>", html)):
+            body = m.group(1)
+            if "{%" in body or "{{" in body or not body.strip():
+                continue
+            with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as tmp:
+                tmp.write(body)
+                path = tmp.name
+            out = subprocess.run([sys.executable and "node", "--check", path],
+                                 capture_output=True, text=True, check=False)
+            if out.returncode:
+                line = next((x for x in out.stderr.splitlines() if "Error" in x), out.stderr[:120])
+                broken[f"{f.name} script {i}"] = line.strip()
+    assert not broken, f"page scripts that do not parse: {broken}"

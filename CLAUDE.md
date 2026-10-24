@@ -38,7 +38,12 @@ analyst every 5 min: candles+OI+funding ─► insights ─► PUSH MarketAnalys
 - `System` (`system.py`) is the engine. It is the only writer of orders,
   settings and toggles, so the engine needs no locks. Never make a worker or
   the web process write trading state.
-- `runner.evaluate()` is the one evaluation path, used inline and on workers.
+- `runner.evaluate()` is the one evaluation path, used inline and on workers. The bars come WITH
+  the job: the engine reads the series once per symbol per close from the `bars` table it fills
+  itself and hands each strategy its slice. They used to be fetched inside the evaluation, once
+  per strategy per symbol — five strategies on the 15-minute close meant ten REST calls for one
+  series already on disk — and a worker now makes no market request at all. An empty read falls
+  back to REST rather than handing every strategy zero bars.
 - `api.Api` is everything the dashboard can do; `RemoteApi` is the same over
   RPC. Add a method to `METHODS` or the engine refuses it.
 - `brokers/base.py` — the `Broker` protocol. `PaperBroker` and `DeltaBroker` implement it.
@@ -59,27 +64,15 @@ analyst every 5 min: candles+OI+funding ─► insights ─► PUSH MarketAnalys
   auto trailing (per-position switch and max trails in `position_controls`). It moves
   SL/TP only through `Broker.update_protection`, under `System.protection_lock`.
 - `settings.py` — validation for every runtime setting; `System._apply` applies them.
-- `strategies/` — signal logic only. `tb_master.py` is the all-in-one: 1d bias, 1h breakout (swing) or 15m
+- `strategies/` — signal logic only, and only structure-based: **`scalper`, `tb_master`,
+  `trade_buddy_manager`**. The indicator strategies (two EMA crossovers, two mother-candle
+  variants) and `pcr_options` were removed — they were transforms of price saying the same thing
+  as each other, and `pcr_options` had lost more than every other strategy combined. Option
+  structures (straddle, strangle, iron condor and the auto-trader that opened them) went with
+  them: this is a directional system now. `tb_master.py` is the all-in-one: 1d bias, 1h breakout (swing) or 15m
   squeeze (scalp), confirmed by rising open interest, options walls cap the target; its `decide()` is pure so
   the backtest runs the code that trades.
 - `options.py` — the options book and its arithmetic (ATM IV, skew, put/call, max pain, walls).
-- `structures.py` — defined-risk option structures (straddle, strangle, iron condor, debit spreads) built from
-  the live chain, and the suggestion (IV rank over the stored history, with the put/call OI ratio). Placed
-  through `Trader.manual_structure`, on paper only (`STRUCTURE_BROKERS`): by a person from the ticket, or by
-  `trading.AutoStructures` when `options_auto_enabled` (rules on the engine's own chain only; one per
-  underlying, 30-min cooldown, 3 a day, sized so the max loss is `options_auto_risk_pct` of equity).
-  `brokers/paper_options.py` holds them, reserves the max loss as margin and closes on
-  whole-structure SL/TP or an hour before expiry — on `realisable()`, what closing would
-  actually book, never the mark.
-- `strategies/scalper.py` — 5-minute scalp with the trend: 15m and 1h must agree, the bar closed
-  hard into its own range on above-average volume, and the profile's nearest level is not already
-  here. Stop a fraction of a percent, target `REWARD` times it. It is the only strategy that
-  declares `margin_pct`, which raises the **cap** (`trade_margin_pct`) and nothing else — at a
-  0.15% stop that cap decides the size before `risk_per_trade_pct` gets a say, and raising the
-  global one would widen every other strategy's positions. Sizing stays `min(by_risk, by_margin)`,
-  so a looser cap can never risk more. It also sets `default_on = False`: toggles default to ON, so
-  a strategy that lands in a release starts trading on deploy — not acceptable for one that fires
-  every five minutes and sizes hard (`tests/test_strategies.py` asserts the two go together).
 - `email_report.py` — `DailyReporter`, an engine job: the day's report by email once at `email_report_hour`.
 - `insights.py` (rules over measured numbers) and `analyst.py` (runs them every 5 minutes, one
   `MarketAnalysis` per symbol). Analysis is advisory: nothing in it places an order. Every *number*
@@ -146,8 +139,7 @@ analyst every 5 min: candles+OI+funding ─► insights ─► PUSH MarketAnalys
   funding of the same bar, `System.collect_bars` for 15m and `System.collect_base_bars` for the 1m
   base, each fetching only what the store is missing),
   `market_snapshots` (the analyst's numbers per bar as typed columns, because base rates are
-  counted with SQL and JSON cannot be scanned) and `process_health` (CPU, memory and loop lag per
-  process, which the monitor had always measured and never stored). A bar already stored is never
+  counted with SQL and JSON cannot be scanned). A bar already stored is never
   rewritten — a silently revised past is worse for a base rate than a missing one — and
   `Store.bar_gaps` reports the holes rather than smoothing over them.
 
@@ -246,7 +238,10 @@ Enforced by tests. Breaking one should fail the build.
 ### Strategy
 
 One module in `tradebuddy/strategies/` with a concrete `Strategy` subclass; it
-is discovered automatically. Keep `name` stable, bump `version` when logic
+is discovered automatically. `wants_outlook` and `wants_structure` hand it the engine's own
+directional view and market-structure read through `ctx` — the same readings the dashboard draws,
+so a strategy and the page can never disagree about where price reacts. Both arrive WITH the job,
+like the bars: a worker has no database. Keep `name` stable, bump `version` when logic
 changes. Strategies return a `Signal` or `None`; they never place orders.
 `is_default_sl_tp = True` (default) leaves the levels to the Trader: the ATR when the analyst has
 measured one, otherwise Settings' percentages. `False` means every Signal carries both

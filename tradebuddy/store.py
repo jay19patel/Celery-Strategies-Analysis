@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -115,28 +116,6 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     mae_pct         REAL NOT NULL DEFAULT 0,   -- worst excursion against the trade, % of entry
     mfe_pct         REAL NOT NULL DEFAULT 0    -- best excursion in its favour, % of entry
 );
--- Open paper option structures (straddle, condor, ...). A close moves the structure to paper_trades.
-CREATE TABLE IF NOT EXISTS paper_structures (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    client_order_id TEXT NOT NULL UNIQUE,
-    symbol          TEXT NOT NULL,              -- the perpetual whose options these are (BTCUSD)
-    underlying      TEXT NOT NULL,              -- BTC
-    kind            TEXT NOT NULL,
-    label           TEXT NOT NULL,
-    expiry          REAL NOT NULL,
-    qty             INTEGER NOT NULL,           -- contracts per leg
-    contract_value  REAL NOT NULL,
-    legs            TEXT NOT NULL,              -- JSON: action, kind, strike, symbol, fill price
-    net             REAL NOT NULL,              -- per unit: + premium paid (debit), - received (credit)
-    premium         REAL NOT NULL,              -- USD paid or received
-    capital         REAL NOT NULL,              -- USD max loss, held as margin
-    max_profit      REAL,                       -- USD; NULL = unlimited
-    entry_fee       REAL NOT NULL,
-    sl_pct          REAL NOT NULL,
-    tp_pct          REAL NOT NULL,
-    strategy        TEXT NOT NULL,
-    opened_at       REAL NOT NULL
-);
 CREATE TABLE IF NOT EXISTS position_controls (
     broker      TEXT NOT NULL,
     symbol      TEXT NOT NULL,
@@ -239,16 +218,6 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
 CREATE INDEX IF NOT EXISTS market_snapshots_keep ON market_snapshots(keep, ts);
 -- Process load over time. The monitor has always measured CPU, memory and loop lag every two
 -- seconds and stored none of it, so "how did it look yesterday" had no answer. One row per
--- process every few minutes is 90 bytes and answers it.
-CREATE TABLE IF NOT EXISTS process_health (
-    role            TEXT NOT NULL,
-    ts              REAL NOT NULL,
-    cpu_pct         REAL,
-    memory_mb       REAL,
-    loop_lag_max_ms REAL,
-    PRIMARY KEY (role, ts)
-);
-CREATE INDEX IF NOT EXISTS process_health_ts ON process_health(ts);
 -- Every verdict any card on the Market page made, and what the market then did about it.
 -- A verdict nobody marks is decoration: this is what turns "the term structure says an event is
 -- priced" into "that card has been right 6 times out of 11, against 5 you would have got by
@@ -296,7 +265,6 @@ SNAPSHOT_COLUMNS = (
     "max_pain_gap_pct", "call_wall_gap_pct", "put_wall_gap_pct", "term_slope", "spread_pct",
 )
 SNAPSHOT_DAYS = 30  # off-boundary rows; the 15-minute ones are kept for good
-HEALTH_DAYS = 30  # process load: 4 processes every 5 minutes is ~1,150 rows a day
 AI_REPORT_DAYS = 30  # written summaries: one a symbol every 15 min is ~192 a day at ~1.5 KB
 PREDICTION_DAYS = 180  # card verdicts and how they turned out: ~6 a bar a symbol, kept long enough to judge
 BAR_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14_400, "1d": 86_400}
@@ -319,7 +287,6 @@ TABLE_INFO = {
     "options_history": ("Options numbers per underlying per minute", "ts", f"{OPTIONS_MINUTE_DAYS} days; 15-minute rows forever"),
     "bars": ("Closed candles with their open interest and funding", "time", f"{BASE_INTERVAL} {BASE_BAR_DAYS} days; 15m and above forever"),
     "market_snapshots": ("The analyst's numbers per bar, for base rates", "ts", f"{SNAPSHOT_DAYS} days; 15-minute rows forever"),
-    "process_health": ("CPU, memory and loop lag per process", "ts", f"{HEALTH_DAYS} days"),
     "predictions": ("Every card verdict and whether it held", "ts", f"{PREDICTION_DAYS} days"),
     "ai_reports": ("Written market summaries, and the failures", "ts", f"{AI_REPORT_DAYS} days"),
     "daily_risk": ("Start-of-day equity and halts, per broker", None, "forever (one row a day)"),
@@ -344,11 +311,90 @@ DEFAULT_RETENTION_DAYS = 90  # signals, skips, errors, orders, closed positions,
 ACTIVE_STATUSES = ("pending", "unknown", "open")
 
 
+
+class _Serialised:
+    """One SQLite connection, used safely from several threads.
+
+    `check_same_thread=False` lets any thread use this connection; it does NOT make concurrent use
+    safe. Two `asyncio.to_thread` workers calling `execute` at the same moment interleave on one
+    cursor, and the symptoms are not a clean exception: a SELECT returns None instead of a row, or
+    a perfectly valid parameter binding is rejected as "bad parameter or other API misuse". Both
+    appeared in the engine within a minute of start-up.
+
+    A lock rather than a connection per thread: the engine is the only writer, every query here is
+    sub-millisecond, and one connection keeps the WAL behaviour and the pragmas in one place.
+    """
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
+        self._lock = threading.RLock()
+
+    def execute(self, *args: Any, **kw: Any) -> sqlite3.Cursor:
+        with self._lock:
+            cur = self._db.execute(*args, **kw)
+            # Drain inside the lock: a cursor read after the lock is released is the same race.
+            return _Rows(cur.fetchall(), cur)
+
+    def executemany(self, *args: Any, **kw: Any) -> sqlite3.Cursor:
+        with self._lock:
+            cur = self._db.executemany(*args, **kw)
+            return _Rows([], cur)
+
+    def executescript(self, *args: Any, **kw: Any) -> sqlite3.Cursor:
+        with self._lock:
+            return self._db.executescript(*args, **kw)
+
+    def commit(self) -> None:
+        with self._lock:
+            self._db.commit()
+
+    def close(self) -> None:
+        with self._lock:
+            self._db.close()
+
+    def __enter__(self) -> sqlite3.Connection:
+        self._lock.acquire()
+        return self._db.__enter__()
+
+    def __exit__(self, *exc: Any) -> None:
+        try:
+            self._db.__exit__(*exc)
+        finally:
+            self._lock.release()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._db, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Everything but this wrapper's own two fields belongs to the connection. Without this,
+        # `store.db.row_factory = sqlite3.Row` set an attribute on the wrapper and every query
+        # came back as a plain tuple, so `row["time"]` raised "tuple indices must be integers".
+        if name in ("_db", "_lock"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._db, name, value)
+
+
+class _Rows(list):
+    """What `execute` returns: the rows, already read, still quacking like a cursor."""
+
+    def __init__(self, rows: list, cur: sqlite3.Cursor) -> None:
+        super().__init__(rows)
+        self.rowcount = cur.rowcount
+        self.lastrowid = cur.lastrowid
+
+    def fetchone(self) -> Any:
+        return self[0] if self else None
+
+    def fetchall(self) -> list:
+        return list(self)
+
+
 class Store:
     def __init__(self, path: str) -> None:
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+        self.db = _Serialised(sqlite3.connect(path, check_same_thread=False, isolation_level=None))
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
@@ -638,21 +684,8 @@ class Store:
 
     # -- process load ---------------------------------------------------------------
 
-    def record_health(self, role: str, ts: float, cpu_pct: float | None, memory_mb: float | None, loop_lag_max_ms: float | None) -> None:
-        self.db.execute(
-            "INSERT OR REPLACE INTO process_health (role, ts, cpu_pct, memory_mb, loop_lag_max_ms) VALUES (?,?,?,?,?)",
-            (role, ts, _number(cpu_pct), _number(memory_mb), _number(loop_lag_max_ms)),
-        )
 
-    def health(self, since: float = 0.0, limit: int = 20_000) -> list[dict[str, Any]]:
-        rows = self.db.execute(
-            "SELECT * FROM process_health WHERE ts >= ? ORDER BY ts DESC LIMIT ?", (since, limit),
-        )
-        return [dict(r) for r in rows][::-1]
 
-    def prune_health(self, now: float | None = None) -> int:
-        now = time.time() if now is None else now
-        return self.db.execute("DELETE FROM process_health WHERE ts < ?", (now - HEALTH_DAYS * 86_400,)).rowcount
 
     # -- verdicts, and whether they held --------------------------------------
 

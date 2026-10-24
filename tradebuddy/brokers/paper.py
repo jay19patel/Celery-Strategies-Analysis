@@ -9,9 +9,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from tradebuddy import structures
 from tradebuddy.brokers.base import Account, Position, protection_error
-from tradebuddy.brokers.paper_options import PaperOptions
 from tradebuddy.errors import BrokerError
 from tradebuddy.events import EventBus, PositionClosed, PositionUpdate, Tick
 from tradebuddy.settings import Settings
@@ -35,7 +33,6 @@ class PaperBroker:
         self.prices = prices
         self.specs = specs
         self.settings = settings
-        self.options = PaperOptions(store, bus, settings, options_snapshot, prices.price)
 
     def not_ready(self) -> str:
         return ""
@@ -69,8 +66,8 @@ class PaperBroker:
     async def account(self) -> Account:
         acct = self._account_row()
         rows = self._rows()
-        margin = sum(p["margin"] for p in rows) + self.options.margin()
-        upnl = sum(self._upnl(p, self.prices.price(p["symbol"]) or p["entry_price"]) for p in rows) + self.options.unrealized()
+        margin = sum(p["margin"] for p in rows)
+        upnl = sum(self._upnl(p, self.prices.price(p["symbol"]) or p["entry_price"]) for p in rows)
         return Account(
             broker=self.name,
             currency="USD",
@@ -110,7 +107,7 @@ class PaperBroker:
         margin = notional / s.paper_leverage
         fee = notional * s.paper_fee_pct / 100
         acct = self._account_row()
-        available = acct["balance"] - sum(p["margin"] for p in self._rows()) - self.options.margin()
+        available = acct["balance"] - sum(p["margin"] for p in self._rows())
         if margin + fee > available:
             raise BrokerError(f"paper: insufficient margin (needs {margin + fee:.2f}, available {available:.2f})")
 
@@ -179,8 +176,7 @@ class PaperBroker:
                 closed.append(p["symbol"])
             except BrokerError as exc:
                 errors.append(f"{p['symbol']}: {exc}")
-        structures = self.options.close_all()
-        return {"closed": closed + structures["closed"], "errors": errors + structures["errors"]}
+        return {"closed": closed, "errors": errors}
 
     async def size_for_margin(self, symbol: str, price: float, margin: float) -> int:
         spec = await self.specs(symbol)
@@ -288,7 +284,6 @@ class PaperBroker:
         balance = self.settings().paper_starting_balance
         with self.db:
             self.db.execute("DELETE FROM paper_positions")
-            self.db.execute("DELETE FROM paper_structures")
             self.db.execute("DELETE FROM paper_trades")
             self.db.execute("DELETE FROM paper_account")
             self.db.execute(
@@ -339,13 +334,6 @@ class PaperBroker:
         by_strategy: dict[str, list[dict[str, Any]]] = {}
         for t in rows:
             by_strategy.setdefault(t["strategy"], []).append(t)
-        # Option structures all trade under one strategy name, so "auto_options -12.40" says nothing
-        # about whether it was the condors or the straddles. A closed structure keeps its label as the
-        # symbol, which carries the kind, so the kinds are counted as their own lines.
-        by_kind: dict[str, list[dict[str, Any]]] = {}
-        for t in rows:
-            if kind := structures.kind_of(t["symbol"]):
-                by_kind.setdefault(kind, []).append(t)
         total_abs = sum(abs(t["pnl"]) for t in rows) or 1.0
         reasons: dict[str, int] = {}
         for t in rows:
@@ -357,23 +345,8 @@ class PaperBroker:
                     {
                         "strategy": k,
                         "share_pct": round(100 * sum(abs(t["pnl"]) for t in v) / total_abs, 1),
-                        "options": all(structures.kind_of(t["symbol"]) for t in v),
                     } | summary(v)
                     for k, v in by_strategy.items()
-                ),
-                key=lambda s: -s["pnl"],
-            ),
-            "by_structure": sorted(
-                (
-                    {
-                        "kind": k,
-                        "name": structures.KINDS[k],
-                        "credit": k in structures.CREDIT_KINDS,
-                        "underlyings": sorted({t["symbol"].split(" ", 1)[0] for t in v}),
-                        "strategies": sorted({t["strategy"] for t in v}),
-                        "share_pct": round(100 * sum(abs(t["pnl"]) for t in v) / total_abs, 1),
-                    } | summary(v)
-                    for k, v in by_kind.items()
                 ),
                 key=lambda s: -s["pnl"],
             ),
@@ -410,10 +383,9 @@ class PaperBroker:
             t["stop_loss"] = order["stop_loss"] if order else None
             t["take_profit"] = order["take_profit"] if order else None
             t["order_id"] = order["order_id"] if order else None
-            t["legs"] = [o for i in range(4) if (o := self.store.order(structures.leg_order_id(t["client_order_id"], i)))]
             t["hold_seconds"] = round(t["closed_at"] - t["opened_at"])
             t["return_pct"] = round(100 * t["pnl"] / t["margin"], 2) if t["margin"] else None
-            risk = abs(t["entry_price"] - t["stop_loss"]) * t["size"] * t["contract_value"] if t["stop_loss"] and not t["legs"] else None
+            risk = abs(t["entry_price"] - t["stop_loss"]) * t["size"] * t["contract_value"] if t["stop_loss"] else None
             t["risk_usd"] = round(risk, 4) if risk else None
             t["r_multiple"] = round(t["pnl"] / risk, 2) if risk else None
         strategies = [r[0] for r in self.db.execute("SELECT DISTINCT strategy FROM paper_trades ORDER BY strategy")]

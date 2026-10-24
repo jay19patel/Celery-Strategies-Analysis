@@ -1,38 +1,30 @@
-"""Scalper: many small trades with the trend, on the five-minute bar.
+"""Scalper: trades with the trend, off structure, with the stop where the idea dies.
 
-Same cadence as the written summary — a decision every five minutes about whether this bar is
-worth taking — but the decision itself is **measured, not written**. The model that writes the
-summary computes nothing and decides nothing (CLAUDE.md 15b), and that does not stop at prose: a
-sentence cannot be rechecked against a bar, so it must not be the reason an order exists. What
-this reads is `ctx.outlook`, the engine's own counted view, which the dashboard shows and a
-backtest can reproduce. If the summary and this strategy ever disagree, the summary is the one
-with no evidence behind it.
+What a person actually does at this timeframe, in the order they do it:
 
-On every closed 5-minute bar:
+    BIAS        the 15m and 1h reads agree. A scalp against the hour works four times and gives
+                it all back on the fifth.
+    TRIGGER     the bar closed hard into its own range on more volume than usual — a bar somebody
+                took, not one that drifted.
+    FLOW        the estimated delta is not pushing the other way. Badged APPROX because it is
+                inferred from candles, so it VETOES a trade and never justifies one.
+    ROOM        the level price is heading into is far enough away to be worth the trip. Buying
+                into the point of control is paying for the last point of a move.
+    STOP        under the swing the market actually turned at — or the trigger bar's own low if
+                that is closer. Not a fixed percentage: a percentage is a number about the
+                account, and the stop is a statement about the market. If price trades there the
+                reason for the trade is gone, which is the only thing a stop should mean.
+    TARGET      the next level price would have to get through: a pool of resting stops, a zone
+                edge, the value-area edge. Refused if that is nearer than the stop — a trade that
+                cannot make 1:1 is not worth its costs.
 
-    PERMISSION  the 15m and 1h reads agree on a direction. A scalp against the hour is the trade
-                that works four times and gives it all back on the fifth.
-    TRIGGER     the bar closed in the top (or bottom) `PUSH` of its own range, on more volume than
-                the recent average. That is a bar being taken, not drifting.
-    LOCATION    price is not already at the level it would be aiming for — the point of control or
-                a value-area edge, from the profile the outlook carries. Entering a scalp into the
-                price the size itself made is paying for the last point of a move.
-    LEVELS      a stop a fraction of a percent away — `STOP_ATR` of the 5m ATR, floored and capped
-                so it is never inside the spread nor a swing trade by accident — and a target
-                `REWARD` times it.
-    NO TRADE    otherwise, which is most bars.
+Everything it reads was measured by the engine and is on the page: `ctx.outlook` for the bias,
+`ctx.structure` for the levels, the pools, the flow and the profile. It works nothing out for
+itself, so the chart and the trade can never disagree.
 
-**Why the size is the interesting part.** The stop is tiny, so the risk rule
-(`risk_per_trade_pct` of equity behind the stop) asks for a large position — which is the point of
-scalping, and correct: the same money is at risk per trade as any other strategy, just behind a
-closer stop. But `trade_margin_pct` caps every order at a share of available margin, and at a 0.15%
-stop that cap binds long before the risk rule does, so the position would be decided by the cap
-instead of by what is being risked. So this declares `margin_pct`, which raises **only the cap**.
-Sizing stays `min(by_risk, by_margin)`: it can never risk more than `risk_per_trade_pct`, it just
-stops the cap from answering first.
-
-`decide()` is pure — bars and the view in, a Decision out — so the backtest, a Celery worker and
-the dashboard all get the same answer, and every refusal carries a reason.
+`decide()` is pure — bars and the two readings in, a Decision out — so a backtest, a Celery worker
+and the dashboard all get the same answer, and every refusal carries a reason you can read back
+from the event log.
 """
 
 from __future__ import annotations
@@ -44,18 +36,18 @@ from tradebuddy.delta import Candle
 from tradebuddy.strategies.base import Context, Signal, Strategy
 from tradebuddy.strategies.indicators import atr
 
-LOOKBACK = 60  # 5 hours of 5m bars: enough for an ATR and a volume average
+LOOKBACK = 60  # 5 hours of 5m bars: enough for an ATR, a volume average and a swing
 VOLUME_WINDOW = 20
 MIN_VOLUME_RATIO = 1.15  # the bar carried more than its recent average
 PUSH = 0.65  # the close sat this far up (or down) its own range
-STOP_ATR = 0.75  # the stop, as a share of the 5m ATR
-REWARD = 1.6  # target = REWARD x stop, before costs
-# A scalper's stop has to clear the spread and the fees or the target is unreachable by
-# construction; it also has to stay small enough that this is still a scalp.
+SWING_BARS = 10  # how far back to look for the low (or high) the move came from
+STOP_BUFFER_ATR = 0.15  # beyond the swing, so the wick that made it does not take the trade out
+MIN_RR = 1.0  # a trade that cannot make its risk back is not worth the fees
+# A stop has to clear the spread and the costs, and stay small enough that this is still a scalp.
 MIN_STOP_PCT = 0.12
-MAX_STOP_PCT = 0.60
-# How close to the next level is too close to bother. In ATRs of the same 5m bar.
-MIN_ROOM_ATR = 1.0
+MAX_STOP_PCT = 0.80
+MIN_ROOM_ATR = 1.0  # the target must be at least this far away, in ATRs
+FLOW_VETO = -0.15  # estimated delta this far against the trade refuses it
 
 
 @dataclass(frozen=True)
@@ -79,33 +71,55 @@ def _way(view: dict[str, Any], interval: str) -> int:
             return int(row.get("direction") or 0)
     for frame in view.get("timeframes") or []:
         if str(frame.get("interval")) == interval:
-            bias = (frame.get("structure") or {}).get("bias")
-            return {"bullish": 1, "bearish": -1}.get(str(bias), 0)
+            return {"bullish": 1, "bearish": -1}.get(str((frame.get("structure") or {}).get("bias")), 0)
     return 0
 
 
-def _room(view: dict[str, Any], side: int) -> float | None:
-    """How far to the level this trade would be heading into, in percent of price.
+def swing(candles: list[Candle], side: int, bars: int = SWING_BARS) -> float | None:
+    """The low the move came from (or the high, short). Where the idea stops being true.
 
-    From the volume profile the outlook already carries — the point of control and the edges of
-    the value area, which are the prices the traded size itself made. Not from `nearby`: that is
-    built in `market_structure`, which a strategy never receives, so reading it here would have
-    returned None on every bar and quietly disabled this check for good. A safeguard that cannot
-    fire is worse than no safeguard, because it reads like one."""
-    prof = view.get("profile") or {}
-    price = prof.get("price")
-    if not prof.get("ready") or not isinstance(price, int | float) or price <= 0:
+    The trigger bar is included: on a strong push it IS the swing, and excluding it would put the
+    stop further away than the move that justified the trade."""
+    window = candles[-bars:]
+    if not window:
         return None
-    ahead = [
-        level for key in ("poc", "value_low", "value_high")
-        if isinstance(level := prof.get(key), int | float)
-        and (level > price if side > 0 else level < price)
-    ]
-    return min(abs(100 * (level / price - 1)) for level in ahead) if ahead else None
+    return min(c.low for c in window) if side > 0 else max(c.high for c in window)
 
 
-def decide(candles: list[Candle], view: dict[str, Any]) -> Decision:
+def target(structure: dict[str, Any], side: int, price: float) -> tuple[float | None, str]:
+    """The next level price has to get through, and what makes it one.
+
+    `nearby` has already merged every source — pools of resting stops, zone edges, value-area
+    edges, previous-period levels — and ranked them by distance, so the nearest one the trade is
+    heading into is the first honest target. A level more than one source names is better still,
+    and that is what `confluence` counts."""
+    near = (structure or {}).get("nearby") or {}
+    ahead = near.get("above") if side > 0 else near.get("below")
+    for level in ahead or []:
+        at = level.get("price")
+        if isinstance(at, int | float) and ((at > price) if side > 0 else (at < price)):
+            agree = level.get("confluence") or 1
+            what = str(level.get("label") or level.get("kind_label") or "level")
+            return float(at), f"{what}{f' ({agree} sources agree)' if agree > 1 else ''}"
+    return None, ""
+
+
+def flow_against(structure: dict[str, Any], side: int) -> float | None:
+    """Estimated delta, signed the way this trade wants it. Negative is against.
+
+    APPROX: inferred from where bars closed in their range, not from a trade tape. It is allowed
+    to refuse a trade and never to justify one — an estimate can say "not this one" honestly, and
+    cannot carry a decision on its own."""
+    flow = (structure or {}).get("flow") or {}
+    ratio = flow.get("cvd_move_pct")
+    if not isinstance(ratio, int | float) or isinstance(ratio, bool):
+        return None
+    return float(ratio) * (1 if side > 0 else -1)
+
+
+def decide(candles: list[Candle], view: dict[str, Any], structure: dict[str, Any] | None = None) -> Decision:
     """Pure. The whole rule, so a backtest runs exactly what trades."""
+    structure = structure or {}
     if len(candles) < VOLUME_WINDOW + 2:
         return Decision(None, f"needs {VOLUME_WINDOW + 2} bars, has {len(candles)}")
 
@@ -118,13 +132,11 @@ def decide(candles: list[Candle], view: dict[str, Any]) -> Decision:
         return Decision(None, "no ATR on this timeframe yet")
     atr_pct = 100 * atr_now / price
 
-    # Permission: the two timeframes above this one have to agree.
     short, medium = _way(view, "15m"), _way(view, "1h")
     if short == 0 or short != medium:
         return Decision(None, f"15m and 1h do not agree ({short:+d} vs {medium:+d}) — a scalp against the hour is not worth taking")
     side = short
 
-    # Trigger: this bar was taken, not drifted.
     bar = candles[-1]
     span = bar.high - bar.low
     if span <= 0:
@@ -139,36 +151,57 @@ def decide(candles: list[Candle], view: dict[str, Any]) -> Decision:
     if ratio < MIN_VOLUME_RATIO:
         return Decision(None, f"volume was {ratio:.2f}x its recent average, under the {MIN_VOLUME_RATIO:.2f}x this needs")
 
-    # Location: do not buy into the level the trade is aiming at.
-    room = _room(view, side)
-    if room is not None and room < MIN_ROOM_ATR * atr_pct:
-        return Decision(None, f"only {room:.2f}% to the next level, inside the {MIN_ROOM_ATR:g} ATR ({atr_pct:.2f}%) this wants")
+    if (pressure := flow_against(structure, side)) is not None and pressure < FLOW_VETO:
+        return Decision(None, f"estimated flow is {pressure:+.2f}% against this trade (APPROX, and it only ever refuses)")
 
-    stop = min(max(STOP_ATR * atr_pct, MIN_STOP_PCT), MAX_STOP_PCT)
+    # The stop: where the idea dies.
+    turn = swing(candles, side)
+    if turn is None:
+        return Decision(None, "no swing to put a stop behind")
+    buffer_ = STOP_BUFFER_ATR * atr_now
+    stop_at = (turn - buffer_) if side > 0 else (turn + buffer_)
+    stop_pct = 100 * abs(price - stop_at) / price
+    if stop_pct < MIN_STOP_PCT:
+        return Decision(None, f"the swing is only {stop_pct:.2f}% away — inside the spread and the fees")
+    if stop_pct > MAX_STOP_PCT:
+        return Decision(None, f"the swing is {stop_pct:.2f}% away, wider than the {MAX_STOP_PCT:g}% this calls a scalp")
+
+    # The target: the next level, and it has to pay for the stop.
+    level, what = target(structure, side, price)
+    if level is None:
+        return Decision(None, "no level above to aim at" if side > 0 else "no level below to aim at")
+    target_pct = 100 * abs(level - price) / price
+    if target_pct < MIN_ROOM_ATR * atr_pct:
+        return Decision(None, f"the next level is {target_pct:.2f}% away, inside the {MIN_ROOM_ATR:g} ATR ({atr_pct:.2f}%) this wants")
+    rr = target_pct / stop_pct
+    if rr < MIN_RR:
+        return Decision(None, f"{what} is only {rr:.2f}:1 against a {stop_pct:.2f}% stop — under {MIN_RR:g}:1 it cannot pay for its costs")
+
     return Decision(
         side="buy" if side > 0 else "sell",
-        reason=(f"5m close {push:.0%} {'up' if side > 0 else 'down'} its range on {ratio:.2f}x volume, "
-                f"15m and 1h both {'up' if side > 0 else 'down'}; stop {stop:.2f}% ({STOP_ATR:g} ATR)"),
-        stop_loss_pct=round(stop, 3),
-        take_profit_pct=round(stop * REWARD, 3),
+        reason=(f"5m close {push:.0%} {'up' if side > 0 else 'down'} its range on {ratio:.2f}x volume, 15m and 1h both "
+                f"{'up' if side > 0 else 'down'}; stop behind the {SWING_BARS}-bar {'low' if side > 0 else 'high'} "
+                f"({stop_pct:.2f}%), target {what} at {rr:.1f}:1"),
+        stop_loss_pct=round(stop_pct, 3),
+        take_profit_pct=round(target_pct, 3),
     )
 
 
 class Scalper(Strategy):
     name = "scalper"
-    version = 1
+    version = 2  # levels come from structure now, not from a multiple of ATR
     interval = "5m"
     symbols = ("BTCUSD", "ETHUSD")
     lookback = LOOKBACK
-    is_default_sl_tp = False  # its own small stop; Settings' percentages are a swing trade here
+    is_default_sl_tp = False  # its own levels; Settings' percentages are a swing trade here
     wants_outlook = True
-    # Only the cap, never the risk. See the module docstring: at a 0.15% stop the global
-    # trade_margin_pct decides the size before the risk rule gets a say, and raising the global one
-    # would widen every other strategy's positions too.
+    wants_structure = True
+    # Only the cap, never the risk. A swing-based stop on a 5m bar is a fraction of a percent, so
+    # `trade_margin_pct` would decide the size before `risk_per_trade_pct` got a say; raising the
+    # global cap would widen every other strategy's positions. Sizing stays min(by_risk, by_margin).
     margin_pct = 60.0
-    # Off until switched on. It trades every five minutes and sizes against a much looser cap
-    # than anything else here; arriving switched on in a release is not a thing it should do.
+    # Off until switched on: it trades every five minutes and sizes against a much looser cap.
     default_on = False
 
     async def on_candle(self, ctx: Context) -> Signal | None:
-        return decide(ctx.candles, ctx.outlook or {}).to_signal()
+        return decide(ctx.candles, ctx.outlook or {}, ctx.structure or {}).to_signal()

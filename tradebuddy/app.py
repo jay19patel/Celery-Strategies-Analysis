@@ -34,7 +34,6 @@ HERE = Path(__file__).parent
 # other pages; each number now lives on the one page that owns it.
 PAGES = [
     ("market", "/", "candlestick-chart", "Market Data", "Monitoring"),
-    ("tape", "/tape", "line-chart", "The Tape", "Monitoring"),
     ("system", "/system", "gauge", "System", "Monitoring"),
     ("events", "/events", "scroll-text", "Event Log", "Monitoring"),
     ("strategies", "/strategies", "brain-circuit", "Strategies", "Trading"),
@@ -111,17 +110,6 @@ class StructurePick(BaseModel):
     strike: float = Field(gt=0)
 
 
-class StructureOrder(BaseModel):
-    broker: Literal["paper"] = "paper"
-    symbol: str = Field(min_length=1, max_length=32)
-    kind: Literal["straddle", "strangle", "iron_condor", "call_spread", "put_spread"]
-    qty: int = Field(ge=1, le=1000)
-    request_id: str = Field(min_length=8, max_length=64)
-    sl_pct: float = Field(ge=5, le=100)  # of the max loss; required, entries are always protected
-    tp_pct: float | None = Field(default=None, ge=5, le=500)  # of the premium
-    expiry: float | None = None
-    legs: list[str] = Field(min_length=2, max_length=4)  # the contracts the person reviewed
-    picks: list[StructurePick] | None = Field(default=None, max_length=4)
 
 
 class PositionControl(BaseModel):
@@ -384,24 +372,6 @@ def create_app(
     async def order_ticket(symbol: str, side: Literal["buy", "sell"] = "buy", margin_pct: float | None = None) -> dict:
         return await call("order_ticket", symbol=symbol, side=side, margin_pct=margin_pct)
 
-    @app.get("/api/option-ticket")
-    async def option_ticket(symbol: str = "", kind: str = "", qty: int = 1, expiry: float = 0, suggested: bool = False) -> dict:
-        return await call("option_ticket", symbol=symbol, kind=kind, qty=qty, expiry=expiry, suggested=suggested)
-
-    @app.get("/api/structures")
-    async def structures(broker: str = "paper") -> list:
-        return await call("structures", broker=broker)
-
-    @app.post("/api/structures", dependencies=[Depends(protected)])
-    async def place_structure(body: StructureOrder) -> dict:
-        data = body.model_dump()
-        data["picks"] = data["picks"] or None
-        return await call("place_structure", **data)
-
-    @app.post("/api/structures/{broker}/{structure_id}/close", dependencies=[Depends(protected)])
-    async def close_structure(broker: str, structure_id: int) -> dict:
-        return await call("close_structure", broker=broker, structure_id=structure_id)
-
     @app.get("/api/risk")
     async def risk() -> dict:
         return await call("risk")
@@ -453,10 +423,6 @@ def create_app(
     @app.get("/api/snapshots")
     async def snapshots(symbol: str = "BTCUSD", days: float = 7) -> dict:
         return await call("snapshots", symbol=symbol, days=days)
-
-    @app.get("/api/health")
-    async def health(hours: float = 48) -> dict:
-        return await call("health", hours=hours)
 
     @app.get("/api/outlook")
     async def outlook_route(symbol: str = "BTCUSD") -> dict:

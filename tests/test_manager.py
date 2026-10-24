@@ -272,7 +272,7 @@ def test_the_demo_market_fills_every_table(tmp_path):
     store = Store(str(tmp_path / "demo.db"))
     assert store.last_bar_time("BTCUSD", "15m") > 0
     assert store.bar_gaps("BTCUSD", "15m") == []  # a demo market with holes in it teaches the wrong lesson
-    assert store.health(0) and store.verdict_record("BTCUSD")
+    assert store.verdict_record("BTCUSD")
     assert store.load_settings().get("demo_data") == "1"  # every page says so while this is set
 
 
