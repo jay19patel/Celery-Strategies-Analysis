@@ -59,6 +59,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     for module in (auth, market, desk, strategies, trading, portfolio, auto, ai, settings, system):
         app.include_router(module.router, prefix="/api")
     app.include_router(ws.router)
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> JSONResponse:
+        return JSONResponse({"status": "online", "app": "TradeBuddy Pro Backend", "version": "5.0.0", "docs": "/docs"})
+
     return app
 
 
