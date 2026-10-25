@@ -1,7 +1,9 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
+import { Zap } from "lucide-react";
 
+import { DirectOptionModal, type OptionLegTarget } from "@/components/desk/direct-option-modal";
 import { Empty, LoadError, Loading } from "@/components/shared/states";
 import { num, pct, price } from "@/lib/format";
 import { useApi } from "@/lib/live";
@@ -14,30 +16,83 @@ export interface PickedLeg {
   ratio: number;
 }
 
-/** Calls on the left, puts on the right. A bid sells that option, an ask buys it. */
-export function ChainTable({ underlying, expiry, picked, onPick }: { underlying: string; expiry: number; picked: Map<string, Side>; onPick: (symbol: string, side: Side) => void }) {
-  const { data, error, isLoading } = useApi<Chain>(`/market/chain?underlying=${underlying}&expiry=${expiry}`, { refreshInterval: 10_000 });
+/** Calls on the left, puts on the right. A bid sells that option, an ask buys it.
+ * Clicking a quote selects it for multi-leg strategies.
+ * Clicking the '⚡' action button opens the Direct Single-Leg Trade Modal.
+ */
+export function ChainTable({
+  underlying,
+  expiry,
+  picked,
+  onPick,
+}: {
+  underlying: string;
+  expiry: number;
+  picked: Map<string, Side>;
+  onPick: (symbol: string, side: Side) => void;
+}) {
+  const { data, error, isLoading } = useApi<Chain>(
+    `/market/chain?underlying=${underlying}&expiry=${expiry}`,
+    { refreshInterval: 10_000 },
+  );
+
+  const [directTarget, setDirectTarget] = useState<OptionLegTarget | null>(null);
+  const [directSide, setDirectSide] = useState<Side>("buy");
+  const [modalOpen, setModalOpen] = useState(false);
+
   if (error) return <LoadError error={error} className="m-4" />;
   if (isLoading && !data) return <Loading rows={8} className="p-4" />;
   if (!data?.rows.length) return <Empty title="No strikes near spot for this expiry" />;
 
-  const atm = data.rows.reduce((best, r) => (Math.abs(r.strike - data.spot) < Math.abs(best.strike - data.spot) ? r : best), data.rows[0]).strike;
+  const atm = data.rows.reduce(
+    (best, r) => (Math.abs(r.strike - data.spot) < Math.abs(best.strike - data.spot) ? r : best),
+    data.rows[0],
+  ).strike;
 
-  const quote = (side: ChainSide | undefined, which: "bid" | "ask") => {
-    if (!side) return <td className="px-2 py-1.5" />;
-    const value = side[which];
+  const openDirectTrade = (sideData: ChainSide, kind: "call" | "put", strike: number, s: Side) => {
+    setDirectTarget({
+      symbol: sideData.symbol,
+      kind,
+      strike,
+      mark: sideData.mark,
+      delta: sideData.delta,
+      iv: sideData.iv,
+      bid: sideData.bid,
+      ask: sideData.ask,
+    });
+    setDirectSide(s);
+    setModalOpen(true);
+  };
+
+  const quote = (
+    sideData: ChainSide | undefined,
+    which: "bid" | "ask",
+    kind: "call" | "put",
+    strike: number,
+  ) => {
+    if (!sideData) return <td className="px-2 py-1.5" />;
+    const value = sideData[which];
     const trade: Side = which === "bid" ? "sell" : "buy";
-    const chosen = picked.get(side.symbol) === trade;
+    const chosen = picked.get(sideData.symbol) === trade;
     return (
       <td className="px-1 py-1">
         <button
           disabled={value === null}
-          onClick={() => onPick(side.symbol, trade)}
-          title={value === null ? "no quote on this side" : `${trade} ${side.symbol} at ${price(value)}`}
+          onClick={() => onPick(sideData.symbol, trade)}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            openDirectTrade(sideData, kind, strike, trade);
+          }}
+          title={
+            value === null
+              ? "no quote on this side"
+              : `Click to add ${trade} to structure, Double-click for Direct Order (${trade} ${sideData.symbol} at ${price(value)})`
+          }
           className={cn(
             "num w-full rounded px-1.5 py-0.5 text-right transition-colors disabled:cursor-not-allowed disabled:opacity-40",
             which === "bid" ? "text-loss hover:bg-loss-soft" : "text-profit hover:bg-profit-soft",
-            chosen && (which === "bid" ? "bg-loss text-white hover:bg-loss" : "bg-profit text-white hover:bg-profit"),
+            chosen &&
+              (which === "bid" ? "bg-loss text-white hover:bg-loss" : "bg-profit text-white hover:bg-profit"),
           )}
         >
           {value === null ? "—" : price(value)}
@@ -47,54 +102,126 @@ export function ChainTable({ underlying, expiry, picked, onPick }: { underlying:
   };
 
   return (
-    <div className="max-h-[560px] overflow-auto">
-      <table className="w-full min-w-[760px] text-[12px]">
-        <thead className="sticky top-0 z-10 bg-slate-50 text-[11px] text-muted-foreground">
-          <tr className="border-b">
-            <th colSpan={5} className="py-1.5 text-center font-semibold text-slate-600">Calls</th>
-            <th className="border-x bg-slate-100 py-1.5 text-center font-semibold text-slate-600">Strike</th>
-            <th colSpan={5} className="py-1.5 text-center font-semibold text-slate-600">Puts</th>
-          </tr>
-          <tr className="border-b">
-            {["OI", "IV", "Δ", "Bid", "Ask"].map((h) => (
-              <th key={`c${h}`} className="px-2 py-1.5 text-right font-medium">{h}</th>
-            ))}
-            <th className="border-x bg-slate-100 px-2 py-1.5 text-center font-medium" />
-            {["Bid", "Ask", "Δ", "IV", "OI"].map((h) => (
-              <th key={`p${h}`} className="px-2 py-1.5 text-right font-medium">{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.rows.map((r) => {
-            const callItm = r.strike < data.spot;
-            return (
-              <Fragment key={r.strike}>
-                {r.strike === atm && (
-                  <tr>
-                    <td colSpan={11} className="bg-accent py-0.5 text-center text-[10.5px] font-semibold text-accent-foreground">
-                      spot {price(data.spot)}
+    <>
+      <div className="max-h-[560px] overflow-auto">
+        <table className="w-full min-w-[760px] text-[12px]">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-[11px] text-muted-foreground">
+            <tr className="border-b">
+              <th colSpan={6} className="py-1.5 text-center font-semibold text-slate-600">
+                Calls
+              </th>
+              <th className="border-x bg-slate-100 py-1.5 text-center font-semibold text-slate-600">
+                Strike
+              </th>
+              <th colSpan={6} className="py-1.5 text-center font-semibold text-slate-600">
+                Puts
+              </th>
+            </tr>
+            <tr className="border-b">
+              <th className="w-6 px-1 py-1.5 text-center">⚡</th>
+              {["OI", "IV", "Δ", "Bid", "Ask"].map((h) => (
+                <th key={`c${h}`} className="px-2 py-1.5 text-right font-medium">
+                  {h}
+                </th>
+              ))}
+              <th className="border-x bg-slate-100 px-2 py-1.5 text-center font-medium" />
+              {["Bid", "Ask", "Δ", "IV", "OI"].map((h) => (
+                <th key={`p${h}`} className="px-2 py-1.5 text-right font-medium">
+                  {h}
+                </th>
+              ))}
+              <th className="w-6 px-1 py-1.5 text-center">⚡</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => {
+              const callItm = r.strike < data.spot;
+              return (
+                <Fragment key={r.strike}>
+                  {r.strike === atm && (
+                    <tr>
+                      <td
+                        colSpan={13}
+                        className="bg-accent py-0.5 text-center text-[10.5px] font-semibold text-accent-foreground"
+                      >
+                        spot {price(data.spot)}
+                      </td>
+                    </tr>
+                  )}
+                  <tr className="border-b border-slate-100 hover:bg-slate-50/60">
+                    {/* Call Direct Trade Icon */}
+                    <td className="px-1 py-1 text-center">
+                      {r.call ? (
+                        <button
+                          type="button"
+                          onClick={() => openDirectTrade(r.call!, "call", r.strike, "buy")}
+                          title={`Direct trade Call ${r.strike}`}
+                          className="rounded p-1 text-slate-400 hover:bg-primary/10 hover:text-primary transition-colors"
+                        >
+                          <Zap className="size-3" />
+                        </button>
+                      ) : null}
+                    </td>
+
+                    <td className={cn("num px-2 py-1.5 text-right text-muted-foreground", callItm && "bg-amber-50/50")}>
+                      {num(r.call?.oi, 2)}
+                    </td>
+                    <td className={cn("num px-2 py-1.5 text-right", callItm && "bg-amber-50/50")}>
+                      {pct(r.call?.iv, 1, true)}
+                    </td>
+                    <td className={cn("num px-2 py-1.5 text-right text-muted-foreground", callItm && "bg-amber-50/50")}>
+                      {num(r.call?.delta, 2)}
+                    </td>
+                    {quote(r.call, "bid", "call", r.strike)}
+                    {quote(r.call, "ask", "call", r.strike)}
+
+                    {/* Strike Column */}
+                    <td className="num border-x bg-slate-50 px-3 py-1.5 text-center font-semibold">
+                      {price(r.strike)}
+                    </td>
+
+                    {quote(r.put, "bid", "put", r.strike)}
+                    {quote(r.put, "ask", "put", r.strike)}
+                    <td className={cn("num px-2 py-1.5 text-right text-muted-foreground", !callItm && "bg-amber-50/50")}>
+                      {num(r.put?.delta, 2)}
+                    </td>
+                    <td className={cn("num px-2 py-1.5 text-right", !callItm && "bg-amber-50/50")}>
+                      {pct(r.put?.iv, 1, true)}
+                    </td>
+                    <td className={cn("num px-2 py-1.5 text-right text-muted-foreground", !callItm && "bg-amber-50/50")}>
+                      {num(r.put?.oi, 2)}
+                    </td>
+
+                    {/* Put Direct Trade Icon */}
+                    <td className="px-1 py-1 text-center">
+                      {r.put ? (
+                        <button
+                          type="button"
+                          onClick={() => openDirectTrade(r.put!, "put", r.strike, "buy")}
+                          title={`Direct trade Put ${r.strike}`}
+                          className="rounded p-1 text-slate-400 hover:bg-primary/10 hover:text-primary transition-colors"
+                        >
+                          <Zap className="size-3" />
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
-                )}
-                <tr className="border-b border-slate-100 hover:bg-slate-50/60">
-                  <td className={cn("num px-2 py-1.5 text-right text-muted-foreground", callItm && "bg-amber-50/50")}>{num(r.call?.oi, 2)}</td>
-                  <td className={cn("num px-2 py-1.5 text-right", callItm && "bg-amber-50/50")}>{pct(r.call?.iv, 1, true)}</td>
-                  <td className={cn("num px-2 py-1.5 text-right text-muted-foreground", callItm && "bg-amber-50/50")}>{num(r.call?.delta, 2)}</td>
-                  {quote(r.call, "bid")}
-                  {quote(r.call, "ask")}
-                  <td className="num border-x bg-slate-50 px-3 py-1.5 text-center font-semibold">{price(r.strike)}</td>
-                  {quote(r.put, "bid")}
-                  {quote(r.put, "ask")}
-                  <td className={cn("num px-2 py-1.5 text-right text-muted-foreground", !callItm && "bg-amber-50/50")}>{num(r.put?.delta, 2)}</td>
-                  <td className={cn("num px-2 py-1.5 text-right", !callItm && "bg-amber-50/50")}>{pct(r.put?.iv, 1, true)}</td>
-                  <td className={cn("num px-2 py-1.5 text-right text-muted-foreground", !callItm && "bg-amber-50/50")}>{num(r.put?.oi, 2)}</td>
-                </tr>
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Direct Single Leg Order Modal */}
+      <DirectOptionModal
+        target={directTarget}
+        initialSide={directSide}
+        underlying={underlying}
+        spotPrice={data.spot}
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+      />
+    </>
   );
 }

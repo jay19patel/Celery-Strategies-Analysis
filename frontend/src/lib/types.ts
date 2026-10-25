@@ -648,6 +648,66 @@ export interface NearbyLevelItem {
   distance_pct?: number;
 }
 
+export interface TrendlineItem {
+  id: string;
+  kind: "support" | "resistance";
+  start_time: number;
+  start_price: number;
+  end_time: number;
+  end_price: number;
+  current_price: number;
+  slope: number;
+  touches: number;
+  touch_times?: number[];
+  distance_pct: number;
+  status: "holding" | "approaching" | "broken";
+  label: string;
+}
+
+export interface HorizontalClusterItem {
+  id: string;
+  price: number;
+  kind: "support" | "resistance" | "cross_level";
+  touches: number;
+  touch_times?: number[];
+  distance_pct: number;
+  status: "holding" | "approaching" | "broken";
+  label: string;
+}
+
+export interface TrendlinesResponse {
+  ready: boolean;
+  symbol: string;
+  interval?: string;
+  bars: number;
+  latest_close: number;
+  trendlines: TrendlineItem[];
+  horizontal_clusters: HorizontalClusterItem[];
+  ema_20?: number | null;
+  ema_50?: number | null;
+}
+
+export interface StructureZone {
+  kind: "fvg" | "ob" | "sr";
+  direction: "bull" | "bear";
+  low: number;
+  high: number;
+  mid?: number;
+  width?: number;
+  created_at: number;
+  timeframe: string;
+  state: "fresh" | "tested" | "mitigated" | "invalidated";
+  touches?: number;
+  last_touched_at?: number | null;
+  strength?: number;
+  fill_pct?: number;
+  distance_pct?: number | null;
+  first_touch_at?: number | null;
+  reaction_pct?: number | null;
+  worked?: boolean | null;
+  live?: boolean;
+}
+
 export interface MarketStructure {
   symbol: string;
   ready: boolean;
@@ -662,6 +722,12 @@ export interface MarketStructure {
   };
   zones: {
     ready?: boolean;
+    zones?: StructureZone[];
+    record?: Record<string, unknown>;
+    nearest_above?: StructureZone | null;
+    nearest_below?: StructureZone | null;
+    states?: Record<string, number>;
+    note?: string;
     supply?: { top: number; bottom: number; strength: number }[];
     demand?: { top: number; bottom: number; strength: number }[];
     [key: string]: unknown;
@@ -688,6 +754,31 @@ export interface MarketStructure {
   nearby: {
     above?: NearbyLevelItem[];
     below?: NearbyLevelItem[];
+  };
+  smc?: {
+    bias?: string;
+    swing_high?: number | null;
+    swing_low?: number | null;
+    position?: number | null;
+    squeeze?: boolean;
+    bars?: number;
+    breaks?: Array<{
+      kind: "choch" | "bos";
+      direction: "up" | "down";
+      bar_time: number;
+      level: number;
+      close: number;
+      displacement: number;
+      volume_ratio: number;
+      index: number;
+    }>;
+    gaps?: Array<{
+      direction: "up" | "down";
+      low: number;
+      high: number;
+      bar_time: number;
+      filled: boolean;
+    }>;
   };
 }
 

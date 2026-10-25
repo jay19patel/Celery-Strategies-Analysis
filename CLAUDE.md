@@ -123,6 +123,7 @@ invalidates in `lib/live.tsx`.
 
 ```bash
 ./start.sh                 # backend :8000 + dashboard :3000, hot reload
+./start_backend.sh         # backend only (production mode, single worker)
 make install               # .venv with the backend, npm install for the dashboard
 make check                 # ruff, eslint, tsc, pytest
 ```

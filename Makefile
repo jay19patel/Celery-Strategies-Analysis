@@ -1,10 +1,14 @@
-.PHONY: help dev install test lint fmt typecheck check clean
+.PHONY: help dev backend install test lint fmt typecheck check clean
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 
 dev:  ## Backend and dashboard with hot reload
 	./start.sh
+
+backend:  ## Backend only (production mode, single worker)
+	./start_backend.sh run
+
 
 install:  ## Install backend and frontend dependencies
 	uv venv -p 3.13 .venv

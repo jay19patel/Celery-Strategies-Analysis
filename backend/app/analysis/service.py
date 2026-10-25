@@ -20,7 +20,20 @@ from typing import Any
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlmodel import col, delete, select
 
-from app.analysis import liquidity, nearby, orderflow, outlook, profile, pulse, reading, resample, verdict, zones
+from app.analysis import (
+    liquidity,
+    nearby,
+    orderflow,
+    outlook,
+    profile,
+    pulse,
+    reading,
+    resample,
+    structure,
+    trendlines,
+    verdict,
+    zones,
+)
 from app.analysis.insights import insights, lean, market_context, outcome
 from app.core.db import session
 from app.core.events import EventHub
@@ -135,11 +148,26 @@ class MarketDesk:
                 "profile": profile.read(base if rich else rows, source="1m" if rich else "15m").to_dict(),
                 "flow": orderflow.read(bars).to_dict(),
                 "levels": reading.levels_block(bars),
+                "smc": structure.read(bars).to_dict(),
+                "trendlines": trendlines.analyze_trendlines(bars),
             }
 
         view = await self._cached("structure", symbol, rows, build)
         price = self.feed.spot(underlying) or view["price"]
         return view | {"nearby": nearby.read(price, view["atr"], view["liquidity"], view["zones"], view["profile"], self.summary(underlying))}
+
+    async def trendlines(self, underlying: str, interval: str = "15m", limit: int = 500) -> dict[str, Any]:
+        """Trendlines and multi-swing horizontal levels for the given timeframe (15m, 1h, 1d)."""
+        symbol = self.perpetual(underlying)
+        if interval == "15m":
+            rows = await self._rows(symbol, limit, interval)
+        else:
+            days = 365.0 if interval == "1d" else 30.0
+            bars_res = await self.bars(underlying, interval, days, limit)
+            rows = bars_res.get("bars", [])
+        if not rows:
+            return {"ready": False, "symbol": symbol, "trendlines": [], "horizontal_clusters": []}
+        return trendlines.analyze_trendlines(candles(rows)) | {"symbol": symbol, "interval": interval}
 
     def analysis(self, underlying: str) -> dict[str, Any]:
         """The price, the options book and the analyst's latest findings, for one underlying."""

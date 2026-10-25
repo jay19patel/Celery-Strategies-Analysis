@@ -264,8 +264,49 @@ export default function StrategiesPage() {
                   </Table>
                 </div>
               ) : (
-                <div className="py-8 text-center">
-                  <Empty title="No directional signals have been recorded yet. They will appear here when strategies detect setups." />
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/80 bg-muted/10 px-6 py-10 text-center">
+                  <div className="relative mb-3 flex size-12 items-center justify-center rounded-full bg-primary/10">
+                    <Crosshair className="size-6 text-primary animate-pulse" />
+                    <span className="absolute -top-0.5 -right-0.5 flex size-3">
+                      <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex size-3 rounded-full bg-emerald-500" />
+                    </span>
+                  </div>
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Real-Time Algorithmic Scanner Active
+                  </h3>
+                  <p className="mt-1 max-w-md text-xs text-muted-foreground leading-relaxed">
+                    The engine is continuously evaluating closed candles every 20 seconds. Directional signals with automated entries, stops, and targets will log here automatically.
+                  </p>
+
+                  <div className="mt-4 grid w-full max-w-lg grid-cols-1 gap-2 sm:grid-cols-3 text-left">
+                    <div className="rounded-lg border bg-background/80 p-2.5 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[10px] font-bold text-muted-foreground">5m</span>
+                        <Badge variant="outline" className="text-[9px] px-1 py-0">SCANNING</Badge>
+                      </div>
+                      <div className="mt-1 font-semibold text-xs text-foreground">EMA × VWAP</div>
+                      <div className="mt-0.5 text-[10px] text-muted-foreground">Waiting for 9 EMA crossover</div>
+                    </div>
+
+                    <div className="rounded-lg border bg-background/80 p-2.5 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[10px] font-bold text-muted-foreground">15m</span>
+                        <Badge variant="outline" className="text-[9px] px-1 py-0">SCANNING</Badge>
+                      </div>
+                      <div className="mt-1 font-semibold text-xs text-foreground">Put/Call Shift</div>
+                      <div className="mt-0.5 text-[10px] text-muted-foreground">Waiting for 0.15+ OI shift</div>
+                    </div>
+
+                    <div className="rounded-lg border bg-background/80 p-2.5 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[10px] font-bold text-muted-foreground">15m</span>
+                        <Badge variant="outline" className="text-[9px] px-1 py-0">SCANNING</Badge>
+                      </div>
+                      <div className="mt-1 font-semibold text-xs text-foreground">Supertrend</div>
+                      <div className="mt-0.5 text-[10px] text-muted-foreground">Waiting for 10,3 flip</div>
+                    </div>
+                  </div>
                 </div>
               )}
             </CardContent>
