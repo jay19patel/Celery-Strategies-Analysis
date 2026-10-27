@@ -106,7 +106,7 @@ export default function DeskPage() {
       {overview && expiry && <MarketStats overview={overview} expiry={expiry} />}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="min-w-0 space-y-5">
+        <div className="min-w-0">
           <Card>
             <CardHeader>
               <CardTitle>
@@ -128,28 +128,6 @@ export default function DeskPage() {
               )}
             </CardContent>
           </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                <CandlestickChart className="size-4 text-slate-400" /> {overview?.perpetual ?? underlying} · 15m
-              </CardTitle>
-              <span className="text-[11.5px] text-muted-foreground">strikes and breakevens of the structure above</span>
-            </CardHeader>
-            <CardContent className="p-2">{bars?.bars.length ? <PriceChart bars={bars.bars} levels={levels} /> : <Loading rows={4} className="p-2" />}</CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                <Grid3x3 className="size-4 text-slate-400" /> Option chain
-              </CardTitle>
-              <span className="text-[11.5px] text-muted-foreground">click a bid to sell, an ask to buy</span>
-            </CardHeader>
-            {expiry && <ChainTable underlying={underlying} expiry={expiry} picked={picked} onPick={pick} />}
-          </Card>
-
-          {strategies && <StrategyCatalog strategies={strategies} selected={params.strategy} onPick={(strategy) => setParams((p) => ({ ...p, strategy, legs: [] }))} />}
         </div>
 
         <div className="space-y-5">
@@ -166,6 +144,31 @@ export default function DeskPage() {
           <AiBriefCard underlying={underlying} />
         </div>
       </div>
+
+      {/* The wide reads: each wants the whole page, not a column beside the rail. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <CandlestickChart className="size-4 text-slate-400" /> {overview?.perpetual ?? underlying} · 15m
+          </CardTitle>
+          <span className="text-[11.5px] text-muted-foreground">strikes and breakevens of the structure above</span>
+        </CardHeader>
+        <CardContent className="p-2">
+          {bars?.bars.length ? <PriceChart bars={bars.bars} levels={levels} height={460} /> : <Loading rows={4} className="p-2" />}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <Grid3x3 className="size-4 text-slate-400" /> Option chain
+          </CardTitle>
+          <span className="text-[11.5px] text-muted-foreground">click a bid to sell, an ask to buy</span>
+        </CardHeader>
+        {expiry && <ChainTable underlying={underlying} expiry={expiry} picked={picked} onPick={pick} />}
+      </Card>
+
+      {strategies && <StrategyCatalog strategies={strategies} selected={params.strategy} onPick={(strategy) => setParams((p) => ({ ...p, strategy, legs: [] }))} />}
     </>
   );
 }

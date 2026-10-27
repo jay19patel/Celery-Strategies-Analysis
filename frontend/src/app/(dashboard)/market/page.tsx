@@ -645,194 +645,169 @@ export default function MarketDeskPage() {
         </Card>
       )}
 
-      {/* Main Trading & Chart Section (2 Columns on large screens) */}
+      {/* The tape, full width — the page's primary read, not a column beside the rail */}
+      <Card>
+        <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between pb-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="space-y-0.5">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <BarChart3 className="size-4 text-primary" />
+                {underlying} Perpetual Structure Chart ({chartInterval})
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Candlestick tape with dynamic Trendlines, Fair Value Gaps (FVG), Order Blocks, and Volume Profile.
+              </p>
+            </div>
+
+            {/* Multi-Timeframe Switcher (15m, 1h, 1d) */}
+            <div className="flex items-center rounded-lg border bg-muted/40 p-1">
+              {(["15m", "1h", "1d"] as const).map((tf) => (
+                <button
+                  key={tf}
+                  type="button"
+                  onClick={() => setChartInterval(tf)}
+                  className={`rounded-md px-2.5 py-0.5 font-mono text-xs font-semibold transition-all ${
+                    chartInterval === tf
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {tf}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Layer Controls Bar (Default ALL ON, click to toggle) */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mr-0.5">
+              Layers:
+            </span>
+
+            <Button
+              variant={layers.fvg ? "default" : "outline"}
+              size="sm"
+              onClick={() => toggleLayer("fvg")}
+              className={`h-7 px-2.5 text-xs font-mono transition-all ${
+                layers.fvg
+                  ? "bg-purple-600 text-white hover:bg-purple-700 shadow-xs"
+                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              }`}
+              title="Toggle Fair Value Gaps (shaded imbalance zones)"
+            >
+              <span className="size-2 rounded-full mr-1.5 bg-purple-300" />
+              FVG ({fvgZones.length})
+            </Button>
+
+            <Button
+              variant={layers.ob ? "default" : "outline"}
+              size="sm"
+              onClick={() => toggleLayer("ob")}
+              className={`h-7 px-2.5 text-xs font-mono transition-all ${
+                layers.ob
+                  ? "bg-orange-600 text-white hover:bg-orange-700 shadow-xs"
+                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              }`}
+              title="Toggle Order Blocks"
+            >
+              <span className="size-2 rounded-full mr-1.5 bg-orange-300" />
+              OB ({obZones.length})
+            </Button>
+
+            <Button
+              variant={layers.ema ? "default" : "outline"}
+              size="sm"
+              onClick={() => toggleLayer("ema")}
+              className={`h-7 px-2.5 text-xs font-mono transition-all ${
+                layers.ema
+                  ? "bg-amber-500 text-white hover:bg-amber-600 shadow-xs"
+                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              }`}
+              title="Toggle EMA 20 (yellow) & EMA 50 (red)"
+            >
+              <span className="size-2 rounded-full mr-1.5 bg-amber-200" />
+              EMA (20/50)
+            </Button>
+
+            <Button
+              variant={layers.smc ? "default" : "outline"}
+              size="sm"
+              onClick={() => toggleLayer("smc")}
+              className={`h-7 px-2.5 text-xs font-mono transition-all ${
+                layers.smc
+                  ? "bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs"
+                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              }`}
+              title="Toggle Smart Money Concepts (BOS / CHoCH break markers)"
+            >
+              <span className="size-2 rounded-full mr-1.5 bg-emerald-300" />
+              SMC Breaks
+            </Button>
+
+            <Button
+              variant={layers.levels ? "default" : "outline"}
+              size="sm"
+              onClick={() => toggleLayer("levels")}
+              className={`h-7 px-2.5 text-xs font-mono transition-all ${
+                layers.levels
+                  ? "bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs"
+                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              }`}
+              title="Toggle Key Levels (POC, VAH/VAL, S&R)"
+            >
+              <span className="size-2 rounded-full mr-1.5 bg-indigo-300" />
+              Levels
+            </Button>
+
+            <Button
+              variant={layers.volume ? "default" : "outline"}
+              size="sm"
+              onClick={() => toggleLayer("volume")}
+              className={`h-7 px-2.5 text-xs font-mono transition-all ${
+                layers.volume
+                  ? "bg-slate-700 text-white hover:bg-slate-800 shadow-xs"
+                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              }`}
+              title="Toggle Volume Histogram"
+            >
+              <span className="size-2 rounded-full mr-1.5 bg-slate-300" />
+              Volume
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-1">
+          {chartData?.bars && chartData.bars.length > 0 ? (
+            <PriceChart
+              bars={chartData.bars}
+              levels={chartLevels}
+              markers={chartMarkers}
+              zones={structureZones}
+              symbol={underlying}
+              interval={chartInterval}
+              showZones={layers.fvg || layers.ob}
+              showFvg={layers.fvg}
+              showOb={layers.ob}
+              showMarkers={layers.smc}
+              showLevels={layers.levels}
+              showVolume={layers.volume}
+              showTrendlines={false}
+              showClusters={false}
+              showEma={layers.ema}
+              timezone={timezone}
+              height={480}
+            />
+          ) : (
+            <div className="flex h-80 items-center justify-center">
+              <Loading rows={4} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Supporting reads beside the AI brief and the trade ticket */}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        {/* Left Column: 15m Structure Chart */}
+        {/* Left Column: the book's own reads */}
         <div className="min-w-0 space-y-5">
-          <Card>
-            <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between pb-3">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="space-y-0.5">
-                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                    <BarChart3 className="size-4 text-primary" />
-                    {underlying} Perpetual Structure Chart ({chartInterval})
-                  </CardTitle>
-                  <p className="text-xs text-muted-foreground">
-                    Candlestick tape with dynamic Trendlines, Fair Value Gaps (FVG), Order Blocks, and Volume Profile.
-                  </p>
-                </div>
-
-                {/* Multi-Timeframe Switcher (15m, 1h, 1d) */}
-                <div className="flex items-center rounded-lg border bg-muted/40 p-1">
-                  {(["15m", "1h", "1d"] as const).map((tf) => (
-                    <button
-                      key={tf}
-                      type="button"
-                      onClick={() => setChartInterval(tf)}
-                      className={`rounded-md px-2.5 py-0.5 font-mono text-xs font-semibold transition-all ${
-                        chartInterval === tf
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {tf}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Layer Controls Bar (Default ALL ON, click to toggle) */}
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mr-0.5">
-                  Layers:
-                </span>
-
-                <Button
-                  variant={layers.fvg ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => toggleLayer("fvg")}
-                  className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                    layers.fvg
-                      ? "bg-purple-600 text-white hover:bg-purple-700 shadow-xs"
-                      : "text-muted-foreground opacity-60 hover:opacity-100"
-                  }`}
-                  title="Toggle Fair Value Gaps (shaded imbalance zones)"
-                >
-                  <span className="size-2 rounded-full mr-1.5 bg-purple-300" />
-                  FVG ({fvgZones.length})
-                </Button>
-
-                <Button
-                  variant={layers.ob ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => toggleLayer("ob")}
-                  className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                    layers.ob
-                      ? "bg-orange-600 text-white hover:bg-orange-700 shadow-xs"
-                      : "text-muted-foreground opacity-60 hover:opacity-100"
-                  }`}
-                  title="Toggle Order Blocks"
-                >
-                  <span className="size-2 rounded-full mr-1.5 bg-orange-300" />
-                  OB ({obZones.length})
-                </Button>
-
-                <Button
-                  variant={layers.ema ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => toggleLayer("ema")}
-                  className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                    layers.ema
-                      ? "bg-amber-500 text-white hover:bg-amber-600 shadow-xs"
-                      : "text-muted-foreground opacity-60 hover:opacity-100"
-                  }`}
-                  title="Toggle EMA 20 (yellow) & EMA 50 (red)"
-                >
-                  <span className="size-2 rounded-full mr-1.5 bg-amber-200" />
-                  EMA (20/50)
-                </Button>
-
-                <Button
-                  variant={layers.smc ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => toggleLayer("smc")}
-                  className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                    layers.smc
-                      ? "bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs"
-                      : "text-muted-foreground opacity-60 hover:opacity-100"
-                  }`}
-                  title="Toggle Smart Money Concepts (BOS / CHoCH break markers)"
-                >
-                  <span className="size-2 rounded-full mr-1.5 bg-emerald-300" />
-                  SMC Breaks
-                </Button>
-
-                <Button
-                  variant={layers.levels ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => toggleLayer("levels")}
-                  className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                    layers.levels
-                      ? "bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs"
-                      : "text-muted-foreground opacity-60 hover:opacity-100"
-                  }`}
-                  title="Toggle Key Levels (POC, VAH/VAL, S&R)"
-                >
-                  <span className="size-2 rounded-full mr-1.5 bg-indigo-300" />
-                  Levels
-                </Button>
-
-                <Button
-                  variant={layers.volume ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => toggleLayer("volume")}
-                  className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                    layers.volume
-                      ? "bg-slate-700 text-white hover:bg-slate-800 shadow-xs"
-                      : "text-muted-foreground opacity-60 hover:opacity-100"
-                  }`}
-                  title="Toggle Volume Histogram"
-                >
-                  <span className="size-2 rounded-full mr-1.5 bg-slate-300" />
-                  Volume
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-1">
-              {chartData?.bars && chartData.bars.length > 0 ? (
-                <PriceChart
-                  bars={chartData.bars}
-                  levels={chartLevels}
-                  markers={chartMarkers}
-                  zones={structureZones}
-                  symbol={underlying}
-                  interval={chartInterval}
-                  showZones={layers.fvg || layers.ob}
-                  showFvg={layers.fvg}
-                  showOb={layers.ob}
-                  showMarkers={layers.smc}
-                  showLevels={layers.levels}
-                  showVolume={layers.volume}
-                  showTrendlines={false}
-                  showClusters={false}
-                  showEma={layers.ema}
-                  timezone={timezone}
-                  height={400}
-                />
-              ) : (
-                <div className="flex h-80 items-center justify-center">
-                  <Loading rows={4} />
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Dedicated Clean Line Trendlines & Multi-Swing Cross-Levels Chart (No Candles, No Mixture) */}
-          <TrendlineStructureChart
-            bars={chartData?.bars || []}
-            trendlines={trendlinesData?.trendlines || []}
-            clusters={trendlinesData?.horizontal_clusters || []}
-            symbol={underlying}
-            interval={chartInterval}
-            currentPrice={currentPrice}
-            timezone={timezone}
-            onIntervalChange={setChartInterval}
-            height={360}
-          />
-
-          {/* Trendlines & Multi-Swing Cross-Levels Table & Visual Trajectory */}
-          <TrendlinesTable
-            trendlines={trendlinesData?.trendlines || []}
-            clusters={trendlinesData?.horizontal_clusters || []}
-            currentPrice={currentPrice}
-            symbol={underlying}
-            interval={chartInterval}
-            showTrendlinesOnChart={true}
-            showClustersOnChart={true}
-            hiddenIds={hiddenItemIds}
-            onToggleItem={toggleItemVisibility}
-          />
-
           {/* Dedicated Fair Value Gaps (FVG) Section */}
           <Card className="border-border/80">
             <CardHeader className="pb-3">
@@ -1004,6 +979,33 @@ export default function MarketDeskPage() {
             structure={structure}
           />
         </div>
+      </div>
+
+      {/* Structure: the trendline chart and its levels, full width — this is the page's widest read */}
+      <div className="space-y-5">
+        <TrendlineStructureChart
+          bars={chartData?.bars || []}
+          trendlines={trendlinesData?.trendlines || []}
+          clusters={trendlinesData?.horizontal_clusters || []}
+          symbol={underlying}
+          interval={chartInterval}
+          currentPrice={currentPrice}
+          timezone={timezone}
+          onIntervalChange={setChartInterval}
+          height={460}
+        />
+
+        <TrendlinesTable
+          trendlines={trendlinesData?.trendlines || []}
+          clusters={trendlinesData?.horizontal_clusters || []}
+          currentPrice={currentPrice}
+          symbol={underlying}
+          interval={chartInterval}
+          showTrendlinesOnChart={true}
+          showClustersOnChart={true}
+          hiddenIds={hiddenItemIds}
+          onToggleItem={toggleItemVisibility}
+        />
       </div>
 
       {/* Comprehensive Analysis Tabs */}

@@ -372,7 +372,9 @@ export interface Decision {
   reason: string;
   expiry: number | null;
   spot: number | null;
-  regime: Omit<Regime, "underlying" | "expiry"> | null;
+  /** plus what the auto-trader recorded about this cycle: the score a strategy had to beat, and
+   *  the pacing note when that bar had eased because the day had produced no entry yet */
+  regime: (Omit<Regime, "underlying" | "expiry"> & { min_score?: number; pacing?: string }) | null;
   candidates: Candidate[] | null;
   ai: AiReview | null;
   orders: Record<string, { structure_id?: string; status?: string; qty?: number; error?: string; refused?: string }> | null;

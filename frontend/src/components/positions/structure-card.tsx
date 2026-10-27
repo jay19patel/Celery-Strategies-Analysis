@@ -93,6 +93,9 @@ function ExitsDialog({ s, open, onOpenChange }: { s: Structure; open: boolean; o
 export function StructureCard({ s }: { s: Structure }) {
   const [editing, setEditing] = useState(false);
   const pnl = s.live?.pnl ?? null;
+  // A position on the perpetual exits at its strategy's prices, not at a share of a premium: it has
+  // no expiry to run out and its take-profit/stop percentages are ignored by the guard.
+  const perp = s.instrument === "perp";
   const close = async () => {
     const r = await api<Structure>(`/trading/structures/${s.id}/close`, "POST").catch((e: Error) => {
       toast.error("Close refused", { description: e.message });
@@ -106,9 +109,13 @@ export function StructureCard({ s }: { s: Structure }) {
     <Card className={cn(s.status === "error" && "border-red-300")}>
       <CardHeader>
         <CardTitle className="flex-wrap">
-          {s.label} <span className="font-normal text-muted-foreground">{s.underlying} · {s.expiry_label} · ×{s.qty}</span>
+          {s.label}{" "}
+          <span className="font-normal text-muted-foreground">
+            {s.underlying} · {perp ? "perpetual" : s.expiry_label} · ×{s.qty}
+          </span>
         </CardTitle>
         <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant={s.kind === "long" || s.kind === "credit" ? "profit" : "loss"}>{s.kind}</Badge>
           <Badge variant={s.broker === "delta" ? "primary" : "default"}>{s.broker}</Badge>
           <Badge variant={s.source === "auto" ? "primary" : "outline"}>{s.source}</Badge>
           {s.status !== "open" && <Badge variant={s.status === "error" ? "loss" : "warn"}>{s.status}</Badge>}
@@ -127,11 +134,23 @@ export function StructureCard({ s }: { s: Structure }) {
             <Progress pnl={pnl} stop={s.stop_loss_usd} target={s.take_profit_usd} />
             <div>
               <KV label="Entry" value={<Premium value={s.entry_cash} />} />
+              {perp && <KV label="Entry spot" value={price(s.entry_spot)} />}
               <KV label="Max profit" value={s.max_profit === null ? "unlimited" : usd(s.max_profit, 4)} />
               <KV label="Max loss" value={s.max_loss === null ? <span className="text-loss">unlimited</span> : usd(s.max_loss, 4)} />
-              <KV label="Expires in" value={hours(s.hours_left)} />
+              {perp ? (
+                <>
+                  <KV label="Stop" value={<span className="text-loss">{price(s.stop_price)}</span>} />
+                  <KV label="Target" value={<span className="text-profit">{price(s.target_price)}</span>} />
+                  <KV label="Closes after" value={hours(s.hours_left)} />
+                </>
+              ) : (
+                <KV label="Expires in" value={hours(s.hours_left)} />
+              )}
+              <KV label="Margin held" value={usd(s.margin, 2)} />
+              <KV label="Fees so far" value={usd(s.fees, 4)} />
               <KV label="Opened" value={dateTime(s.opened_at)} />
             </div>
+            {s.reason && <p className="text-[11.5px] leading-relaxed text-muted-foreground">{s.reason}</p>}
           </div>
           <div className="min-w-0">
             <Table>
@@ -164,11 +183,16 @@ export function StructureCard({ s }: { s: Structure }) {
             </Table>
             <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
               <span className="mr-auto text-[11.5px] text-muted-foreground">
-                take profit {s.take_profit_pct}% · stop {s.stop_loss_pct}% · margin {usd(s.margin, 4)}
+                {perp
+                  ? `${s.strategy} · exits at its own stop and target`
+                  : `take profit ${s.take_profit_pct}% of ${s.kind === "credit" ? "max profit" : "the debit"} · stop ${s.stop_loss_pct}%`}
               </span>
-              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                <Pencil /> Exits
-              </Button>
+              {/* A perpetual's exits are prices its strategy set; the guard ignores these percentages. */}
+              {!perp && (
+                <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                  <Pencil /> Exits
+                </Button>
+              )}
               <Confirm
                 title={`Close ${s.label}?`}
                 description={`Every leg is closed at the live book on ${s.broker} — shorts bought back first. Expected ${signed(pnl)}.`}

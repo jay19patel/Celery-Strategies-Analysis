@@ -63,7 +63,11 @@ export function OrderPanel({ preview, brokers, onQty }: { preview: Preview; brok
         {sizing && !sizing.error && (
           <div className="text-[12.5px] text-muted-foreground">
             <div>
-              Equity <span className="num font-medium text-slate-800">{usd(sizing.equity)}</span> · available <span className="num font-medium text-slate-800">{usd(sizing.available)}</span>
+              Equity <span className="num font-medium text-slate-800">{usd(sizing.equity)}</span> · available{" "}
+              <span className="num font-medium text-slate-800">{usd(sizing.available)}</span> · this trade needs{" "}
+              <span className={`num font-medium ${sizing.margin_ok === false ? "text-loss" : "text-slate-800"}`}>
+                {usd(preview.analysis.margin + preview.analysis.entry_fees)}
+              </span>
             </div>
             <div>
               Worst case {sizing.worst_case_pct != null ? <span className="num font-medium text-slate-800">{pct(sizing.worst_case_pct, 2)}</span> : "unlimited"} of equity · risk budget fits{" "}
@@ -88,6 +92,8 @@ export function OrderPanel({ preview, brokers, onQty }: { preview: Preview; brok
           <div className="space-y-2 text-[13px]">
             <div className="flex justify-between"><span>Premium</span><Premium value={preview.analysis.net_premium} /></div>
             <div className="flex justify-between"><span>Worst case</span>{preview.analysis.max_loss === null ? <span className="font-semibold text-loss">unlimited</span> : <Pnl value={-preview.analysis.max_loss} digits={4} />}</div>
+            <div className="flex justify-between"><span>Margin held</span><span className="num">{usd(preview.analysis.margin, 2)}</span></div>
+            <div className="flex justify-between"><span>Entry fees</span><span className="num">{usd(preview.analysis.entry_fees, 4)}</span></div>
             <p className="text-muted-foreground">Each leg is sent as an immediate-or-cancel limit at most 5% from its quote; bought legs first, and anything filled is unwound if a leg fails.</p>
             {failed.length > 0 && (
               <Notice tone="warn">

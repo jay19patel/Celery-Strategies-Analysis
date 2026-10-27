@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Bot, ChevronDown, ChevronRight } from "lucide-react";
 
 import { Pnl, Premium } from "@/components/shared/money";
+import { Notice } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { dateTime, pct, price, signedPct } from "@/lib/format";
@@ -39,8 +40,14 @@ export function DecisionRow({ d }: { d: Decision }) {
               <span>realised <b className="num text-slate-800">{pct(m.rv_24h, 1, true)}</b> / <b className="num text-slate-800">{pct(m.rv_7d, 1, true)}</b></span>
               <span>24h <b className="num text-slate-800">{signedPct(m.change_24h_pct)}</b></span>
               <span>to expiry <b className="num text-slate-800">{d.regime.hours_to_expiry}h</b></span>
+              {d.regime.min_score != null && (
+                <span>score to beat <b className="num text-slate-800">{d.regime.min_score}</b></span>
+              )}
             </div>
           )}
+
+          {/* The bar moves while a day goes by with no entry, so say when it has. */}
+          {d.regime?.pacing && <Notice tone="warn">{d.regime.pacing}</Notice>}
 
           {d.candidates && d.candidates.length > 0 && (
             <div className="overflow-hidden rounded-lg border bg-card">

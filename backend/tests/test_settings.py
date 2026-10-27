@@ -5,14 +5,17 @@ from __future__ import annotations
 import pytest
 
 from app.errors import SettingsError
-from app.settings import LIVE_CONFIRM_PHRASE, Settings, apply_changes, from_stored
+from app.settings import LIVE_CONFIRM_PHRASE, STRATEGY_KEYS, Settings, apply_changes, from_stored
+from app.strategies import REGISTRY
 
 
 def test_defaults_are_paper_only_and_delta_on_demo() -> None:
     s = Settings()
     assert s.active_brokers == ["paper"]
     assert s.delta_env == "demo" and not s.auto_delta and not s.is_real_money
-    assert all(k in ("iron_condor", "iron_butterfly", "bull_put_spread", "bear_call_spread") for k in s.auto_strategies)
+    # Every structure in the catalog is enabled, including the two whose loss is not bounded.
+    assert sorted(s.auto_strategies) == sorted(STRATEGY_KEYS)
+    assert sorted(s.directional_strategies) == sorted(REGISTRY)
 
 
 def test_real_money_needs_the_phrase() -> None:

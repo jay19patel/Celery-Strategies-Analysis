@@ -69,10 +69,10 @@ class Settings(BaseModel):
     # A strategy absent from this map, or mapped to an empty list, runs on every enabled underlying.
     strategy_symbols: dict[Directional, list[Underlying]] = Field(default_factory=dict)
     auto_interval_minutes: int = Field(15, ge=5, le=240)
-    # Defined-risk structures only by default: their worst case is known before entry.
-    auto_strategies: list[Strategy] = Field(
-        default_factory=lambda: ["iron_condor", "iron_butterfly", "bull_put_spread", "bear_call_spread"]
-    )
+    # Every structure in the catalog is on. Note that short_strangle and short_straddle are the two
+    # whose loss is NOT bounded before entry — the regime score and the hard checks are all that
+    # stands between them and an open-ended position. Drop them here to go back to defined risk only.
+    auto_strategies: list[Strategy] = Field(default_factory=lambda: list(STRATEGY_KEYS))
     expiry_min_hours: float = Field(12.0, ge=1, le=720)
     expiry_max_hours: float = Field(60.0, ge=2, le=2000)
     short_delta: float = Field(0.18, ge=0.05, le=0.45)  # |delta| of sold strikes on OTM structures
