@@ -11,7 +11,10 @@ from app.ai.analyst import ALLOWED, Analyst, clean_review, digest
 from app.ai.llm import LLM, LLMError
 from app.core.db import session
 from app.core.models import Structure
+from app.errors import SettingsError
+from app.settings import Settings
 from app.trading.autotrader import AutoTrader, lots_for_risk
+from app.trading.risk import day_start, trading_day
 
 
 class StubLLM(LLM):
@@ -22,7 +25,7 @@ class StubLLM(LLM):
 
     async def json(self, system: str, payload: dict[str, Any], max_tokens: int = 900) -> tuple[dict[str, Any], dict[str, Any]]:
         self.calls += 1
-        self.payload = payload
+        self.system, self.payload = system, payload
         if isinstance(self.answer, Exception):
             raise self.answer
         answer = self.answer(payload) if callable(self.answer) else self.answer
@@ -89,6 +92,18 @@ async def test_a_broker_with_no_room_is_skipped_before_anything_is_asked(env: An
     assert llm.calls == 0
 
 
+async def test_a_position_on_the_perpetual_does_not_take_the_options_slot(env: Any) -> None:
+    """Each instrument holds its own slot: BTC futures never block a BTC option structure."""
+    auto, _ = make(env, ai_enabled=False, max_per_underlying=1)
+    await env.trading.open_directional("paper", "BTC", "buy", 1, 79_500, 81_000, "supertrend", "auto", "req-perp-room", "")
+    d = await auto.decide("BTC", ["paper"])
+    assert d["action"] == "open", d["reason"]
+
+    # The option structure it just opened does, though — that is the per-underlying cap doing its job.
+    again = await auto.decide("BTC", ["paper"])
+    assert again["action"] == "skip" and "no room" in again["reason"] and "options" in again["reason"]
+
+
 def test_what_goes_to_the_model_is_market_data_only(env: Any) -> None:
     regime = env.desk.regime("BTC")
     payload = digest("BTC", regime, [])
@@ -96,6 +111,67 @@ def test_what_goes_to_the_model_is_market_data_only(env: Any) -> None:
     text = str(payload).lower()
     for word in ("balance", "equity", "cash", "api_key", "secret", "pnl"):
         assert word not in text
+
+
+async def test_the_bar_eases_through_a_day_with_no_entry_and_resets_on_one(env: Any) -> None:
+    """Pacing towards about a trade a day: the score bar falls as an empty day runs out, the first
+    entry puts it back, and a floor at or above min_score is simply off."""
+    auto, _ = make(env, ai_enabled=False, day_timezone="UTC")  # the engine's own bar stays at 0
+    paced = env.settings().model_copy(update={"min_score": 60, "min_score_floor": 40})
+    day = day_start("UTC", trading_day("UTC"))
+
+    assert auto._bar("BTC", paced, day)[0] == 60  # the day opens at the full bar
+    midday, note = auto._bar("BTC", paced, day + 43_200)
+    assert midday == 50 and "eased from 60 to 50" in note
+    assert auto._bar("BTC", paced, day + 86_399)[0] == 40  # and reaches the floor by its end
+    assert auto._bar("ETH", paced, day + 43_200)[0] == 50  # each underlying is paced on its own
+
+    off = paced.model_copy(update={"min_score_floor": 60})
+    assert auto._bar("BTC", off, day + 43_200) == (60, "")  # a floor at the bar is no pacing at all
+
+    # One option structure today and the bar is back up: the floor paces entries, it never adds one.
+    assert (await auto.decide("BTC", ["paper"]))["action"] == "open"
+    assert auto._bar("BTC", paced, day + 43_200) == (60, "")
+
+
+async def test_a_position_on_the_perpetual_is_not_the_options_desks_entry_for_the_day(env: Any) -> None:
+    auto, _ = make(env, ai_enabled=False, day_timezone="UTC")
+    paced = env.settings().model_copy(update={"min_score": 60, "min_score_floor": 40})
+    day = day_start("UTC", trading_day("UTC"))
+    await env.trading.open_directional("paper", "BTC", "buy", 1, 79_500, 81_000, "supertrend", "auto", "req-pace", "")
+    assert auto._bar("BTC", paced, day + 43_200)[0] == 50
+
+
+def test_a_floor_above_the_bar_is_refused() -> None:
+    from app.settings import apply_changes
+
+    with pytest.raises(SettingsError, match="eases down"):
+        apply_changes(Settings(min_score=60), {"min_score_floor": 70})
+
+
+def test_the_market_block_reaches_the_model_and_is_still_market_data_only(env: Any) -> None:
+    """It is allowlisted twice: `MARKET_ALLOWED` inside the block, `ALLOWED` on the block itself."""
+    payload = digest("BTC", env.desk.regime("BTC"), market={"rsi_1h": 51.0, "funding_pct": 0.004, "equity": 10_000})
+    assert payload["market"] == {"rsi_1h": 51.0, "funding_pct": 0.004}
+    assert set(payload) <= ALLOWED
+
+
+async def test_each_desk_gets_its_own_brief(env: Any) -> None:
+    llm = StubLLM(env.settings, lambda _p: {"headline": "flat", "confidence": "medium", "watch": ["a break"]})
+    analyst = Analyst(llm, env.settings, env.hub)
+    regime = env.desk.regime("BTC")
+
+    await analyst.brief("BTC", regime, {"rsi_1h": 51.0}, "market")
+    assert "perpetual futures desk" in llm.system
+
+    [market] = analyst.latest("BTC", kind="market")
+    assert market["content"]["headline"] == "flat" and "levels" in market["content"]
+    assert analyst.latest("BTC", kind="options") == []  # one desk's brief never shows on the other
+
+    await analyst.brief("BTC", regime, None, "options")
+    assert "crypto options desk" in llm.system
+    [options] = analyst.latest("BTC", kind="options")
+    assert "volatility" in options["content"] and "levels" not in options["content"]
 
 
 def test_review_answers_are_shaped_and_capped() -> None:

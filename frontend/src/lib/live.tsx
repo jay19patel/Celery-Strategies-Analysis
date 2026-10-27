@@ -42,7 +42,7 @@ function wsUrl(): string {
   const configured = process.env.NEXT_PUBLIC_WS_URL;
   if (configured) return configured;
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.hostname}:8000/ws`;
+  return `${proto}//${window.location.host}/ws`;
 }
 
 function announce(e: LiveEvent) {
@@ -84,13 +84,27 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     let stopped = false;
 
     const connect = () => {
-      ws = new WebSocket(wsUrl());
+      try {
+        ws = new WebSocket(wsUrl());
+      } catch {
+        setConnected(false);
+        if (!stopped) {
+          timer = setTimeout(connect, retry.current);
+          retry.current = Math.min(retry.current * 2, 30_000);
+        }
+        return;
+      }
       ws.onopen = () => {
         setConnected(true);
         retry.current = 1000;
       };
       ws.onmessage = (msg) => {
-        const e = JSON.parse(msg.data) as LiveEvent;
+        let e: LiveEvent;
+        try {
+          e = JSON.parse(msg.data) as LiveEvent;
+        } catch {
+          return;
+        }
         if (e.type === "Prices") {
           setPrices((e.data.prices ?? {}) as Prices);
           return;
@@ -107,6 +121,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         timer = setTimeout(connect, retry.current);
         retry.current = Math.min(retry.current * 2, 30_000);
       };
+      ws.onerror = () => ws?.close();
     };
     connect();
     return () => {

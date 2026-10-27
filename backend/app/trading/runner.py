@@ -66,6 +66,8 @@ class StrategyRunner:
         frames: dict[str, list[dict[str, Any]]] = {}
         fired: list[tuple[str, Decision, int]] = []
         for name in s.directional_strategies:
+            if not s.strategy_on(name, underlying):
+                continue  # enabled, but not for this underlying
             strategy = REGISTRY[name]
             bars = frames.setdefault(strategy.interval, resample.fold(base, "1m", strategy.interval))
             if not bars:
@@ -173,6 +175,7 @@ class StrategyRunner:
         for name, strategy in REGISTRY.items():
             out.append(strategy.describe() | {
                 "enabled": name in s.directional_strategies,
+                "symbols": s.strategy_underlyings(name),  # the enabled underlyings it runs on
                 "latest": [v for (n, _sym), v in self.latest.items() if n == name],
             })
         return out

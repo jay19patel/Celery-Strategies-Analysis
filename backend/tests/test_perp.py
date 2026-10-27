@@ -127,3 +127,14 @@ async def test_the_runner_trades_the_best_signal_once_per_bar(perp: Any, monkeyp
     assert "better trade" in next(r for r in signals if r["strategy"] == "slow")["reason"]
     await runner._symbol("BTC", s)  # the same closed bar is never decided twice
     assert slow.calls == best.calls == 1
+
+
+async def test_a_strategy_switched_off_for_a_symbol_is_not_evaluated_there(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.trading.runner as runner_mod
+
+    only_eth = Always("only_eth", 3.0)
+    monkeypatch.setattr(runner_mod, "REGISTRY", {"only_eth": only_eth})
+    s = perp.settings().model_copy(update={"directional_strategies": ["only_eth"], "strategy_symbols": {"only_eth": ["ETH"]}})
+    runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)
+    assert await runner._symbol("BTC", s) == "BTCUSD: no signal"
+    assert only_eth.calls == 0 and not perp.trading.structures("open")

@@ -32,7 +32,8 @@ STRATEGY_KEYS = (
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@+\-]{2,120}$")
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
-Directional = Literal["ema_vwap", "pcr_options", "supertrend"]
+Underlying = Literal["BTC", "ETH"]
+Directional = Literal["ema_vwap", "ema_9_15", "pcr_options", "supertrend"]
 Strategy = Literal[
     "iron_condor", "iron_butterfly", "short_strangle", "short_straddle",
     "long_straddle", "bull_put_spread", "bear_call_spread",
@@ -50,7 +51,7 @@ class Settings(BaseModel):
     delta_api_secret: str = Field("", max_length=200)
     # Where prices come from while Delta is not active. Live public data needs no keys.
     market_data: Literal["live", "demo"] = "live"
-    underlyings: list[Literal["BTC", "ETH"]] = Field(default_factory=lambda: ["BTC"], min_length=1)
+    underlyings: list[Underlying] = Field(default_factory=lambda: ["BTC"], min_length=1)
 
     # -- paper -----------------------------------------------------------------------------
     paper_starting_balance: float = Field(1000.0, ge=10, le=10_000_000)
@@ -63,7 +64,10 @@ class Settings(BaseModel):
     auto_paper: bool = True
     auto_delta: bool = False
     auto_options: bool = True
-    directional_strategies: list[Directional] = Field(default_factory=lambda: ["ema_vwap", "pcr_options", "supertrend"])
+    directional_strategies: list[Directional] = Field(default_factory=lambda: ["ema_vwap", "ema_9_15", "pcr_options", "supertrend"])
+    # Two switches, as in v3: the strategy itself above, and which underlyings it may trade here.
+    # A strategy absent from this map, or mapped to an empty list, runs on every enabled underlying.
+    strategy_symbols: dict[Directional, list[Underlying]] = Field(default_factory=dict)
     auto_interval_minutes: int = Field(15, ge=5, le=240)
     # Defined-risk structures only by default: their worst case is known before entry.
     auto_strategies: list[Strategy] = Field(
@@ -74,6 +78,11 @@ class Settings(BaseModel):
     short_delta: float = Field(0.18, ge=0.05, le=0.45)  # |delta| of sold strikes on OTM structures
     wing_width_pct: float = Field(2.0, ge=0.25, le=15)  # distance of the protective wings, % of spot
     min_score: int = Field(60, ge=0, le=100)  # regime fit a strategy needs to be considered
+    # Pacing, towards about one entry a day. While nothing has opened on an underlying today, the
+    # score above eases towards this floor as the day runs out: early, hold out for a good fit;
+    # late, take the best there is. One entry puts the bar back. 0 switches it off — then `min_score`
+    # is the bar all day. The hard checks never ease: a thin premium is refused at any hour.
+    min_score_floor: int = Field(0, ge=0, le=100)
     min_pop_pct: float = Field(55.0, ge=0, le=95)  # probability of profit at expiry, from the ATM IV
     min_credit_width_pct: float = Field(10.0, ge=0, le=60)  # credit / widest spread on defined-risk credits
     max_spread_pct: float = Field(30.0, ge=1, le=100)  # each leg's bid/ask spread as % of its mark
@@ -158,6 +167,8 @@ class Settings(BaseModel):
             raise ValueError("keep at least one broker active")
         if self.expiry_min_hours >= self.expiry_max_hours:
             raise ValueError("expiry_min_hours must be below expiry_max_hours")
+        if self.min_score_floor > self.min_score:
+            raise ValueError("min_score_floor cannot be above min_score: the bar eases down, never up")
         return self
 
     # -- derived ---------------------------------------------------------------------------
@@ -185,6 +196,17 @@ class Settings(BaseModel):
 
     def auto_on(self, broker: str) -> bool:
         return getattr(self, f"{broker}_active") and getattr(self, f"auto_{broker}")
+
+    def strategy_on(self, name: str, underlying: str) -> bool:
+        """Both switches: the strategy is enabled, and this underlying is one it may trade."""
+        if name not in self.directional_strategies:
+            return False
+        only = self.strategy_symbols.get(name) or []
+        return not only or underlying in only
+
+    def strategy_underlyings(self, name: str) -> list[str]:
+        """The enabled underlyings this strategy would run on — what the Strategies page shows."""
+        return [u for u in self.underlyings if self.strategy_on(name, u)]
 
     def public(self) -> dict[str, Any]:
         data = self.model_dump()

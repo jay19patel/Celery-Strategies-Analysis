@@ -12,20 +12,45 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { useApi } from "@/lib/live";
-import type { AiBrief, AiStatus } from "@/lib/types";
+import type { AiBrief, AiStatus, BriefKind } from "@/lib/types";
 
-export function AiBriefCard({ underlying }: { underlying: string }) {
+// Each desk's brief and the sections it is written in, in reading order. The options desk is asked
+// about volatility and the book; the market desk about direction, levels and what is behind them.
+const DESKS: Record<BriefKind, { title: string; sections: { key: string; label: string }[] }> = {
+  options: {
+    title: "AI market brief",
+    sections: [
+      { key: "volatility", label: "Volatility" },
+      { key: "positioning", label: "Positioning" },
+      { key: "trend", label: "Trend" },
+      { key: "momentum_flow", label: "Momentum & flow" },
+    ],
+  },
+  market: {
+    title: "AI market read",
+    sections: [
+      { key: "trend", label: "Trend" },
+      { key: "levels", label: "Levels" },
+      { key: "momentum", label: "Momentum" },
+      { key: "flow", label: "Flow & positioning" },
+    ],
+  },
+};
+
+export function AiBriefCard({ underlying, kind = "options" }: { underlying: string; kind?: BriefKind }) {
   const { mutate } = useSWRConfig();
+  const desk = DESKS[kind];
+  const path = `/ai/brief?underlying=${underlying}&kind=${kind}`;
   const { data: status } = useApi<AiStatus>("/ai/status");
-  const { data: briefs } = useApi<AiBrief[]>(`/ai/brief?underlying=${underlying}`);
+  const { data: briefs } = useApi<AiBrief[]>(path);
   const [busy, setBusy] = useState(false);
   const brief = briefs?.[0];
 
   const refresh = async () => {
     setBusy(true);
     try {
-      await api("/ai/brief", "POST", { underlying });
-      await mutate(`/ai/brief?underlying=${underlying}`);
+      await api("/ai/brief", "POST", { underlying, kind });
+      await mutate(path);
     } catch (e) {
       toast.error("Brief failed", { description: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -37,7 +62,7 @@ export function AiBriefCard({ underlying }: { underlying: string }) {
     <Card>
       <CardHeader>
         <CardTitle>
-          <Sparkles className="size-4 text-slate-400" /> AI market brief
+          <Sparkles className="size-4 text-slate-400" /> {desk.title}
         </CardTitle>
         <Button variant="ghost" size="xs" onClick={refresh} disabled={busy || !!status?.ready}>
           {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />} Refresh
@@ -53,8 +78,15 @@ export function AiBriefCard({ underlying }: { underlying: string }) {
         {brief?.content && (
           <>
             <p className="font-semibold text-slate-900">{brief.content.headline}</p>
-            <p>{brief.content.volatility}</p>
-            <p>{brief.content.positioning}</p>
+            {desk.sections.map(({ key, label }) => {
+              const text = brief.content?.[key as keyof typeof brief.content];
+              return typeof text === "string" && text ? (
+                <p key={key}>
+                  <span className="font-medium text-slate-500">{label}. </span>
+                  {text}
+                </p>
+              ) : null;
+            })}
             <p className="text-slate-600">{brief.content.summary}</p>
             {brief.content.watch.length > 0 && (
               <ul className="space-y-0.5 text-[12px] text-muted-foreground">

@@ -68,6 +68,11 @@ export function TrendlineStructureChart({
   const trendlineSeriesRefs = useRef<ISeriesApi<"Line">[]>([]);
   const priceLineRefs = useRef<IPriceLine[]>([]);
 
+  // Bumped every time the chart is rebuilt (a height or timezone change). Everything that fills
+  // the chart depends on it, so a rebuild is always followed by a refill — without it the new
+  // chart stays empty of its line, trendlines and levels until their own data happens to change.
+  const [built, setBuilt] = useState(0);
+
   // Toggles for the dedicated chart
   const [showSupportRays, setShowSupportRays] = useState(true);
   const [showResistanceRays, setShowResistanceRays] = useState(true);
@@ -147,6 +152,7 @@ export function TrendlineStructureChart({
       handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
     });
     chartRef.current = chart;
+    setBuilt((n) => n + 1);  // the chart is empty: every effect that fills it now runs again
 
     // Clean close price Area/Line series (NO candles)
     const area = chart.addSeries(AreaSeries, {
@@ -183,6 +189,11 @@ export function TrendlineStructureChart({
       window.removeEventListener("resize", handleResize);
       chart.remove();
       chartRef.current = null;
+      // Every series and price line belonged to the chart just removed. Held on to, the next mount
+      // would hand the new chart handles into the old one and lightweight-charts would throw.
+      mainLineSeriesRef.current = null;
+      trendlineSeriesRefs.current = [];
+      priceLineRefs.current = [];
     };
   }, [height, timezone]);
 
@@ -194,7 +205,7 @@ export function TrendlineStructureChart({
       value: b.close,
     }));
     mainLineSeriesRef.current.setData(lineData);
-  }, [sortedBars]);
+  }, [built, sortedBars]);
 
   // Render native Trendlines on the chart (rock-solid, 100% zoom-invariant)
   useEffect(() => {
@@ -259,7 +270,7 @@ export function TrendlineStructureChart({
         trendlineSeriesRefs.current.push(raySeries);
       }
     }
-  }, [showResistanceRays, showSupportRays, sortedBars, trendlines]);
+  }, [built, showResistanceRays, showSupportRays, sortedBars, trendlines]);
 
   // Render native Horizontal Multi-Swing Cross-Levels (rock-solid PriceLines)
   useEffect(() => {
@@ -293,7 +304,7 @@ export function TrendlineStructureChart({
 
       priceLineRefs.current.push(pl);
     }
-  }, [clusters, showCrossLevels]);
+  }, [built, clusters, showCrossLevels]);
 
   const handleResetZoom = () => {
     chartRef.current?.timeScale().fitContent();

@@ -9,6 +9,8 @@ from app.market.delta import Candle
 from app.market.indicators import supertrend
 from app.strategies import REGISTRY
 from app.strategies.base import Context
+from app.strategies.ema_9_15 import REWARD_MULTIPLE as EMA_REWARD_MULTIPLE
+from app.strategies.ema_9_15 import Ema915
 from app.strategies.ema_vwap import MIN_SESSION_BARS, EmaVwap, session_vwap
 from app.strategies.pcr_options import MIN_SHIFT, PcrOptions
 from app.strategies.supertrend import REWARD_MULTIPLE, SupertrendTrend
@@ -48,6 +50,43 @@ def crossing_up() -> list[Candle]:
 # -- EMA x VWAP (ported from the v3 engine's tests) -------------------------------------------------
 
 EV = EmaVwap()
+EMA915 = Ema915()
+
+
+def test_ema_9_15_buy_requires_previous_high_below_15_ema_and_close_above() -> None:
+    bars = [Candle(MIDNIGHT + i * 300, 100.0, 100.0, 100.0, 100.0, 10.0) for i in range(20)]
+    bars.append(Candle(MIDNIGHT + 20 * 300, 99.0, 99.5, 98.8, 99.2, 10.0))
+    bars.append(Candle(MIDNIGHT + 21 * 300, 99.2, 99.5, 99.1, 99.4, 10.0))
+    bars.append(Candle(MIDNIGHT + 22 * 300, 99.4, 100.5, 99.3, 100.4, 10.0))
+    d = EMA915.decide(ctx(bars))
+    assert d.side == "buy", d.reason
+    assert d.stop == bars[-1].low and d.stop < d.entry < d.target
+    assert math.isclose((d.target or 0) - (d.entry or 0), EMA_REWARD_MULTIPLE * ((d.entry or 0) - d.stop), rel_tol=1e-3)
+
+
+def test_ema_9_15_sell_requires_previous_close_above_9_ema_and_close_below() -> None:
+    bars = [Candle(MIDNIGHT + i * 300, 100.0, 100.0, 100.0, 100.0, 10.0) for i in range(20)]
+    bars.append(Candle(MIDNIGHT + 20 * 300, 101.0, 101.2, 100.8, 100.9, 10.0))
+    bars.append(Candle(MIDNIGHT + 21 * 300, 100.9, 101.0, 100.7, 100.8, 10.0))
+    bars.append(Candle(MIDNIGHT + 22 * 300, 100.8, 100.9, 99.5, 99.6, 10.0))
+    d = EMA915.decide(ctx(bars))
+    assert d.side == "sell", d.reason
+    assert d.stop == bars[-1].high and d.target < d.entry < d.stop
+
+
+def test_ema_9_15_does_not_signal_when_price_only_remains_above_ema() -> None:
+    bars = series([100.0] * 30 + [101.0, 101.1])
+    d = EMA915.decide(ctx(bars))
+    assert d.side is None and "no 9/15 EMA close signal" in d.reason
+
+
+def test_ema_9_15_rejects_a_signal_candle_with_stop_on_wrong_side() -> None:
+    bars = [Candle(MIDNIGHT + i * 300, 100.0, 100.0, 100.0, 100.0, 10.0) for i in range(20)]
+    bars.append(Candle(MIDNIGHT + 20 * 300, 99.0, 99.5, 98.8, 99.2, 10.0))
+    bars.append(Candle(MIDNIGHT + 21 * 300, 99.2, 99.5, 99.1, 99.4, 10.0))
+    bars.append(Candle(MIDNIGHT + 22 * 300, 100.4, 100.5, 100.4, 100.4, 10.0))
+    d = EMA915.decide(ctx(bars))
+    assert d.side is None and "stop beyond the entry" in d.reason
 
 
 def test_the_vwap_resets_at_midnight_utc() -> None:
@@ -105,9 +144,13 @@ PCR = PcrOptions()
 
 
 def pcr_rows(start: float, end: float, close_ts: float) -> list[dict]:
-    """Five hours of minute readings, the ratio moving linearly from `start` to `end`."""
+    """Five hours of minute readings: the ratio sits at `start`, then moves to `end` inside the bar
+    closing at `close_ts` — so the 4h window crosses on that bar and not on the one before it."""
     n = 300
-    return [{"ts": close_ts - (n - i) * 60, "pcr_oi": start + (end - start) * i / (n - 1)} for i in range(n)]
+    return [
+        {"ts": ts, "pcr_oi": start if ts <= close_ts - 900 else end}
+        for ts in (close_ts - (n - i) * 60 for i in range(n))
+    ]
 
 
 def fifteen(prices: list[float]) -> list[Candle]:
@@ -130,6 +173,30 @@ def test_a_falling_ratio_sells_and_a_small_move_is_nothing() -> None:
     assert down.side == "sell" and (down.stop or 0) > bars[-1].high
     flat = PCR.decide(Context("BTCUSD", "BTC", "15m", bars, options_history=pcr_rows(0.60, 0.65, close)))
     assert flat.side is None and "under" in flat.reason
+
+
+def test_a_shift_already_past_the_threshold_a_bar_ago_is_not_news() -> None:
+    """The crossing is the signal. Without this the same shift re-fires for hours and the strategy
+    re-opens the idea after every stop, paying the round trip each time."""
+    bars = fifteen([80_000.0 + i for i in range(41)])
+    rows = pcr_rows(0.60, 0.60 + MIN_SHIFT + 0.05, bars[-2].time + 900)
+    assert PCR.decide(Context("BTCUSD", "BTC", "15m", bars[:-1], options_history=rows)).side == "buy"
+
+    # One bar on, with the ratio holding where it got to: the move is still 4h wide, but it is old.
+    held = rows + [{"ts": rows[-1]["ts"] + 60 * i, "pcr_oi": rows[-1]["pcr_oi"]} for i in range(1, 16)]
+    later = PCR.decide(Context("BTCUSD", "BTC", "15m", bars, options_history=held))
+    assert later.side is None and "already" in later.reason
+
+
+def test_a_shift_that_crosses_the_other_way_still_fires() -> None:
+    """A latch that only lets one side through would miss the turn."""
+    bars = fifteen([80_000.0] * 41)
+    close = bars[-1].time + 900
+    # Rising through the threshold up to the previous bar, then falling back through it on this one.
+    up = [{"ts": close - 900 - (300 - i) * 60, "pcr_oi": 0.60 + 0.25 * i / 299} for i in range(300)]
+    down = [{"ts": close - 900 + 60 * i, "pcr_oi": 0.85 - 0.60 * i / 15} for i in range(1, 16)]
+    d = PCR.decide(Context("BTCUSD", "BTC", "15m", bars, options_history=up + down))
+    assert d.side == "sell", d.reason
 
 
 def test_without_enough_recorded_history_it_says_so() -> None:

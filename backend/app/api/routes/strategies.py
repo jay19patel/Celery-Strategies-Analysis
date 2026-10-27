@@ -28,7 +28,10 @@ class PerpOrder(BaseModel):
 def directional(engine: EngineDep) -> dict[str, Any]:
     s = engine.settings()
     job = next((j for j in engine.scheduler.status() if j["id"] == "strategies.run"), None)
-    return {"strategies": engine.runner.status(), "job": job, "auto_options": s.auto_options, "brokers": engine.broker_status()}
+    return {
+        "strategies": engine.runner.status(), "job": job, "auto_options": s.auto_options,
+        "underlyings": s.underlyings, "brokers": engine.broker_status(),
+    }
 
 
 @router.get("/strategies/signals")

@@ -2,7 +2,10 @@
 
   1. expiry   the nearest between `expiry_min_hours` and `expiry_max_hours`
   2. regime   volatility premium and direction, a rule score per strategy (`options.regime`)
-  3. build    every enabled strategy scoring at least `min_score`, assessed at one lot
+  3. build    every enabled strategy scoring at least the bar, assessed at one lot. The bar is
+              `min_score`, eased towards `min_score_floor` as a day with no entry on this
+              underlying runs out — the one number pacing towards about a trade a day
+
   4. filter   only those passing every required check (liquidity, POP, edge at realised vol, ...)
   5. review   with AI on, a model approves one of the top three or skips; it cannot invent one
   6. size     lots whose worst case is `risk_per_trade_pct` of that broker's equity
@@ -32,7 +35,8 @@ from app.market import options as chain
 from app.options.strategies import CATALOG, Plan
 from app.settings import Settings
 from app.trading.desk import Desk
-from app.trading.service import HELD, TradingService
+from app.trading.risk import day_start, trading_day
+from app.trading.service import HELD, TradingService, is_directional
 
 log = logging.getLogger(__name__)
 MAX_CANDIDATES = 3
@@ -90,14 +94,50 @@ class AutoTrader:
         return "; ".join(out)
 
     def _room(self, broker: str, underlying: str, s: Settings) -> str:
-        """Why `broker` cannot take another auto entry on `underlying`, or ""."""
+        """Why `broker` cannot take another auto entry on `underlying`, or "".
+
+        Only option structures are counted. A position on the perpetual holds its own slot, gated
+        per symbol in `TradingService.gate_directional`, so BTC futures never block a BTC option
+        structure and neither one blocks the other underlying — the same split `gate` already makes.
+        """
         with session() as db:
-            held = db.exec(select(Structure).where(Structure.broker == broker, col(Structure.status).in_(HELD))).all()
+            rows = db.exec(select(Structure).where(Structure.broker == broker, col(Structure.status).in_(HELD))).all()
+        held = [st for st in rows if not is_directional(st)]
         if len(held) >= s.max_open_structures:
-            return f"holds {len(held)} structures (max {s.max_open_structures})"
+            return f"holds {len(held)} option structures (max {s.max_open_structures})"
         if sum(st.underlying == underlying for st in held) >= s.max_per_underlying:
-            return f"already holds {underlying} (max {s.max_per_underlying})"
+            return f"already holds {underlying} options (max {s.max_per_underlying})"
         return ""
+
+    def _bar(self, underlying: str, s: Settings, now: float | None = None) -> tuple[int, str]:
+        """The score a strategy must beat this cycle, and the note that explains it.
+
+        `min_score` is the bar at the start of the trading day. With `min_score_floor` set and
+        nothing opened on this underlying yet today, it eases towards that floor as the day runs
+        out — hold out for a good fit early, take the best there is late. The first entry of the day
+        puts the bar back up: the floor paces the desk to about one entry a day, it never licenses a
+        second one. Only this bar moves; every hard check runs at full strength at any hour.
+        """
+        if s.min_score_floor >= s.min_score:
+            return s.min_score, ""
+        now = time.time() if now is None else now
+        day = trading_day(s.day_timezone, now)
+        start = day_start(s.day_timezone, day)
+        if self._opened_today(underlying, start):
+            return s.min_score, ""
+        through = min(max((now - start) / 86_400, 0.0), 1.0)
+        bar = round(s.min_score - (s.min_score - s.min_score_floor) * through)
+        return bar, f"nothing opened on {underlying} today: the bar has eased from {s.min_score} to {bar} ({through:.0%} through {day})"
+
+    @staticmethod
+    def _opened_today(underlying: str, since: float) -> bool:
+        """Has an option structure on this underlying been opened since the day began? Failed and
+        closed ones count: the desk took its shot, whatever became of it."""
+        with session() as db:
+            rows = db.exec(
+                select(Structure).where(Structure.underlying == underlying, Structure.opened_at >= since)
+            ).all()
+        return any(not is_directional(st) for st in rows)
 
     async def decide(self, underlying: str, brokers: list[str]) -> dict[str, Any]:
         s: Settings = self.settings()
@@ -135,13 +175,18 @@ class AutoTrader:
         regime["hours_to_expiry"] = round((expiry - time.time()) / 3600, 2)
         dec.regime = {k: regime[k] for k in ("label", "direction", "direction_parts", "metrics", "scores", "notes", "hours_to_expiry")}
 
+        bar, pacing = self._bar(underlying, s)
+        dec.regime["min_score"] = bar  # what the bar actually was, so a past decision reads back straight
+        if pacing:
+            dec.regime["pacing"] = pacing
+
         considered, passing, plans = [], [], {}
         for key in s.auto_strategies:
             score = regime["scores"][key]
             entry: dict[str, Any] = {"strategy": key, "label": CATALOG[key].label, "score": score["score"], "reasons": score["reasons"]}
             considered.append(entry)
-            if score["score"] < s.min_score:
-                entry["status"] = f"score {score['score']} under {s.min_score}"
+            if score["score"] < bar:
+                entry["status"] = f"score {score['score']} under {bar}"
                 continue
             try:
                 plan = self.desk.plan(underlying, key, expiry)
@@ -162,10 +207,12 @@ class AutoTrader:
         dec.candidates = considered
         if not top:
             dec.reason = "no strategy passed: " + "; ".join(f"{c['label']} {c.get('status', '')}" for c in considered) if considered else "no strategy enabled"
+            if pacing:
+                dec.reason += f" ({pacing})"
             return
 
         choice = top[0]
-        why = f"rules chose {choice['label']} (score {choice['score']})"
+        why = f"rules chose {choice['label']} (score {choice['score']}{f', bar eased to {bar}' if pacing else ''})"
         if s.ai_enabled and s.ai_review_trades:
             choice, why = await self._review(dec, underlying, regime, top, choice, why, s)
             if choice is None:

@@ -26,6 +26,7 @@ import { useSWRConfig } from "swr";
 import { PcrHistoryChart } from "@/components/charts/pcr-history-chart";
 import { PriceChart, type ChartMarker, type Level } from "@/components/charts/price-chart";
 import { TrendlineStructureChart } from "@/components/charts/trendline-structure-chart";
+import { AiBriefCard } from "@/components/desk/ai-brief-card";
 import { DirectPerpPanel } from "@/components/desk/direct-perp-panel";
 import { TrendlinesTable } from "@/components/desk/trendlines-table";
 import { PageHeader } from "@/components/shared/page";
@@ -994,8 +995,9 @@ export default function MarketDeskPage() {
           <PcrHistoryChart underlying={underlying} timezone={timezone} />
         </div>
 
-        {/* Right Column: Direct Perpetual Trading Panel with Auto-fill from Stats */}
-        <div>
+        {/* Right Column: the read, then the ticket it informs */}
+        <div className="space-y-4">
+          <AiBriefCard underlying={underlying} kind="market" />
           <DirectPerpPanel
             underlying={underlying}
             currentPrice={currentPrice}

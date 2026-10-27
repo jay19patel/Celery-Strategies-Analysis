@@ -11,6 +11,7 @@ import { ExpiryPicker, MarketStats } from "@/components/desk/market-bar";
 import { OrderPanel } from "@/components/desk/order-panel";
 import { PreviewPanel } from "@/components/desk/preview-panel";
 import { RegimeCard } from "@/components/desk/regime-card";
+import { StrategyCatalog } from "@/components/desk/strategy-catalog";
 import { StrategyPicker, type TicketParams } from "@/components/desk/strategy-picker";
 import { Empty, LoadError, Loading } from "@/components/shared/states";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -147,6 +148,8 @@ export default function DeskPage() {
             </CardHeader>
             {expiry && <ChainTable underlying={underlying} expiry={expiry} picked={picked} onPick={pick} />}
           </Card>
+
+          {strategies && <StrategyCatalog strategies={strategies} selected={params.strategy} onPick={(strategy) => setParams((p) => ({ ...p, strategy, legs: [] }))} />}
         </div>
 
         <div className="space-y-5">

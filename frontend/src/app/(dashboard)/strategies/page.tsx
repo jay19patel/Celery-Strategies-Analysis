@@ -5,27 +5,29 @@ import Link from "next/link";
 import {
   Bot,
   Crosshair,
-  ExternalLink,
-  Layers,
   ListFilter,
+  Loader2,
   Sparkles,
 } from "lucide-react";
+import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 
 import { PageHeader } from "@/components/shared/page";
-import { Empty, LoadError } from "@/components/shared/states";
+import { LoadError } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { api } from "@/lib/api";
 import { ago, num } from "@/lib/format";
 import { useApi } from "@/lib/live";
-import type { DirectionalStatus, SignalRow, StrategySpec } from "@/lib/types";
+import type { DirectionalStatus, SettingsResponse, SignalRow } from "@/lib/types";
 
 export default function StrategiesPage() {
   const { mutate } = useSWRConfig();
   const [selectedStrategy, setSelectedStrategy] = useState<string>("");
+  const [saving, setSaving] = useState<string>("");
 
   const { data: directional, error: dirErr } = useApi<DirectionalStatus>("/strategies/directional", {
     refreshInterval: 10_000,
@@ -34,9 +36,7 @@ export default function StrategiesPage() {
     `/strategies/signals${selectedStrategy ? `?strategy=${selectedStrategy}` : ""}`,
     { refreshInterval: 10_000 },
   );
-  const { data: optionsCatalog } = useApi<StrategySpec[]>("/strategies", {
-    revalidateOnFocus: false,
-  });
+  const { data: settings } = useApi<SettingsResponse>("/settings");
 
   if (dirErr) {
     return <LoadError error={dirErr} />;
@@ -44,12 +44,41 @@ export default function StrategiesPage() {
 
   const job = directional?.job;
   const strategies = directional?.strategies ?? [];
+  const underlyings = directional?.underlyings ?? [];
+  const enabledNames = (settings?.values.directional_strategies as string[] | undefined) ?? [];
+  const symbolMap = (settings?.values.strategy_symbols as Record<string, string[]> | undefined) ?? {};
+
+  /** Write one change through the same settings endpoint the Settings page uses. */
+  async function save(key: string, changes: Record<string, unknown>) {
+    setSaving(key);
+    try {
+      await api("/settings", "PATCH", { changes });
+      await mutate((k) => typeof k === "string" && (k.startsWith("/settings") || k.startsWith("/strategies")));
+    } catch (e) {
+      toast.error("Could not save", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSaving("");
+    }
+  }
+
+  const toggleStrategy = (name: string, on: boolean) =>
+    save(name, {
+      directional_strategies: on ? [...new Set([...enabledNames, name])] : enabledNames.filter((n) => n !== name),
+    });
+
+  // An unset strategy runs on every underlying, so the first symbol switched off has to be written
+  // as "all the others" rather than as an empty list, which the engine reads as no restriction.
+  const toggleSymbol = (name: string, symbol: string, on: boolean) => {
+    const current = symbolMap[name]?.length ? symbolMap[name] : underlyings;
+    const next = on ? [...new Set([...current, symbol])] : current.filter((s) => s !== symbol);
+    return save(`${name}:${symbol}`, { strategy_symbols: { ...symbolMap, [name]: next } });
+  };
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Strategies"
-        description="Algorithmic directional models on perpetuals, live signals stream, and options structure catalog."
+        description="The directional models that trade the perpetuals: which are on, which symbols each runs, and every signal they have fired."
         actions={
           <div className="flex items-center gap-3">
             <Link href="/">
@@ -107,21 +136,70 @@ export default function StrategiesPage() {
 
         <div className="grid gap-4 md:grid-cols-3">
           {strategies.map((strat) => (
-            <Card key={strat.name} className="flex flex-col justify-between">
+            <Card key={strat.name} className={`flex flex-col justify-between ${strat.enabled ? "" : "opacity-60"}`}>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <Badge variant={strat.enabled ? "solid" : "default"}>
                     {strat.enabled ? "Active" : "Disabled"}
                   </Badge>
-                  <span className="font-mono text-xs text-muted-foreground font-semibold">
-                    {strat.interval}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-muted-foreground font-semibold">
+                      {strat.interval}
+                    </span>
+                    {saving === strat.name ? (
+                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      <Switch
+                        checked={strat.enabled}
+                        onCheckedChange={(on) => toggleStrategy(strat.name, on)}
+                        aria-label={`${strat.label} on or off`}
+                      />
+                    )}
+                  </div>
                 </div>
                 <CardTitle className="text-base font-bold mt-1">{strat.label}</CardTitle>
                 <p className="text-xs text-muted-foreground leading-relaxed mt-1">{strat.summary}</p>
               </CardHeader>
 
               <CardContent className="space-y-3 pt-0 text-xs">
+                {/* The second switch: which symbols this strategy may trade. */}
+                <div className="rounded-lg border bg-muted/30 p-2.5 space-y-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Symbols
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {underlyings.map((symbol) => {
+                      const on = strat.symbols.includes(symbol);
+                      const key = `${strat.name}:${symbol}`;
+                      return (
+                        <div key={symbol} className="flex items-center gap-1.5 rounded-md border bg-background px-2 py-1">
+                          <span className="font-mono text-[11px] font-semibold">{symbol}</span>
+                          {saving === key ? (
+                            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                          ) : (
+                            <Switch
+                              checked={on}
+                              disabled={!strat.enabled}
+                              onCheckedChange={(next) => toggleSymbol(strat.name, symbol, next)}
+                              aria-label={`${strat.label} on ${symbol}`}
+                              className="h-4 w-7 *:data-[slot=switch-thumb]:size-3 *:data-[slot=switch-thumb]:data-[state=checked]:translate-x-3.5"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                    {underlyings.length === 0 && (
+                      <span className="text-[11px] text-muted-foreground">
+                        No underlying is enabled.{" "}
+                        <Link href="/settings" className="font-medium text-primary hover:underline">Settings</Link>
+                      </span>
+                    )}
+                  </div>
+                  {strat.enabled && strat.symbols.length === 0 && underlyings.length > 0 && (
+                    <p className="text-[11px] text-loss">On, but switched off for every symbol — it will never fire.</p>
+                  )}
+                </div>
+
                 <div className="rounded-lg border bg-muted/30 p-2.5 space-y-1.5 text-[11px]">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Stop Rule:</span>
@@ -153,19 +231,12 @@ export default function StrategiesPage() {
         </div>
       </div>
 
-      {/* Tabs for Signals Stream and Options Strategies */}
-      <Tabs defaultValue="signals" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2 sm:w-auto">
-          <TabsTrigger value="signals" className="gap-2 text-xs">
-            <ListFilter className="size-3.5" /> Signals Stream ({signals?.length ?? 0})
-          </TabsTrigger>
-          <TabsTrigger value="catalog" className="gap-2 text-xs">
-            <Layers className="size-3.5" /> Options Catalog ({optionsCatalog?.length ?? 0})
-          </TabsTrigger>
-        </TabsList>
-
-        {/* Signals Stream Tab */}
-        <TabsContent value="signals" className="space-y-4">
+      {/* Signals stream. The options structure catalog lives on the Options Desk, with the chain
+          and the builder that uses it. */}
+      <div className="space-y-4">
+        <h2 className="flex items-center gap-2 text-sm font-semibold tracking-tight text-foreground">
+          <ListFilter className="size-4 text-primary" /> Signals Stream ({signals?.length ?? 0})
+        </h2>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div>
@@ -311,63 +382,7 @@ export default function StrategiesPage() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
-
-        {/* Options Catalog Tab */}
-        <TabsContent value="catalog" className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {optionsCatalog?.map((spec) => (
-              <Card key={spec.key} className="flex flex-col justify-between">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <Badge
-                      variant={
-                        spec.view === "bullish"
-                          ? "profit"
-                          : spec.view === "bearish"
-                          ? "loss"
-                          : spec.view === "volatile"
-                          ? "solid"
-                          : "default"
-                      }
-                      className="text-[10px] capitalize"
-                    >
-                      {spec.view}
-                    </Badge>
-                    <div className="flex items-center gap-1.5">
-                      <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                        {spec.premium}
-                      </Badge>
-                      <Badge variant="outline" className="text-[10px] capitalize font-mono">
-                        {spec.risk} risk
-                      </Badge>
-                    </div>
-                  </div>
-                  <CardTitle className="text-base font-bold mt-2">{spec.label}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4 pt-0 text-xs">
-                  <p className="text-muted-foreground leading-relaxed">{spec.summary}</p>
-                  <div className="border-t pt-3 flex justify-end">
-                    <Link href={`/?strategy=${spec.key}`}>
-                      <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-                        Configure on Desk <ExternalLink className="size-3" />
-                      </Button>
-                    </Link>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {(!optionsCatalog || optionsCatalog.length === 0) && (
-            <Card>
-              <CardContent className="py-8">
-                <Empty title="No options strategies in catalog." />
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-      </Tabs>
+      </div>
     </div>
   );
 }

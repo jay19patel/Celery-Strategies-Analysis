@@ -141,6 +141,7 @@ class AiBrief(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     ts: float = Field(index=True)
     underlying: str
+    kind: str = "options"  # which desk asked: options | market
     model: str = ""
     content: Any = Field(default=None, sa_column=Column(JSON))
     error: str = ""

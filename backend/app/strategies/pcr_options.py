@@ -4,6 +4,11 @@ The level is not the signal: the ratio sits wherever the book sits for hours, an
 fires on every bar. What carries information is the CHANGE — writers moving from one side of the
 book to the other. Rising put/call (puts being written into: support) -> buy; falling -> sell.
 
+Nor is a change that already happened. A shift past `MIN_SHIFT` stays past it for as long as the
+reading `LOOKBACK_HOURS` back is still the low one — hours, a dozen bars — so only the bar the shift
+CROSSES the threshold is a signal. Without that latch the strategy re-opens the same idea after
+every stop and pays the round trip each time, which is how a range grinds an account down.
+
 The comparison reads the engine's own stored options history, minute by minute: the exchange keeps
 none, so there is no signal until the engine has recorded `LOOKBACK_HOURS` of it, and it says so.
 
@@ -22,6 +27,7 @@ from app.strategies.base import Context, Decision, Strategy, bracket, min_stop_p
 LOOKBACK_HOURS = 4.0
 MIN_SHIFT = 0.15
 MAX_AGE = 1800.0  # a stored row older than this does not describe the book now
+BAR_SECONDS = 900  # the strategy's own 15m bar
 STOP_BUFFER_ATR = 0.1
 MIN_STOP_PCT = 0.15
 MAX_STOP_PCT = 2.0
@@ -31,6 +37,24 @@ REWARD_MULTIPLE = 2.0
 def _pcr(row: dict[str, Any]) -> float | None:
     value = row.get("pcr_oi")
     return float(value) if isinstance(value, int | float) and not isinstance(value, bool) and value > 0 else None
+
+
+def _window(rows: list[dict[str, Any]], at: float) -> tuple[float, float, float] | None:
+    """The put/call ratio `LOOKBACK_HOURS` apart, measured as of the last reading at or before `at`:
+    (then, now, the time of that reading). None when the history does not reach back that far.
+
+    Taking the last reading at or before `at` rather than simply the newest one keeps the measurement
+    the bar's own — the engine records every minute, so by the time a bar is evaluated there are
+    readings after its close, and a backtest must not see them."""
+    upto = [r for r in rows if float(r["ts"]) <= at]
+    if not upto:
+        return None
+    last = upto[-1]
+    first = next((r for r in reversed(upto) if float(last["ts"]) - float(r["ts"]) >= LOOKBACK_HOURS * 3600), None)
+    if first is None:
+        return None
+    now, then = _pcr(last), _pcr(first)
+    return None if now is None or then is None else (then, now, float(last["ts"]))
 
 
 class PcrOptions(Strategy):
@@ -50,17 +74,23 @@ class PcrOptions(Strategy):
         if not ctx.candles:
             return none("no bars")
         bar = ctx.candles[-1]
-        latest = rows[-1]
-        if bar.time + 900 - float(latest["ts"]) > MAX_AGE:
-            return none("the latest options reading is stale")
-        earlier = next((r for r in reversed(rows) if float(latest["ts"]) - float(r["ts"]) >= LOOKBACK_HOURS * 3600), None)
-        if earlier is None:
+        window = _window(rows, bar.time + BAR_SECONDS)
+        if window is None:
             return none(f"needs {LOOKBACK_HOURS:g}h of recorded options history")
-        now, then = _pcr(latest), _pcr(earlier)
-        assert now is not None and then is not None
+        then, now, at = window
+        if bar.time + BAR_SECONDS - at > MAX_AGE:
+            return none("the latest options reading is stale")
         shift = now - then
         if abs(shift) < MIN_SHIFT:
             return none(f"put/call OI {then:.2f} -> {now:.2f} over {LOOKBACK_HOURS:g}h: a {shift:+.2f} move, under {MIN_SHIFT:g}")
+
+        # The crossing is the signal, not the level. The same measurement one bar ago: already past
+        # the threshold the same way, and this bar is not news — it is the bar after the news.
+        before = _window(rows, bar.time)
+        if before is not None:
+            was = before[1] - before[0]
+            if abs(was) >= MIN_SHIFT and (was > 0) == (shift > 0):
+                return none(f"put/call was already {was:+.2f} on the previous bar — the crossing is the signal, not the level")
 
         side = 1 if shift > 0 else -1
         closes = [c.close for c in ctx.candles]

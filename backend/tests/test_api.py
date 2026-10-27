@@ -75,3 +75,28 @@ def test_going_live_needs_the_phrase_over_http(client: TestClient) -> None:
     login(client)
     r = client.patch("/api/settings", json={"changes": {"delta_active": True, "delta_env": "live"}})
     assert r.status_code == 422 and "confirmation phrase" in r.json()["error"]
+
+
+def test_the_strategies_page_can_switch_a_strategy_per_symbol(client: TestClient) -> None:
+    """The Strategies page writes both switches through the settings endpoint, and reads the result
+    back from /strategies/directional."""
+    login(client)
+    assert client.patch("/api/settings", json={"changes": {"underlyings": ["BTC", "ETH"]}}).status_code == 200
+
+    before = {s["name"]: s["symbols"] for s in client.get("/api/strategies/directional").json()["strategies"]}
+    assert before["supertrend"] == ["BTC", "ETH"]  # unmapped: every enabled underlying
+
+    assert client.patch("/api/settings", json={"changes": {"strategy_symbols": {"supertrend": ["ETH"]}}}).status_code == 200
+    body = client.get("/api/strategies/directional").json()
+    assert body["underlyings"] == ["BTC", "ETH"]
+    assert {s["name"]: s["symbols"] for s in body["strategies"]}["supertrend"] == ["ETH"]
+
+    bad = client.patch("/api/settings", json={"changes": {"strategy_symbols": {"supertrend": ["DOGE"]}}})
+    assert bad.status_code == 422 and "strategy_symbols" in bad.json()["error"]
+
+
+def test_a_brief_is_asked_for_by_desk(client: TestClient) -> None:
+    login(client)
+    assert client.get("/api/ai/brief?underlying=BTC&kind=market").json() == []
+    assert client.get("/api/ai/brief?underlying=BTC&kind=nope").status_code == 409
+    assert client.post("/api/ai/brief", json={"underlying": "BTC", "kind": "nope"}).status_code == 409

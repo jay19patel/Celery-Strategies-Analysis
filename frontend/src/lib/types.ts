@@ -417,21 +417,24 @@ export interface AiStatus {
   ready: string;
 }
 
+/** Which desk asked: the options desk writes about volatility, the market desk about direction. */
+export type BriefKind = "options" | "market";
+
 export interface AiBrief {
   id: number;
   ts: number;
   underlying: string;
+  kind: BriefKind;
   model: string;
   latency_ms: number | null;
   error: string;
-  content: {
+  // Only the sections of this brief's kind are present; both carry headline, summary and watch.
+  content: ({
     headline: string;
-    volatility: string;
-    positioning: string;
     summary: string;
     watch: string[];
     confidence: "high" | "medium" | "low";
-  } | null;
+  } & Partial<Record<"volatility" | "positioning" | "trend" | "momentum_flow" | "levels" | "momentum" | "flow", string>>) | null;
 }
 
 export interface EventRow {
@@ -551,6 +554,8 @@ export interface DirectionalStrategy {
   interval: string;
   lookback: number;
   enabled: boolean;
+  /** the enabled underlyings this strategy actually runs on — both switches applied */
+  symbols: string[];
   /** what it decided on the last closed bar, per symbol */
   latest: { strategy: string; symbol: string; bar_time: number; at: number; reason: string; decision: DirectionalDecision | null }[];
 }
@@ -559,6 +564,8 @@ export interface DirectionalStatus {
   strategies: DirectionalStrategy[];
   job: JobStatus | null;
   auto_options: boolean;
+  /** every underlying the engine is running, whatever each strategy is set to */
+  underlyings: string[];
   brokers: BrokerStatus[];
 }
 

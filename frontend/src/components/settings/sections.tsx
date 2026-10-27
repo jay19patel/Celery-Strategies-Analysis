@@ -226,6 +226,14 @@ export function AutoTab({ strategies }: { strategies: StrategySpec[] }) {
           <NumberField name="max_spread_pct" label="Maximum leg bid/ask spread (%)" />
         </FieldGrid>
       </Section>
+      <Section
+        title="Pacing"
+        description="Towards about one entry a day. While nothing has opened on an underlying today the regime score above eases towards this floor as the day runs out, and the first entry puts it back. 0 switches it off. The filters above never ease: a thin premium is refused at any hour."
+      >
+        <FieldGrid>
+          <NumberField name="min_score_floor" label="Regime score floor (0 = off)" integer />
+        </FieldGrid>
+      </Section>
     </div>
   );
 }

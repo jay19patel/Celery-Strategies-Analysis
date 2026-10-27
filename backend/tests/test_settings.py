@@ -50,6 +50,23 @@ def test_invalid_changes_are_refused_with_the_field_named() -> None:
         apply_changes(Settings(), {"ai_model": "not a model!"})
 
 
+def test_a_strategy_runs_on_an_underlying_only_when_both_switches_are_on() -> None:
+    s = Settings(underlyings=["BTC", "ETH"])
+    assert s.strategy_underlyings("supertrend") == ["BTC", "ETH"]  # unmapped: every enabled underlying
+
+    s = apply_changes(s, {"strategy_symbols": {"supertrend": ["ETH"], "pcr_options": []}})
+    assert s.strategy_on("supertrend", "ETH") and not s.strategy_on("supertrend", "BTC")
+    assert s.strategy_underlyings("pcr_options") == ["BTC", "ETH"]  # empty list means no restriction
+
+    off = apply_changes(s, {"directional_strategies": ["pcr_options"]})
+    assert not off.strategy_on("supertrend", "ETH")  # the strategy switch still wins over its symbols
+
+    with pytest.raises(SettingsError, match="strategy_symbols"):
+        apply_changes(s, {"strategy_symbols": {"supertrend": ["DOGE"]}})
+    with pytest.raises(SettingsError, match="strategy_symbols"):
+        apply_changes(s, {"strategy_symbols": {"no_such_strategy": ["BTC"]}})
+
+
 def test_stored_values_that_no_longer_validate_fall_back() -> None:
     s = from_stored({"min_score": 70, "risk_per_trade_pct": 999, "retired_field": 1})
     assert s.min_score == 70

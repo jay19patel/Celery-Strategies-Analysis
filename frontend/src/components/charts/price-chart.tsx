@@ -123,12 +123,18 @@ export function PriceChart({
   const ema50Series = useRef<ISeriesApi<"Line"> | null>(null);
   const markersPlugin = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLines = useRef<IPriceLine[]>([]);
+  const live = useRef({ paintOverlay: () => {}, zones, showZones, showFvg, showOb });
 
   // Hover states for the fixed corner legend
   const [hoverBar, setHoverBar] = useState<Bar | null>(null);
   const [cursorPrice, setCursorPrice] = useState<number | null>(null);
   const [hoveredZone, setHoveredZone] = useState<StructureZone | null>(null);
   const [isLegendCollapsed, setIsLegendCollapsed] = useState(false);
+
+  // Bumped every time the chart is rebuilt. Everything that fills the chart depends on it, so a
+  // rebuild is always followed by a refill — without it, a rebuild triggered by something the
+  // refill effects do not watch leaves the new chart empty of exactly those things.
+  const [built, setBuilt] = useState(0);
 
   // Paint zones (FVG & OB) & Trendlines on the background canvas
   const paintOverlay = useCallback(() => {
@@ -456,7 +462,7 @@ export function PriceChart({
 
     // Listen to time scale visible range changes to redraw canvas zones & trendlines
     c.timeScale().subscribeVisibleLogicalRangeChange(() => {
-      paintOverlay();
+      live.current.paintOverlay();
     });
 
     // Crosshair move listener for OHLCV hover, cursor price & Zone detection
@@ -483,11 +489,12 @@ export function PriceChart({
           const hoveredPrice = cs.coordinateToPrice(param.point.y);
           if (hoveredPrice !== null) {
             setCursorPrice(hoveredPrice);
-            if (showZones) {
-              const match = zones.find(
+            const now = live.current;
+            if (now.showZones) {
+              const match = now.zones.find(
                 (z) =>
                   z.state !== "invalidated" &&
-                  ((z.kind === "fvg" && showFvg) || (z.kind === "ob" && showOb)) &&
+                  ((z.kind === "fvg" && now.showFvg) || (z.kind === "ob" && now.showOb)) &&
                   hoveredPrice >= z.low &&
                   hoveredPrice <= z.high,
               );
@@ -499,11 +506,12 @@ export function PriceChart({
     });
 
     chart.current = c;
+    setBuilt((n) => n + 1);  // the chart is empty: every effect that fills it now runs again
 
     const resizeObserver = new ResizeObserver(() => {
       if (!box.current) return;
       c.applyOptions({ width: box.current.clientWidth, height });
-      paintOverlay();
+      live.current.paintOverlay();
     });
     resizeObserver.observe(box.current);
 
@@ -518,7 +526,7 @@ export function PriceChart({
       markersPlugin.current = null;
       priceLines.current = [];
     };
-  }, [height, paintOverlay, showFvg, showOb, showVolume, showZones, timezone, zones]);
+  }, [height, showVolume, timezone]);
 
   // Set candlestick, volume, and EMA data
   useEffect(() => {
@@ -571,7 +579,7 @@ export function PriceChart({
     }
 
     setTimeout(paintOverlay, 50);
-  }, [bars, paintOverlay, showEma, showVolume]);
+  }, [bars, built, paintOverlay, showEma, showVolume]);
 
   // Set levels
   useEffect(() => {
@@ -593,7 +601,7 @@ export function PriceChart({
         title: l.label,
       }),
     );
-  }, [levels, showLevels]);
+  }, [built, levels, showLevels]);
 
   // Set SMC Markers (CHoCH & BOS)
   useEffect(() => {
@@ -618,12 +626,19 @@ export function PriceChart({
     });
 
     markersPlugin.current.setMarkers(chartMarkers);
-  }, [markers, showMarkers]);
+  }, [built, markers, showMarkers]);
 
   // Repaint overlay when zones, trendlines or visibility toggles change
   useEffect(() => {
     paintOverlay();
   }, [paintOverlay]);
+
+  // What the chart's own listeners need, read when they fire rather than closed over at creation.
+  // Keeping these out of the chart's dependencies is what stops it being torn down and rebuilt on
+  // every data refresh — which emptied it of markers and levels, and reset the user's zoom with it.
+  useEffect(() => {
+    live.current = { paintOverlay, zones, showZones, showFvg, showOb };
+  });
 
   const activeBar = hoverBar || (bars.length > 0 ? bars[bars.length - 1] : null);
   const changePct = activeBar ? ((activeBar.close - activeBar.open) / activeBar.open) * 100 : 0;
