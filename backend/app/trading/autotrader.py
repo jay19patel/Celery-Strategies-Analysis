@@ -32,7 +32,7 @@ from app.core.events import EventHub
 from app.core.models import Decision, Structure
 from app.errors import AppError, BrokerError, Refused
 from app.market import options as chain
-from app.options.strategies import CATALOG, Plan
+from app.options.strategies import CATALOG, ZERO_HERO, Plan
 from app.settings import Settings
 from app.trading.desk import Desk
 from app.trading.risk import day_start, trading_day
@@ -276,7 +276,7 @@ class AutoTrader:
     @staticmethod
     def decisions(underlying: str = "", action: str = "", limit: int = 50) -> list[dict[str, Any]]:
         with session() as db:
-            q = select(Decision)
+            q = select(Decision).where(Decision.strategy != ZERO_HERO)  # zero-hero has its own page
             if underlying:
                 q = q.where(Decision.underlying == underlying)
             if action:

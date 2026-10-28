@@ -31,7 +31,7 @@ from app.market.feed import MarketFeed
 from app.market.options import PERP_SLIPPAGE, PERPETUALS, UNDERLYING_OF
 from app.options.assess import leg_fee
 from app.options.pricing import LegSpec, analyze, intrinsic, margin_required, net_premium
-from app.options.strategies import CATALOG, Plan
+from app.options.strategies import ZERO_HERO, Plan, spec_for
 from app.settings import Settings
 from app.strategies import REGISTRY
 from app.trading.desk import Desk
@@ -57,11 +57,19 @@ def is_directional(st: Structure) -> bool:
     return st.stop_price is not None
 
 
+def is_zerohero(st: Structure) -> bool:
+    return st.strategy == ZERO_HERO
+
+
+def is_zerohero_plan(plan: Plan) -> bool:
+    return plan.strategy == ZERO_HERO
+
+
 def label_of(st: Structure) -> str:
     if is_directional(st):
         strategy = REGISTRY.get(st.strategy)
         return strategy.label if strategy else "Perpetual"
-    spec = CATALOG.get(st.strategy)
+    spec = spec_for(st.strategy)
     return spec.label if spec else "Custom"
 
 
@@ -72,6 +80,20 @@ def structure_id(broker: str, request_id: str) -> str:
 
 def leg_sign(side: str) -> int:
     return 1 if side == "buy" else -1
+
+
+def _tp_pct(plan: Plan, credit: bool, cfg: Settings) -> float:
+    """A zero-hero buy takes profit at a multiple of the debit, not at the 60% a long straddle does:
+    the whole position is the tail, and a 60% target throws away what pays for the losers."""
+    if is_zerohero_plan(plan):
+        return cfg.zh_take_profit_pct
+    return cfg.credit_take_profit_pct if credit else cfg.debit_take_profit_pct
+
+
+def _sl_pct(plan: Plan, credit: bool, cfg: Settings) -> float:
+    if is_zerohero_plan(plan):
+        return cfg.zh_stop_loss_pct
+    return cfg.credit_stop_loss_pct if credit else cfg.debit_stop_loss_pct
 
 
 def exit_thresholds(st: Structure) -> tuple[float | None, float | None]:
@@ -225,13 +247,20 @@ class TradingService:
         and the assessment at `qty`; raises Refused naming the first rule that fails."""
         s: Settings = self.settings()
         b, held = self._ready(broker, s)
-        held = [st for st in held if not is_directional(st)]  # positions on the perpetual are gated on their own
-        if len(held) >= s.max_open_structures:
-            raise Refused(f"{broker} already holds {len(held)} structures (max {s.max_open_structures})")
-        if sum(st.underlying == plan.underlying for st in held) >= s.max_per_underlying:
-            raise Refused(f"{broker} already holds {s.max_per_underlying} {plan.underlying} structure(s) (max per underlying)")
-        if not 1 <= qty <= s.max_lots:
-            raise Refused(f"quantity must be 1 to {s.max_lots} lots")
+        # Each family holds its own slots. A position on the perpetual is gated per symbol in
+        # `gate_directional`, and a zero-hero buy by its daily budget and attempt count, so neither
+        # blocks a condor and a condor blocks neither — the same split, extended.
+        held = [st for st in held if not is_directional(st) and not is_zerohero(st)]
+        if is_zerohero_plan(plan):
+            if not 1 <= qty <= s.zh_max_lots:
+                raise Refused(f"quantity must be 1 to {s.zh_max_lots} lots")
+        else:
+            if len(held) >= s.max_open_structures:
+                raise Refused(f"{broker} already holds {len(held)} structures (max {s.max_open_structures})")
+            if sum(st.underlying == plan.underlying for st in held) >= s.max_per_underlying:
+                raise Refused(f"{broker} already holds {s.max_per_underlying} {plan.underlying} structure(s) (max per underlying)")
+            if not 1 <= qty <= s.max_lots:
+                raise Refused(f"quantity must be 1 to {s.max_lots} lots")
         hours = (plan.expiry - time.time()) / 3600
         floor = s.expiry_min_hours if source == "auto" else MIN_MANUAL_HOURS
         if hours < floor:
@@ -266,8 +295,8 @@ class TradingService:
                 id=sid, broker=broker, underlying=plan.underlying, strategy=plan.strategy, source=source, status="opening",
                 expiry=plan.expiry, qty=qty, entry_spot=plan.spot, opened_at=time.time(), decision_id=decision_id,
                 request_id=request_id, margin=assessment["analysis"]["margin"],
-                take_profit_pct=cfg.credit_take_profit_pct if credit else cfg.debit_take_profit_pct,
-                stop_loss_pct=cfg.credit_stop_loss_pct if credit else cfg.debit_stop_loss_pct,
+                take_profit_pct=_tp_pct(plan, credit, cfg),
+                stop_loss_pct=_sl_pct(plan, credit, cfg),
             )
             legs = [
                 Leg(structure_id=sid, idx=i, symbol=leg.symbol, kind=leg.kind, strike=leg.strike, side=leg.side,

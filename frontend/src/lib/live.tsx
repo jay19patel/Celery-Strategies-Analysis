@@ -31,8 +31,9 @@ const REFRESH: Record<string, string[]> = {
   RiskResumed: ["/portfolio", "/auto"],
   KillSwitch: ["/trading", "/portfolio"],
   AutoDecision: ["/auto", "/portfolio/journal"],
+  ZeroHeroDecision: ["/zerohero", "/portfolio/journal"],
   AiBrief: ["/ai"],
-  SettingsChanged: ["/settings", "/auto", "/portfolio", "/ai", "/market", "/strategies"],
+  SettingsChanged: ["/settings", "/auto", "/zerohero", "/portfolio", "/ai", "/market", "/strategies"],
   Signal: ["/strategies", "/trading", "/portfolio"],
   MarketAnalysis: ["/desk"],
   PaperReset: ["/portfolio", "/trading"],
@@ -67,6 +68,12 @@ function announce(e: LiveEvent) {
     case "AutoDecision":
       if (d.action === "open") toast.info("Auto-trader opened a structure", { description: e.message });
       if (d.action === "error") toast.error("Auto-trader error", { description: e.message });
+      break;
+    case "ZeroHeroDecision":
+      // A shadow proposal is information, not a trade; it says so rather than looking like one.
+      if (d.action === "open") toast.info("Zero-hero bought", { description: e.message });
+      if (d.action === "shadow") toast.message("Zero-hero (shadow)", { description: e.message });
+      if (d.action === "error") toast.error("Zero-hero error", { description: e.message });
       break;
   }
 }

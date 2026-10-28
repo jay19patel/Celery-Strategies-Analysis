@@ -273,6 +273,75 @@ export function RiskTab() {
   );
 }
 
+// -- zero hero ----------------------------------------------------------------------------
+
+export function ZeroHeroTab() {
+  const { draft } = useForm();
+  const shadow = draft.zh_shadow !== false;
+  const budget = Number(draft.zh_daily_budget_pct ?? 20);
+  const attempts = Number(draft.zh_max_attempts_day ?? 3);
+  return (
+    <div className="space-y-6">
+      <Notice tone={shadow ? "info" : "warn"}>
+        {shadow ? (
+          <>
+            <strong>Shadow mode is on.</strong> Every scan is recorded with the contract it chose and the size it would have
+            bought, and no order is sent. Leave it on until the Zero-Hero page shows enough closed scans to tell you what the
+            hit rate actually is — the sizing arithmetic below is only as good as that number.
+          </>
+        ) : (
+          <>
+            <strong>Shadow mode is off: this will send real orders</strong> on any broker whose auto-trading is on. A long OTM
+            buy in the last hours before expiry loses its whole premium most of the time. That is the design, not a fault.
+          </>
+        )}
+      </Notice>
+      <Section
+        title="Zero-hero"
+        description="A long OTM option bought on an expiry-day momentum break. It is the opposite trade to everything on the Auto Options page and is gated separately, because a premium seller's filters would refuse it every time — correctly, and uselessly."
+      >
+        <FieldGrid>
+          <SwitchField name="zh_enabled" label="Run the expiry-day scan" />
+          <SwitchField name="zh_shadow" label="Shadow mode (scan and record, never trade)" />
+          <NumberField name="zh_window_start_hours" label="Window opens (hours before expiry)" />
+          <NumberField name="zh_window_end_hours" label="Window closes (hours before expiry)" hint="Must leave room before the time stop." />
+          <NumberField name="zh_scan_seconds" label="Scan every (seconds)" integer hint="A break is a one-bar event; a slow scan finds the same entry after it has run." />
+        </FieldGrid>
+      </Section>
+      <Section
+        title="Sizing"
+        description={`The budget is for the whole DAY and is split across the attempts the day has left — not per trade. At ${budget}% over ${attempts} attempts that is about ${(budget / attempts).toFixed(1)}% of equity each.`}
+      >
+        <FieldGrid>
+          <NumberField name="zh_daily_budget_pct" label="Daily budget (% of equity)" />
+          <NumberField name="zh_max_attempts_day" label="Maximum attempts per day" integer />
+          <NumberField name="zh_max_lots" label="Maximum lots per attempt" integer hint="A backstop, not the sizing rule: one lot of an 8-dollar BTC option is 0.008 dollars of premium." />
+          <NumberField name="zh_capacity_share_pct" label="Share of a strike's traded size (%)" hint="What actually limits size. A proxy from OI and volume — Delta's ticker carries no book depth." />
+          <NumberField name="zh_min_oi" label="Minimum open interest (underlying)" />
+        </FieldGrid>
+      </Section>
+      <Section title="Entry filters" description="A contract must pass every one of these, and the market must pass the scan's own gates on top.">
+        <FieldGrid>
+          <NumberField name="zh_min_multiple" label="Minimum payoff at the target (x)" hint="Repriced with the clock advanced, not just the spot." />
+          <NumberField name="zh_min_ev" label="Minimum expected value (per unit paid)" />
+          <NumberField name="zh_min_distance_pct" label="Minimum distance OTM (%)" />
+          <NumberField name="zh_max_distance_pct" label="Maximum distance OTM (%)" />
+          <NumberField name="zh_max_spread_pct" label="Maximum bid/ask spread (%)" hint="An 8/10 quote is a 20% loss on contact." />
+          <NumberField name="zh_displacement_atr" label="Minimum displacement (x mean range)" />
+          <NumberField name="zh_max_pain_buffer_pct" label="Past max pain by (% of spot)" hint="A trade running into the pin is refused outright." />
+        </FieldGrid>
+      </Section>
+      <Section title="Exits" description="Whichever time stop comes first applies — this one or the global 'close before expiry'. A broken premise closes the position before either.">
+        <FieldGrid>
+          <NumberField name="zh_take_profit_pct" label="Take profit (% of the debit)" hint="300% means the contract at 4x." />
+          <NumberField name="zh_stop_loss_pct" label="Stop loss (% of the debit)" />
+          <NumberField name="zh_time_stop_minutes" label="Time stop (minutes before expiry)" integer />
+        </FieldGrid>
+      </Section>
+    </div>
+  );
+}
+
 // -- AI -----------------------------------------------------------------------------------
 
 const EXAMPLE_MODELS = [

@@ -3,8 +3,10 @@
 A position on the perpetual leaves when the mark reaches its strategy's stop or target, or after
 `perp_max_hold_hours`. Per options structure, strongest reason first:
   1. past expiry and still open  -> settle at intrinsic on the index
-  2. inside `exit_before_expiry_minutes` -> close (settlement and pin risk are not worth the last hour)
-  3. P&L at the take-profit or the stop-loss -> close
+  2. inside `exit_before_expiry_minutes` -> close (settlement and pin risk are not worth the last hour),
+     or `zh_exit_minutes` on a zero-hero buy, whichever of the two comes first
+  3. a zero-hero buy whose break has been undone -> close on the premise, not on the P&L
+  4. P&L at the take-profit or the stop-loss -> close
 
 The P&L read is what closing would actually book (`TradingService.valuation`): bids for longs, asks
 for shorts, every fee. Without a fresh quote on every leg nothing is decided — absence over
@@ -28,14 +30,15 @@ from app.core.models import Leg, Structure
 from app.errors import BrokerError
 from app.settings import Settings
 from app.trading.risk import set_halt, start_day
-from app.trading.service import TradingService, exit_thresholds, is_directional
+from app.trading.service import TradingService, exit_thresholds, is_directional, is_zerohero
 
 
 class Guard:
-    def __init__(self, trading: TradingService, settings: Any, hub: EventHub) -> None:
+    def __init__(self, trading: TradingService, settings: Any, hub: EventHub, zerohero: Any = None) -> None:
         self.trading = trading
         self.settings: Any = settings
         self.hub = hub
+        self.zerohero = zerohero  # reads the break a zero-hero buy was opened on; None in tests
 
     async def check_structures(self) -> str:
         s: Settings = self.settings()
@@ -63,8 +66,18 @@ class Guard:
         if now >= st.expiry:
             return "expired"
         minutes_left = (st.expiry - now) / 60
-        if s.exit_before_expiry_minutes and minutes_left <= s.exit_before_expiry_minutes:
+        # A zero-hero buy leaves at whichever time stop comes FIRST. In the last hour theta goes
+        # vertical on a contract that is all time value, so holding one to find out is not a
+        # decision, it is a donation with a countdown.
+        floor = s.zh_exit_minutes if is_zerohero(st) else s.exit_before_expiry_minutes
+        if floor and minutes_left <= floor:
             return f"time exit: {minutes_left:.0f} min to expiry"
+        # The premise, re-read. This is checked BEFORE the P&L rules on purpose: a position whose
+        # reason for existing has gone is closed on that fact, not on whether it is green yet.
+        if is_zerohero(st) and self.zerohero is not None and legs and (
+            why := self.zerohero.invalidated(st.underlying, legs[0].kind)
+        ):
+            return why
         value = self.trading.valuation(st, legs)
         pnl = value["pnl"]
         if pnl is None:

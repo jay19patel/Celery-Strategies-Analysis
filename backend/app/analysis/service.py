@@ -21,6 +21,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlmodel import col, delete, select
 
 from app.analysis import (
+    fibonacci,
     liquidity,
     nearby,
     orderflow,
@@ -150,11 +151,15 @@ class MarketDesk:
                 "levels": reading.levels_block(bars),
                 "smc": structure.read(bars).to_dict(),
                 "trendlines": trendlines.analyze_trendlines(bars),
+                "fibonacci": fibonacci.read(bars).to_dict(),
             }
 
         view = await self._cached("structure", symbol, rows, build)
         price = self.feed.spot(underlying) or view["price"]
-        return view | {"nearby": nearby.read(price, view["atr"], view["liquidity"], view["zones"], view["profile"], self.summary(underlying))}
+        return view | {"nearby": nearby.read(
+            price, view["atr"], view["liquidity"], view["zones"], view["profile"],
+            self.summary(underlying), view.get("fibonacci"),
+        )}
 
     async def trendlines(self, underlying: str, interval: str = "15m", limit: int = 500) -> dict[str, Any]:
         """Trendlines and multi-swing horizontal levels for the given timeframe (15m, 1h, 1d)."""
@@ -168,6 +173,19 @@ class MarketDesk:
         if not rows:
             return {"ready": False, "symbol": symbol, "trendlines": [], "horizontal_clusters": []}
         return trendlines.analyze_trendlines(candles(rows)) | {"symbol": symbol, "interval": interval}
+
+    async def fibonacci(self, underlying: str, interval: str = "15m", limit: int = 500) -> dict[str, Any]:
+        """The last impulse and its levels, on one timeframe. Same source as the Market page's
+        structure reading; separate so the chart can ask for 1h or 1d without rebuilding the rest."""
+        symbol = self.perpetual(underlying)
+        if interval == "15m":
+            rows = await self._rows(symbol, limit, interval)
+        else:
+            days = 365.0 if interval == "1d" else 30.0
+            rows = (await self.bars(underlying, interval, days, limit)).get("bars", [])
+        if not rows:
+            return {"ready": False, "note": "no stored bars yet", "symbol": symbol, "interval": interval}
+        return fibonacci.read(candles(rows)).to_dict() | {"symbol": symbol, "interval": interval}
 
     def analysis(self, underlying: str) -> dict[str, Any]:
         """The price, the options book and the analyst's latest findings, for one underlying."""

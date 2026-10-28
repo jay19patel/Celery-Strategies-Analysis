@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.options.pricing import analyze, distribution
-from app.options.strategies import CATALOG, Plan
+from app.options.strategies import SELLER_CHECKS, Plan, spec_for
 from app.settings import Settings
 
 # Delta India's option fee: a rate on the underlying notional, capped at a share of the premium.
@@ -54,9 +54,15 @@ def assess(
     analysis["round_trip_fees"] = round(2 * fees, 4)
 
     checks: list[dict[str, Any]] = []
+    spec = spec_for(plan.strategy)
+    # Which checks BIND is the strategy's own property. A seller must clear the lot; a long
+    # momentum buy is gated on a two-sided book and nothing else, because its probability of
+    # profit is low and its edge at realised vol negative by construction — refusing it on those
+    # is refusing what it is, not catching a fault. Everything still runs and is still reported.
+    required = spec.required_checks if spec else SELLER_CHECKS
 
-    def check(name: str, ok: bool, detail: str, required: bool = True) -> None:
-        checks.append({"name": name, "ok": ok, "detail": detail, "required": required})
+    def check(name: str, ok: bool, detail: str) -> None:
+        checks.append({"name": name, "ok": ok, "detail": detail, "required": name in required})
 
     spreads = [(leg.symbol, leg.spread_pct) for leg in plan.legs]
     missing = [sym for sym, sp in spreads if sp is None]
@@ -83,11 +89,9 @@ def assess(
         net = ev - analysis["round_trip_fees"]
         check("edge at realised vol", net > 0, f"{net:+,.2f} expected after fees if volatility stays as realised")
 
-    spec = CATALOG.get(plan.strategy)
     check(
         "risk", analysis["max_loss"] is not None,
         f"worst case {analysis['max_loss']:,.2f}" if analysis["max_loss"] is not None else "unlimited loss beyond the breakevens",
-        required=False,
     )
     return {
         "strategy": plan.strategy,

@@ -28,6 +28,7 @@ import { PriceChart, type ChartMarker, type Level } from "@/components/charts/pr
 import { TrendlineStructureChart } from "@/components/charts/trendline-structure-chart";
 import { AiBriefCard } from "@/components/desk/ai-brief-card";
 import { DirectPerpPanel } from "@/components/desk/direct-perp-panel";
+import { FibonacciCard } from "@/components/desk/fibonacci-card";
 import { TrendlinesTable } from "@/components/desk/trendlines-table";
 import { PageHeader } from "@/components/shared/page";
 import { Empty, LoadError, Loading } from "@/components/shared/states";
@@ -48,6 +49,7 @@ import type {
   Overview,
   SettingsResponse,
   StructureZone,
+  Fib,
   TrendlinesResponse,
 } from "@/lib/types";
 
@@ -322,6 +324,9 @@ export default function MarketDeskPage() {
     { refreshInterval: 60_000 },
   );
 
+  const { data: fibData } = useApi<Fib>(`/desk/fibonacci?underlying=${underlying}&interval=${chartInterval}&limit=500`, {
+    refreshInterval: 60_000,
+  });
   const { data: trendlinesData } = useApi<TrendlinesResponse>(
     `/desk/trendlines?underlying=${underlying}&interval=${chartInterval}&limit=500`,
     { refreshInterval: 30_000 },
@@ -1006,6 +1011,8 @@ export default function MarketDeskPage() {
           hiddenIds={hiddenItemIds}
           onToggleItem={toggleItemVisibility}
         />
+
+        <FibonacciCard fib={fibData} currentPrice={currentPrice} />
       </div>
 
       {/* Comprehensive Analysis Tabs */}

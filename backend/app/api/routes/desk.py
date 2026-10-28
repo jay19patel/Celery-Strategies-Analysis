@@ -42,6 +42,11 @@ async def trendlines(engine: EngineDep, underlying: str = "BTC", interval: str =
     return await engine.market.trendlines(underlying, interval, limit)
 
 
+@router.get("/fibonacci")
+async def fib(engine: EngineDep, underlying: str = "BTC", interval: str = "15m", limit: int = 500) -> dict[str, Any]:
+    return await engine.market.fibonacci(underlying, interval, limit)
+
+
 @router.get("/verdicts")
 async def verdicts(engine: EngineDep, underlying: str = "BTC", days: float = 30) -> dict[str, Any]:
     return await engine.market.verdicts(underlying, days)

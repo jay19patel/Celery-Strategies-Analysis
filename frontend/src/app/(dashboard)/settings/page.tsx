@@ -6,7 +6,7 @@ import { Loader2, RotateCcw, Save } from "lucide-react";
 import { toast } from "sonner";
 
 import { FormContext, type FormState } from "@/components/settings/fields";
-import { AiTab, AutoTab, BrokersTab, NotifyTab, PaperTab, RiskTab, SecurityTab } from "@/components/settings/sections";
+import { AiTab, AutoTab, BrokersTab, NotifyTab, PaperTab, RiskTab, SecurityTab, ZeroHeroTab } from "@/components/settings/sections";
 import { PageHeader } from "@/components/shared/page";
 import { LoadError, Loading, Notice } from "@/components/shared/states";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ const TABS = [
   { value: "brokers", label: "Brokers" },
   { value: "paper", label: "Paper" },
   { value: "auto", label: "Auto-trader" },
+  { value: "zerohero", label: "Zero-Hero" },
   { value: "risk", label: "Risk & exits" },
   { value: "ai", label: "AI" },
   { value: "notifications", label: "Notifications" },
@@ -155,6 +156,9 @@ export default function SettingsPage() {
                 </TabsContent>
                 <TabsContent value="auto">
                   <AutoTab strategies={data.strategies} />
+                </TabsContent>
+                <TabsContent value="zerohero">
+                  <ZeroHeroTab />
                 </TabsContent>
                 <TabsContent value="risk">
                   <RiskTab />

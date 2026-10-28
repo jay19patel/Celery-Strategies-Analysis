@@ -16,15 +16,25 @@ from typing import Any
 from app.market.options import OptionQuote
 from app.options.pricing import LegSpec
 
+# The checks in `assess` that a premium seller must pass. They are the right gate for everything
+# in CATALOG and the wrong one for a long momentum buy, whose whole proposition is a low
+# probability of a large payoff — so which checks bind is a property of the strategy, not a
+# constant. A spec that does not say otherwise is gated as a seller.
+SELLER_CHECKS = ("liquidity", "credit / width", "probability of profit", "edge at realised vol")
+
+# The one strategy outside CATALOG that other modules name directly.
+ZERO_HERO = "zero_hero"
+
 
 @dataclass(frozen=True)
 class StrategySpec:
     key: str
     label: str
-    view: str  # neutral | bullish | bearish | volatile
+    view: str  # neutral | bullish | bearish | volatile | momentum
     premium: str  # credit | debit
     risk: str  # defined | undefined
     summary: str
+    required_checks: tuple[str, ...] = SELLER_CHECKS
 
 
 CATALOG: dict[str, StrategySpec] = {s.key: s for s in (
@@ -43,6 +53,30 @@ CATALOG: dict[str, StrategySpec] = {s.key: s for s in (
     StrategySpec("long_straddle", "Long Straddle", "volatile", "debit", "defined",
                  "Buy the ATM call and put. Pays when price moves further than the premium, either way."),
 )}
+
+# Structures the system can price, hold and exit, but the options auto-trader does not pick and the
+# Settings page does not offer. CATALOG is that menu; this is everything else with a payoff.
+#
+# zero_hero is deliberately out of CATALOG: it is not scored by `regime`, not built by a `build()`
+# call, and its gate is its own (`options/zerohero.py`). Putting it in the menu would have the
+# condor desk's regime score decide when to buy lottery tickets, which is not a question that
+# score can answer.
+EXTRA: dict[str, StrategySpec] = {s.key: s for s in (
+    StrategySpec(
+        ZERO_HERO, "Zero-Hero Buy", "momentum", "debit", "defined",
+        "One OTM option bought on an expiry-day momentum break, out of a daily budget. Most expire "
+        "worthless; the few that do not are what pays for them.",
+        # A long buy cannot pass a seller's gate and should not be asked to: its POP is low by
+        # construction and its expected value at realised vol is negative on a fairly priced chain.
+        # What it must still pass is a two-sided book — an 8/10 quote is a 20% loss on contact.
+        required_checks=("liquidity",),
+    ),
+)}
+
+
+def spec_for(key: str) -> StrategySpec | None:
+    """The spec of anything the system can hold, whether or not the auto-trader may pick it."""
+    return CATALOG.get(key) or EXTRA.get(key)
 
 
 @dataclass(frozen=True)
@@ -232,3 +266,10 @@ def custom(quotes: dict[str, OptionQuote], legs: list[dict[str, Any]], spot: flo
     if len({leg.symbol for leg in out}) != len(out):
         raise ValueError("each contract can appear once")
     return Plan(strategy="custom", underlying=underlyings.pop(), expiry=expiries.pop(), spot=spot, legs=tuple(out))
+
+
+def single(q: OptionQuote, side: str, spot: float, strategy: str) -> Plan | None:
+    """A one-leg structure on a quote the caller already chose. The zero-hero scanner picks its own
+    contract from the whole chain against five tests; there is no strike rule to put in BUILDERS."""
+    leg = leg_from_quote(q, side)
+    return None if leg is None else Plan(strategy=strategy, underlying=q.underlying, expiry=q.expiry, spot=spot, legs=(leg,))

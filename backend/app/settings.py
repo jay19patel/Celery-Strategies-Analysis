@@ -87,6 +87,46 @@ class Settings(BaseModel):
     min_credit_width_pct: float = Field(10.0, ge=0, le=60)  # credit / widest spread on defined-risk credits
     max_spread_pct: float = Field(30.0, ge=1, le=100)  # each leg's bid/ask spread as % of its mark
 
+    # -- zero-hero (expiry-day momentum buys) ------------------------------------------------
+    # A long OTM buy in the last hours of a daily expiry. It is the opposite trade to everything
+    # above and is gated separately for that reason: its probability of profit is low by design
+    # and its expected value at the chain's own IV is negative, so a seller's filters would (quite
+    # correctly) refuse it every time. What stands in their place is the five-dimension scan in
+    # `options/zerohero.py`, a hard daily budget and a shadow mode that is on until switched off.
+    zh_enabled: bool = False
+    # Scan and record, never send an order. The hit rate this strategy needs in order not to lose
+    # money is a number nobody has yet; this is how it gets measured before it is bet on.
+    zh_shadow: bool = True
+    zh_window_start_hours: float = Field(4.0, ge=0.5, le=12)  # start looking this long before expiry
+    zh_window_end_hours: float = Field(2.0, ge=0.25, le=11)  # stop opening this long before expiry
+    # A break is a one- or two-bar event, so a slow scan does not find a cheaper entry, it finds
+    # the same entry after it has already run. The scan is arithmetic over one chain and costs
+    # nothing; outside the window it compares a timestamp and stops.
+    zh_scan_seconds: int = Field(60, ge=30, le=900)
+    # Sizing. The budget is for the DAY, not for one entry: a lottery with an 85% loss rate bet at
+    # a fifth of capital per attempt is ruinous at any hit rate the edge could plausibly have.
+    zh_daily_budget_pct: float = Field(20.0, ge=0.5, le=50)
+    zh_max_attempts_day: int = Field(3, ge=1, le=10)
+    # A backstop against a fat-fingered budget, NOT the sizing rule. One lot of an 8-dollar BTC
+    # option is 0.008 dollars of premium, so deploying even a small budget takes tens of thousands
+    # of them; a cap set at condor scale makes the strategy undeployable without saying so. What
+    # actually limits size here is `zh_capacity_share_pct` against what the strike trades.
+    zh_max_lots: int = Field(100_000, ge=1, le=10_000_000)
+    zh_capacity_share_pct: float = Field(10.0, ge=0.5, le=100)  # share of a strike's traded size we will take
+    zh_min_oi: float = Field(5.0, ge=0, le=100_000)  # open interest on the contract, in the underlying
+    # Entry filters.
+    zh_min_multiple: float = Field(6.0, ge=1.5, le=50)  # what one unit must be worth at the target
+    zh_min_ev: float = Field(0.15, ge=0, le=5)  # expected value per unit paid, after the exit haircut
+    zh_min_distance_pct: float = Field(0.3, ge=0.05, le=5)  # how far OTM the strike must be
+    zh_max_distance_pct: float = Field(2.0, ge=0.1, le=10)
+    zh_max_spread_pct: float = Field(25.0, ge=1, le=100)  # an 8/10 quote is a 20% loss on contact
+    zh_displacement_atr: float = Field(1.5, ge=0.5, le=5)  # the breaking bar, against the recent mean
+    zh_max_pain_buffer_pct: float = Field(0.1, ge=0, le=5)  # how far past max pain counts as "away from the pin"
+    # Exits. Whichever of this and `exit_before_expiry_minutes` comes first, applies.
+    zh_take_profit_pct: float = Field(300.0, ge=50, le=2000)  # of the debit paid
+    zh_stop_loss_pct: float = Field(50.0, ge=10, le=100)  # of the debit paid
+    zh_time_stop_minutes: int = Field(45, ge=5, le=240)
+
     # -- perpetual (directional strategies) --------------------------------------------------
     paper_leverage: float = Field(10.0, ge=1, le=100)
     trade_margin_pct: float = Field(25.0, ge=1, le=100)  # most of the available margin one position may use
@@ -169,7 +209,21 @@ class Settings(BaseModel):
             raise ValueError("expiry_min_hours must be below expiry_max_hours")
         if self.min_score_floor > self.min_score:
             raise ValueError("min_score_floor cannot be above min_score: the bar eases down, never up")
+        if self.zh_window_end_hours >= self.zh_window_start_hours:
+            raise ValueError("zh_window_end_hours must be below zh_window_start_hours: the window counts down to expiry")
+        if self.zh_min_distance_pct >= self.zh_max_distance_pct:
+            raise ValueError("zh_min_distance_pct must be below zh_max_distance_pct")
+        # An entry that opens inside its own time stop is closed on the guard's next pass. That is
+        # not a preference to allow, it is a trade that cannot work.
+        if self.zh_window_end_hours * 60 <= max(self.exit_before_expiry_minutes, self.zh_time_stop_minutes):
+            raise ValueError("zh_window_end_hours must close before the time stop, or entries open already expired")
         return self
+
+    @property
+    def zh_exit_minutes(self) -> int:
+        """Minutes before expiry a zero-hero position is closed: whichever stop comes FIRST. The
+        global one governs every structure; this strategy may only ever leave earlier, never later."""
+        return max(self.exit_before_expiry_minutes, self.zh_time_stop_minutes)
 
     # -- derived ---------------------------------------------------------------------------
 

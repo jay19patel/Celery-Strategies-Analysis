@@ -832,3 +832,156 @@ export interface MarketAnalysisResponse {
   } | null;
 }
 
+
+// -- zero hero ------------------------------------------------------------------------------
+
+/** A named test with the sentence that explains its verdict. The same shape the assessment uses. */
+export interface ZhCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface ZhTrigger {
+  direction: number;
+  kind: string;
+  level: number | null;
+  bars_ago: number | null;
+  displacement: number;
+  volume_ratio: number;
+  pulse_state: string;
+  squeeze: boolean;
+  flow: string;
+  flow_agrees: boolean;
+  target: number | null;
+  target_pct: number | null;
+  checks: ZhCheck[];
+  ok: boolean;
+}
+
+export interface ZhPositioning {
+  max_pain: number | null;
+  call_wall: number | null;
+  put_wall: number | null;
+  wall_ahead: number | null;
+  wall_distance_pct: number | null;
+  pcr_oi: number | null;
+  skew_25d: number | null;
+  atm_iv: number | null;
+  implied_move_pct: number | null;
+  away_from_pin: boolean;
+  detail: string;
+}
+
+export interface ZhCandidate {
+  symbol: string;
+  kind: string;
+  strike: number;
+  distance_pct: number;
+  /** the ask: what a buy actually costs, not the mark */
+  paid: number;
+  mark: number | null;
+  bid: number | null;
+  iv: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  spread_pct: number | null;
+  oi: number;
+  volume: number;
+  contract_value: number;
+  hold_minutes: number;
+  target_pct: number;
+  /** what one unit is worth at the target, over what it cost, after the exit haircut */
+  multiple: number | null;
+  value_at_target: number | null;
+  /** the other half of the trade: the same unit if nothing happens */
+  decay_if_flat: number | null;
+  p_touch: number | null;
+  ev: number | null;
+  capacity_lots: number;
+  checks: ZhCheck[];
+  ok: boolean;
+}
+
+export interface ZhScan {
+  underlying: string;
+  at: number;
+  spot: number;
+  expiry: number | null;
+  hours_left: number | null;
+  window_open: boolean;
+  note: string;
+  hold_minutes: number | null;
+  realised_vol: number | null;
+  trigger: ZhTrigger | null;
+  positioning: ZhPositioning | null;
+  gates: ZhCheck[];
+  candidates: ZhCandidate[];
+  rejected: { symbol: string; strike: number; paid: number; why: string; detail: string }[];
+  best: ZhCandidate | null;
+  ok: boolean;
+}
+
+export interface ZhRecord {
+  days: number;
+  scans: number;
+  proposed: number;
+  shadowed: number;
+  opened: number;
+  closed: number;
+  wins: number;
+  hit_rate_pct: number | null;
+  premium_paid: number;
+  pnl: number | null;
+  note: string;
+}
+
+export interface ZhStatus {
+  enabled: boolean;
+  shadow: boolean;
+  underlying: string;
+  budget: { broker: string; spent: number; attempts: number; max_attempts: number; auto: boolean }[];
+  config: Record<string, number> & { exit_minutes: number };
+  job: JobStatus | null;
+  record: ZhRecord;
+}
+
+/** A zero-hero decision reuses the Decision row; `regime` carries the scan instead of a regime. */
+export interface ZhDecision extends Omit<Decision, "action" | "regime" | "candidates"> {
+  action: "open" | "shadow" | "skip" | "error";
+  regime: {
+    hours_left: number | null;
+    hold_minutes: number | null;
+    realised_vol: number | null;
+    window_open: boolean;
+    shadow: boolean;
+    trigger: ZhTrigger | null;
+    positioning: ZhPositioning | null;
+    gates: ZhCheck[];
+  } | null;
+  candidates: ZhCandidate[] | null;
+}
+
+// -- fibonacci ------------------------------------------------------------------------------
+
+export interface FibLevel {
+  ratio: number;
+  price: number;
+  kind: "retracement" | "extension";
+  label: string;
+  golden: boolean;
+}
+
+export interface Fib {
+  ready: boolean;
+  note: string;
+  leg: { direction: "up" | "down"; start_price: number; end_price: number; start_time: number; end_time: number; size: number } | null;
+  levels: FibLevel[];
+  price: number | null;
+  /** how far back into the leg price has come: 0 at its end, 1 at its start */
+  retraced: number | null;
+  in_golden: boolean;
+  symbol?: string;
+  interval?: string;
+}

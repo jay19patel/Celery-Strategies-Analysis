@@ -47,12 +47,13 @@ from app.trading.guard import Guard
 from app.trading.risk import halt_reason, set_halt
 from app.trading.runner import StrategyRunner
 from app.trading.service import TradingService
+from app.trading.zerohero import ZeroHero
 
 log = logging.getLogger(__name__)
 
 EVENT_RETENTION_DAYS = 30
 DECISION_RETENTION_DAYS = 90
-SCHEDULE_FIELDS = ("auto_interval_minutes", "ai_brief_minutes", "daily_report_hour", "day_timezone")
+SCHEDULE_FIELDS = ("auto_interval_minutes", "ai_brief_minutes", "daily_report_hour", "day_timezone", "zh_scan_seconds")
 
 
 class Engine:
@@ -72,7 +73,8 @@ class Engine:
         self.paper = PaperBroker(self.feed, self.settings, self.desk.fee_rate)
         self.brokers: dict[str, Broker] = {"paper": self.paper, "delta": self.delta}
         self.trading = TradingService(self.feed, self.desk, self.brokers, self.settings, self.hub)
-        self.guard = Guard(self.trading, self.settings, self.hub)
+        self.zerohero = ZeroHero(self.desk, self.trading, self.settings, self.hub)
+        self.guard = Guard(self.trading, self.settings, self.hub, self.zerohero)
         self.llm = LLM(self.settings)
         self.analyst = Analyst(self.llm, self.settings, self.hub)
         self.auto = AutoTrader(self.desk, self.trading, self.analyst, self.settings, self.hub)
@@ -113,6 +115,7 @@ class Engine:
         sch.every("guard.structures", "Exits: take profit, stop loss, expiry", 5, self.guard.check_structures)
         sch.every("guard.daily", "Daily loss limit", 30, self.guard.check_daily_loss)
         sch.every("auto.cycle", "Auto options decision", s.auto_interval_minutes * 60, self.auto.cycle)
+        sch.every("zerohero.scan", "Zero-hero expiry-day scan", s.zh_scan_seconds, self.zerohero.cycle)
         sch.every("ai.brief", "AI market brief", s.ai_brief_minutes * 60, self.brief_job)
         sch.daily("report.daily", "Daily report", s.daily_report_hour, 0, s.day_timezone, self.scheduled_report)
         sch.every("live.prices", "Live prices to dashboards", 2, self.push_prices)

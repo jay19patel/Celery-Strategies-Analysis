@@ -144,3 +144,59 @@ def margin_required(legs: Sequence[LegSpec], spot: float, max_loss: float | None
     if max_loss is not None:
         return max_loss
     return sum((NAKED_MARGIN_PCT * spot + leg.price) * leg.units for leg in legs if leg.side == "sell")
+
+
+# -- repricing before expiry -------------------------------------------------------------------
+#
+# Everything above settles AT expiry. A contract bought to be sold again — the expiry-day momentum
+# buy — asks the other question: what is it worth with `hours` still left, if the underlying moves?
+#
+# That is Black-Scholes with no rate and no drift. These options are cash-settled on an index with
+# no carry, so the forward is the spot and the discount factor is one. The same model the chain's
+# own mark IV came from, so repricing at that IV is self-consistent: it says what the market would
+# pay at the new spot under its own assumptions, not what the contract is "really" worth.
+
+
+def norm_cdf(x: float) -> float:
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def bs_price(kind: str, spot: float, strike: float, iv: float, hours: float) -> float:
+    """One option's value with `hours` left, at `iv` as an annualised fraction (0.45 = 45%)."""
+    if spot <= 0 or strike <= 0:
+        return 0.0
+    if hours <= 0 or iv <= 0:
+        return intrinsic(kind, strike, spot)
+    sigma = iv * math.sqrt(hours / YEAR_HOURS)
+    d1 = (math.log(spot / strike) + 0.5 * sigma * sigma) / sigma
+    d2 = d1 - sigma
+    if kind == "call":
+        return spot * norm_cdf(d1) - strike * norm_cdf(d2)
+    return strike * norm_cdf(-d2) - spot * norm_cdf(-d1)
+
+
+def reprice(kind: str, strike: float, spot: float, move_pct: float, iv: float, hours_left: float, minutes_ahead: float) -> float:
+    """What the contract is worth once the underlying has moved `move_pct` over `minutes_ahead`.
+
+    BOTH halves of the trade: the move pays (gamma) and the clock takes (theta). A figure that
+    moved the spot without also moving the clock is a brochure, not an estimate — and in the last
+    hours before expiry the clock is the larger of the two terms on anything that does not move.
+    """
+    return bs_price(kind, spot * (1 + move_pct / 100), strike, iv, max(0.0, hours_left - minutes_ahead / 60))
+
+
+def multiple_at_move(
+    kind: str, strike: float, paid: float, spot: float, move_pct: float, iv: float,
+    hours_left: float, minutes_ahead: float, exit_haircut_pct: float = 0.0,
+) -> float | None:
+    """`reprice` as a multiple of what was paid, after giving `exit_haircut_pct` back to the book on
+    the way out. None when there is nothing to compare with.
+
+    The haircut is not a detail. Buying at the ask and selling at the bid on a contract quoting
+    8/10 is a 20% round trip before anything happens, and a scan that prices the exit at the mark
+    reports a 10x where the book pays 8x.
+    """
+    if paid <= 0:
+        return None
+    value = reprice(kind, strike, spot, move_pct, iv, hours_left, minutes_ahead) * (1 - exit_haircut_pct / 100)
+    return value / paid

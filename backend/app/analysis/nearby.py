@@ -90,6 +90,7 @@ def collect(
     zones: dict[str, Any] | None = None,
     profile: dict[str, Any] | None = None,
     options: dict[str, Any] | None = None,
+    fib: dict[str, Any] | None = None,
 ) -> list[Level]:
     """Every level the structure modules found, as one flat list. Unsorted, unmerged."""
     out: list[Level] = []
@@ -141,6 +142,17 @@ def collect(
     for key, label in (("call_wall", "Call wall"), ("put_wall", "Put wall"), ("max_pain", "Max pain")):
         _add(out, opt.get(key), price, atr, kind="wall", label=label, evidence="dealer positioning")
 
+    # Fibonacci is the weakest source here and is included for exactly one reason: it is the only
+    # one that is self-fulfilling. Nobody defends a POC because it is a POC, but a great many
+    # people have an order resting at the .618 of the last leg. What it is worth is therefore the
+    # CONFLUENCE count it contributes to — a fib level that agrees with an order block is worth
+    # reading, a fib level on its own is a line drawn on a chart, and the `kind` says which it is.
+    for level in (fib or {}).get("levels") or []:
+        ratio, kind = level.get("label", ""), level.get("kind", "")
+        _add(out, level.get("price"), price, atr, kind="fib",
+             label=f"Fib {ratio}" + (" (golden)" if level.get("golden") else ""),
+             evidence=f"{kind} of the last leg")
+
     return out
 
 
@@ -189,9 +201,10 @@ def read(
     zones: dict[str, Any] | None = None,
     profile: dict[str, Any] | None = None,
     options: dict[str, Any] | None = None,
+    fib: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The merged map of price: what is above, what is below, and where sources agree."""
-    found = merge(collect(price, atr, liquidity, zones, profile, options), atr)
+    found = merge(collect(price, atr, liquidity, zones, profile, options, fib), atr)
     by_distance = sorted(found, key=lambda level: level.distance_atr)
     above = [level for level in by_distance if level.side == "above"]
     below = [level for level in by_distance if level.side == "below"]

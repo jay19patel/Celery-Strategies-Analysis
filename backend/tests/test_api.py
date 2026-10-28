@@ -32,12 +32,23 @@ def login(client: TestClient) -> None:
 
 
 def test_every_route_is_private_unless_listed(client: TestClient) -> None:
-    for route in client.app.routes:  # type: ignore[attr-defined]
-        path = getattr(route, "path", "")
-        methods = getattr(route, "methods", None) or set()
-        if not path.startswith("/api") or path in PUBLIC_PATHS or "{" in path or "GET" not in methods:
+    """Invariant 10, checked against the OpenAPI schema rather than `app.routes`.
+
+    This FastAPI version wraps an included router in an object with no `.path`, so walking
+    `app.routes` saw four docs endpoints and twelve opaque wrappers: the loop ran, matched
+    nothing, and passed. A test that cannot fail is not a test, and this one guards the rule that
+    a route added later is private until somebody lists it.
+    """
+    schema = client.app.openapi()["paths"]  # type: ignore[attr-defined]
+    paths = [p for p in schema if p.startswith("/api")]
+    assert len(paths) > 40, "the schema should carry every /api route"
+    checked = 0
+    for path in paths:
+        if path in PUBLIC_PATHS or "{" in path or "get" not in schema[path]:
             continue
         assert client.get(path).status_code == 401, path
+        checked += 1
+    assert checked > 30
     assert client.get("/api/health").status_code == 200
 
 
@@ -100,3 +111,31 @@ def test_a_brief_is_asked_for_by_desk(client: TestClient) -> None:
     assert client.get("/api/ai/brief?underlying=BTC&kind=market").json() == []
     assert client.get("/api/ai/brief?underlying=BTC&kind=nope").status_code == 409
     assert client.post("/api/ai/brief", json={"underlying": "BTC", "kind": "nope"}).status_code == 409
+
+
+def test_the_zero_hero_surface_is_reachable_and_off_by_default(client: TestClient) -> None:
+    login(client)
+    status = client.get("/api/zerohero/status").json()
+    assert status["enabled"] is False  # fail closed: it does not run until switched on
+    assert status["shadow"] is True  # and when it does, it trades nothing until that is switched off
+    assert status["record"]["hit_rate_pct"] is None
+    assert client.get("/api/zerohero/decisions").json() == []
+    assert client.post("/api/zerohero/run").json()["note"].startswith("zero-hero is off")
+
+
+def test_zero_hero_settings_round_trip_and_refuse_an_impossible_window(client: TestClient) -> None:
+    login(client)
+    assert client.patch("/api/settings", json={"changes": {"zh_min_multiple": 8.0}}).status_code == 200
+    assert client.get("/api/settings").json()["values"]["zh_min_multiple"] == 8.0
+    # A window that opens inside its own time stop is a trade that cannot work, not a preference.
+    bad = client.patch("/api/settings", json={"changes": {"zh_window_end_hours": 0.5}})
+    assert bad.status_code == 422 and "time stop" in bad.json()["error"]
+
+
+def test_the_strategy_menu_does_not_offer_zero_hero(client: TestClient) -> None:
+    """It is priced, held and exited like any structure, but the options auto-trader must never
+    pick it: its gate is its own and the regime score cannot answer for it."""
+    login(client)
+    keys = {s["key"] for s in client.get("/api/settings").json()["strategies"]}
+    assert "zero_hero" not in keys
+    assert "iron_condor" in keys

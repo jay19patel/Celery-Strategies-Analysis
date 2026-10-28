@@ -13,7 +13,7 @@ from app.market.feed import MarketFeed
 from app.market.indicators import realised_vol
 from app.options import regime as regime_mod
 from app.options.assess import DEFAULT_FEE, FeeRate, assess
-from app.options.strategies import CATALOG, Plan, build, custom
+from app.options.strategies import BUILDERS, CATALOG, Plan, build, custom
 from app.settings import Settings
 
 RV_BARS = {"24h": 97, "7d": 673}
@@ -138,7 +138,7 @@ class Desk:
                 return custom({q.symbol: q for q in self.feed.quotes(underlying)}, legs or [], spot)
             except ValueError as exc:
                 raise Refused(str(exc)) from exc
-        if strategy not in CATALOG:
+        if strategy not in BUILDERS:
             raise NotFound(f"unknown strategy {strategy!r}")
         s: Settings = self.settings()
         expiry = expiry or self.default_expiry(underlying)
