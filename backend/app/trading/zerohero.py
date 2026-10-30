@@ -162,6 +162,8 @@ class ZeroHero:
 
     def brokers(self) -> list[str]:
         s: Settings = self.settings()
+        return [name for name in s.active_brokers if s.auto_on(name)]
+
     def get_window(self, now_ts: float | None = None) -> tuple[float, float, str]:
         """Compute the active zero-hero scan window against the nearest listed expiry."""
         now = time.time() if now_ts is None else now_ts

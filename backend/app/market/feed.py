@@ -88,6 +88,7 @@ class MarketFeed:
         self._task: asyncio.Task[None] | None = None
         self.ws = {"connected": False, "since": None, "last_message": None, "reconnects": 0, "messages": 0, "error": ""}
         self.rest_status = {"last_refresh": None, "error": ""}
+        self._latest_bar_times: dict[tuple[str, str], int] = {}
 
     # -- lifecycle ---------------------------------------------------------------------------
 
@@ -214,11 +215,27 @@ class MarketFeed:
             {"symbol": symbol, "interval": interval, "time": c.time, "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume}
             for c in candles if start <= c.time <= end
         ]
+        if rows:
+            max_t = max(r["time"] for r in rows)
+            curr = self._latest_bar_times.get((symbol, interval), 0)
+            if max_t > curr:
+                self._latest_bar_times[(symbol, interval)] = max_t
         with session() as s:
             for i in range(0, len(rows), 1000):  # SQLite caps the variables in one statement
                 s.exec(sqlite_insert(Bar).values(rows[i : i + 1000]).on_conflict_do_nothing())
             s.commit()
         return len(rows)
+
+    def latest_bar_time(self, symbol: str, interval: str = "15m") -> int:
+        """Return the timestamp of the latest closed bar for this symbol and interval."""
+        cached = self._latest_bar_times.get((symbol, interval))
+        if cached is not None:
+            return cached
+        with session() as s:
+            val = s.exec(select(func.max(Bar.time)).where(Bar.symbol == symbol, Bar.interval == interval)).one()
+            latest = int(val) if val else 0
+            self._latest_bar_times[(symbol, interval)] = latest
+            return latest
 
     @staticmethod
     def prune_bars() -> int:
@@ -234,9 +251,14 @@ class MarketFeed:
     def bars(symbol: str, limit: int = 3000, interval: str = "15m", since: float = 0.0) -> list[dict[str, Any]]:
         """Stored closed bars, oldest first."""
         with session() as s:
-            q = select(Bar).where(Bar.symbol == symbol, Bar.interval == interval, col(Bar.time) >= since)
-            rows = s.exec(q.order_by(col(Bar.time).desc()).limit(limit)).all()
-        return [r.model_dump(exclude={"symbol", "interval"}) for r in reversed(rows)]
+            stmt = (
+                select(Bar.time, Bar.open, Bar.high, Bar.low, Bar.close, Bar.volume)
+                .where(Bar.symbol == symbol, Bar.interval == interval, col(Bar.time) >= since)
+                .order_by(col(Bar.time).desc())
+                .limit(limit)
+            )
+            rows = s.exec(stmt).all()
+        return [{"time": r[0], "open": r[1], "high": r[2], "low": r[3], "close": r[4], "volume": r[5]} for r in reversed(rows)]
 
     # -- WebSocket ---------------------------------------------------------------------------
 

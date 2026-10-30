@@ -41,8 +41,8 @@ export default function ZeroHeroPage() {
   const [underlying, setUnderlying] = useState("BTC");
   const [running, setRunning] = useState(false);
   const { data: status, error: statusError } = useApi<ZhStatus>(`/zerohero/status?underlying=${underlying}`, { refreshInterval: 30_000 });
-  // Only poll hard while the window is open; outside it the answer cannot change for hours.
-  const open = status?.enabled;
+  // Only poll fast while the execution window is actively open; outside it, calculations do not change for hours.
+  const open = Boolean(status?.window_schedule?.window_open);
   const { data: scan, error, isLoading } = useApi<ZhScan>(`/zerohero/scan?underlying=${underlying}`, {
     refreshInterval: open ? 15_000 : 120_000,
   });

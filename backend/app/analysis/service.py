@@ -116,12 +116,20 @@ class MarketDesk:
 
     async def outlook(self, underlying: str) -> dict[str, Any]:
         symbol = self.perpetual(underlying)
+        latest_time = self.feed.latest_bar_time(symbol, "15m")
+        hit = self._cache.get(("outlook", symbol))
+        if hit and hit[0] == latest_time and latest_time > 0:
+            return hit[1]
         rows = await self._rows(symbol, OUTLOOK_BARS)
         summary = self.summary(underlying)
         return await self._cached("outlook", symbol, rows, lambda: outlook.build(symbol, candles(rows), summary, VERDICT_STOP_PCT, VERDICT_TARGET_PCT))
 
     async def pulse(self, underlying: str) -> dict[str, Any]:
         symbol = self.perpetual(underlying)
+        latest_time = self.feed.latest_bar_time(symbol, "15m")
+        hit = self._cache.get(("pulse", symbol))
+        if hit and hit[0] == latest_time and latest_time > 0:
+            return hit[1]
         rows = await self._rows(symbol, OUTLOOK_BARS)
         return await self._cached("pulse", symbol, rows, lambda: pulse.read(symbol, candles(rows)).to_dict())
 
@@ -130,6 +138,15 @@ class MarketDesk:
         and below merged from all four plus the option walls. The merge is redone on every read:
         the walls move every few seconds, the rest once a bar."""
         symbol = self.perpetual(underlying)
+        latest_time = self.feed.latest_bar_time(symbol, "15m")
+        hit = self._cache.get(("structure", symbol))
+        if hit and hit[0] == latest_time and latest_time > 0:
+            view = hit[1]
+            price = self.feed.spot(underlying) or view["price"]
+            return view | {"nearby": nearby.read(
+                price, view["atr"], view["liquidity"], view["zones"], view["profile"],
+                self.summary(underlying), view.get("fibonacci"),
+            )}
         rows = await self._rows(symbol, STRUCTURE_BARS)
         if not rows:
             return {"ready": False, "symbol": symbol, "note": "no stored bars yet — the bar collector fills them within minutes"}
