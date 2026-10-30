@@ -317,6 +317,7 @@ export interface Summary {
   losses: number;
   win_rate: number | null;
   pnl: number;
+  gross_pnl?: number;
   fees: number;
   avg_win: number | null;
   avg_loss: number | null;

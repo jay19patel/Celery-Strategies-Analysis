@@ -715,12 +715,16 @@ class TradingService:
 
         def summary(trades: list[Structure]) -> dict[str, Any]:
             pnls = [t.pnl or 0.0 for t in trades]
+            gross = [t.entry_cash + t.exit_cash for t in trades]
+            fees = [t.fees for t in trades]
             wins, losses = [p for p in pnls if p > 0], [p for p in pnls if p <= 0]
             n = len(pnls)
             return {
                 "trades": n, "wins": len(wins), "losses": len(losses),
                 "win_rate": round(100 * len(wins) / n, 1) if n else None,
-                "pnl": round(sum(pnls), 4), "fees": round(sum(t.fees for t in trades), 4),
+                "pnl": round(sum(pnls), 4),
+                "gross_pnl": round(sum(gross), 4),
+                "fees": round(sum(fees), 4),
                 "avg_win": round(sum(wins) / len(wins), 4) if wins else None,
                 "avg_loss": round(sum(losses) / len(losses), 4) if losses else None,
                 "profit_factor": round(sum(wins) / -sum(losses), 2) if losses and sum(losses) < 0 else None,

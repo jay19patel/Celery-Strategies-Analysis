@@ -14,7 +14,7 @@ import logging
 import time
 from typing import Any
 
-from sqlmodel import col, delete
+from sqlmodel import col, delete, select
 
 from app.ai.analyst import Analyst
 from app.ai.llm import LLM
@@ -25,7 +25,7 @@ from app.brokers.paper import PaperBroker
 from app.config import Config
 from app.core.db import kv_get, kv_set, session
 from app.core.events import EventHub
-from app.core.models import AiBrief, Decision, EventLog, SignalLog
+from app.core.models import AiBrief, Decision, EventLog, SignalLog, Structure
 from app.core.scheduler import Scheduler
 from app.errors import AppError, BrokerError
 from app.market.delta import DeltaClient
@@ -184,13 +184,23 @@ class Engine:
 
     async def accounts(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
+        with session() as s:
+            fees_by_broker = {
+                b: sum(r.fees for r in s.exec(select(Structure.fees).where(Structure.broker == b, Structure.status == "closed")).all())
+                for b in self._settings.active_brokers
+            }
         for name in self._settings.active_brokers:
             b = self.brokers[name]
             if why := b.not_ready():
                 out[name] = {"error": why}
                 continue
             try:
-                out[name] = (await b.account()).to_dict()
+                acc_dict = (await b.account()).to_dict()
+                extra = acc_dict.get("extra") or {}
+                if "fees_paid" not in extra or not extra["fees_paid"]:
+                    extra["fees_paid"] = round(fees_by_broker.get(name, 0.0), 4)
+                acc_dict["extra"] = extra
+                out[name] = acc_dict
             except BrokerError as exc:
                 out[name] = {"error": str(exc)}
         return out

@@ -60,6 +60,8 @@ export function AccountSection({
   const start = typeof x.starting_balance === "number" ? x.starting_balance : null;
   const unrealised = open.reduce((a, s) => a + (s.live?.pnl ?? 0), 0);
   const realised = stats?.overall.pnl ?? null;
+  const feesPaid = stats?.overall.fees ?? (typeof x.fees_paid === "number" ? x.fees_paid : 0);
+  const grossPnl = stats?.overall.gross_pnl ?? (realised !== null ? realised + feesPaid : null);
   const tz = String(settings?.day_timezone ?? "UTC");
   const today = stats?.daily[dayKey(tz)] ?? 0;
   const limitPct = Number(settings?.daily_loss_limit_pct ?? 0);
@@ -81,18 +83,57 @@ export function AccountSection({
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7">
         <Stat label="Equity" value={usd(account.equity)} hint={account.currency} />
         <Stat label="Wallet balance" value={usd(account.cash)} hint="cash, before open legs" />
         <Stat label="Available" value={usd(account.available)} hint="for new margin" />
         <Stat label="Margin used" value={usd(account.margin_used)} />
         <Stat label="Unrealised P&L" value={signed(unrealised, 4)} valueClass={pnlClass(unrealised)} hint={`${open.length} open structure${open.length === 1 ? "" : "s"}`} />
+        <Stat label="Total Charges / Fees" value={usd(feesPaid, 4)} valueClass="text-amber-600 dark:text-amber-400" hint="exchange & broker fees" />
         <Stat
-          label="Realised P&L"
+          label="Net Realised P&L"
           value={realised === null ? "—" : signed(realised, 4)}
           valueClass={pnlClass(realised)}
-          hint={start ? `${signedPct(((account.equity - start) / start) * 100)} since start` : "closed structures"}
+          hint={grossPnl !== null ? `Gross: ${signed(grossPnl, 2)}` : (start ? `${signedPct(((account.equity - start) / start) * 100)} since start` : "closed structures")}
         />
+      </div>
+
+      <div className="rounded-xl border border-slate-200/80 bg-gradient-to-r from-slate-50 via-white to-slate-50 p-3.5 shadow-2xs dark:border-slate-800 dark:from-slate-900/60 dark:via-slate-900/40 dark:to-slate-900/60">
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <span className="flex size-6 items-center justify-center rounded-full bg-slate-200/70 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              <Info className="size-3.5" />
+            </span>
+            <div>
+              <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                P&L & Charges Breakdown
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                Gross Trading Result − Total Charges = Net Realised P&L
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 dark:border-slate-700 dark:bg-slate-800">
+              <span className="text-muted-foreground">Gross P&L:</span>
+              <span className={cn("num font-semibold", pnlClass(grossPnl))}>
+                {grossPnl !== null ? signed(grossPnl, 4) : "—"}
+              </span>
+            </div>
+            <span className="font-bold text-slate-400">−</span>
+            <div className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50/60 px-2.5 py-1 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+              <span className="text-amber-700 dark:text-amber-400">Charges & Fees:</span>
+              <span className="num font-semibold">{usd(feesPaid, 4)}</span>
+            </div>
+            <span className="font-bold text-slate-400">=</span>
+            <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 dark:border-slate-700 dark:bg-slate-800">
+              <span className="text-muted-foreground">Net Realised:</span>
+              <span className={cn("num font-semibold", pnlClass(realised))}>
+                {realised !== null ? signed(realised, 4) : "—"}
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-2">
@@ -105,7 +146,9 @@ export function AccountSection({
               ["Broker", broker === "paper" ? "Paper (simulated)" : `Delta Exchange (${status?.env ?? "—"})`],
               ["Currency", account.currency],
               ...(start !== null ? [["Starting balance", usd(start)]] : []),
-              ...(typeof x.fees_paid === "number" ? [["Fees paid", usd(x.fees_paid, 4)]] : []),
+              ...(grossPnl !== null ? [["Gross trading P&L", signed(grossPnl, 4)]] : []),
+              ["Total fees & charges paid", usd(feesPaid, 4)],
+              ...(realised !== null ? [["Net realised P&L", signed(realised, 4)]] : []),
               ...(typeof x.created_at === "number" ? [["Account opened", dateTime(x.created_at)]] : []),
               ["Auto-trading", status?.auto ? "on" : "off"],
             ].map(([k, v]) => (

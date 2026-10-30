@@ -107,8 +107,20 @@ export default function PerformancePage() {
       {!o ? (
         <Loading rows={2} />
       ) : (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
-          <Stat label="Net realised" value={signed(o.pnl, 4)} valueClass={pnlClass(o.pnl)} hint={`fees ${usd(o.fees, 2)}`} />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5 xl:grid-cols-10">
+          <Stat
+            label="Gross P&L"
+            value={o.gross_pnl !== undefined ? signed(o.gross_pnl, 4) : signed(o.pnl + o.fees, 4)}
+            valueClass={pnlClass(o.gross_pnl !== undefined ? o.gross_pnl : o.pnl + o.fees)}
+            hint="before fees"
+          />
+          <Stat
+            label="Total Charges"
+            value={usd(o.fees, 4)}
+            valueClass="text-amber-600 dark:text-amber-400"
+            hint="broker & exchange"
+          />
+          <Stat label="Net realised" value={signed(o.pnl, 4)} valueClass={pnlClass(o.pnl)} hint="after all fees" />
           <Stat label="Trades" value={num(o.trades, 0)} hint={`${o.wins} won · ${o.losses} lost`} />
           <Stat label="Win rate" value={pct(o.win_rate)} />
           <Stat label="Profit factor" value={num(o.profit_factor)} valueClass={o.profit_factor !== null && o.profit_factor < 1 ? "text-loss" : undefined} />
@@ -119,7 +131,7 @@ export default function PerformancePage() {
             label="Max drawdown"
             value={start ? pct((100 * o.max_drawdown) / start, 2) : usd(o.max_drawdown, 4)}
             valueClass={o.max_drawdown ? "text-loss" : undefined}
-            hint={o.avg_hold_hours === null ? undefined : `held ${duration(o.avg_hold_hours * 3600)} on average`}
+            hint={o.avg_hold_hours === null ? undefined : `held ${duration(o.avg_hold_hours * 3600)} on avg`}
           />
         </div>
       )}
