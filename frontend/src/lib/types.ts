@@ -937,6 +937,15 @@ export interface ZhRecord {
   note: string;
 }
 
+export interface ZhWindowSchedule {
+  window_open: boolean;
+  window_start: number;
+  window_end: number;
+  seconds_to_window: number;
+  hours_to_window: number;
+  description: string;
+}
+
 export interface ZhStatus {
   enabled: boolean;
   shadow: boolean;
@@ -945,6 +954,7 @@ export interface ZhStatus {
   config: Record<string, number> & { exit_minutes: number };
   job: JobStatus | null;
   record: ZhRecord;
+  window_schedule?: ZhWindowSchedule;
 }
 
 /** A zero-hero decision reuses the Decision row; `regime` carries the scan instead of a regime. */

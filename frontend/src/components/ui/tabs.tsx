@@ -13,7 +13,7 @@ function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimi
   return (
     <TabsPrimitive.List
       data-slot="tabs-list"
-      className={cn("inline-flex h-9 w-fit items-center justify-center rounded-lg bg-muted p-[3px] text-muted-foreground", className)}
+      className={cn("inline-flex h-9 w-fit max-w-full items-center justify-start overflow-x-auto no-scrollbar rounded-lg bg-muted p-[3px] text-muted-foreground", className)}
       {...props}
     />
   );

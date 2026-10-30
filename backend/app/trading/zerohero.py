@@ -40,6 +40,7 @@ from app.settings import Settings
 from app.trading.desk import Desk
 from app.trading.risk import day_start, trading_day
 from app.trading.service import TradingService
+from app.trading.timing import get_zerohero_window
 
 log = logging.getLogger(__name__)
 
@@ -161,7 +162,16 @@ class ZeroHero:
 
     def brokers(self) -> list[str]:
         s: Settings = self.settings()
-        return [b for b in s.active_brokers if s.auto_on(b)]
+    def get_window(self, now_ts: float | None = None) -> tuple[float, float, str]:
+        """Compute the active zero-hero scan window against the nearest listed expiry."""
+        now = time.time() if now_ts is None else now_ts
+        s: Settings = self.settings()
+        expiry: float | None = None
+        for u in s.underlyings:
+            e = self.expiry(u)
+            if e and (expiry is None or e < expiry):
+                expiry = e
+        return get_zerohero_window(now, s, expiry)
 
     # -- the cycle -------------------------------------------------------------------------
 
@@ -282,16 +292,27 @@ class ZeroHero:
 
     def status(self, underlying: str) -> dict[str, Any]:
         s: Settings = self.settings()
+        now_ts = time.time()
+        w_start, w_end, desc = self.get_window(now_ts)
         budget = []
         for name in s.active_brokers:
             spent, attempts = self.spent_today(name)
             budget.append({"broker": name, "spent": round(spent, 4), "attempts": attempts,
                            "max_attempts": s.zh_max_attempts_day, "auto": s.auto_on(name)})
+        seconds_to_window = max(0.0, w_start - now_ts) if now_ts < w_start else 0.0
         return {
             "enabled": s.zh_enabled,
             "shadow": s.zh_shadow,
             "underlying": underlying,
             "budget": budget,
+            "window_schedule": {
+                "window_open": w_start <= now_ts < w_end,
+                "window_start": w_start,
+                "window_end": w_end,
+                "seconds_to_window": seconds_to_window,
+                "hours_to_window": round(seconds_to_window / 3600, 2),
+                "description": desc,
+            },
             "config": {k: getattr(s, k) for k in (
                 "zh_window_start_hours", "zh_window_end_hours", "zh_scan_seconds", "zh_daily_budget_pct",
                 "zh_max_attempts_day", "zh_max_lots", "zh_capacity_share_pct", "zh_min_oi", "zh_min_multiple",

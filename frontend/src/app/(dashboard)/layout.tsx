@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Loader2, RefreshCw, WifiOff } from "lucide-react";
 
+import { BottomNav } from "@/components/layout/bottom-nav";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ interface Session {
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const [menuOpen, setMenuOpen] = useState(false);
   const { data: session, error, isValidating, mutate } = useApi<Session>("/auth/session", { revalidateOnFocus: true });
 
   useEffect(() => {
@@ -52,7 +54,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     <LiveProvider>
       <Sidebar />
       <div className="min-w-0 lg:pl-60">
-        <Header />
+        <Header menuOpen={menuOpen} onMenuOpenChange={setMenuOpen} />
         {error && (
           <div className="flex flex-wrap items-center gap-2 border-b border-amber-200 bg-warn-soft px-4 py-2 text-[12.5px] text-amber-900 lg:px-6">
             <WifiOff className="size-3.5" />
@@ -67,7 +69,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             The dashboard PIN is still the published default. <Link href="/settings#security" className="font-semibold underline">Change it</Link> before this is reachable from anywhere but this machine.
           </div>
         )}
-        <main className="mx-auto max-w-[1600px] space-y-5 p-4 lg:p-6">{children}</main>
+        {/* pb-24 ensures floating bottom nav bar never obscures content or buttons on mobile */}
+        <main className="mx-auto max-w-[1600px] space-y-4 sm:space-y-5 p-3.5 sm:p-5 lg:p-6 pb-24 lg:pb-6">
+          {children}
+        </main>
+        <BottomNav onOpenMenu={() => setMenuOpen(true)} />
       </div>
     </LiveProvider>
   );

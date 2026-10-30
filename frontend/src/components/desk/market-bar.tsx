@@ -8,18 +8,18 @@ import { cn } from "@/lib/utils";
 
 export function ExpiryPicker({ overview, expiry, onChange }: { overview: Overview; expiry: number; onChange: (e: number) => void }) {
   return (
-    <div className="flex gap-1.5 overflow-x-auto pb-1">
+    <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar -mx-1 px-1">
       {overview.expiries.map((e) => (
         <button
           key={e.expiry}
           onClick={() => onChange(e.expiry)}
           className={cn(
-            "shrink-0 rounded-lg border bg-card px-3 py-1.5 text-left transition-colors hover:border-slate-300",
+            "shrink-0 rounded-lg border bg-card px-2.5 sm:px-3 py-1.5 text-left transition-all active:scale-95 hover:border-slate-300 shadow-2xs",
             e.expiry === expiry && "border-primary bg-accent ring-1 ring-primary/20",
           )}
         >
-          <div className="text-[12.5px] font-semibold">{e.label}</div>
-          <div className="num text-[10.5px] text-muted-foreground">
+          <div className="text-[12px] sm:text-[12.5px] font-semibold">{e.label}</div>
+          <div className="num text-[10px] sm:text-[10.5px] text-muted-foreground">
             {hours(e.hours)} · IV {pct(e.atm_iv, 1, true)}
           </div>
         </button>

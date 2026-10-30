@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Loader2, Play, Settings2, Zap } from "lucide-react";
+import { CalendarClock, Clock, Loader2, Play, Settings2, Sparkles, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/shared/page";
@@ -19,7 +19,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CandidateTable } from "@/components/zerohero/candidates";
 import { CheckList } from "@/components/zerohero/checks";
 import { api } from "@/lib/api";
-import { ago, num, pct, price, signed, signedPct, usd } from "@/lib/format";
+import { ago, dateTime, num, pct, price, signed, signedPct, until, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
 import type { ZhDecision, ZhScan, ZhStatus } from "@/lib/types";
 
@@ -106,14 +106,69 @@ export default function ZeroHeroPage() {
         </Notice>
       )}
 
+      {status?.window_schedule && (
+        <Card className={status.window_schedule.window_open ? "border-profit/30 bg-profit/5" : "border-amber-500/20 bg-amber-500/5"}>
+          <CardContent className="p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className={`mt-0.5 rounded-md p-2 ${status.window_schedule.window_open ? "bg-profit/15 text-profit" : "bg-amber-500/15 text-amber-500"}`}>
+                  {status.window_schedule.window_open ? (
+                    <Sparkles className="size-4 animate-pulse" />
+                  ) : (
+                    <CalendarClock className="size-4" />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-foreground">
+                      {status.window_schedule.window_open ? "Active Expiry Scan Window" : "Smart Expiry Window Scheduled"}
+                    </span>
+                    <Badge variant={status.window_schedule.window_open ? "profit" : "outline"}>
+                      {status.window_schedule.window_open ? "Scanning Active (60s)" : "Scheduler Sleeping"}
+                    </Badge>
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {status.window_schedule.description}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-muted-foreground sm:justify-end">
+                <div>
+                  <span className="text-muted-foreground/70">Window: </span>
+                  <span className="font-semibold text-foreground">
+                    {dateTime(status.window_schedule.window_start)} → {dateTime(status.window_schedule.window_end)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground/70">Next Wake-up: </span>
+                  <span className="font-semibold text-foreground">
+                    {status.job?.next_run ? `${dateTime(status.job.next_run)} (${until(status.job.next_run)})` : until(status.window_schedule.window_start)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
-          label="Window"
-          value={scan?.window_open ? "OPEN" : "closed"}
-          valueClass={scan?.window_open ? "text-profit" : "text-muted-foreground"}
-          hint={scan?.note}
+          label="Execution Window"
+          value={status?.window_schedule?.window_open ? "ACTIVE" : "SCHEDULED"}
+          valueClass={status?.window_schedule?.window_open ? "text-profit font-semibold animate-pulse" : "text-amber-500 font-mono"}
+          hint={
+            status?.window_schedule
+              ? status.window_schedule.window_open
+                ? `Closes ${until(status.window_schedule.window_end)}`
+                : `Starts ${until(status.window_schedule.window_start)}`
+              : (scan?.note ?? undefined)
+          }
         />
-        <Stat label="To expiry" value={countdown(scan?.hours_left ?? null)} hint={`hold ${num(scan?.hold_minutes, 0)} min to the time stop`} />
+        <Stat
+          label="Next Scan"
+          value={status?.job?.next_run ? until(status.job.next_run) : (status?.window_schedule ? until(status.window_schedule.window_start) : countdown(scan?.hours_left ?? null))}
+          hint={status?.job?.next_run ? `At ${dateTime(status.job.next_run)}` : `Hold ${num(scan?.hold_minutes, 0)} min max`}
+        />
         <Stat label="Spot" value={price(scan?.spot)} hint={`realised vol ${pct(scan?.realised_vol, 1, true)}`} />
         <Stat
           label="Candidates"

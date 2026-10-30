@@ -27,13 +27,13 @@ export function StrategyPicker({ strategies, params, onChange }: { strategies: S
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar sm:flex-wrap sm:pb-0 -mx-1 px-1">
         {strategies.map((s) => (
           <button
             key={s.key}
             onClick={() => onChange({ strategy: s.key })}
             className={cn(
-              "rounded-lg border bg-card px-3 py-1.5 text-[12.5px] font-medium transition-colors hover:border-slate-300",
+              "shrink-0 rounded-lg border bg-card px-2.5 sm:px-3 py-1.5 text-[12px] sm:text-[12.5px] font-medium transition-all active:scale-95 hover:border-slate-300 shadow-2xs",
               params.strategy === s.key && "border-primary bg-accent text-accent-foreground ring-1 ring-primary/20",
             )}
           >
@@ -43,7 +43,7 @@ export function StrategyPicker({ strategies, params, onChange }: { strategies: S
         <button
           onClick={() => onChange({ strategy: "custom" })}
           className={cn(
-            "rounded-lg border border-dashed bg-card px-3 py-1.5 text-[12.5px] font-medium transition-colors hover:border-slate-400",
+            "shrink-0 rounded-lg border border-dashed bg-card px-2.5 sm:px-3 py-1.5 text-[12px] sm:text-[12.5px] font-medium transition-all active:scale-95 hover:border-slate-400 shadow-2xs",
             params.strategy === "custom" && "border-primary bg-accent text-accent-foreground",
           )}
         >

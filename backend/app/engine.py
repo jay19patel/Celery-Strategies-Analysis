@@ -113,9 +113,15 @@ class Engine:
         sch.every("market.verdicts", "Mark the cards' past claims", 900, self.market.settle)
         sch.every("strategies.run", "Directional strategies on closed bars", 20, self.runner.run)
         sch.every("guard.structures", "Exits: take profit, stop loss, expiry", 5, self.guard.check_structures)
-        sch.every("guard.daily", "Daily loss limit", 30, self.guard.check_daily_loss)
         sch.every("auto.cycle", "Auto options decision", s.auto_interval_minutes * 60, self.auto.cycle)
-        sch.every("zerohero.scan", "Zero-hero expiry-day scan", s.zh_scan_seconds, self.zerohero.cycle)
+        sch.windowed(
+            "zerohero.scan",
+            "Zero-hero expiry-day scan",
+            self.zerohero.get_window,
+            s.zh_scan_seconds,
+            self.zerohero.cycle,
+            idle_heartbeat=1800.0,
+        )
         sch.every("ai.brief", "AI market brief", s.ai_brief_minutes * 60, self.brief_job)
         sch.daily("report.daily", "Daily report", s.daily_report_hour, 0, s.day_timezone, self.scheduled_report)
         sch.every("live.prices", "Live prices to dashboards", 2, self.push_prices)

@@ -45,10 +45,10 @@ export function OrderPanel({ preview, brokers, onQty }: { preview: Preview; brok
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 w-full sm:w-auto">
           <Label>Broker</Label>
           <Select value={broker} onValueChange={(v) => setBroker(v as Broker)}>
-            <SelectTrigger className="w-44">
+            <SelectTrigger className="w-full sm:w-44">
               <SelectValue placeholder="Choose broker" />
             </SelectTrigger>
             <SelectContent>
@@ -61,7 +61,7 @@ export function OrderPanel({ preview, brokers, onQty }: { preview: Preview; brok
           </Select>
         </div>
         {sizing && !sizing.error && (
-          <div className="text-[12.5px] text-muted-foreground">
+          <div className="text-[12px] sm:text-[12.5px] text-muted-foreground">
             <div>
               Equity <span className="num font-medium text-slate-800">{usd(sizing.equity)}</span> · available{" "}
               <span className="num font-medium text-slate-800">{usd(sizing.available)}</span> · this trade needs{" "}
@@ -103,11 +103,11 @@ export function OrderPanel({ preview, brokers, onQty }: { preview: Preview; brok
           </div>
         }
         trigger={(open) => (
-          <div className="flex items-center gap-3">
-            <Button onClick={open} disabled={!!blocked || preview.plan.legs.length === 0}>
-              <Send /> Place {preview.qty} lot{preview.qty > 1 ? "s" : ""}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
+            <Button onClick={open} disabled={!!blocked || preview.plan.legs.length === 0} className="w-full sm:w-auto h-10 text-[13.5px] font-semibold active:scale-95 shadow-sm">
+              <Send className="size-4" /> Place {preview.qty} lot{preview.qty > 1 ? "s" : ""}
             </Button>
-            {blocked && <Badge variant="warn">{blocked}</Badge>}
+            {blocked && <Badge variant="warn" className="w-fit">{blocked}</Badge>}
           </div>
         )}
       />
