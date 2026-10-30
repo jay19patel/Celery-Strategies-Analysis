@@ -72,13 +72,19 @@ function calcEma(bars: Bar[], period: number): Array<{ time: UTCTimestamp; value
  * - POC, VAH, VAL, and Confluence S/R levels
  * - Multi-timezone axis support (UTC / Local / IST)
  */
+const EMPTY_LEVELS: Level[] = [];
+const EMPTY_MARKERS: ChartMarker[] = [];
+const EMPTY_ZONES: StructureZone[] = [];
+const EMPTY_TRENDLINES: TrendlineItem[] = [];
+const EMPTY_CLUSTERS: HorizontalClusterItem[] = [];
+
 export function PriceChart({
   bars,
-  levels = [],
-  markers = [],
-  zones = [],
-  trendlines = [],
-  clusters = [],
+  levels = EMPTY_LEVELS,
+  markers = EMPTY_MARKERS,
+  zones = EMPTY_ZONES,
+  trendlines = EMPTY_TRENDLINES,
+  clusters = EMPTY_CLUSTERS,
   symbol = "BTC",
   interval = "15m",
   timezone = "IST",
@@ -468,27 +474,47 @@ export function PriceChart({
     // Crosshair move listener for OHLCV hover, cursor price & Zone detection
     c.subscribeCrosshairMove((param) => {
       if (!param.time || !param.seriesData.get(cs)) {
-        setHoverBar(null);
-        setHoveredZone(null);
-        setCursorPrice(null);
+        setHoverBar((prev) => (prev !== null ? null : prev));
+        setHoveredZone((prev) => (prev !== null ? null : prev));
+        setCursorPrice((prev) => (prev !== null ? null : prev));
         return;
       }
       const data = param.seriesData.get(cs) as { open?: number; high?: number; low?: number; close?: number } | undefined;
       const volData = volumeSeries.current ? (param.seriesData.get(volumeSeries.current) as { value?: number } | undefined) : undefined;
       if (data && data.open !== undefined && data.close !== undefined) {
-        setHoverBar({
-          time: Number(param.time),
-          open: data.open,
-          high: data.high ?? data.open,
-          low: data.low ?? data.open,
-          close: data.close,
-          volume: volData?.value ?? 0,
+        const nextTime = Number(param.time);
+        const nextOpen = data.open;
+        const nextHigh = data.high ?? data.open;
+        const nextLow = data.low ?? data.open;
+        const nextClose = data.close;
+        const nextVol = volData?.value ?? 0;
+
+        setHoverBar((prev) => {
+          if (
+            prev &&
+            prev.time === nextTime &&
+            prev.open === nextOpen &&
+            prev.high === nextHigh &&
+            prev.low === nextLow &&
+            prev.close === nextClose &&
+            prev.volume === nextVol
+          ) {
+            return prev;
+          }
+          return {
+            time: nextTime,
+            open: nextOpen,
+            high: nextHigh,
+            low: nextLow,
+            close: nextClose,
+            volume: nextVol,
+          };
         });
 
         if (param.point) {
           const hoveredPrice = cs.coordinateToPrice(param.point.y);
           if (hoveredPrice !== null) {
-            setCursorPrice(hoveredPrice);
+            setCursorPrice((prev) => (prev !== null && Math.abs(prev - hoveredPrice) < 0.0001 ? prev : hoveredPrice));
             const now = live.current;
             if (now.showZones) {
               const match = now.zones.find(
@@ -498,7 +524,22 @@ export function PriceChart({
                   hoveredPrice >= z.low &&
                   hoveredPrice <= z.high,
               );
-              setHoveredZone(match || null);
+              setHoveredZone((prev) => {
+                const nextZone = match || null;
+                if (prev === nextZone) return prev;
+                if (
+                  prev &&
+                  nextZone &&
+                  prev.kind === nextZone.kind &&
+                  prev.low === nextZone.low &&
+                  prev.high === nextZone.high &&
+                  prev.created_at === nextZone.created_at &&
+                  prev.state === nextZone.state
+                ) {
+                  return prev;
+                }
+                return nextZone;
+              });
             }
           }
         }
@@ -578,8 +619,10 @@ export function PriceChart({
       }
     }
 
-    setTimeout(paintOverlay, 50);
-  }, [bars, built, paintOverlay, showEma, showVolume]);
+    setTimeout(() => {
+      live.current.paintOverlay();
+    }, 50);
+  }, [bars, built, showEma, showVolume]);
 
   // Set levels
   useEffect(() => {
