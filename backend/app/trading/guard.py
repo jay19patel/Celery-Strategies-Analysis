@@ -12,6 +12,11 @@ The P&L read is what closing would actually book (`TradingService.valuation`): b
 for shorts, every fee. Without a fresh quote on every leg nothing is decided — absence over
 staleness — except the expiry rules, which depend only on the clock.
 
+A structure left in `error` — a close that did not finish, an entry whose unwind did not — is
+retried here too, with a backoff, until it is flat: its intent was always to be out, and left alone
+it would sit outside every stop and past its expiry. Past expiry it is settled instead. One
+structure failing never stops the others from being checked.
+
 Per broker: equity down `daily_loss_limit_pct` from the start of the trading day closes that
 broker's structures and blocks its entries until the next day. Brokers are independent: one
 halting never touches another.
@@ -19,6 +24,7 @@ halting never touches another.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -32,6 +38,9 @@ from app.settings import Settings
 from app.trading.risk import set_halt, start_day
 from app.trading.service import TradingService, exit_thresholds, is_directional, is_zerohero
 
+log = logging.getLogger(__name__)
+RETRY_FIRST, RETRY_MAX = 30.0, 600.0  # seconds between retries of a structure in error: doubling, capped
+
 
 class Guard:
     def __init__(self, trading: TradingService, settings: Any, hub: EventHub, zerohero: Any = None) -> None:
@@ -39,26 +48,46 @@ class Guard:
         self.settings: Any = settings
         self.hub = hub
         self.zerohero = zerohero  # reads the break a zero-hero buy was opened on; None in tests
+        self._retry: dict[str, tuple[float, float]] = {}  # structure id -> (next attempt, current wait)
 
     async def check_structures(self) -> str:
         s: Settings = self.settings()
         with session() as db:
-            rows = list(db.exec(select(Structure).where(Structure.status == "open")).all())
+            rows = list(db.exec(select(Structure).where(col(Structure.status).in_(("open", "error")))).all())
             ids = [r.id for r in rows]
             legs = list(db.exec(select(Leg).where(col(Leg.structure_id).in_(ids))).all()) if ids else []
-        acted = 0
+        acted = failed = 0
         now = time.time()
+        self._retry = {sid: v for sid, v in self._retry.items() if sid in ids}
         for st in rows:
-            st_legs = [leg for leg in legs if leg.structure_id == st.id]
-            reason = self.exit_reason(st, st_legs, s, now)
+            if st.status == "error":
+                reason = self._error_reason(st, now)
+            else:
+                reason = self.exit_reason(st, [leg for leg in legs if leg.structure_id == st.id], s, now)
             if reason is None:
                 continue
             acted += 1
-            if reason == "expired":
-                await self.trading.settle_expired(st.id)
-            else:
-                await self.trading.close(st.id, reason)
-        return f"{len(rows)} open, {acted} exited"
+            try:
+                if reason == "expired":
+                    await self.trading.settle_expired(st.id)
+                else:
+                    await self.trading.close(st.id, reason)
+            except Exception:  # one structure must not keep the guard from every other one
+                failed += 1
+                log.exception("guard_exit_failed structure=%s reason=%s", st.id, reason)
+        open_ = sum(st.status == "open" for st in rows)
+        return f"{open_} open, {len(rows) - open_} in error, {acted} exited" + (f", {failed} failed" if failed else "")
+
+    def _error_reason(self, st: Structure, now: float) -> str | None:
+        """When a structure in error is due another attempt at getting flat, and how."""
+        next_at, wait = self._retry.get(st.id, (0.0, RETRY_FIRST / 2))
+        if now < next_at:
+            return None
+        wait = min(wait * 2, RETRY_MAX)
+        self._retry[st.id] = (now + wait, wait)
+        if not is_directional(st) and now >= st.expiry:
+            return "expired"
+        return f"retrying the exit after an error: {st.error[:200]}"
 
     def exit_reason(self, st: Structure, legs: list[Leg], s: Settings, now: float) -> str | None:
         if is_directional(st):

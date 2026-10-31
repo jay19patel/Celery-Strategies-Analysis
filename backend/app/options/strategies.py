@@ -79,6 +79,13 @@ def spec_for(key: str) -> StrategySpec | None:
     return CATALOG.get(key) or EXTRA.get(key)
 
 
+def describe(legs: Any) -> str:
+    """A hand-built structure named by what it holds — "Buy 80,600 Call + Sell 82,000 Call" — since
+    "Custom" says nothing about which option was taken."""
+    parts = dict.fromkeys(f"{leg.side.title()} {leg.strike:,.0f} {leg.kind.title()}" for leg in legs)
+    return " + ".join(parts) or "Custom"
+
+
 @dataclass(frozen=True)
 class PlanLeg:
     symbol: str

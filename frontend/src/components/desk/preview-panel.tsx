@@ -67,19 +67,20 @@ export function PreviewPanel({ preview }: { preview: Preview }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
+      <div className="grid gap-1.5 md:flex md:flex-wrap">
         {preview.checks.map((c) => (
           <div
             key={c.name}
             title={c.detail}
             className={cn(
-              "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11.5px]",
+              "flex items-start gap-1.5 rounded-md border px-2 py-1.5 text-[11.5px] md:items-center md:py-1",
               c.ok ? "border-green-200 bg-profit-soft text-profit" : c.required ? "border-red-200 bg-loss-soft text-loss" : "border-amber-200 bg-warn-soft text-warn",
             )}
           >
-            {c.ok ? <CheckCircle2 className="size-3.5" /> : c.required ? <XCircle className="size-3.5" /> : <CircleAlert className="size-3.5" />}
-            <span className="font-medium">{c.name}</span>
-            <span className="hidden text-[11px] opacity-80 md:inline">— {c.detail}</span>
+            {c.ok ? <CheckCircle2 className="mt-px size-3.5 shrink-0 md:mt-0" /> : c.required ? <XCircle className="mt-px size-3.5 shrink-0 md:mt-0" /> : <CircleAlert className="mt-px size-3.5 shrink-0 md:mt-0" />}
+            <span className="min-w-0">
+              <span className="font-medium">{c.name}</span> <span className="text-[11px] opacity-80">— {c.detail}</span>
+            </span>
           </div>
         ))}
       </div>

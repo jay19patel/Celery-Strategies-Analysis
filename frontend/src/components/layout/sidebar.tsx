@@ -2,21 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CandlestickChart, X } from "lucide-react";
+import { CandlestickChart } from "lucide-react";
 
 import { NAV } from "@/components/layout/nav";
 import { useApi, useLive } from "@/lib/live";
 import type { Structure } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarBody() {
   const pathname = usePathname();
   const { connected } = useLive();
   const { data: open } = useApi<Structure[]>("/trading/structures?status=open", { refreshInterval: 15_000 });
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-14 items-center justify-between border-b px-5">
+      <div className="flex h-14 items-center border-b px-5">
         <div className="flex items-center gap-2.5">
           <div className="grid size-7 place-items-center rounded-lg bg-primary text-white shadow-xs">
             <CandlestickChart className="size-4" />
@@ -26,16 +26,6 @@ export function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
             <div className="text-[10.5px] text-muted-foreground">Options & Perps desk</div>
           </div>
         </div>
-        {onNavigate && (
-          <button
-            type="button"
-            onClick={onNavigate}
-            className="flex size-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 lg:hidden"
-            aria-label="Close Drawer"
-          >
-            <X className="size-4" />
-          </button>
-        )}
       </div>
       <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-4 no-scrollbar">
         {NAV.map((group) => (
@@ -48,7 +38,6 @@ export function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
                   <Link
                     key={item.href}
                     href={item.href}
-                    onClick={onNavigate}
                     className={cn(
                       "flex min-h-[42px] items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] font-medium text-slate-600 transition-all active:scale-[0.98] hover:bg-slate-50 hover:text-slate-900",
                       active && "bg-accent text-accent-foreground font-semibold hover:bg-accent hover:text-accent-foreground shadow-2xs",

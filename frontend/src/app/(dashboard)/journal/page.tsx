@@ -20,9 +20,9 @@ function iso(year: number, month: number, day: number): string {
 
 function Tile({ label, value, hint, className }: { label: string; value: string; hint: string; className?: string }) {
   return (
-    <div className="px-4 py-3">
-      <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={cn("num text-[17px] font-semibold", className)}>{value}</div>
+    <div className="min-w-0 px-3 py-3 sm:px-4">
+      <div className="truncate text-[10.5px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={cn("num truncate text-[16px] font-semibold sm:text-[17px]", className)}>{value}</div>
       <div className="text-[10.5px] leading-snug text-muted-foreground">{hint}</div>
     </div>
   );
@@ -41,7 +41,7 @@ function MonthSummary({ m, accounts, label }: { m: JournalMonth; accounts: Accou
   const sorted = [...active].sort((a, b) => b.pnl - a.pnl);
   return (
     <div>
-      <Card className="grid grid-cols-2 divide-x divide-slate-100 md:grid-cols-3 xl:grid-cols-6">
+      <Card className="grid grid-cols-2 divide-x divide-slate-100 overflow-hidden md:grid-cols-3 xl:grid-cols-6 [&>*]:border-b [&>*]:border-slate-100">
         <Tile label={`${label} P&L`} value={signed(m.pnl)} className={pnlClass(m.pnl)} hint={`${m.trades} closed · realised only`} />
         <Tile label="Win rate" value={m.trades ? pct((100 * m.wins) / m.trades, 0) : "—"} hint={`${m.wins} won · ${m.trades - m.wins} lost`} />
         <Tile label="Days" value={`${active.length} active`} hint={`${green} green · ${red} red`} />
@@ -95,11 +95,11 @@ export default function JournalPage() {
           </h1>
           <p className="mt-0.5 text-xs text-slate-500">Click any day for its full audit: what opened and closed, every order, why the auto-trader stood aside, and what went wrong.</p>
         </div>
-        <div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-1.5 shadow-xs">
+        <div className="flex w-full items-center gap-1 rounded-lg border bg-card px-2 py-1.5 shadow-xs sm:w-auto sm:gap-2 sm:px-3">
           <Button variant="ghost" size="icon-sm" onClick={() => shift(-1)} aria-label="Previous month">
             <ChevronLeft />
           </Button>
-          <span className="w-36 text-center text-sm font-semibold text-slate-700">{label}</span>
+          <span className="flex-1 text-center text-sm font-semibold text-slate-700 sm:w-36 sm:flex-none">{label}</span>
           <Button variant="ghost" size="icon-sm" onClick={() => shift(1)} aria-label="Next month">
             <ChevronRight />
           </Button>
@@ -115,7 +115,7 @@ export default function JournalPage() {
       <Card className="overflow-hidden">
         <div className="grid grid-cols-7 border-b bg-slate-50">
           {WEEKDAYS.map((w) => (
-            <div key={w} className="border-r border-slate-200 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-slate-500 last:border-0">{w}</div>
+            <div key={w} className="border-r border-slate-200 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-slate-500 last:border-0 sm:py-2.5 sm:text-xs">{w}</div>
           ))}
         </div>
         {isLoading && !data ? (
@@ -123,7 +123,7 @@ export default function JournalPage() {
         ) : (
           <div className="grid grid-cols-7 gap-px bg-slate-200">
             {cells.map((day, i) => {
-              if (day === null) return <div key={`blank-${i}`} className="min-h-[88px] bg-slate-50 sm:min-h-[110px]" />;
+              if (day === null) return <div key={`blank-${i}`} className="min-h-[72px] bg-slate-50 sm:min-h-[110px]" />;
               const date = iso(ym.year, ym.month, day);
               const d = data?.days[date];
               const isToday = date === todayStr;
@@ -133,10 +133,10 @@ export default function JournalPage() {
                   key={date}
                   type="button"
                   onClick={() => setSelected(date)}
-                  className={cn("flex min-h-[88px] flex-col bg-card p-2 text-left transition-colors hover:bg-slate-50 sm:min-h-[110px] sm:p-2.5", isToday && "bg-blue-50/40")}
+                  className={cn("flex min-h-[72px] min-w-0 flex-col overflow-hidden bg-card p-1 text-left transition-colors hover:bg-slate-50 active:bg-slate-100 sm:min-h-[110px] sm:p-2.5", isToday && "bg-blue-50/40")}
                 >
                   <div className="flex items-start justify-between">
-                    <span className={cn("text-xs font-bold text-slate-700", isToday && "grid size-7 place-items-center rounded-full bg-primary text-white shadow-sm ring-2 ring-blue-200")}>{day}</span>
+                    <span className={cn("text-xs font-bold text-slate-700", isToday && "grid size-6 place-items-center sm:size-7 rounded-full bg-primary text-white shadow-sm ring-2 ring-blue-200")}>{day}</span>
                     {active && <span className="size-1.5 rounded-full bg-primary" />}
                   </div>
                   <div className="flex-1" />
@@ -145,16 +145,16 @@ export default function JournalPage() {
                       <>
                         <span
                           className={cn(
-                            "num inline-block rounded px-1.5 py-0.5 text-[11px] font-bold",
+                            "num inline-block max-w-full truncate rounded px-0.5 py-0.5 text-[9.5px] font-bold sm:px-1.5 sm:text-[11px]",
                             d.pnl > 0 ? "bg-profit-soft text-profit" : d.pnl < 0 ? "bg-loss-soft text-loss" : "bg-slate-100 text-slate-500",
                           )}
                         >
                           {signed(d.pnl)}
                         </span>
-                        <div className="mt-0.5 text-[10px] font-medium text-slate-400">{d.trades} {d.trades === 1 ? "trade" : "trades"}</div>
+                        <div className="mt-0.5 text-[9.5px] font-medium text-slate-400 sm:text-[10px]">{d.trades}<span className="hidden sm:inline"> {d.trades === 1 ? "trade" : "trades"}</span></div>
                       </>
                     ) : d && d.decisions > 0 ? (
-                      <span className="num inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">{d.decisions} decisions</span>
+                      <span className="num inline-block rounded bg-slate-100 px-1 py-0.5 text-[9.5px] text-slate-600 sm:px-1.5 sm:text-[10px]">{d.decisions}<span className="hidden sm:inline"> decisions</span></span>
                     ) : (
                       <div className="pt-2 text-[10px] text-slate-300">—</div>
                     )}

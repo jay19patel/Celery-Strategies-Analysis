@@ -80,8 +80,8 @@ export default function PerformancePage() {
         />
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-        <p className="max-w-3xl text-xs text-slate-500">
+      <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
+        <p className="max-w-3xl text-xs leading-relaxed text-slate-500">
           {broker === "paper"
             ? "The paper broker fills each leg at the live bid or ask (the mark plus slippage only when that side is empty), charges the fee from Delta's product spec, and settles anything still open at expiry on the index. Configure it in "
             : "Results of every structure closed on Delta. Configure the account in "}
@@ -95,7 +95,7 @@ export default function PerformancePage() {
             destructive
             onConfirm={reset}
             trigger={(openDialog) => (
-              <Button variant="destructive-outline" size="sm" onClick={openDialog}>
+              <Button variant="destructive-outline" size="sm" onClick={openDialog} className="self-start sm:self-auto">
                 <RotateCcw /> Reset paper account
               </Button>
             )}
@@ -107,7 +107,7 @@ export default function PerformancePage() {
       {!o ? (
         <Loading rows={2} />
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5 xl:grid-cols-10">
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
           <Stat
             label="Gross P&L"
             value={o.gross_pnl !== undefined ? signed(o.gross_pnl, 4) : signed(o.pnl + o.fees, 4)}
@@ -117,7 +117,7 @@ export default function PerformancePage() {
           <Stat
             label="Total Charges"
             value={usd(o.fees, 4)}
-            valueClass="text-amber-600 dark:text-amber-400"
+            valueClass="text-amber-600"
             hint="broker & exchange"
           />
           <Stat label="Net realised" value={signed(o.pnl, 4)} valueClass={pnlClass(o.pnl)} hint="after all fees" />

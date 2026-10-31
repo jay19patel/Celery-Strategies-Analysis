@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Loader2, RefreshCw, WifiOff } from "lucide-react";
+import { Loader2, RefreshCw, ShieldAlert, WifiOff } from "lucide-react";
 
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { Header } from "@/components/layout/header";
@@ -19,7 +19,6 @@ interface Session {
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [menuOpen, setMenuOpen] = useState(false);
   const { data: session, error, isValidating, mutate } = useApi<Session>("/auth/session", { revalidateOnFocus: true });
 
   useEffect(() => {
@@ -54,26 +53,31 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     <LiveProvider>
       <Sidebar />
       <div className="min-w-0 lg:pl-60">
-        <Header menuOpen={menuOpen} onMenuOpenChange={setMenuOpen} />
+        <Header />
         {error && (
-          <div className="flex flex-wrap items-center gap-2 border-b border-amber-200 bg-warn-soft px-4 py-2 text-[12.5px] text-amber-900 lg:px-6">
-            <WifiOff className="size-3.5" />
-            Lost contact with the backend — showing the last data received. Retrying automatically.
+          <div className="flex items-center gap-2 border-b border-amber-200 bg-warn-soft px-4 py-2 text-[12.5px] text-amber-900 lg:px-6">
+            <WifiOff className="size-3.5 shrink-0" />
+            <span className="min-w-0">Lost contact with the backend — showing the last data received. Retrying automatically.</span>
             <Button variant="ghost" size="xs" className="ml-auto" onClick={() => mutate()} disabled={isValidating}>
               {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />} Retry now
             </Button>
           </div>
         )}
         {session.using_default_pin && (
-          <div className="border-b border-amber-200 bg-warn-soft px-4 py-2 text-[12.5px] text-amber-900 lg:px-6">
-            The dashboard PIN is still the published default. <Link href="/settings#security" className="font-semibold underline">Change it</Link> before this is reachable from anywhere but this machine.
+          <div className="flex items-start gap-2 border-b border-amber-200 bg-warn-soft px-4 py-2 text-[12.5px] leading-snug text-amber-900 lg:px-6">
+            <ShieldAlert className="mt-px size-3.5 shrink-0" />
+            <span className="min-w-0">
+              The dashboard PIN is still the published default.{" "}
+              <Link href="/settings#security" className="font-semibold underline">Change it</Link>
+              <span className="hidden sm:inline"> before this is reachable from anywhere but this machine</span>.
+            </span>
           </div>
         )}
-        {/* pb-24 ensures floating bottom nav bar never obscures content or buttons on mobile */}
-        <main className="mx-auto max-w-[1600px] space-y-4 sm:space-y-5 p-3.5 sm:p-5 lg:p-6 pb-24 lg:pb-6">
+        {/* The bottom padding keeps the phone tab bar (and the home indicator below it) off the last card. */}
+        <main key={pathname} className="page-in mx-auto max-w-[1600px] space-y-4 px-4 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:space-y-5 sm:px-5 sm:pt-5 lg:p-6">
           {children}
         </main>
-        <BottomNav onOpenMenu={() => setMenuOpen(true)} />
+        <BottomNav />
       </div>
     </LiveProvider>
   );

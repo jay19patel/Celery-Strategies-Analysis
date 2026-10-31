@@ -18,19 +18,23 @@ export function DecisionRow({ d }: { d: Decision }) {
   const m = d.regime?.metrics;
   return (
     <div className="border-b border-slate-100 last:border-0">
-      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-slate-50/70">
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50/70 active:bg-slate-50">
         {open ? <ChevronDown className="mt-0.5 size-4 shrink-0 text-slate-400" /> : <ChevronRight className="mt-0.5 size-4 shrink-0 text-slate-400" />}
-        <span className="num w-28 shrink-0 text-[12px] text-muted-foreground">{dateTime(d.ts)}</span>
-        <Badge variant={ACTION[d.action]} className="w-12 shrink-0 uppercase">{d.action}</Badge>
-        <span className="w-10 shrink-0 text-[12.5px] font-semibold">{d.underlying}</span>
-        <span className="min-w-0 flex-1 text-[12.5px] text-slate-700">
-          {d.strategy && <span className="mr-1.5 font-medium capitalize">{d.strategy.replace(/_/g, " ")} ·</span>}
-          {d.reason}
-        </span>
+        <div className="min-w-0 flex-1 sm:flex sm:items-start sm:gap-3">
+          <div className="flex items-center gap-2 sm:contents">
+            <span className="num shrink-0 text-[12px] text-muted-foreground sm:w-28">{dateTime(d.ts)}</span>
+            <Badge variant={ACTION[d.action]} className="w-12 shrink-0 uppercase">{d.action}</Badge>
+            <span className="shrink-0 text-[12.5px] font-semibold sm:w-10">{d.underlying}</span>
+          </div>
+          <span className="mt-1 block min-w-0 text-[12.5px] text-slate-700 sm:mt-0 sm:flex-1">
+            {d.strategy && <span className="mr-1.5 font-medium capitalize">{d.strategy.replace(/_/g, " ")} ·</span>}
+            {d.reason}
+          </span>
+        </div>
         {d.ai?.used && <Bot className="size-4 shrink-0 text-primary" aria-label="AI reviewed" />}
       </button>
       {open && (
-        <div className="space-y-4 bg-slate-50/50 px-4 pb-4 pl-11">
+        <div className="animate-in fade-in slide-in-from-top-1 space-y-4 bg-slate-50/50 px-4 pb-4 duration-200 sm:pl-11">
           {d.regime && m && (
             <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-muted-foreground">
               <span>regime <b className="capitalize text-slate-800">{d.regime.label}</b></span>
@@ -105,7 +109,7 @@ export function DecisionRow({ d }: { d: Decision }) {
           {d.orders && (
             <div className="flex flex-wrap gap-2 text-[12px]">
               {Object.entries(d.orders).map(([broker, o]) => (
-                <div key={broker} className="rounded-md border bg-card px-2.5 py-1.5">
+                <div key={broker} className="min-w-0 break-words rounded-md border bg-card px-2.5 py-1.5">
                   <span className="font-semibold capitalize">{broker}</span>:{" "}
                   {o.refused ? <span className="text-muted-foreground">{o.refused}</span> : <span className={o.status === "open" ? "text-profit" : "text-loss"}>{o.status} ×{o.qty} <span className="num">{o.structure_id}</span>{o.error ? ` — ${o.error}` : ""}</span>}
                 </div>

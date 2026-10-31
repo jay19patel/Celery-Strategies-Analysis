@@ -75,14 +75,14 @@ export function StrategyPicker({ strategies, params, onChange }: { strategies: S
                     {leg.side}
                   </button>
                   <span className="num flex-1 truncate">{leg.symbol}</span>
-                  <Button variant="ghost" size="icon-sm" className="size-6" onClick={() => onChange({ legs: params.legs.map((l, j) => (j === i ? { ...l, ratio: Math.max(1, l.ratio - 1) } : l)) })}>
+                  <Button variant="ghost" size="icon-sm" className="size-8 sm:size-6" onClick={() => onChange({ legs: params.legs.map((l, j) => (j === i ? { ...l, ratio: Math.max(1, l.ratio - 1) } : l)) })}>
                     <Minus className="size-3" />
                   </Button>
                   <span className="num w-5 text-center">{leg.ratio}</span>
-                  <Button variant="ghost" size="icon-sm" className="size-6" onClick={() => onChange({ legs: params.legs.map((l, j) => (j === i ? { ...l, ratio: Math.min(10, l.ratio + 1) } : l)) })}>
+                  <Button variant="ghost" size="icon-sm" className="size-8 sm:size-6" onClick={() => onChange({ legs: params.legs.map((l, j) => (j === i ? { ...l, ratio: Math.min(10, l.ratio + 1) } : l)) })}>
                     <Plus className="size-3" />
                   </Button>
-                  <Button variant="ghost" size="icon-sm" className="size-6 text-slate-400 hover:text-loss" onClick={() => onChange({ legs: params.legs.filter((_, j) => j !== i) })}>
+                  <Button variant="ghost" size="icon-sm" className="size-8 text-slate-400 hover:text-loss sm:size-6" onClick={() => onChange({ legs: params.legs.filter((_, j) => j !== i) })}>
                     <Trash2 className="size-3.5" />
                   </Button>
                 </div>

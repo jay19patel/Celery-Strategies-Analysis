@@ -137,21 +137,21 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
 
   return (
     <Dialog open={!!date} onOpenChange={(o) => { if (!o) { onClose(); setTab("overview"); } }}>
-      <DialogContent className="max-w-5xl gap-0 p-0 sm:max-w-5xl">
-        <DialogHeader className="flex-row items-center gap-3 border-b bg-slate-50 px-6 py-4">
+      <DialogContent className="max-w-5xl gap-0 p-0 sm:max-w-5xl sm:p-0">
+        <DialogHeader className="flex-row items-center gap-3 border-b bg-slate-50 px-4 py-4 pr-10 sm:px-6">
           <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-blue-100 bg-accent text-primary">
             <BarChart2 className="size-5" />
           </div>
           <div className="min-w-0">
-            <DialogTitle className="text-lg">Session audit — {human}</DialogTitle>
+            <DialogTitle className="text-base sm:text-lg">Session audit — {human}</DialogTitle>
             <DialogDescription>{date} · all times {data?.timezone ?? "…"}</DialogDescription>
           </div>
         </DialogHeader>
-        <LoadError error={error} className="m-6" />
-        {isLoading && !data && <Loading rows={6} className="p-6" />}
+        <LoadError error={error} className="m-4 sm:m-6" />
+        {isLoading && !data && <Loading rows={6} className="p-4 sm:p-6" />}
         {data && story && (
           <Tabs value={tab} onValueChange={setTab} className="gap-0">
-            <div className="overflow-x-auto border-b px-6">
+            <div className="no-scrollbar overflow-x-auto border-b px-2 sm:px-6">
               <TabsList className="h-11 rounded-none bg-transparent p-0">
                 {[
                   ["overview", <Sparkles key="i" />, "Overview", null],
@@ -170,9 +170,9 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
                 ))}
               </TabsList>
             </div>
-            <div className="max-h-[68vh] overflow-y-auto bg-slate-50/50 p-6">
+            <div className="max-h-[68vh] overflow-y-auto bg-slate-50/50 p-4 sm:p-6">
               <TabsContent value="overview" className="space-y-6">
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2.5 sm:gap-4 md:grid-cols-4">
                   <Kpi
                     label="Net realised P&L"
                     value={<Pnl value={data.pnl} />}

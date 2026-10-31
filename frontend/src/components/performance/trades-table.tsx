@@ -24,7 +24,7 @@ const ALL = "__all__";
 
 function Field({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <div>
+    <div className="min-w-0 break-words">
       <div className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
       <div className={cn("num text-[12px]", className)}>{children}</div>
     </div>
@@ -37,7 +37,7 @@ function Detail({ s }: { s: Structure }) {
   const legs = data?.legs ?? s.legs;
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7">
         <Field label="Opened">{dateTime(s.opened_at)}</Field>
         <Field label="Closed">{dateTime(s.closed_at)}</Field>
         <Field label="Held">{duration(holdSeconds(s))}</Field>
@@ -52,10 +52,11 @@ function Detail({ s }: { s: Structure }) {
         <Field label="Take profit · stop">{`${s.take_profit_pct}% · ${s.stop_loss_pct}%`}</Field>
         <Field label="Source">{s.source}{s.decision_id ? ` · decision #${s.decision_id}` : ""}</Field>
       </div>
-      <p className="text-[12px] text-slate-600">{s.close_reason}</p>
+      <p className="break-words text-[12px] text-slate-600">{s.close_reason}</p>
       <div>
         <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Legs</div>
-        <table className="w-full max-w-3xl text-[11.5px]">
+        <div className="overflow-x-auto">
+        <table className="w-full max-w-3xl text-[11.5px] [&_td]:whitespace-nowrap">
           <tbody>
             {legs.map((l) => (
               <tr key={l.id} className="border-t border-slate-100">
@@ -67,11 +68,13 @@ function Detail({ s }: { s: Structure }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
       {!!data?.orders?.length && (
         <div>
           <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Leg orders</div>
-          <table className="w-full max-w-3xl text-[11.5px]">
+          <div className="overflow-x-auto">
+          <table className="w-full max-w-3xl text-[11.5px] [&_td]:whitespace-nowrap">
             <tbody>
               {data.orders.map((o) => (
                 <tr key={o.client_order_id} className="border-t border-slate-100">
@@ -86,9 +89,52 @@ function Detail({ s }: { s: Structure }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
-      <div className="num text-[11px] text-muted-foreground">structure {s.id}</div>
+      <div className="num break-all text-[11px] text-muted-foreground">structure {s.id}</div>
+    </div>
+  );
+}
+
+/** A closed trade on a phone: the row's numbers stacked, tapped open for the same detail. */
+function TradeCard({ s, expanded, onToggle }: { s: Structure; expanded: boolean; onToggle: () => void }) {
+  const ret = returnPct(s);
+  return (
+    <div className={cn("transition-colors", expanded && "bg-slate-50/70")}>
+      <button type="button" onClick={onToggle} className="block w-full px-4 py-3 text-left active:bg-slate-50" aria-expanded={expanded}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-[13.5px] font-semibold text-slate-900">{s.label}</div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11.5px] text-muted-foreground">
+              <span className="font-medium text-slate-700">{s.underlying}</span> {s.expiry_label}
+              <Badge variant="primary">{s.broker}</Badge>
+              <Badge variant={s.source === "auto" ? "primary" : "outline"}>{s.source}</Badge>
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <Pnl value={s.pnl} digits={4} className="text-[15px]" />
+            <div className={cn("num text-[11px]", pnlClass(s.pnl))}>{ret === null ? "—" : `${num(ret, 2)}%`}</div>
+          </div>
+        </div>
+        <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+          <div className="min-w-0"><div className="text-muted-foreground">Entry</div><Premium value={s.entry_cash} className="text-[11.5px]" /></div>
+          <div className="min-w-0"><div className="text-muted-foreground">Gross</div><span className={cn("num font-medium", pnlClass(grossPnl(s)))}>{signed(grossPnl(s), 4)}</span></div>
+          <div className="min-w-0"><div className="text-muted-foreground">Fees</div><span className="num">{usd(s.fees, 4)}</span></div>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+          <span className="num truncate">{dateTime(s.closed_at)} · {s.qty} lot{s.qty === 1 ? "" : "s"} · {duration(holdSeconds(s))}</span>
+          <span className="flex shrink-0 items-center gap-1">
+            <Badge title={s.close_reason}>{reasonKind(s.close_reason)}</Badge>
+            <ChevronRight className={cn("size-3.5 text-slate-400 transition-transform duration-200", expanded && "rotate-90")} />
+          </span>
+        </div>
+      </button>
+      {expanded && (
+        <div className="animate-in fade-in slide-in-from-top-1 border-t border-slate-100 px-4 py-3 duration-200">
+          <Detail s={s} />
+        </div>
+      )}
     </div>
   );
 }
@@ -134,9 +180,9 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
           <History className="size-4 text-slate-400" /> Closed trades
           <span className="text-xs font-normal text-muted-foreground">{filtered.length} trade{filtered.length === 1 ? "" : "s"}{filtering ? " match" : ""}</span>
         </CardTitle>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid w-full grid-cols-[1fr_auto] gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
           <Select value={strategy || ALL} onValueChange={(v) => { onStrategy(v === ALL ? "" : v); setPage(1); }}>
-            <SelectTrigger size="sm" className="w-44 text-[12.5px]">
+            <SelectTrigger size="sm" className="w-full text-[12.5px] sm:w-44">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -146,16 +192,16 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
               ))}
             </SelectContent>
           </Select>
-          <Tabs value={outcome || "all"} onValueChange={(v) => { setOutcome(v === "all" ? "" : (v as Outcome)); setPage(1); }}>
-            <TabsList className="h-8">
+          <Tabs className="col-span-2 row-start-2" value={outcome || "all"} onValueChange={(v) => { setOutcome(v === "all" ? "" : (v as Outcome)); setPage(1); }}>
+            <TabsList className="h-8 w-full sm:w-fit">
               <TabsTrigger value="all">All</TabsTrigger>
               <TabsTrigger value="win">Wins</TabsTrigger>
               <TabsTrigger value="loss">Losses</TabsTrigger>
             </TabsList>
           </Tabs>
-          <Input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Symbol, reason, id…" className="h-8 w-48 text-[12.5px]" />
+          <Input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Symbol, reason, id…" className="col-span-2 h-9 w-full text-[12.5px] sm:h-8 sm:w-48" />
           <Select value={String(per)} onValueChange={(v) => { setPer(Number(v)); setPage(1); }}>
-            <SelectTrigger size="sm" className="w-20 text-[12.5px]" aria-label="Trades per page">
+            <SelectTrigger size="sm" className="col-start-2 row-start-1 w-20 text-[12.5px]" aria-label="Trades per page">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -166,7 +212,7 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
           </Select>
         </div>
       </CardHeader>
-      <div className="flex flex-wrap gap-x-5 gap-y-1 border-b border-slate-100 px-4 py-2 text-[12px]">
+      <div className="flex flex-wrap gap-x-5 gap-y-1 border-b border-slate-100 bg-slate-50/50 px-4 py-2 text-[12px]">
         <span>Net <b className={cn("num", pnlClass(sum.pnl))}>{signed(sum.pnl, 4)}</b></span>
         <span>Win rate <b className="num">{pct(sum.winRate)}</b> <span className="text-muted-foreground">({sum.wins} of {sum.trades})</span></span>
         <span>Fees <b className="num">{usd(sum.fees, 4)}</b></span>
@@ -181,7 +227,13 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
       ) : !shown.length ? (
         <Empty title={`No closed trades${filtering ? " for these filters" : " yet"}`} />
       ) : (
-        <Table>
+        <>
+        <div className="divide-y divide-slate-100 md:hidden">
+          {shown.map((s) => (
+            <TradeCard key={s.id} s={s} expanded={open.has(s.id)} onToggle={() => toggle(s.id)} />
+          ))}
+        </div>
+        <Table className="hidden md:table">
           <TableHeader>
             <TableRow>
               <TableHead className="w-6" />
@@ -210,7 +262,7 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
                       <ChevronRight className={cn("size-3.5 text-slate-400 transition-transform", expanded && "rotate-90")} />
                     </TableCell>
                     <TableCell className="num text-[11.5px] text-slate-500">{dateTime(s.closed_at)}</TableCell>
-                    <TableCell className="font-medium">{titleCase(s.strategy)}</TableCell>
+                    <TableCell className="max-w-56 truncate font-medium" title={s.label}>{s.label}</TableCell>
                     <TableCell>
                       <span className="font-medium">{s.underlying}</span> <span className="text-muted-foreground">{s.expiry_label}</span>
                     </TableCell>
@@ -242,6 +294,7 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
             })}
           </TableBody>
         </Table>
+        </>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 text-[12px]">
         <span className="num text-muted-foreground">
@@ -252,7 +305,7 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
           <Button variant="outline" size="xs" disabled={current === 1} onClick={() => go(current - 1)}>‹</Button>
           {nums[0] > 1 && <span className="px-1 text-muted-foreground">…</span>}
           {nums.map((p) => (
-            <Button key={p} variant={p === current ? "default" : "outline"} size="xs" onClick={() => go(p)} className="num min-w-7">{p}</Button>
+            <Button key={p} variant={p === current ? "default" : "outline"} size="xs" onClick={() => go(p)} className={cn("num min-w-7", Math.abs(p - current) > 1 && "hidden sm:inline-flex")}>{p}</Button>
           ))}
           {nums[nums.length - 1] < pages && <span className="px-1 text-muted-foreground">…</span>}
           <Button variant="outline" size="xs" disabled={current === pages} onClick={() => go(current + 1)}>›</Button>

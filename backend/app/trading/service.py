@@ -25,13 +25,13 @@ from sqlmodel import col, select
 from app.brokers.base import Broker, Fill, LegOrder
 from app.core.db import session
 from app.core.events import EventHub
-from app.core.models import Leg, OrderRecord, Structure
+from app.core.models import Bar, Leg, OrderRecord, Structure
 from app.errors import BrokerError, BrokerTimeout, NotFound, Refused
 from app.market.feed import MarketFeed
 from app.market.options import PERP_SLIPPAGE, PERPETUALS, UNDERLYING_OF
 from app.options.assess import leg_fee
 from app.options.pricing import LegSpec, analyze, intrinsic, margin_required, net_premium
-from app.options.strategies import ZERO_HERO, Plan, spec_for
+from app.options.strategies import ZERO_HERO, Plan, describe, spec_for
 from app.settings import Settings
 from app.strategies import REGISTRY
 from app.trading.desk import Desk
@@ -43,6 +43,7 @@ UNWIND_SLACK = 0.25
 RESOLVE_DELAYS = (1.0, 3.0, 10.0)
 HELD = ("opening", "open", "closing", "error")
 MIN_MANUAL_HOURS = 0.5
+SETTLE_LIVE_SECONDS = 300  # settled within this of expiry, the live index is the settlement price
 # A perpetual's book is deep: an entry at most 0.2% through the touch, a close at most 1%.
 PERP_ENTRY_SLACK = 0.002
 PERP_CLOSE_SLACK = 0.01
@@ -65,12 +66,16 @@ def is_zerohero_plan(plan: Plan) -> bool:
     return plan.strategy == ZERO_HERO
 
 
-def label_of(st: Structure) -> str:
+def label_of(st: Structure, legs: list[Leg] | None = None) -> str:
     if is_directional(st):
         strategy = REGISTRY.get(st.strategy)
         return strategy.label if strategy else "Perpetual"
-    spec = spec_for(st.strategy)
-    return spec.label if spec else "Custom"
+    if spec := spec_for(st.strategy):
+        return spec.label
+    if legs is None:
+        with session() as s:
+            legs = list(s.exec(select(Leg).where(Leg.structure_id == st.id).order_by(Leg.idx)).all())
+    return describe(legs)
 
 
 def structure_id(broker: str, request_id: str) -> str:
@@ -210,7 +215,7 @@ class TradingService:
             q = self.book(leg.symbol) if st.status in HELD else None
             out_legs.append(leg.model_dump() | {"bid": q[0] if q else None, "ask": q[1] if q else None, "mark": q[2] if q else None})
         return st.model_dump() | {
-            "label": label_of(st),
+            "label": label_of(st, legs),
             "instrument": "perp" if is_directional(st) else "options",
             "kind": ("long" if legs and legs[0].side == "buy" else "short") if is_directional(st) else ("credit" if st.entry_cash > 0 else "debit"),
             "legs": out_legs,
@@ -500,9 +505,9 @@ class TradingService:
             st, legs = self._load(sid)
             if st.status not in ("open", "error"):
                 raise Refused(f"structure {sid} is {st.status}, not open")
-            spot = self.feed.spot(st.underlying)
+            spot = self._settlement_price(st)
             if spot is None:
-                raise Refused(f"no {st.underlying} index price to settle {sid} at")
+                raise Refused(f"no {st.underlying} price at expiry to settle {sid} at")
             b = self.brokers[st.broker]
             for leg in legs:
                 if leg.entry_price is None or leg.exit_price is not None:
@@ -517,6 +522,20 @@ class TradingService:
             self._finish(st, legs, "closed", f"settled at expiry on index {spot:,.2f}")
             self._closed_event(st)
             return self.view(st, legs)
+
+    def _settlement_price(self, st: Structure) -> float | None:
+        """The index the structure expired on. Settled late — the engine was down at expiry — today's
+        price is not it: the stored 1m close of the perpetual at expiry is, and until that bar has
+        been backfilled there is nothing to settle at."""
+        if time.time() - st.expiry <= SETTLE_LIVE_SECONDS:
+            return self.feed.spot(st.underlying)
+        with session() as s:
+            bar = s.exec(
+                select(Bar).where(Bar.symbol == PERPETUALS[st.underlying], Bar.interval == "1m",
+                                  col(Bar.time) <= st.expiry - 60, col(Bar.time) >= st.expiry - 600)
+                .order_by(col(Bar.time).desc()).limit(1)
+            ).first()
+        return bar.close if bar else None
 
     async def close_all(self, reason: str, broker: str = "") -> dict[str, Any]:
         """The kill switch: every open structure, on one broker or all of them."""

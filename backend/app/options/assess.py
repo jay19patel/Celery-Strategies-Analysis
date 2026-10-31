@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.options.pricing import analyze, distribution
-from app.options.strategies import SELLER_CHECKS, Plan, spec_for
+from app.options.strategies import SELLER_CHECKS, Plan, describe, spec_for
 from app.settings import Settings
 
 # Delta India's option fee: a rate on the underlying notional, capped at a share of the premium.
@@ -95,7 +95,7 @@ def assess(
     )
     return {
         "strategy": plan.strategy,
-        "label": spec.label if spec else "Custom",
+        "label": spec.label if spec else describe(plan.legs),
         "plan": plan.to_dict(),
         "qty": qty,
         "hours_to_expiry": round(hours, 2),

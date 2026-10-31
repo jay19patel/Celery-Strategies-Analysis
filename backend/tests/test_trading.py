@@ -212,3 +212,64 @@ async def test_paper_never_fills_beyond_the_limit(env: Any) -> None:
         await env.paper.execute(LegOrder("x-1", q.symbol, "buy", 1, 99.0, 0.001))
     fill = await env.paper.execute(LegOrder("x-2", q.symbol, "sell", 1, 85.0, 0.001))
     assert fill.price == 90.0
+
+
+async def test_the_guard_retries_a_close_that_did_not_finish(env: Any) -> None:
+    """A close the broker refused leaves the structure in error; the guard keeps trying until it is flat,
+    instead of leaving it outside every stop."""
+    view = await env.trading.open("paper", condor(env), QTY, "manual", "req-retry-1")
+    env.brokers["paper"] = Recording(env.paper, fail=lambda o: o.reduce_only)
+    failed = await env.trading.close(view["id"], "test")
+    assert failed["status"] == "error"
+
+    guard = Guard(env.trading, env.settings, env.hub)
+    await guard.check_structures()  # still refused: it stays in error, and the guard does not raise
+    assert env.trading.structure(view["id"])["status"] == "error"
+
+    env.brokers["paper"] = env.paper
+    await guard.check_structures()  # inside the backoff: not retried yet
+    assert env.trading.structure(view["id"])["status"] == "error"
+    guard._retry.clear()
+    await guard.check_structures()
+    closed = env.trading.structure(view["id"])
+    assert closed["status"] == "closed" and closed["close_reason"].startswith("retrying the exit")
+
+
+async def test_a_late_settlement_uses_the_price_at_expiry_not_today(env: Any) -> None:
+    """With the engine down at expiry, the structure settles on the stored bar at expiry; with no such
+    bar yet it waits, and the guard goes on to check every other structure."""
+    from app.core.models import Bar, Structure
+
+    guard = Guard(env.trading, env.settings, env.hub)
+    held = await env.trading.open("paper", condor(env), QTY, "manual", "req-late-1")
+    expiry = int(time.time() - 3 * 3600) // 60 * 60
+    with session() as s:
+        row = s.get(Structure, held["id"])
+        row.expiry = expiry
+        s.add(row)
+        s.commit()
+    assert "1 failed" in await guard.check_structures()
+    assert env.trading.structure(held["id"])["status"] == "open"
+
+    then = env.feed.spot("BTC") * 0.9
+    with session() as s:
+        s.add(Bar(symbol="BTCUSD", interval="1m", time=expiry - 60, open=then, high=then, low=then, close=then))
+        s.commit()
+    guard._retry.clear()
+    await guard.check_structures()
+    settled = env.trading.structure(held["id"])
+    assert settled["status"] == "closed" and f"{then:,.2f}" in settled["close_reason"]
+    for leg in settled["legs"]:
+        intrinsic = max(0.0, then - leg["strike"]) if leg["kind"] == "call" else max(0.0, leg["strike"] - then)
+        assert leg["exit_price"] == pytest.approx(intrinsic)
+
+
+async def test_a_hand_built_structure_is_named_by_its_legs(env: Any) -> None:
+    """Not "Custom": the dashboard says which option was bought or sold."""
+    legs = condor(env).legs[:2]
+    plan = env.desk.plan("BTC", "custom", legs=[{"symbol": leg.symbol, "side": leg.side, "ratio": 1} for leg in legs])
+    view = await env.trading.open("paper", plan, QTY, "manual", "req-named-1")
+    expected = " + ".join(f"{leg.side.title()} {leg.strike:,.0f} {leg.kind.title()}" for leg in legs)
+    assert view["label"] == expected
+    assert env.trading.structures(status="open")[0]["label"] == expected
+    assert (await env.desk.assess(plan, 1))["label"] == expected

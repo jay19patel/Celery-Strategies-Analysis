@@ -139,3 +139,51 @@ def test_the_strategy_menu_does_not_offer_zero_hero(client: TestClient) -> None:
     keys = {s["key"] for s in client.get("/api/settings").json()["strategies"]}
     assert "zero_hero" not in keys
     assert "iron_condor" in keys
+
+
+def test_accounts_carry_the_fees_of_closed_structures(client: TestClient) -> None:
+    """A closed structure on the book must not break the accounts endpoint the Performance page reads."""
+    from app.core.db import session
+    from app.core.models import Structure
+
+    with session() as s:
+        s.add(Structure(id="s1", broker="paper", underlying="BTC", strategy="iron_condor", source="auto", status="closed",
+                        expiry=0.0, qty=1, fees=1.25, pnl=-3.0, take_profit_pct=50.0, stop_loss_pct=100.0, opened_at=0.0))
+        s.commit()
+    login(client)
+    r = client.get("/api/portfolio/accounts")
+    assert r.status_code == 200, r.text
+
+
+def test_reset_data_needs_the_pin_keeps_settings_and_spares_open_positions(client: TestClient) -> None:
+    from sqlmodel import select
+
+    from app.core.db import session
+    from app.core.models import Decision, Structure
+
+    def structure(sid: str, status: str) -> Structure:
+        return Structure(id=sid, broker="paper", underlying="BTC", strategy="iron_condor", source="auto", status=status,
+                         expiry=0.0, qty=1, pnl=-1.0, take_profit_pct=50.0, stop_loss_pct=100.0, opened_at=0.0)
+
+    login(client)
+    assert client.patch("/api/settings", json={"changes": {"min_score": 70}}).status_code == 200
+    with session() as s:
+        s.add(structure("done", "closed"))
+        s.add(Decision(ts=0.0, underlying="BTC", action="skip"))
+        s.add(structure("held", "open"))
+        s.commit()
+
+    assert client.post("/api/system/reset-data", json={"pin": "000000"}).status_code == 409
+    r = client.post("/api/system/reset-data", json={"pin": PIN})
+    assert r.status_code == 409 and "close every position" in r.json()["error"]
+    with session() as s:
+        assert len(s.exec(select(Structure)).all()) == 2  # refused: nothing deleted
+
+        s.delete(s.get(Structure, "held"))
+        s.commit()
+    r = client.post("/api/system/reset-data", json={"pin": PIN})
+    assert r.status_code == 200 and r.json()["deleted"]["structure"] == 1
+    with session() as s:
+        assert not s.exec(select(Structure)).all() and not s.exec(select(Decision)).all()
+    assert client.get("/api/settings").json()["values"]["min_score"] == 70
+    assert client.get("/api/portfolio/stats").json()["overall"]["trades"] == 0

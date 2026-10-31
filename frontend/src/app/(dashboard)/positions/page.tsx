@@ -43,7 +43,7 @@ function AccountRow({
         <Stat label="Available" value={usd(account.available)} hint="for new margin" />
         <Stat label="Margin in use" value={usd(account.margin_used)} hint={usedPct === null ? undefined : `${usedPct.toFixed(1)}% of equity`} />
         <Stat label="Cash" value={usd(account.cash)} hint={typeof account.extra.fees_paid === "number" ? `fees paid ${usd(account.extra.fees_paid)}` : undefined} />
-        <Stat label="Today" value={onDay === null ? "—" : signed(onDay)} hint={today?.start_equity != null ? `from ${usd(today.start_equity)} at open` : "no day recorded yet"} />
+        <Stat className="col-span-2 sm:col-span-1" label="Today" value={onDay === null ? "—" : signed(onDay)} hint={today?.start_equity != null ? `from ${usd(today.start_equity)} at open` : "no day recorded yet"} />
       </div>
       {today?.halted && (
         <Notice tone="loss">

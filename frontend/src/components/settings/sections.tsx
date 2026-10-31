@@ -518,8 +518,23 @@ export function SecurityTab() {
     }
   };
 
+  const [resetPin, setResetPin] = useState("");
+  const resetData = async () => {
+    try {
+      const r = await api<{ deleted: Record<string, number> }>("/system/reset-data", "POST", { pin: resetPin });
+      const rows = Object.values(r.deleted).reduce((a, n) => a + n, 0);
+      toast.success("All data deleted", { description: `${rows} rows removed; settings kept, paper account back to its starting balance` });
+      setResetPin("");
+      await mutate(() => true);
+    } catch (err) {
+      toast.error("Nothing deleted", { description: message(err) });
+      throw err;
+    }
+  };
+
   const digits = (v: string) => v.replace(/\D/g, "").slice(0, 6);
   return (
+    <>
     <Section title="Dashboard PIN" description="Stored as an Argon2 hash. Every page, API route and the live stream need it.">
       <form onSubmit={submit} className="grid max-w-3xl gap-4 sm:grid-cols-3">
         <div className="space-y-1.5">
@@ -542,5 +557,32 @@ export function SecurityTab() {
         </div>
       </form>
     </Section>
+
+    <Section
+      title="Reset all data"
+      description="Deletes every trade, order, auto decision, signal, AI brief, prediction and event log, and puts the paper account back to its starting balance. Settings, API keys, the PIN and stored market prices are kept. Refused while any position is open."
+    >
+      <Confirm
+        title="Delete all trading data?"
+        description="This cannot be undone. Every trade, order, decision, signal and log is deleted; your configuration stays. Enter your login PIN to confirm."
+        confirmLabel="Delete everything"
+        destructive
+        onConfirm={resetData}
+        trigger={(open) => (
+          <Button variant="destructive-outline" size="sm" onClick={() => { setResetPin(""); open(); }}>
+            <Trash2 /> Reset all data
+          </Button>
+        )}
+      >
+        <div className="space-y-1.5">
+          <Label htmlFor="reset-pin">Login PIN</Label>
+          <Input
+            id="reset-pin" type="password" inputMode="numeric" autoComplete="current-password" className="num"
+            value={resetPin} onChange={(e) => setResetPin(digits(e.target.value))}
+          />
+        </div>
+      </Confirm>
+    </Section>
+    </>
   );
 }

@@ -78,6 +78,8 @@
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     touch-action: manipulation;
+    /* A stray wide child must never make the whole page pan sideways on a phone. */
+    overflow-x: clip;
   }
   .num {
     font-family: var(--font-mono);
@@ -96,5 +98,69 @@
   }
   .pt-safe {
     padding-top: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* Motion: one short entrance for a page, a sheen for skeletons, a press for anything tappable. */
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@layer components {
+  .page-in {
+    animation: page-in 0.28s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+  .shimmer {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 37%, #f1f5f9 63%);
+    background-size: 400% 100%;
+    animation: shimmer 1.4s ease infinite;
+  }
+  .pressable {
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.2s ease,
+      background-color 0.2s ease;
+  }
+  .pressable:active {
+    transform: scale(0.985);
+  }
+  /* On a phone a wide table scrolls inside its card and keeps its first column in view. */
+  @media (max-width: 767px) {
+    [data-slot="table-container"][data-sticky="true"] :is(th, td):first-child {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      background-color: var(--card);
+      box-shadow: 1px 0 0 var(--border);
+    }
+    [data-slot="table-container"][data-sticky="true"] th:first-child {
+      background-color: #f8fafc;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

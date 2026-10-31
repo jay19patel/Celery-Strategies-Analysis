@@ -37,6 +37,7 @@ const REFRESH: Record<string, string[]> = {
   Signal: ["/strategies", "/trading", "/portfolio"],
   MarketAnalysis: ["/desk"],
   PaperReset: ["/portfolio", "/trading"],
+  DataReset: ["/portfolio", "/trading", "/auto", "/zerohero", "/strategies", "/system", "/ai", "/market", "/desk"],
 };
 
 function wsUrl(): string {

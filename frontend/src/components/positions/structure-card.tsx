@@ -106,7 +106,7 @@ export function StructureCard({ s }: { s: Structure }) {
   };
 
   return (
-    <Card className={cn(s.status === "error" && "border-red-300")}>
+    <Card className={cn("transition-shadow hover:shadow-sm", s.status === "error" && "border-red-300")}>
       <CardHeader>
         <CardTitle className="flex-wrap">
           {s.label}{" "}
@@ -153,7 +153,26 @@ export function StructureCard({ s }: { s: Structure }) {
             {s.reason && <p className="text-[11.5px] leading-relaxed text-muted-foreground">{s.reason}</p>}
           </div>
           <div className="min-w-0">
-            <Table>
+            <div className="divide-y divide-slate-100 rounded-lg border md:hidden">
+              {s.legs.map((l) => (
+                <div key={l.id} className="space-y-1 px-3 py-2 text-[12px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate">
+                      <span className={cn("mr-1.5 text-[11px] font-semibold uppercase", l.side === "buy" ? "text-profit" : "text-loss")}>{l.side} {l.size}</span>
+                      <span className="num">{l.symbol}</span>
+                    </span>
+                    <Pnl value={l.exit_price === null ? legPnl(l) : null} digits={4} className="shrink-0" />
+                  </div>
+                  <div className="num flex flex-wrap justify-between gap-x-3 text-[11px] text-muted-foreground">
+                    <span>entry {price(l.entry_price)}</span>
+                    <span>{price(l.bid)} / {price(l.ask)}</span>
+                    <span>mark {price(l.mark)}</span>
+                  </div>
+                  {l.exit_price !== null && <div className="text-[11px] text-muted-foreground">exited {price(l.exit_price)}</div>}
+                </div>
+              ))}
+            </div>
+            <Table className="hidden md:table">
               <TableHeader>
                 <TableRow>
                   <TableHead>Leg</TableHead>
@@ -182,14 +201,14 @@ export function StructureCard({ s }: { s: Structure }) {
               </TableBody>
             </Table>
             <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-              <span className="mr-auto text-[11.5px] text-muted-foreground">
+              <span className="w-full text-[11.5px] text-muted-foreground sm:mr-auto sm:w-auto">
                 {perp
                   ? `${s.strategy} · exits at its own stop and target`
                   : `take profit ${s.take_profit_pct}% of ${s.kind === "credit" ? "max profit" : "the debit"} · stop ${s.stop_loss_pct}%`}
               </span>
               {/* A perpetual's exits are prices its strategy set; the guard ignores these percentages. */}
               {!perp && (
-                <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                <Button variant="outline" size="sm" onClick={() => setEditing(true)} className="h-10 flex-1 sm:h-8 sm:flex-none">
                   <Pencil /> Exits
                 </Button>
               )}
@@ -200,7 +219,7 @@ export function StructureCard({ s }: { s: Structure }) {
                 destructive
                 onConfirm={close}
                 trigger={(open) => (
-                  <Button variant="destructive-outline" size="sm" onClick={open}>
+                  <Button variant="destructive-outline" size="sm" onClick={open} className="h-10 flex-1 sm:h-8 sm:flex-none">
                     <X /> Close
                   </Button>
                 )}

@@ -53,7 +53,34 @@ export default function OrdersPage() {
         ) : !rows.length ? (
           <Empty title="No orders">Orders appear here once a structure is opened, manually or by the auto-trader.</Empty>
         ) : (
-          <Table>
+          <>
+          <div className="divide-y divide-slate-100 md:hidden">
+            {rows.map((o) => (
+              <div key={o.client_order_id} className="space-y-1 px-4 py-3 text-[12px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate">
+                    <span className={cn("mr-1.5 font-semibold uppercase", o.side === "buy" ? "text-profit" : "text-loss")}>{o.side}</span>
+                    <span className="num font-medium">{o.symbol}</span>
+                  </span>
+                  <Badge variant={STATUS_TONE[o.status]}>{o.status}</Badge>
+                </div>
+                <div className="num grid grid-cols-4 gap-2 text-[11px]">
+                  <div><div className="text-muted-foreground">Size</div>{o.filled_size && o.filled_size !== o.size ? `${o.filled_size}/${o.size}` : o.size}</div>
+                  <div><div className="text-muted-foreground">Limit</div>{price(o.limit_price)}</div>
+                  <div><div className="text-muted-foreground">Fill</div>{price(o.fill_price)}</div>
+                  <div><div className="text-muted-foreground">Fee</div>{usd(o.fee, 4)}</div>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                  <Badge variant="primary">{o.broker}</Badge>
+                  <span>{o.purpose}</span>
+                  <span className="num">{dateTime(o.created_at)}</span>
+                  <span className="num break-all">{o.structure_id}</span>
+                </div>
+                {o.error && <div className="break-words text-[11px] text-loss">{o.error}</div>}
+              </div>
+            ))}
+          </div>
+          <Table className="hidden md:table">
             <TableHeader>
               <TableRow>
                 <TableHead>Time</TableHead>
@@ -89,6 +116,7 @@ export default function OrdersPage() {
               ))}
             </TableBody>
           </Table>
+          </>
         )}
       </Card>
     </>

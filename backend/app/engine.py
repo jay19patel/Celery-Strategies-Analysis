@@ -25,9 +25,9 @@ from app.brokers.paper import PaperBroker
 from app.config import Config
 from app.core.db import kv_get, kv_set, session
 from app.core.events import EventHub
-from app.core.models import AiBrief, Decision, EventLog, SignalLog, Structure
+from app.core.models import AiBrief, DayRisk, Decision, EventLog, Leg, OrderRecord, Prediction, SignalLog, Structure
 from app.core.scheduler import Scheduler
-from app.errors import AppError, BrokerError
+from app.errors import AppError, BrokerError, Refused
 from app.market.delta import DeltaClient
 from app.market.feed import OPTIONS_REFRESH, MarketFeed
 from app.notify import report
@@ -46,7 +46,7 @@ from app.trading.desk import Desk
 from app.trading.guard import Guard
 from app.trading.risk import halt_reason, set_halt
 from app.trading.runner import StrategyRunner
-from app.trading.service import TradingService
+from app.trading.service import HELD, TradingService
 from app.trading.zerohero import ZeroHero
 
 log = logging.getLogger(__name__)
@@ -186,7 +186,7 @@ class Engine:
         out: dict[str, Any] = {}
         with session() as s:
             fees_by_broker = {
-                b: sum(r.fees for r in s.exec(select(Structure.fees).where(Structure.broker == b, Structure.status == "closed")).all())
+                b: sum(s.exec(select(Structure.fees).where(Structure.broker == b, Structure.status == "closed")).all())
                 for b in self._settings.active_brokers
             }
         for name in self._settings.active_brokers:
@@ -243,6 +243,25 @@ class Engine:
             s.commit()
         bars = await asyncio.to_thread(self.feed.prune_bars)
         return f"pruned {events} events, {briefs} briefs, {decisions} decisions, {bars} bars"
+
+    async def reset_data(self) -> dict[str, int]:
+        """Every record of what the desk did — structures and their legs, orders, decisions, signals,
+        events, AI briefs, the Market Desk's predictions, daily loss halts — deleted, and the paper
+        account back to its starting balance. Settings, keys, the PIN and stored market history stay.
+        Refused while any broker holds a structure: its legs would be orphaned, and on Delta they are
+        real positions."""
+        async with self.trading.lock:
+            with session() as s:
+                if held := s.exec(select(Structure).where(col(Structure.status).in_(HELD))).first():
+                    raise Refused(f"close every position first: {held.id} on {held.broker} is {held.status}")
+                deleted = {
+                    model.__tablename__: s.exec(delete(model)).rowcount or 0
+                    for model in (Leg, OrderRecord, Structure, Decision, SignalLog, EventLog, AiBrief, Prediction, DayRisk)
+                }
+                s.commit()
+            self.paper.reset()
+        self.hub.publish("DataReset", f"every trade, order, decision, signal and log deleted ({sum(deleted.values())} rows); settings kept")
+        return deleted
 
     # -- status --------------------------------------------------------------------------------
 
