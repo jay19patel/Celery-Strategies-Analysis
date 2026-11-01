@@ -1,12 +1,17 @@
 """The guard: an engine job over every open structure, and one over every broker's day.
 
 A position on the perpetual leaves when the mark reaches its strategy's stop or target, or after
-`perp_max_hold_hours`. Per options structure, strongest reason first:
+`perp_max_hold_hours`. On an exchange that holds stops, the stop is also left there at entry; when
+that one fills first, the close books its fill. Per options structure, strongest reason first:
   1. past expiry and still open  -> settle at intrinsic on the index
   2. inside `exit_before_expiry_minutes` -> close (settlement and pin risk are not worth the last hour),
      or `zh_exit_minutes` on a zero-hero buy, whichever of the two comes first
   3. a zero-hero buy whose break has been undone -> close on the premise, not on the P&L
-  4. P&L at the take-profit or the stop-loss -> close
+  4. P&L at the take-profit or the stop-loss -> close. A stop must hold `stop_confirm_checks` checks
+     in a row: a thin wing's ask can jump for a few seconds with the underlying standing still, and
+     that is the book's spread, not the trade's loss. On a credit structure whose expiry payoff at
+     the current spot is already a loss — the spot is past a breakeven — the move is real and the
+     stop closes at once.
 
 The P&L read is what closing would actually book (`TradingService.valuation`): bids for longs, asks
 for shorts, every fee. Without a fresh quote on every leg nothing is decided — absence over
@@ -34,6 +39,7 @@ from app.core.db import session
 from app.core.events import EventHub
 from app.core.models import Leg, Structure
 from app.errors import BrokerError
+from app.options.pricing import LegSpec, payoff
 from app.settings import Settings
 from app.trading.risk import set_halt, start_day
 from app.trading.service import TradingService, exit_thresholds, is_directional, is_zerohero
@@ -49,6 +55,7 @@ class Guard:
         self.hub = hub
         self.zerohero = zerohero  # reads the break a zero-hero buy was opened on; None in tests
         self._retry: dict[str, tuple[float, float]] = {}  # structure id -> (next attempt, current wait)
+        self._breached: dict[str, int] = {}  # structure id -> guard checks in a row at or past its stop
 
     async def check_structures(self) -> str:
         s: Settings = self.settings()
@@ -59,9 +66,12 @@ class Guard:
         acted = failed = 0
         now = time.time()
         self._retry = {sid: v for sid, v in self._retry.items() if sid in ids}
+        self._breached = {sid: n for sid, n in self._breached.items() if sid in ids}
         for st in rows:
             if st.status == "error":
                 reason = self._error_reason(st, now)
+            elif await self.trading.stop_filled(st):
+                reason = "the exchange stop filled"  # the close books that fill; it sends nothing
             else:
                 reason = self.exit_reason(st, [leg for leg in legs if leg.structure_id == st.id], s, now)
             if reason is None:
@@ -115,9 +125,24 @@ class Guard:
         tp, sl = exit_thresholds(st)
         if tp is not None and pnl >= tp:
             return f"take profit: {pnl:+,.2f} reached {st.take_profit_pct:g}% target {tp:+,.2f}"
-        if sl is not None and pnl <= sl:
-            return f"stop loss: {pnl:+,.2f} reached {st.stop_loss_pct:g}% stop {sl:+,.2f}"
-        return None
+        if sl is None or pnl > sl:
+            self._breached.pop(st.id, None)
+            return None
+        n = self._breached[st.id] = self._breached.get(st.id, 0) + 1
+        past = st.entry_cash > 0 and self._past_breakeven(st, legs)
+        if not past and n < s.stop_confirm_checks:
+            return None
+        why = "the spot is past a breakeven" if past else f"held {n} checks"
+        return f"stop loss: {pnl:+,.2f} reached {st.stop_loss_pct:g}% stop {sl:+,.2f} ({why})"
+
+    def _past_breakeven(self, st: Structure, legs: list[Leg]) -> bool:
+        """Would the structure lose at expiry if the underlying settled where it is now?"""
+        spot = self.trading.feed.spot(st.underlying)
+        held = [leg for leg in legs if leg.entry_price is not None and leg.exit_price is None]
+        if not spot or not held:
+            return False
+        specs = [LegSpec(leg.kind, leg.strike, leg.side, leg.size, leg.entry_price or 0.0, leg.contract_value) for leg in held]
+        return payoff(specs, spot) < 0
 
     def _directional_exit(self, st: Structure, legs: list[Leg], now: float) -> str | None:
         """A position on the perpetual leaves at its strategy's levels, read on the mark — the price the

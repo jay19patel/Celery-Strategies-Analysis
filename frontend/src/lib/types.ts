@@ -279,7 +279,16 @@ export interface Structure {
   error: string;
   decision_id: number | null;
   legs: Leg[];
-  live: { pnl: number | null; pnl_mid: number | null; missing: string[]; spot: number | null } | null;
+  live: {
+    pnl: number | null;
+    pnl_mid: number | null;
+    missing: string[];
+    spot: number | null;
+    /** fees already charged on this structure's legs */
+    fees_paid?: number;
+    /** fees closing the held legs now would charge; null without a quote on every leg */
+    exit_fees?: number | null;
+  } | null;
   orders?: OrderRecord[];
 }
 
@@ -329,7 +338,9 @@ export interface Summary {
 }
 
 export interface Stats {
-  overall: Summary & { max_drawdown: number };
+  overall: Summary & { max_drawdown: number; sharpe?: number | null; sortino?: number | null };
+  /** auto trades by the regime score they were opened on ("60-69"), plus "manual" */
+  by_score?: (Summary & { score: string })[];
   by_strategy: (Summary & { strategy: string })[];
   by_source: (Summary & { source: string })[];
   by_broker: (Summary & { broker: string })[];

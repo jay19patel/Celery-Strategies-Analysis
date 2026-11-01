@@ -55,11 +55,14 @@ class PaperBroker:
             if leg.entry_price is None or leg.exit_price is not None:
                 continue
             touch = self._touch(leg.symbol)
-            mark = touch[2] if touch else leg.entry_price
+            sign = 1 if leg.side == "buy" else -1
             if touch is None:
                 stale.append(leg.symbol)
-            sign = 1 if leg.side == "buy" else -1
-            value += sign * mark * leg.size * leg.contract_value
+                price = leg.entry_price
+            else:  # what closing would get: a long sold at the bid, a short bought back at the ask
+                bid, ask, mark, _, slip = touch
+                price = (bid or mark * (1 - slip)) if sign > 0 else (ask or mark * (1 + slip))
+            value += sign * price * leg.size * leg.contract_value
             if leg.kind == "perp":  # its notional is not spent cash: shown back in the wallet
                 notional += sign * leg.entry_price * leg.size * leg.contract_value
         margin = sum(st.margin for st in structures)
@@ -95,16 +98,28 @@ class PaperBroker:
             beyond = price < order.limit_price
         if beyond:
             raise BrokerError(f"paper: {order.symbol} would {order.side} at {price:,.2f}, beyond the limit {order.limit_price:,.2f}")
-        units = order.size * order.contract_value
+        # An IOC fills what the touch shows and no more: the rest of the book is worse than the limit.
+        size = order.size
+        if (shown := self._shown(order.symbol, order.side)) is not None:
+            size = min(size, int(shown))
+            if size < 1:
+                raise BrokerError(f"paper: nothing shown on the {'ask' if order.side == 'buy' else 'bid'} of {order.symbol}")
+        units = size * order.contract_value
         fee = leg_fee(price, units, spot, await self.fee_rate(order.symbol))
         # An option's premium changes hands; a perpetual's notional does too, here, and comes back on
         # the close — the same arithmetic, so equity = cash + every held leg at its mark either way.
         cash = (price if order.side == "sell" else -price) * units - fee
-        return self._book(order, price, fee, cash)
+        return self._book(order, price, fee, cash, size)
 
     async def settle(self, order: LegOrder, price: float) -> Fill:
         cash = (price if order.side == "sell" else -price) * order.size * order.contract_value
         return self._book(order, price, 0.0, cash)
+
+    async def protect(self, symbol: str, side: str, size: int, stop_price: float, client_order_id: str) -> str:
+        return ""  # the simulated book lives in this process: the guard is its stop
+
+    async def unprotect(self, symbol: str, order_id: str) -> None:
+        return None
 
     async def lookup(self, client_order_id: str) -> Fill | None:
         with session() as s:
@@ -113,8 +128,16 @@ class PaperBroker:
             return None
         return Fill(client_order_id, rec.filled_size, rec.fill_price, rec.fee, rec.exchange_id)
 
-    def _book(self, order: LegOrder, price: float, fee: float, cash: float) -> Fill:
+    def _shown(self, symbol: str, side: str) -> float | None:
+        """Contracts displayed on the side an order would take, or None when the feed does not say."""
+        q = self.feed.quote(symbol) if symbol not in UNDERLYING_OF else None
+        if q is None:
+            return None
+        return q.ask_size if side == "buy" else q.bid_size
+
+    def _book(self, order: LegOrder, price: float, fee: float, cash: float, size: int | None = None) -> Fill:
         """The cash and the order's fill in one transaction: a restart can never see one without the other."""
+        size = order.size if size is None else size
         self._row()
         exchange_id = f"paper-{order.client_order_id[-12:]}"
         with session() as s:
@@ -124,11 +147,11 @@ class PaperBroker:
             s.add(acct)
             rec = s.get(OrderRecord, order.client_order_id)
             if rec is not None:
-                rec.status, rec.fill_price, rec.filled_size, rec.fee = "filled", price, order.size, fee
+                rec.status, rec.fill_price, rec.filled_size, rec.fee = "filled", price, size, fee
                 rec.exchange_id, rec.updated_at = exchange_id, time.time()
                 s.add(rec)
             s.commit()
-        return Fill(order.client_order_id, order.size, price, fee, exchange_id)
+        return Fill(order.client_order_id, size, price, fee, exchange_id)
 
     def reset(self) -> None:
         """A fresh paper account. Refused while a paper structure is open: its legs would be orphaned."""

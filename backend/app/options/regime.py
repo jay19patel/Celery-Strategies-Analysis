@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from app.market.indicators import ema, fold, realised_vol, rsi
+from app.market.indicators import ema, fold, parkinson_vol, realised_vol, rsi
 
 BAR_HOURS = 0.25  # the stored series is 15m
 YEAR_HOURS = 365 * 24
@@ -34,8 +34,11 @@ def measure(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any]) ->
     closes = [b["close"] for b in bars]
     rv_24h = realised_vol(closes[-97:], BAR_HOURS) if len(closes) >= 97 else None
     rv_7d = realised_vol(closes[-673:], BAR_HOURS) if len(closes) >= 200 else None
-    known = [v for v in (rv_24h, rv_7d) if v]
-    rv_ref = sum(known) / len(known) if known else None
+    rv_range_24h = parkinson_vol(bars[-96:], BAR_HOURS) if len(bars) >= 96 else None
+    known = [v for v in (rv_24h, rv_7d, rv_range_24h) if v]
+    # The highest of the three: a seller's premium is measured against the worst realised reading,
+    # so one quiet day's close-to-close cannot make thin premium look rich.
+    rv_ref = max(known) if known else None
     iv = summary.get("atm_iv")
 
     change_24h = closes[-1] / closes[-97] - 1 if len(closes) >= 97 and closes[-97] else None
@@ -55,6 +58,7 @@ def measure(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any]) ->
         "atm_iv": iv,
         "rv_24h": rv_24h,
         "rv_7d": rv_7d,
+        "rv_range_24h": rv_range_24h,
         "vol_premium": (iv - rv_ref) if iv and rv_ref else None,
         "rv_ratio": (rv_24h / rv_7d) if rv_24h and rv_7d else None,
         "change_24h_pct": None if change_24h is None else 100 * change_24h,

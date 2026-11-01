@@ -95,14 +95,14 @@ def test_the_strategies_page_can_switch_a_strategy_per_symbol(client: TestClient
     assert client.patch("/api/settings", json={"changes": {"underlyings": ["BTC", "ETH"]}}).status_code == 200
 
     before = {s["name"]: s["symbols"] for s in client.get("/api/strategies/directional").json()["strategies"]}
-    assert before["supertrend"] == ["BTC", "ETH"]  # unmapped: every enabled underlying
+    assert before["ema_vwap"] == ["BTC", "ETH"]  # unmapped: every enabled underlying
 
-    assert client.patch("/api/settings", json={"changes": {"strategy_symbols": {"supertrend": ["ETH"]}}}).status_code == 200
+    assert client.patch("/api/settings", json={"changes": {"strategy_symbols": {"ema_vwap": ["ETH"]}}}).status_code == 200
     body = client.get("/api/strategies/directional").json()
     assert body["underlyings"] == ["BTC", "ETH"]
-    assert {s["name"]: s["symbols"] for s in body["strategies"]}["supertrend"] == ["ETH"]
+    assert {s["name"]: s["symbols"] for s in body["strategies"]}["ema_vwap"] == ["ETH"]
 
-    bad = client.patch("/api/settings", json={"changes": {"strategy_symbols": {"supertrend": ["DOGE"]}}})
+    bad = client.patch("/api/settings", json={"changes": {"strategy_symbols": {"ema_vwap": ["DOGE"]}}})
     assert bad.status_code == 422 and "strategy_symbols" in bad.json()["error"]
 
 

@@ -63,6 +63,16 @@ class DeltaBroker:
         raw = await self.client.order_by_client_id(client_order_id)
         return parse_fill(client_order_id, raw) if raw else None
 
+    async def protect(self, symbol: str, side: str, size: int, stop_price: float, client_order_id: str) -> str:
+        raw = await self.client.place_stop_order(symbol, side, size, client_order_id, stop_price)
+        order_id = str((raw or {}).get("id") or "")
+        if not order_id:
+            raise BrokerError(f"delta: no id for the stop on {symbol}")
+        return order_id
+
+    async def unprotect(self, symbol: str, order_id: str) -> None:
+        await self.client.cancel_order(symbol, order_id)
+
     async def settle(self, order: LegOrder, price: float) -> Fill:
         # The exchange settles an expired option itself; this only records what it paid.
         return Fill(order.client_order_id, order.size, price, 0.0, "settlement")

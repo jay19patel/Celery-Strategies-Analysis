@@ -43,11 +43,14 @@ MAX_CANDIDATES = 3
 
 
 def unit_risk(assessment: dict[str, Any], s: Settings) -> float:
-    """The worst case of one lot: the max loss when it is bounded, else the loss at the stop."""
+    """The worst case of one lot: the max loss when it is bounded. Unbounded, the larger of the loss
+    at the stop and the loss after a move of `STRESS_MOVES` expected moves — a stop on a gap fills
+    where the market is, not where it was set."""
     a = assessment["analysis"]
     if a["max_loss"] is not None:
         return a["max_loss"] + a["round_trip_fees"]
-    return abs(a["net_premium"]) * s.credit_stop_loss_pct / 100 + a["round_trip_fees"]
+    at_stop = abs(a["net_premium"]) * s.credit_stop_loss_pct / 100
+    return max(at_stop, a.get("stress_loss") or 0.0) + a["round_trip_fees"]
 
 
 def lots_for_risk(equity: float, assessment: dict[str, Any], s: Settings) -> int:
@@ -118,7 +121,7 @@ class AutoTrader:
         puts the bar back up: the floor paces the desk to about one entry a day, it never licenses a
         second one. Only this bar moves; every hard check runs at full strength at any hour.
         """
-        if s.min_score_floor >= s.min_score:
+        if s.min_score_floor <= 0 or s.min_score_floor >= s.min_score:  # 0 is off, as the setting says
             return s.min_score, ""
         now = time.time() if now is None else now
         day = trading_day(s.day_timezone, now)
@@ -180,11 +183,15 @@ class AutoTrader:
         if pacing:
             dec.regime["pacing"] = pacing
 
+        event = s.event_between(time.time(), expiry)  # a seller is not paid enough to hold through one
         considered, passing, plans = [], [], {}
         for key in s.auto_strategies:
             score = regime["scores"][key]
             entry: dict[str, Any] = {"strategy": key, "label": CATALOG[key].label, "score": score["score"], "reasons": score["reasons"]}
             considered.append(entry)
+            if event and CATALOG[key].premium == "credit":
+                entry["status"] = f"scheduled event at {event} UTC before expiry"
+                continue
             if score["score"] < bar:
                 entry["status"] = f"score {score['score']} under {bar}"
                 continue

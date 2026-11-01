@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { LineChart, PieChart, RotateCcw, Trophy, Users } from "lucide-react";
+import { Gauge, LineChart, PieChart, RotateCcw, Trophy, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { AccountSection } from "@/components/performance/account-section";
@@ -27,12 +27,11 @@ import type { Accounts, Broker, SettingsResponse, Stats, Structure } from "@/lib
 export default function PerformancePage() {
   const [broker, setBroker] = useState<Broker>("paper");
   const [strategy, setStrategy] = useState("");
-  // The live account figures refresh as often as the Positions page; closed results only change on a close.
-  const accounts = useApi<Accounts>("/portfolio/accounts", { refreshInterval: 3_000 });
+  // Only booked results live here; they change when a trade closes. Live figures are on Positions.
+  const accounts = useApi<Accounts>("/portfolio/accounts", { refreshInterval: 15_000 });
   const settings = useApi<SettingsResponse>("/settings");
   const stats = useApi<Stats>(`/portfolio/stats?broker=${broker}`, { refreshInterval: 15_000 });
   const closed = useApi<Structure[]>(`/trading/structures?status=closed&broker=${broker}&limit=1000`, { refreshInterval: 15_000 });
-  const open = useApi<Structure[]>(`/trading/structures?status=open&broker=${broker}`, { refreshInterval: 3_000 });
 
   const account = accounts.data?.accounts[broker];
   const real = account && !("error" in account) ? account : undefined;
@@ -56,7 +55,7 @@ export default function PerformancePage() {
     <>
       <PageHeader
         title="Performance"
-        description="What each broker's account holds, what its closed trades made after every fee, and where the money came from."
+        description="Realised results only: what each broker's closed trades booked after every fee, and where it came from. Open positions, unrealised P&L and their charges are on Positions."
         actions={
           <Tabs value={broker} onValueChange={(v) => { setBroker(v as Broker); setStrategy(""); }}>
             <TabsList>
@@ -79,10 +78,8 @@ export default function PerformancePage() {
           broker={broker}
           account={account}
           status={accounts.data.brokers.find((b) => b.name === broker)}
-          open={open.data ?? []}
           stats={stats.data}
           settings={settings.data?.values}
-          onResumed={() => accounts.mutate()}
         />
       )}
 
@@ -140,6 +137,8 @@ export default function PerformancePage() {
             valueClass={o.max_drawdown ? "text-loss" : undefined}
             hint={o.avg_hold_hours === null ? undefined : `held ${duration(o.avg_hold_hours * 3600)} on avg`}
           />
+          <Stat label="Sharpe" value={num(o.sharpe ?? null)} valueClass={o.sharpe != null && o.sharpe < 0 ? "text-loss" : undefined} hint="daily realised P&L, annualised" />
+          <Stat label="Sortino" value={num(o.sortino ?? null)} valueClass={o.sortino != null && o.sortino < 0 ? "text-loss" : undefined} hint="downside days only" />
         </div>
       )}
 
@@ -173,6 +172,18 @@ export default function PerformancePage() {
           <Empty title={`No closed ${broker} trades yet`} />
         )}
       </Card>
+
+      {!!stats.data?.by_score?.some((g) => g.score !== "manual") && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <Gauge className="size-4 text-slate-400" /> By regime score
+              <span className="text-xs font-normal text-muted-foreground">auto trades by the score they opened on — does a higher score earn more?</span>
+            </CardTitle>
+          </CardHeader>
+          <SummaryTable rows={stats.data.by_score} keyName="score" label="Score" />
+        </Card>
+      )}
 
       {!!stats.data?.by_source.length && (
         <Card>

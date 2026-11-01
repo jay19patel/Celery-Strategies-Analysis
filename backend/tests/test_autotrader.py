@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pytest
@@ -12,6 +13,7 @@ from app.ai.llm import LLM, LLMError
 from app.core.db import session
 from app.core.models import Structure
 from app.errors import SettingsError
+from app.options.strategies import CATALOG
 from app.settings import Settings
 from app.trading.autotrader import AutoTrader, lots_for_risk
 from app.trading.risk import day_start, trading_day
@@ -128,6 +130,8 @@ async def test_the_bar_eases_through_a_day_with_no_entry_and_resets_on_one(env: 
 
     off = paced.model_copy(update={"min_score_floor": 60})
     assert auto._bar("BTC", off, day + 43_200) == (60, "")  # a floor at the bar is no pacing at all
+    zero = paced.model_copy(update={"min_score_floor": 0})
+    assert auto._bar("BTC", zero, day + 86_399) == (60, "")  # 0 is off: the bar holds all day
 
     # One option structure today and the bar is back up: the floor paces entries, it never adds one.
     assert (await auto.decide("BTC", ["paper"]))["action"] == "open"
@@ -189,3 +193,31 @@ def test_lots_are_sized_on_the_worst_case() -> None:
     assert lots_for_risk(50, assessment, s) == 0
     unbounded = {"analysis": {"max_loss": None, "round_trip_fees": 0.0, "net_premium": 0.5}}
     assert lots_for_risk(1000, unbounded, s) == pytest.approx(40)  # sized on the stop: 100% of the credit
+
+
+async def test_a_scheduled_event_before_expiry_keeps_every_seller_out(env: Any) -> None:
+    from datetime import UTC, datetime
+
+    soon = datetime.fromtimestamp(time.time() + 3600, UTC).strftime("%Y-%m-%d %H:%M")
+    sellers_only = [k for k in env.settings().auto_strategies if CATALOG[k].premium == "credit"]
+    auto, _ = make(env, ai_enabled=False, event_times=[soon], auto_strategies=sellers_only)
+    d = await auto.decide("BTC", ["paper"])
+    assert d["action"] == "skip"
+    statuses = {c["strategy"]: c.get("status", "") for c in d["candidates"]}
+    sellers = [k for k in statuses if CATALOG[k].premium == "credit"]
+    assert sellers and all("scheduled event" in statuses[k] for k in sellers)
+    assert not opened()
+
+    auto, _ = make(env, ai_enabled=False, event_times=[], auto_strategies=sellers_only)
+    assert (await auto.decide("BTC", ["paper"]))["action"] == "open"  # no event, the same desk trades
+
+
+async def test_an_auto_trade_is_reported_under_the_score_it_was_opened_on(env: Any) -> None:
+    auto, _ = make(env, ai_enabled=False)
+    d = await auto.decide("BTC", ["paper"])
+    [st] = opened()
+    await env.trading.close(st.id, "test")
+    score = next(c["score"] for c in d["candidates"] if c["strategy"] == d["strategy"])
+    lo = min(score // 10 * 10, 90)
+    [bucket] = env.trading.stats()["by_score"]
+    assert bucket["score"] == f"{lo}-{lo + 9}" and bucket["trades"] == 1

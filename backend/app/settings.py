@@ -11,6 +11,7 @@ Secrets are never returned: `public()` masks them, and a blank secret in an upda
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -29,6 +30,8 @@ STRATEGY_KEYS = (
     "iron_condor", "iron_butterfly", "short_strangle", "short_straddle",
     "long_straddle", "bull_put_spread", "bear_call_spread",
 )
+UNDEFINED_RISK = ("short_strangle", "short_straddle")
+EVENT_FORMAT = "%Y-%m-%d %H:%M"
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@+\-]{2,120}$")
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
@@ -64,7 +67,9 @@ class Settings(BaseModel):
     auto_paper: bool = True
     auto_delta: bool = False
     auto_options: bool = True
-    directional_strategies: list[Directional] = Field(default_factory=lambda: ["ema_vwap", "ema_9_15", "pcr_options", "supertrend"])
+    # Off by default: Supertrend and the 9/15 cross lost before costs as well as after them over the
+    # stored year of 15m bars and month of 1m bars (`python -m app.backtest.perp`). Opt in to test them.
+    directional_strategies: list[Directional] = Field(default_factory=lambda: ["ema_vwap", "pcr_options"])
     # Two switches, as in v3: the strategy itself above, and which underlyings it may trade here.
     # A strategy absent from this map, or mapped to an empty list, runs on every enabled underlying.
     strategy_symbols: dict[Directional, list[Underlying]] = Field(default_factory=dict)
@@ -72,7 +77,8 @@ class Settings(BaseModel):
     # Every structure in the catalog is on. Note that short_strangle and short_straddle are the two
     # whose loss is NOT bounded before entry — the regime score and the hard checks are all that
     # stands between them and an open-ended position. Drop them here to go back to defined risk only.
-    auto_strategies: list[Strategy] = Field(default_factory=lambda: list(STRATEGY_KEYS))
+    # Unlimited-risk sales are left off the auto menu by default: their only stop is the guard's.
+    auto_strategies: list[Strategy] = Field(default_factory=lambda: [k for k in STRATEGY_KEYS if k not in UNDEFINED_RISK])
     expiry_min_hours: float = Field(12.0, ge=1, le=720)
     expiry_max_hours: float = Field(60.0, ge=2, le=2000)
     short_delta: float = Field(0.18, ge=0.05, le=0.45)  # |delta| of sold strikes on OTM structures
@@ -85,7 +91,11 @@ class Settings(BaseModel):
     min_score_floor: int = Field(0, ge=0, le=100)
     min_pop_pct: float = Field(55.0, ge=0, le=95)  # probability of profit at expiry, from the ATM IV
     min_credit_width_pct: float = Field(10.0, ge=0, le=60)  # credit / widest spread on defined-risk credits
-    max_spread_pct: float = Field(30.0, ge=1, le=100)  # each leg's bid/ask spread as % of its mark
+    max_spread_pct: float = Field(12.0, ge=1, le=100)  # each leg's bid/ask spread as % of its mark
+    # Scheduled events (UTC, "YYYY-MM-DD HH:MM") a premium seller stands aside for: no credit
+    # structure is opened whose life, from `event_buffer_hours` before now to its expiry, holds one.
+    event_times: list[str] = Field(default_factory=lambda: ["2026-12-09 19:00"], max_length=100)  # FOMC
+    event_buffer_hours: float = Field(2.0, ge=0, le=48)
 
     # -- zero-hero (expiry-day momentum buys) ------------------------------------------------
     # A long OTM buy in the last hours of a daily expiry. It is the opposite trade to everything
@@ -145,6 +155,9 @@ class Settings(BaseModel):
     debit_take_profit_pct: float = Field(60.0, ge=5, le=1000)  # of the debit paid
     debit_stop_loss_pct: float = Field(50.0, ge=5, le=100)  # of the debit paid
     exit_before_expiry_minutes: int = Field(60, ge=0, le=1440)
+    # A stop read on the book must hold this many guard checks in a row (5s apart) before it closes:
+    # one wide ask on a thin wing is not a loss. With the spot through a sold strike it closes at once.
+    stop_confirm_checks: int = Field(3, ge=1, le=20)
 
     # -- AI (LiteLLM) ----------------------------------------------------------------------
     ai_enabled: bool = False
@@ -195,6 +208,17 @@ class Settings(BaseModel):
         if v and not all(EMAIL.match(a.strip()) for a in v.split(",") if a.strip()):
             raise ValueError("must be email addresses separated by commas")
         return v
+
+    @field_validator("event_times")
+    @classmethod
+    def _event_times(cls, v: list[str]) -> list[str]:
+        out = sorted({t.strip() for t in v if t.strip()})
+        for t in out:
+            try:
+                datetime.strptime(t, EVENT_FORMAT).replace(tzinfo=UTC)
+            except ValueError:
+                raise ValueError(f"{t!r} is not a UTC time like 2026-12-09 19:00") from None
+        return out
 
     @field_validator("underlyings", "auto_strategies", "directional_strategies")
     @classmethod
@@ -247,6 +271,15 @@ class Settings(BaseModel):
     @property
     def email_recipients(self) -> list[str]:
         return [a.strip() for a in self.email_to.split(",") if a.strip()]
+
+    def event_between(self, start: float, end: float) -> str:
+        """The first scheduled event from `event_buffer_hours` before `start` to `end`, or ""."""
+        lo = start - self.event_buffer_hours * 3600
+        for t in self.event_times:
+            at = datetime.strptime(t, EVENT_FORMAT).replace(tzinfo=UTC).timestamp()
+            if lo <= at <= end:
+                return t
+        return ""
 
     def auto_on(self, broker: str) -> bool:
         return getattr(self, f"{broker}_active") and getattr(self, f"auto_{broker}")

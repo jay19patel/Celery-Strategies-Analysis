@@ -25,7 +25,7 @@ from sqlmodel import col, select
 from app.brokers.base import Broker, Fill, LegOrder
 from app.core.db import session
 from app.core.events import EventHub
-from app.core.models import Bar, Leg, OrderRecord, Structure
+from app.core.models import Bar, Decision, Leg, OrderRecord, Structure
 from app.errors import BrokerError, BrokerTimeout, NotFound, Refused
 from app.market.feed import MarketFeed
 from app.market.options import PERP_SLIPPAGE, PERPETUALS, UNDERLYING_OF
@@ -83,6 +83,11 @@ def structure_id(broker: str, request_id: str) -> str:
     return "s" + hashlib.sha256(f"{broker}:{request_id}".encode()).hexdigest()[:11]
 
 
+def stop_cid(st: Structure) -> str:
+    """The client order id of the stop a position leaves with the exchange."""
+    return f"{st.id}0k"
+
+
 def leg_sign(side: str) -> int:
     return 1 if side == "buy" else -1
 
@@ -114,6 +119,22 @@ def exit_thresholds(st: Structure) -> tuple[float | None, float | None]:
         debit = -st.entry_cash
         return debit * st.take_profit_pct / 100, -debit * st.stop_loss_pct / 100
     return None, None
+
+
+def ratios(daily: list[float]) -> dict[str, float | None]:
+    """Sharpe and Sortino of the daily P&L, annualised over a 365-day market. Measured on P&L, not
+    returns, so they compare days with each other; days without a closed trade are not counted."""
+    n = len(daily)
+    if n < 2:
+        return {"sharpe": None, "sortino": None}
+    mean = sum(daily) / n
+    sd = math.sqrt(sum((d - mean) ** 2 for d in daily) / (n - 1))
+    down = math.sqrt(sum(min(d, 0.0) ** 2 for d in daily) / n)
+    year = math.sqrt(365)
+    return {
+        "sharpe": round(mean / sd * year, 2) if sd > 0 else None,
+        "sortino": round(mean / down * year, 2) if down > 0 else None,
+    }
 
 
 class TradingService:
@@ -184,6 +205,8 @@ class TradingService:
         of every fee — and the same at the marks. The guard acts on the first; it never books a
         'profit' the order book would not pay."""
         book = mid = sum(-leg_sign(leg.side) * (leg.entry_price or 0) * leg.size * leg.contract_value - leg.entry_fee for leg in legs if leg.entry_price is not None)
+        entry_fees = sum(leg.entry_fee for leg in legs if leg.entry_price is not None)
+        exit_fees = 0.0  # what closing the held legs would be charged
         missing: list[str] = []
         spot = self.feed.spot(st.underlying) or 0.0
         for leg in legs:
@@ -194,6 +217,7 @@ class TradingService:
                 cash = leg_sign(leg.side) * leg.exit_price * units - leg.exit_fee
                 book += cash
                 mid += cash
+                entry_fees += leg.exit_fee  # booked already: a fee paid, not one to come
                 continue
             quote = self.book(leg.symbol)
             if quote is None:
@@ -203,9 +227,15 @@ class TradingService:
             slip = self.slippage(leg.symbol)
             price = (bid or mark * (1 - slip)) if leg.side == "buy" else (ask or mark * (1 + slip))
             fee = leg_fee(price, units, spot, self.desk.cached_fee(leg.symbol))
+            exit_fees += fee
             book += leg_sign(leg.side) * price * units - fee
             mid += leg_sign(leg.side) * mark * units
-        return {"pnl": None if missing else round(book, 6), "pnl_mid": None if missing else round(mid, 6), "missing": missing, "spot": spot or None}
+        return {
+            "pnl": None if missing else round(book, 6), "pnl_mid": None if missing else round(mid, 6), "missing": missing, "spot": spot or None,
+            # The parts of `pnl`: fees already paid, fees closing would charge. `pnl_mid` is at the marks
+            # net of fees paid only, so the rest of the gap to `pnl` is what the bid/ask spread costs.
+            "fees_paid": round(entry_fees, 6), "exit_fees": None if missing else round(exit_fees, 6),
+        }
 
     def view(self, st: Structure, legs: list[Leg]) -> dict[str, Any]:
         tp, sl = exit_thresholds(st)
@@ -273,6 +303,8 @@ class TradingService:
         if stale := [leg.symbol for leg in plan.legs if self.feed.quote(leg.symbol) is None]:
             raise Refused(f"no fresh quote for {', '.join(stale)}")
         assessment = await self.desk.assess(plan, qty)
+        if broker == "delta" and s.is_real_money and assessment["analysis"]["max_loss"] is None:
+            raise Refused("no bounded loss, and the only stop is this process: not on real money")
         try:
             account = await b.account()
         except BrokerError as exc:
@@ -445,6 +477,7 @@ class TradingService:
                 leg.entry_price, leg.entry_fee, leg.size = fill.price, fill.fee, fill.size
                 self._save(leg)
                 self._opened_directional(st, leg)
+                await self._protect(b, st, leg)
             elif unknown:
                 st.status, st.error = "error", f"{error} — the order's outcome is unknown; check the exchange, then close this position"
                 self._save(st)
@@ -453,7 +486,7 @@ class TradingService:
                 self._finish(st, [leg], "failed", f"entry failed: {error}")
                 self.hub.publish("StructureFailed", f"{self._title(st)} on {broker} not opened: {error}", "warning",
                                  structure_id=st.id, broker=broker, source=source, pnl=st.pnl)
-            return self.view(st, [leg])
+            return self.structure(sid)  # read back: a refused exchange stop has closed it since
 
     def _opened_directional(self, st: Structure, leg: Leg) -> None:
         units = leg.size * leg.contract_value
@@ -477,6 +510,62 @@ class TradingService:
 
     # -- close ---------------------------------------------------------------------------------
 
+    async def _protect(self, b: Broker, st: Structure, leg: Leg) -> None:
+        """Leave the strategy's stop with the exchange, so the position is protected when this process
+        is not. A broker that will not hold it gets the position closed now: open without a stop on
+        the exchange that offers one is not a state to sit in."""
+        order = LegOrder(stop_cid(st), leg.symbol, "sell" if leg.side == "buy" else "buy", leg.size,
+                         st.stop_price or 0.0, leg.contract_value, reduce_only=True)
+        try:
+            st.stop_order_id = await b.protect(order.symbol, order.side, order.size, order.limit_price, order.client_order_id)
+        except (BrokerError, BrokerTimeout) as exc:
+            self.hub.publish("StructureError", f"{self._title(st)} on {st.broker}: the exchange stop was not placed ({exc}); closing it",
+                             "error", structure_id=st.id, broker=st.broker)
+            await self._close(st.id, f"closed: the exchange stop could not be placed ({exc})")
+            return
+        if st.stop_order_id:
+            self._record(order, st, "stop")
+            self._save(st)
+
+    async def stop_filled(self, st: Structure) -> bool:
+        """Has the stop the exchange holds for `st` filled? False when there is none or it cannot be read."""
+        if not st.stop_order_id:
+            return False
+        try:
+            return await self.brokers[st.broker].lookup(stop_cid(st)) is not None
+        except (BrokerError, BrokerTimeout):
+            return False
+
+    async def _stopped_out(self, b: Broker, st: Structure, legs: list[Leg]) -> bool:
+        """Before closing a position whose stop the exchange holds: book the stop if it filled, else
+        cancel it so it cannot later act on another position. True when the position is accounted for."""
+        try:
+            fill = await b.lookup(stop_cid(st))
+            if fill is None:
+                await b.unprotect(legs[0].symbol, st.stop_order_id)
+                self._mark_order(stop_cid(st), status="cancelled")
+                st.stop_order_id = ""
+                self._save(st)
+                return False
+        except (BrokerError, BrokerTimeout) as exc:
+            fill = await b.lookup(stop_cid(st))  # a cancel that fails is most often a stop that just filled
+            if fill is None:
+                self.hub.publish("StructureError", f"{self._title(st)} on {st.broker}: its exchange stop could not be cancelled ({exc}); check the exchange",
+                                 "error", structure_id=st.id, broker=st.broker)
+                return False
+        leg = legs[0]
+        self._mark_order(stop_cid(st), fill=fill)
+        if fill.size < leg.size:
+            st.status, st.error = "error", f"the exchange stop filled {fill.size} of {leg.size} contracts; check the exchange, then close this position"
+            self._save(st)
+            return True
+        leg.exit_price, leg.exit_fee = fill.price, fill.fee
+        self._save(leg)
+        st.stop_order_id = ""
+        self._finish(st, legs, "closed", f"stop loss: the exchange stop filled at {fill.price:,.2f}")
+        self._closed_event(st)
+        return True
+
     async def close(self, sid: str, reason: str = "closed from the dashboard") -> dict[str, Any]:
         async with self.lock:
             return await self._close(sid, reason)
@@ -487,6 +576,8 @@ class TradingService:
             raise Refused(f"structure {sid} is {st.status}, not open")
         b = self.brokers[st.broker]
         await self._resolve_unknown(b, st, legs)
+        if st.stop_order_id and await self._stopped_out(b, st, legs):
+            return self.view(st, legs)
         st.status = "closing"
         self._save(st)
         problems = await self._exit(b, st, legs, "close", CLOSE_SLACK)
@@ -731,6 +822,18 @@ class TradingService:
             if broker:
                 q = q.where(Structure.broker == broker)
             rows = list(s.exec(q.order_by(Structure.closed_at)).all())
+            ids = {t.decision_id for t in rows if t.decision_id}
+            decisions = {d.id: d for d in s.exec(select(Decision).where(col(Decision.id).in_(ids))).all()} if ids else {}
+
+        def score_of(t: Structure) -> str:
+            """The regime score the auto-trader opened `t` on, in buckets of ten — so whether a higher
+            score earned more can be read off the results instead of trusted."""
+            d = decisions.get(t.decision_id) if t.decision_id else None
+            score = next((c.get("score") for c in (d.candidates or []) if c.get("strategy") == t.strategy), None) if d else None
+            if not isinstance(score, int | float):
+                return "manual" if t.source != "auto" else "unknown"
+            lo = min(int(score) // 10 * 10, 90)
+            return f"{lo}-{lo + 9}"
 
         def summary(trades: list[Structure]) -> dict[str, Any]:
             pnls = [t.pnl or 0.0 for t in trades]
@@ -762,14 +865,15 @@ class TradingService:
             day = trading_day(tz, t.closed_at)
             daily[day] = round(daily.get(day, 0.0) + (t.pnl or 0.0), 4)
 
-        def grouped(key: str) -> list[dict[str, Any]]:
+        def grouped(key: str, of: Any = None) -> list[dict[str, Any]]:
             groups: dict[str, list[Structure]] = {}
             for t in rows:
-                groups.setdefault(getattr(t, key), []).append(t)
+                groups.setdefault(of(t) if of else getattr(t, key), []).append(t)
             return sorted(({key: k} | summary(v) for k, v in groups.items()), key=lambda g: -g["pnl"])
 
         return {
-            "overall": summary(rows) | {"max_drawdown": round(drawdown, 4)},
+            "overall": summary(rows) | {"max_drawdown": round(drawdown, 4)} | ratios(list(daily.values())),
+            "by_score": sorted(grouped("score", score_of), key=lambda g: g["score"]),
             "by_strategy": grouped("strategy"),
             "by_source": grouped("source"),
             "by_broker": grouped("broker"),

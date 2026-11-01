@@ -138,3 +138,109 @@ async def test_a_strategy_switched_off_for_a_symbol_is_not_evaluated_there(perp:
     runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)
     assert await runner._symbol("BTC", s) == "BTCUSD: no signal"
     assert only_eth.calls == 0 and not perp.trading.structures("open")
+
+
+async def test_the_funding_rate_is_part_of_a_signals_cost(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.trading.runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "REGISTRY", {"costs": Always("costs", 3.0)})
+    s = perp.settings().model_copy(update={"directional_strategies": ["costs"]})
+    runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)
+    strategy = runner_mod.REGISTRY["costs"]
+    calm = (await runner._context(strategy, "BTC", "BTCUSD", [{"time": 0, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}])).cost_pct
+    perp.feed.perps["BTCUSD"].stats["funding_rate_pct"] = -0.05  # either sign: the side is not known yet
+    paid = (await runner._context(strategy, "BTC", "BTCUSD", [{"time": 0, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}])).cost_pct
+    assert paid == pytest.approx(calm + 0.05)
+
+
+# -- stops held by the exchange ----------------------------------------------------------------------
+
+
+class Exchange:
+    """Paper's fills, plus stops held the way an exchange holds them: placed, cancelled, or filled."""
+
+    name = "delta"
+
+    def __init__(self, paper: Any, refuse: bool = False) -> None:
+        self.paper, self.refuse = paper, refuse
+        self.stops: dict[str, dict[str, Any]] = {}  # client id -> the stop
+        self.cancelled: list[str] = []
+        self.sent: list[Any] = []
+
+    def not_ready(self) -> str:
+        return ""
+
+    async def account(self) -> Any:
+        return await self.paper.account()
+
+    async def execute(self, order: Any) -> Any:
+        self.sent.append(order)
+        return await self.paper.execute(order)
+
+    async def lookup(self, cid: str) -> Any:
+        stop = self.stops.get(cid)
+        if stop is not None:
+            return stop.get("fill")
+        return await self.paper.lookup(cid)
+
+    async def settle(self, order: Any, price: float) -> Any:
+        return await self.paper.settle(order, price)
+
+    async def protect(self, symbol: str, side: str, size: int, stop_price: float, cid: str) -> str:
+        from app.errors import BrokerError
+
+        if self.refuse:
+            raise BrokerError("stop orders are not accepted")
+        self.stops[cid] = {"symbol": symbol, "side": side, "size": size, "stop": stop_price, "id": f"ex-{len(self.stops)}"}
+        return self.stops[cid]["id"]
+
+    async def unprotect(self, symbol: str, order_id: str) -> None:
+        self.cancelled.append(order_id)
+
+    def trigger(self, price: float, fee: float = 0.1) -> None:
+        from app.brokers.base import Fill
+
+        for cid, stop in self.stops.items():
+            stop["fill"] = Fill(cid, stop["size"], price, fee, "ex-fill")
+
+
+@pytest.fixture
+def exchange(perp: Any) -> Exchange:
+    ex = Exchange(perp.paper)
+    perp.brokers["delta"] = ex
+    perp.configure(delta_active=True)
+    return ex
+
+
+async def test_an_entry_leaves_its_stop_with_the_exchange(perp: Any, exchange: Exchange) -> None:
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-ex-1", "")
+    [stop] = exchange.stops.values()
+    assert stop == {"symbol": "BTCUSD", "side": "sell", "size": 5, "stop": 79_500, "id": "ex-0"}
+    assert perp.trading.structure(view["id"])["stop_order_id"] == "ex-0"
+
+
+async def test_a_close_cancels_the_exchange_stop_first(perp: Any, exchange: Exchange) -> None:
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-ex-2", "")
+    closed = await perp.trading.close(view["id"], "test")
+    assert closed["status"] == "closed" and exchange.cancelled == ["ex-0"]
+    assert closed["stop_order_id"] == ""
+
+
+async def test_a_stop_the_exchange_filled_is_booked_not_sold_again(perp: Any, exchange: Exchange) -> None:
+    guard = Guard(perp.trading, perp.settings, perp.hub)
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-ex-3", "")
+    exchange.trigger(79_480.0)  # the process was away; the mark is back above the stop by now
+    sent = len(exchange.sent)
+    await guard.check_structures()
+    closed = perp.trading.structure(view["id"])
+    assert closed["status"] == "closed" and "exchange stop filled at 79,480.00" in closed["close_reason"]
+    assert closed["legs"][0]["exit_price"] == 79_480.0
+    assert len(exchange.sent) == sent and not exchange.cancelled  # nothing was sold twice
+
+
+async def test_a_position_the_exchange_will_not_protect_is_closed(perp: Any) -> None:
+    ex = Exchange(perp.paper, refuse=True)
+    perp.brokers["delta"] = ex
+    perp.configure(delta_active=True)
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-ex-4", "")
+    assert view["status"] == "closed" and "exchange stop could not be placed" in view["close_reason"]

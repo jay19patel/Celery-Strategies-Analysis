@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Loader2, Pencil, X } from "lucide-react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 
+import { openCosts } from "@/components/positions/derive";
 import { Confirm } from "@/components/shared/confirm";
 import { Pnl, Premium } from "@/components/shared/money";
 import { Notice } from "@/components/shared/states";
@@ -24,6 +25,23 @@ import { cn } from "@/lib/utils";
 function legPnl(leg: Leg): number | null {
   if (leg.entry_price === null || leg.mark === null) return null;
   return (leg.side === "buy" ? 1 : -1) * (leg.mark - leg.entry_price) * leg.size * leg.contract_value;
+}
+
+/** A charge, shown as money going out; one too small to show at four digits is not given a sign. */
+function cost(v: number | null): ReactNode {
+  if (v === null) return "—";
+  if (v < 0.00005) return <span className="num">{usd(0, 4)}</span>;
+  return <span className="num text-warn">−{usd(v, 4)}</span>;
+}
+
+function Tile({ label, hint, className, children }: { label: string; hint: string; className?: string; children: ReactNode }) {
+  return (
+    <div className={cn("min-w-0 rounded-xl border px-3 py-2", className)}>
+      <div className="truncate text-[11.5px] text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate text-[15px] font-semibold">{children}</div>
+      <div className="truncate text-[10.5px] text-muted-foreground">{hint}</div>
+    </div>
+  );
 }
 
 /** Where the P&L sits between the stop and the target, as a share of that span. */
@@ -93,6 +111,7 @@ function ExitsDialog({ s, open, onOpenChange }: { s: Structure; open: boolean; o
 export function StructureCard({ s }: { s: Structure }) {
   const [editing, setEditing] = useState(false);
   const pnl = s.live?.pnl ?? null;
+  const costs = openCosts(s);
   // A position on the perpetual exits at its strategy's prices, not at a share of a premium: it has
   // no expiry to run out and its take-profit/stop percentages are ignored by the guard.
   const perp = s.instrument === "perp";
@@ -123,109 +142,112 @@ export function StructureCard({ s }: { s: Structure }) {
       </CardHeader>
       <CardContent className="space-y-4">
         {s.error && <Notice tone="loss">{s.error}</Notice>}
-        <div className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)]">
-          <div className="space-y-3">
+        {/* What closing now would book, and what it is made of. */}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:items-center">
+          <div className="space-y-2.5">
             <div>
-              <div className="text-[11.5px] text-muted-foreground">P&amp;L if closed now</div>
-              <Pnl value={pnl} className="text-2xl" />
-              <div className="num text-[11.5px] text-muted-foreground">at marks {signed(s.live?.pnl_mid ?? null)}</div>
+              <div className="text-[11.5px] text-muted-foreground">Unrealised P&amp;L if closed now</div>
+              <Pnl value={pnl} digits={4} className="text-2xl" />
               {s.live?.missing.length ? <div className="text-[11px] text-warn">no quote: {s.live.missing.join(", ")}</div> : null}
             </div>
             <Progress pnl={pnl} stop={s.stop_loss_usd} target={s.take_profit_usd} />
-            <div>
-              <KV label="Entry" value={<Premium value={s.entry_cash} />} />
-              {perp && <KV label="Entry spot" value={price(s.entry_spot)} />}
-              <KV label="Max profit" value={s.max_profit === null ? "unlimited" : usd(s.max_profit, 4)} />
-              <KV label="Max loss" value={s.max_loss === null ? <span className="text-loss">unlimited</span> : usd(s.max_loss, 4)} />
-              {perp ? (
-                <>
-                  <KV label="Stop" value={<span className="text-loss">{price(s.stop_price)}</span>} />
-                  <KV label="Target" value={<span className="text-profit">{price(s.target_price)}</span>} />
-                  <KV label="Closes after" value={hours(s.hours_left)} />
-                </>
-              ) : (
-                <KV label="Expires in" value={hours(s.hours_left)} />
-              )}
-              <KV label="Margin held" value={usd(s.margin, 2)} />
-              <KV label="Fees so far" value={usd(s.fees, 4)} />
-              <KV label="Opened" value={dateTime(s.opened_at)} />
-            </div>
-            {s.reason && <p className="text-[11.5px] leading-relaxed text-muted-foreground">{s.reason}</p>}
           </div>
-          <div className="min-w-0">
-            <div className="divide-y divide-slate-100 rounded-lg border md:hidden">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+            <Tile label="Gross move" hint="at the marks"><Pnl value={costs.gross} digits={4} /></Tile>
+            <Tile label="Charges paid" hint="on entry">{cost(costs.paid)}</Tile>
+            <Tile label="Exit charges" hint="to close now (est.)">{cost(costs.exit)}</Tile>
+            <Tile label="Spread" hint="bid/ask vs marks">{cost(costs.spread)}</Tile>
+            <Tile label="Net if closed" hint="after all of it" className="col-span-2 sm:col-span-1"><Pnl value={pnl} digits={4} /></Tile>
+          </div>
+        </div>
+
+        <div className="divide-y divide-slate-100 rounded-lg border md:hidden">
+          {s.legs.map((l) => (
+            <div key={l.id} className="space-y-1 px-3 py-2 text-[12px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate">
+                  <span className={cn("mr-1.5 text-[11px] font-semibold uppercase", l.side === "buy" ? "text-profit" : "text-loss")}>{l.side} {l.size}</span>
+                  <span className="num">{l.symbol}</span>
+                </span>
+                <Pnl value={l.exit_price === null ? legPnl(l) : null} digits={4} className="shrink-0" />
+              </div>
+              <div className="num flex flex-wrap justify-between gap-x-3 text-[11px] text-muted-foreground">
+                <span>entry {price(l.entry_price)}</span>
+                <span>{price(l.bid)} / {price(l.ask)}</span>
+                <span>mark {price(l.mark)}</span>
+              </div>
+              {l.exit_price !== null && <div className="text-[11px] text-muted-foreground">exited {price(l.exit_price)}</div>}
+            </div>
+          ))}
+        </div>
+        <div className="hidden rounded-lg border md:block">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Leg</TableHead>
+                <TableHead className="text-right">Size</TableHead>
+                <TableHead className="text-right">Entry</TableHead>
+                <TableHead className="text-right">Bid / Ask</TableHead>
+                <TableHead className="text-right">Mark</TableHead>
+                <TableHead className="text-right">P&amp;L (mark)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {s.legs.map((l) => (
-                <div key={l.id} className="space-y-1 px-3 py-2 text-[12px]">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate">
-                      <span className={cn("mr-1.5 text-[11px] font-semibold uppercase", l.side === "buy" ? "text-profit" : "text-loss")}>{l.side} {l.size}</span>
-                      <span className="num">{l.symbol}</span>
-                    </span>
-                    <Pnl value={l.exit_price === null ? legPnl(l) : null} digits={4} className="shrink-0" />
-                  </div>
-                  <div className="num flex flex-wrap justify-between gap-x-3 text-[11px] text-muted-foreground">
-                    <span>entry {price(l.entry_price)}</span>
-                    <span>{price(l.bid)} / {price(l.ask)}</span>
-                    <span>mark {price(l.mark)}</span>
-                  </div>
-                  {l.exit_price !== null && <div className="text-[11px] text-muted-foreground">exited {price(l.exit_price)}</div>}
-                </div>
-              ))}
-            </div>
-            <Table className="hidden md:table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Leg</TableHead>
-                  <TableHead className="text-right">Size</TableHead>
-                  <TableHead className="text-right">Entry</TableHead>
-                  <TableHead className="text-right">Bid / Ask</TableHead>
-                  <TableHead className="text-right">Mark</TableHead>
-                  <TableHead className="text-right">P&amp;L (mark)</TableHead>
+                <TableRow key={l.id}>
+                  <TableCell>
+                    <span className={cn("mr-2 text-[11px] font-semibold uppercase", l.side === "buy" ? "text-profit" : "text-loss")}>{l.side}</span>
+                    <span className="num">{l.symbol}</span>
+                    {l.exit_price !== null && <span className="ml-2 text-[11px] text-muted-foreground">exited {price(l.exit_price)}</span>}
+                  </TableCell>
+                  <TableCell className="num text-right">{l.size}</TableCell>
+                  <TableCell className="num text-right">{price(l.entry_price)}</TableCell>
+                  <TableCell className="num text-right text-muted-foreground">{price(l.bid)} / {price(l.ask)}</TableCell>
+                  <TableCell className="num text-right">{price(l.mark)}</TableCell>
+                  <TableCell className="text-right"><Pnl value={l.exit_price === null ? legPnl(l) : null} digits={4} /></TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {s.legs.map((l) => (
-                  <TableRow key={l.id}>
-                    <TableCell>
-                      <span className={cn("mr-2 text-[11px] font-semibold uppercase", l.side === "buy" ? "text-profit" : "text-loss")}>{l.side}</span>
-                      <span className="num">{l.symbol}</span>
-                      {l.exit_price !== null && <span className="ml-2 text-[11px] text-muted-foreground">exited {price(l.exit_price)}</span>}
-                    </TableCell>
-                    <TableCell className="num text-right">{l.size}</TableCell>
-                    <TableCell className="num text-right">{price(l.entry_price)}</TableCell>
-                    <TableCell className="num text-right text-muted-foreground">{price(l.bid)} / {price(l.ask)}</TableCell>
-                    <TableCell className="num text-right">{price(l.mark)}</TableCell>
-                    <TableCell className="text-right"><Pnl value={l.exit_price === null ? legPnl(l) : null} digits={4} /></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-              <span className="w-full text-[11.5px] text-muted-foreground sm:mr-auto sm:w-auto">
-                {perp
-                  ? `${s.strategy} · exits at its own stop and target`
-                  : `take profit ${s.take_profit_pct}% of ${s.kind === "credit" ? "max profit" : "the debit"} · stop ${s.stop_loss_pct}%`}
-              </span>
-              {/* A perpetual's exits are prices its strategy set; the guard ignores these percentages. */}
-              {!perp && (
-                <Button variant="outline" size="sm" onClick={() => setEditing(true)} className="h-10 flex-1 sm:h-8 sm:flex-none">
-                  <Pencil /> Exits
-                </Button>
-              )}
-              <Confirm
-                title={`Close ${s.label}?`}
-                description={`Every leg is closed at the live book on ${s.broker} — shorts bought back first. Expected ${signed(pnl)}.`}
-                confirmLabel="Close structure"
-                destructive
-                onConfirm={close}
-                trigger={(open) => (
-                  <Button variant="destructive-outline" size="sm" onClick={open} className="h-10 flex-1 sm:h-8 sm:flex-none">
-                    <X /> Close
-                  </Button>
-                )}
-              />
-            </div>
-          </div>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        <div className="grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <KV label="Entry" value={<Premium value={s.entry_cash} />} />
+          {perp && <KV label="Entry spot" value={price(s.entry_spot)} />}
+          <KV label="Max profit" value={s.max_profit === null ? "unlimited" : usd(s.max_profit, 4)} />
+          <KV label="Max loss" value={s.max_loss === null ? <span className="text-loss">unlimited</span> : usd(s.max_loss, 4)} />
+          {perp && <KV label="Stop" value={<span className="text-loss">{price(s.stop_price)}</span>} />}
+          {perp && <KV label="Target" value={<span className="text-profit">{price(s.target_price)}</span>} />}
+          <KV label={perp ? "Closes after" : "Expires in"} value={hours(s.hours_left)} />
+          <KV label="Margin held" value={usd(s.margin, 2)} />
+          <KV label="Opened" value={dateTime(s.opened_at)} />
+        </div>
+        {s.reason && <p className="text-[11.5px] leading-relaxed text-muted-foreground">{s.reason}</p>}
+
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-3">
+          <span className="w-full text-[11.5px] text-muted-foreground sm:mr-auto sm:w-auto">
+            {perp
+              ? `${s.strategy} · exits at its own stop and target`
+              : `take profit ${s.take_profit_pct}% of ${s.kind === "credit" ? "max profit" : "the debit"} · stop ${s.stop_loss_pct}%`}
+          </span>
+          {/* A perpetual's exits are prices its strategy set; the guard ignores these percentages. */}
+          {!perp && (
+            <Button variant="outline" size="sm" onClick={() => setEditing(true)} className="h-10 flex-1 sm:h-8 sm:flex-none">
+              <Pencil /> Exits
+            </Button>
+          )}
+          <Confirm
+            title={`Close ${s.label}?`}
+            description={`Every leg is closed at the live book on ${s.broker} — shorts bought back first. Expected ${signed(pnl)}.`}
+            confirmLabel="Close structure"
+            destructive
+            onConfirm={close}
+            trigger={(open) => (
+              <Button variant="destructive-outline" size="sm" onClick={open} className="h-10 flex-1 sm:h-8 sm:flex-none">
+                <X /> Close
+              </Button>
+            )}
+          />
         </div>
       </CardContent>
       <ExitsDialog s={s} open={editing} onOpenChange={setEditing} />

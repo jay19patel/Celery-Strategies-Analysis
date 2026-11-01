@@ -78,7 +78,9 @@ Enforced by tests (`backend/tests`). Breaking one should fail the build.
 6. **The broker decides.** Before an entry the account is read; if that fails, no trade.
 7. **Exits read what closing would book** — bids for longs, asks for shorts, every fee
    (`TradingService.valuation`). Without a fresh quote on every leg, the guard decides nothing but
-   the expiry rules.
+   the expiry rules. A stop holds `stop_confirm_checks` checks in a row unless the spot is past a
+   breakeven. On Delta a perpetual's stop is also left with the exchange at entry; if it cannot be
+   placed the position is closed.
 8. **Absence over staleness.** A perpetual price older than 30s or an option quote older than 120s
    is no price.
 9. **Secrets stay in the process.** No endpoint returns a key, secret or token; `Settings.public()`
@@ -90,8 +92,11 @@ Enforced by tests (`backend/tests`). Breaking one should fail the build.
     `analyst.ALLOWED` — market numbers only, never a balance, position, order or P&L.
 12. **Every decision is written down.** Each auto cycle is a `Decision` row with what it saw, every
     strategy it considered and why each was dropped, the model's answer, and what each broker did.
-13. **Bounded.** Prices and ticks are never stored; events and briefs are pruned after 30 days,
-    decisions after 90.
+13. **Bounded.** Ticks are never stored. Bars (15m a year, 1m 30 days) and option-chain snapshots
+    (`data/chains/`, every 5 min, 90 days) are kept for backtests; events and briefs are pruned after
+    30 days, decisions after 90.
+14. **No unbounded loss on real money.** A structure without a bounded max loss is refused on Delta
+    live; elsewhere it is sized on a move of three expected moves, not on its stop.
 
 ## Extension Points
 
@@ -104,7 +109,8 @@ picks strikes; pricing, checks, sizing and execution are shared.
 ### Broker
 
 Implement `Broker` (`brokers/base.py`): `account`, `execute` (IOC at the limit or refuse, idempotent
-on `client_order_id`, `BrokerTimeout` when unsure), `lookup`, `settle`. Register it in
+on `client_order_id`, `BrokerTimeout` when unsure), `lookup`, `settle`, and `protect`/`unprotect`
+(a reduce-only stop held by the exchange; return "" when the broker holds none). Register it in
 `Engine.brokers`, add it to `BROKERS` and a `<name>_active` / `auto_<name>` setting.
 
 ### Setting
@@ -126,6 +132,7 @@ invalidates in `lib/live.tsx`.
 ./start_backend.sh         # backend only (production mode, single worker)
 make install               # .venv with the backend, npm install for the dashboard
 make check                 # ruff, eslint, tsc, pytest
+cd backend && ../.venv/bin/python -m app.backtest.perp supertrend --underlying BTC   # perp backtest on stored bars
 ```
 
 Tests run the engine's parts over a real captured option chain (`tests/fixtures/btc_chain.json`)

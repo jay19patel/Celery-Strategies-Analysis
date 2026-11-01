@@ -183,6 +183,15 @@ def realised_vol(closes: Sequence[float], bar_hours: float) -> float | None:
     return math.sqrt(var) * math.sqrt(YEAR_HOURS / bar_hours)
 
 
+def parkinson_vol(bars: Sequence[dict[str, Any]], bar_hours: float) -> float | None:
+    """Annualised volatility from each bar's high-low range (Parkinson): about five times as much
+    information per bar as close-to-close, so a day of 15m bars measures it far less noisily."""
+    xs = [math.log(b["high"] / b["low"]) ** 2 for b in bars if b.get("low") and b.get("high") and b["low"] > 0]
+    if len(xs) < 20:
+        return None
+    return math.sqrt(sum(xs) / (4 * math.log(2) * len(xs))) * math.sqrt(YEAR_HOURS / bar_hours)
+
+
 def fold(bars: Sequence[dict[str, Any]], span_seconds: int) -> list[dict[str, Any]]:
     """Bars folded into `span_seconds` buckets that start at `time // span * span` (UTC).
     The last bucket is dropped: it may still be forming."""

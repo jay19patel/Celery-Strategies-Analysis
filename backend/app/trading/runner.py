@@ -106,12 +106,18 @@ class StrategyRunner:
             outlook=await self.market.outlook(underlying) if strategy.wants_outlook else {},
             structure=await self.market.structure(underlying) if strategy.wants_structure else {},
             options_history=self.market.options_history(underlying, 8) if strategy.wants_options_history else [],
-            cost_pct=2 * rate.taker * 100 + spread,
+            cost_pct=2 * rate.taker * 100 + spread + self._funding_pct(underlying),
         )
+
+    def _funding_pct(self, underlying: str) -> float:
+        """One funding payment at the current rate, as % of notional. A position held for hours pays
+        it at least once, and which side pays is not known before the side is, so it is charged as a cost."""
+        perp = self.trading.feed.perp(underlying)
+        return abs((perp.stats.get("funding_rate_pct") if perp else None) or 0.0)
 
     async def _trade(self, underlying: str, symbol: str, fired: list[tuple[str, Decision, int]], s: Settings) -> str:
         """The best signal on this symbol gets the slot; every other one is refused by name."""
-        cost = 2 * self.trading.desk.cached_fee(symbol).taker * 100
+        cost = 2 * self.trading.desk.cached_fee(symbol).taker * 100 + self._funding_pct(underlying)
 
         def edge(d: Decision) -> float:
             entry = d.entry or 1.0

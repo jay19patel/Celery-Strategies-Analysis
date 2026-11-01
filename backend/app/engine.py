@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from sqlmodel import col, delete, select
@@ -28,6 +29,7 @@ from app.core.events import EventHub
 from app.core.models import AiBrief, DayRisk, Decision, EventLog, Leg, OrderRecord, Prediction, SignalLog, Structure
 from app.core.scheduler import Scheduler
 from app.errors import AppError, BrokerError, Refused
+from app.market import recorder
 from app.market.delta import DeltaClient
 from app.market.feed import OPTIONS_REFRESH, MarketFeed
 from app.notify import report
@@ -53,12 +55,14 @@ log = logging.getLogger(__name__)
 
 EVENT_RETENTION_DAYS = 30
 DECISION_RETENTION_DAYS = 90
+CHAIN_RECORD_SECONDS = 300
 SCHEDULE_FIELDS = ("auto_interval_minutes", "ai_brief_minutes", "daily_report_hour", "day_timezone", "zh_scan_seconds")
 
 
 class Engine:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
+        self.chain_dir = Path(cfg.db_path).parent / "chains"
         self.started_at = time.time()
         self.hub = EventHub()
         self.scheduler = Scheduler()
@@ -109,6 +113,7 @@ class Engine:
         sch.every("market.bars", "Store 15m bars (a year)", 300, self.feed.collect_bars, run_now=True)
         sch.every("market.base", "Store 1m base bars (30 days)", 30, lambda: self.feed.collect_bars("1m"), run_now=True)
         sch.every("options.history", "Record the options book each minute", 60, self.market.record_options)
+        sch.every("market.chains", "Record every option quote for backtests (90 days)", CHAIN_RECORD_SECONDS, self.record_chains)
         sch.every("market.analyst", "Market analysis and insights", 300, self.market.analyse)
         sch.every("market.verdicts", "Mark the cards' past claims", 900, self.market.settle)
         sch.every("strategies.run", "Directional strategies on closed bars", 20, self.runner.run)
@@ -233,6 +238,12 @@ class Engine:
             }
         self.hub.publish("Prices", persist=False, prices=prices, at=time.time())
 
+    async def record_chains(self) -> str:
+        rows = 0
+        for u in self._settings.underlyings:
+            rows += await asyncio.to_thread(recorder.record, self.chain_dir, u, self.feed.quotes(u), self.feed.spot(u))
+        return f"{rows} option quotes recorded"
+
     async def housekeeping(self) -> str:
         now = time.time()
         with session() as s:
@@ -242,7 +253,8 @@ class Engine:
             s.exec(delete(SignalLog).where(col(SignalLog.ts) < now - DECISION_RETENTION_DAYS * 86_400))
             s.commit()
         bars = await asyncio.to_thread(self.feed.prune_bars)
-        return f"pruned {events} events, {briefs} briefs, {decisions} decisions, {bars} bars"
+        chains = await asyncio.to_thread(recorder.prune, self.chain_dir)
+        return f"pruned {events} events, {briefs} briefs, {decisions} decisions, {bars} bars, {chains} chain files"
 
     async def reset_data(self) -> dict[str, int]:
         """Every record of what the desk did — structures and their legs, orders, decisions, signals,

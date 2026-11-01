@@ -10,7 +10,7 @@ from typing import Any
 from app.errors import NotFound, Refused
 from app.market import options as chain
 from app.market.feed import MarketFeed
-from app.market.indicators import realised_vol
+from app.market.indicators import parkinson_vol, realised_vol
 from app.options import regime as regime_mod
 from app.options.assess import DEFAULT_FEE, FeeRate, assess
 from app.options.strategies import BUILDERS, CATALOG, Plan, build, custom
@@ -57,7 +57,8 @@ class Desk:
         return expiry
 
     def realised(self, underlying: str) -> dict[str, float | None]:
-        """Realised volatility over 24h and 7d from the stored 15m bars, and their mean."""
+        """Realised volatility over 24h and 7d from the stored 15m bars (close-to-close), over 24h from
+        their ranges, and the highest of them as the reference a premium is measured against."""
         bars = self.feed.bars(chain.PERPETUALS[underlying], RV_BARS["7d"])
         last = bars[-1]["time"] if bars else 0
         cached = self._rv.get(underlying)
@@ -67,8 +68,9 @@ class Desk:
         out: dict[str, float | None] = {
             span: realised_vol(closes[-n:], 0.25) if len(closes) >= min(n, 200) else None for span, n in RV_BARS.items()
         }
+        out["range_24h"] = parkinson_vol(bars[-96:], 0.25) if len(bars) >= 96 else None
         known = [v for v in out.values() if v]
-        out["reference"] = sum(known) / len(known) if known else None
+        out["reference"] = max(known) if known else None
         self._rv[underlying] = (last, out)
         return out
 

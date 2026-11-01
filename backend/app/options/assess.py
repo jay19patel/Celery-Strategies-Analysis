@@ -6,13 +6,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from app.options.pricing import analyze, distribution
+from app.options.pricing import analyze, distribution, payoff
 from app.options.strategies import SELLER_CHECKS, Plan, describe, spec_for
 from app.settings import Settings
 
 # Delta India's option fee: a rate on the underlying notional, capped at a share of the premium.
 # The product spec carries the real figures; these are used only when it could not be read.
 DEFAULT_FEE = (0.0005, 0.10)
+# The move an unbounded structure is sized for: this many of the expected moves to expiry. A stop
+# is a hope on a gap, so the worst case is read here instead of at the stop.
+STRESS_MOVES = 3.0
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,9 @@ def assess(
     pop_rv, ev_rv = distribution(specs, plan.spot, realised_vol, hours)
     analysis["pop_realised"] = None if pop_rv is None else round(100 * pop_rv, 1)
     analysis["expected_value_realised"] = None if ev_rv is None else round(ev_rv, 4)
+    move = STRESS_MOVES * analysis["expected_move"]
+    probes = [plan.spot - move, plan.spot + move, *(k for k in {leg.strike for leg in plan.legs} if abs(k - plan.spot) <= move)]
+    analysis["stress_loss"] = round(max(0.0, -min(payoff(specs, max(p, 0.0)) for p in probes)), 4)
     rates = rates or {}
     fees = sum(leg_fee(sp.price, sp.units, plan.spot, rates.get(leg.symbol, FeeRate(*DEFAULT_FEE))) for leg, sp in zip(plan.legs, specs, strict=True))
     analysis["entry_fees"] = round(fees, 4)

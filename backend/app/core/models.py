@@ -61,6 +61,7 @@ class Structure(SQLModel, table=True):
     stop_price: float | None = None
     target_price: float | None = None
     reason: str = ""  # why it was opened: the strategy's own sentence
+    stop_order_id: str = ""  # the exchange's id for the stop it holds for this position, if any
 
 
 class Leg(SQLModel, table=True):

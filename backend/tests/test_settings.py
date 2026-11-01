@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.errors import SettingsError
-from app.settings import LIVE_CONFIRM_PHRASE, STRATEGY_KEYS, Settings, apply_changes, from_stored
+from app.settings import LIVE_CONFIRM_PHRASE, STRATEGY_KEYS, UNDEFINED_RISK, Settings, apply_changes, from_stored
 from app.strategies import REGISTRY
 
 
@@ -13,9 +13,12 @@ def test_defaults_are_paper_only_and_delta_on_demo() -> None:
     s = Settings()
     assert s.active_brokers == ["paper"]
     assert s.delta_env == "demo" and not s.auto_delta and not s.is_real_money
-    # Every structure in the catalog is enabled, including the two whose loss is not bounded.
-    assert sorted(s.auto_strategies) == sorted(STRATEGY_KEYS)
-    assert sorted(s.directional_strategies) == sorted(REGISTRY)
+    # Every defined-risk structure is enabled; the two whose loss is not bounded are opt-in.
+    assert sorted(s.auto_strategies) == sorted(k for k in STRATEGY_KEYS if k not in UNDEFINED_RISK)
+    assert not set(UNDEFINED_RISK) & set(s.auto_strategies)
+    assert s.max_spread_pct <= 15  # a wing quoted wider than this gives the credit back to the book
+    assert set(s.directional_strategies) < set(REGISTRY)
+    assert not {"supertrend", "ema_9_15"} & set(s.directional_strategies)  # no edge in the backtest
 
 
 def test_real_money_needs_the_phrase() -> None:
@@ -55,17 +58,17 @@ def test_invalid_changes_are_refused_with_the_field_named() -> None:
 
 def test_a_strategy_runs_on_an_underlying_only_when_both_switches_are_on() -> None:
     s = Settings(underlyings=["BTC", "ETH"])
-    assert s.strategy_underlyings("supertrend") == ["BTC", "ETH"]  # unmapped: every enabled underlying
+    assert s.strategy_underlyings("ema_vwap") == ["BTC", "ETH"]  # unmapped: every enabled underlying
 
-    s = apply_changes(s, {"strategy_symbols": {"supertrend": ["ETH"], "pcr_options": []}})
-    assert s.strategy_on("supertrend", "ETH") and not s.strategy_on("supertrend", "BTC")
+    s = apply_changes(s, {"strategy_symbols": {"ema_vwap": ["ETH"], "pcr_options": []}})
+    assert s.strategy_on("ema_vwap", "ETH") and not s.strategy_on("ema_vwap", "BTC")
     assert s.strategy_underlyings("pcr_options") == ["BTC", "ETH"]  # empty list means no restriction
 
     off = apply_changes(s, {"directional_strategies": ["pcr_options"]})
-    assert not off.strategy_on("supertrend", "ETH")  # the strategy switch still wins over its symbols
+    assert not off.strategy_on("ema_vwap", "ETH")  # the strategy switch still wins over its symbols
 
     with pytest.raises(SettingsError, match="strategy_symbols"):
-        apply_changes(s, {"strategy_symbols": {"supertrend": ["DOGE"]}})
+        apply_changes(s, {"strategy_symbols": {"ema_vwap": ["DOGE"]}})
     with pytest.raises(SettingsError, match="strategy_symbols"):
         apply_changes(s, {"strategy_symbols": {"no_such_strategy": ["BTC"]}})
 
@@ -74,3 +77,15 @@ def test_stored_values_that_no_longer_validate_fall_back() -> None:
     s = from_stored({"min_score": 70, "risk_per_trade_pct": 999, "retired_field": 1})
     assert s.min_score == 70
     assert s.risk_per_trade_pct == Settings().risk_per_trade_pct
+
+
+def test_event_times_are_utc_minutes_and_a_window_finds_them() -> None:
+    with pytest.raises(SettingsError, match="event_times"):
+        apply_changes(Settings(), {"event_times": ["9 Dec 2026"]})
+    s = apply_changes(Settings(), {"event_times": [" 2026-12-09 19:00 ", "2026-12-09 19:00"], "event_buffer_hours": 2})
+    assert s.event_times == ["2026-12-09 19:00"]
+    at = 1_796_842_800  # 2026-12-09 19:00 UTC
+    assert s.event_between(at - 3600, at + 3600) == "2026-12-09 19:00"
+    assert s.event_between(at + 3600, at + 86_400) == "2026-12-09 19:00"  # inside the buffer after it
+    assert s.event_between(at + 3 * 3600, at + 86_400) == ""
+    assert s.event_between(at - 86_400, at - 3600) == ""

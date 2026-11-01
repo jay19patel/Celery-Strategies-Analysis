@@ -182,6 +182,28 @@ class DeltaClient:
         }
         return await self.request("POST", "/v2/orders", body=body, auth=True)
 
+    async def place_stop_order(self, symbol: str, side: str, size: int, client_order_id: str, stop_price: float) -> dict[str, Any]:
+        """A reduce-only stop-market order, triggered on the mark price: the position's stop held by the
+        exchange, so it fires whether or not this process is running."""
+        product = await self.product(symbol)
+        tick = float(product.get("tick_size") or 0.1)
+        body = {
+            "product_id": product["id"],
+            "size": int(size),
+            "side": side,
+            "order_type": "market_order",
+            "stop_order_type": "stop_loss_order",
+            "stop_price": round_to_tick(stop_price, tick),
+            "stop_trigger_method": "mark_price",
+            "client_order_id": client_order_id,
+            "reduce_only": "true",
+        }
+        return await self.request("POST", "/v2/orders", body=body, auth=True)
+
+    async def cancel_order(self, symbol: str, order_id: str) -> Any:
+        product = await self.product(symbol)
+        return await self.request("DELETE", "/v2/orders", body={"id": int(order_id), "product_id": product["id"]}, auth=True)
+
     async def order_by_client_id(self, client_order_id: str) -> dict[str, Any] | None:
         try:
             return await self.request("GET", f"/v2/orders/client_order_id/{client_order_id}", auth=True)

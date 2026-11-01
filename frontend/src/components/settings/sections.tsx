@@ -227,6 +227,15 @@ export function AutoTab({ strategies }: { strategies: StrategySpec[] }) {
         </FieldGrid>
       </Section>
       <Section
+        title="Scheduled events"
+        description="No credit structure is opened whose life holds one of these, from the buffer before now until its expiry. Add FOMC, CPI and other release times as they are announced."
+      >
+        <FieldGrid>
+          <EventTimes />
+          <NumberField name="event_buffer_hours" label="Stand aside after an event (hours)" />
+        </FieldGrid>
+      </Section>
+      <Section
         title="Pacing"
         description="Towards about one entry a day. While nothing has opened on an underlying today the regime score above eases towards this floor as the day runs out, and the first entry puts it back. 0 switches it off. The filters above never ease: a thin premium is refused at any hour."
       >
@@ -234,6 +243,28 @@ export function AutoTab({ strategies }: { strategies: StrategySpec[] }) {
           <NumberField name="min_score_floor" label="Regime score floor (0 = off)" integer />
         </FieldGrid>
       </Section>
+    </div>
+  );
+}
+
+function EventTimes() {
+  const { draft, set } = useForm();
+  const list = (draft.event_times as string[] | undefined) ?? [];
+  const [text, setText] = useState(list.join(", "));
+  return (
+    <div className="space-y-1.5 sm:col-span-2">
+      <Label htmlFor="event_times">Event times (UTC)</Label>
+      <Input
+        id="event_times"
+        className="num"
+        value={text}
+        placeholder="2026-12-09 19:00, 2027-01-13 13:30"
+        onChange={(e) => {
+          setText(e.target.value);
+          set("event_times", e.target.value.split(",").map((t) => t.trim()).filter(Boolean));
+        }}
+      />
+      <p className="text-[11.5px] text-muted-foreground">Comma-separated, YYYY-MM-DD HH:MM in UTC.</p>
     </div>
   );
 }
@@ -267,6 +298,12 @@ export function RiskTab() {
           <NumberField name="debit_take_profit_pct" label="Debit: take profit (% of debit)" />
           <NumberField name="debit_stop_loss_pct" label="Debit: stop loss (% of debit)" />
           <NumberField name="exit_before_expiry_minutes" label="Close before expiry (minutes)" integer hint="0 holds to settlement." />
+          <NumberField
+            name="stop_confirm_checks"
+            label="Stop loss holds for (checks)"
+            integer
+            hint="5s apart. A spread spike is not a loss; with the spot past a breakeven it closes at once."
+          />
         </FieldGrid>
       </Section>
     </div>

@@ -66,3 +66,12 @@ class Broker(Protocol):
     async def settle(self, order: LegOrder, price: float) -> Fill:
         """A leg that reached expiry, settled at its intrinsic value `price`."""
         ...
+
+    async def protect(self, symbol: str, side: str, size: int, stop_price: float, client_order_id: str) -> str:
+        """Leave a reduce-only stop for a position with the exchange. Returns its exchange id, or ""
+        when the broker holds no stops of its own (the guard is then the only stop)."""
+        ...
+
+    async def unprotect(self, symbol: str, order_id: str) -> None:
+        """Cancel a stop left by `protect`."""
+        ...

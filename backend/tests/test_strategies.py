@@ -62,3 +62,28 @@ def test_selling_premium_needs_edge_at_realised_volatility() -> None:
     edge = lambda a: next(c for c in a["checks"] if c["name"] == "edge at realised vol")  # noqa: E731
     assert edge(calm)["ok"] and calm["ok"]
     assert not edge(wild)["ok"] and not wild["ok"]
+
+
+def test_range_volatility_reads_the_same_market_as_closes_and_the_reference_is_the_highest() -> None:
+    import math
+    import random
+
+    from app.market.indicators import parkinson_vol, realised_vol
+    from app.options.regime import measure
+
+    # A walk at 60% annualised, with bars whose high/low come from four sub-steps inside each bar.
+    rng, sigma, price, bars = random.Random(3), 0.60 / math.sqrt(365 * 24 * 4 * 4), 80_000.0, []
+    for i in range(700):
+        path = [price]
+        for _ in range(4):
+            path.append(path[-1] * math.exp(rng.gauss(0, sigma)))
+        bars.append({"time": i * 900, "open": price, "high": max(path), "low": min(path), "close": path[-1], "volume": 1.0})
+        price = path[-1]
+    closes = [b["close"] for b in bars]
+    assert parkinson_vol(bars[-96:], 0.25) == pytest.approx(0.60, rel=0.35)  # sampled ranges read a little low
+    assert realised_vol(closes, 0.25) == pytest.approx(0.60, rel=0.15)
+    assert parkinson_vol(bars[:10], 0.25) is None  # too few bars to say
+
+    m = measure(bars, price, {"atm_iv": 0.70})
+    readings = [v for v in (m["rv_24h"], m["rv_7d"], m["rv_range_24h"]) if v]
+    assert m["vol_premium"] == pytest.approx(0.70 - max(readings))

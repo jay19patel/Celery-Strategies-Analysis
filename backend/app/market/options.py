@@ -28,6 +28,8 @@ class OptionQuote:
     mark: float | None = None
     bid: float | None = None
     ask: float | None = None
+    bid_size: float | None = None  # contracts shown at the best bid; None when the ticker carries none
+    ask_size: float | None = None
     iv: float | None = None  # mark IV, annualised fraction: 0.45 = 45%
     delta: float | None = None
     gamma: float | None = None
@@ -84,6 +86,7 @@ def parse_ticker(msg: dict[str, Any], now: float | None = None) -> OptionQuote |
     return OptionQuote(
         symbol=msg["symbol"], underlying=underlying, kind=kind, strike=strike, expiry=expiry,
         mark=_f(msg.get("mark_price")), bid=bid if bid else None, ask=ask if ask else None,
+        bid_size=_f(quotes.get("bid_size")), ask_size=_f(quotes.get("ask_size")),
         iv=_f(quotes.get("mark_iv")) or _f(msg.get("mark_vol")),
         delta=_f(greeks.get("delta")), gamma=_f(greeks.get("gamma")), theta=_f(greeks.get("theta")), vega=_f(greeks.get("vega")),
         oi=_f(msg.get("oi")) or 0.0, oi_usd=_f(msg.get("oi_value_usd")) or 0.0,
