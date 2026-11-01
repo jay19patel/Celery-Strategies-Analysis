@@ -107,13 +107,13 @@ export default function ZeroHeroPage() {
       )}
 
       {status?.window_schedule && (
-        <Card className={status.window_schedule.window_open ? "border-profit/30 bg-profit/5" : "border-amber-500/20 bg-amber-500/5"}>
+        <Card className={status.window_schedule.window_open ? "border-profit/30 bg-profit/5" : "border-amber-200 bg-warn-soft/40"}>
           <CardContent className="p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-3">
-                <div className={`mt-0.5 rounded-md p-2 ${status.window_schedule.window_open ? "bg-profit/15 text-profit" : "bg-amber-500/15 text-amber-500"}`}>
+                <div className={`mt-0.5 rounded-md p-2 ${status.window_schedule.window_open ? "bg-profit/15 text-profit" : "bg-warn-soft text-warn"}`}>
                   {status.window_schedule.window_open ? (
-                    <Sparkles className="size-4 animate-pulse" />
+                    <Sparkles className="size-4" />
                   ) : (
                     <CalendarClock className="size-4" />
                   )}
@@ -154,8 +154,8 @@ export default function ZeroHeroPage() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
           label="Execution Window"
-          value={status?.window_schedule?.window_open ? "ACTIVE" : "SCHEDULED"}
-          valueClass={status?.window_schedule?.window_open ? "text-profit font-semibold animate-pulse" : "text-amber-500 font-mono"}
+          value={status?.window_schedule?.window_open ? "Open" : "Scheduled"}
+          valueClass={status?.window_schedule?.window_open ? "text-profit" : "text-warn"}
           hint={
             status?.window_schedule
               ? status.window_schedule.window_open

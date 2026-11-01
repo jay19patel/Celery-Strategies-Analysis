@@ -90,10 +90,10 @@ export function ChainTable({
               : `Click to add ${trade} to structure, Double-click for Direct Order (${trade} ${sideData.symbol} at ${price(value)})`
           }
           className={cn(
-            "num w-full rounded px-1 sm:px-1.5 py-1 sm:py-0.5 text-right text-[11px] sm:text-[12px] font-medium transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-40",
+            "num w-full rounded px-1 sm:px-1.5 py-1 sm:py-0.5 text-right text-[11px] sm:text-[12px] font-medium transition-[color,background-color,border-color,transform] duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40",
             which === "bid" ? "text-loss hover:bg-loss-soft" : "text-profit hover:bg-profit-soft",
             chosen &&
-              (which === "bid" ? "bg-loss text-white hover:bg-loss shadow-2xs" : "bg-profit text-white hover:bg-profit shadow-2xs"),
+              (which === "bid" ? "bg-loss text-white hover:bg-loss " : "bg-profit text-white hover:bg-profit "),
           )}
         >
           {value === null ? "—" : price(value)}
@@ -111,13 +111,13 @@ export function ChainTable({
       {/* Mobile Segmented Toggle for compact mobile trading */}
       <div className="flex items-center justify-between border-b px-3 py-2 bg-slate-50/70 sm:hidden">
         <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Side:</span>
-        <div className="flex rounded-lg border bg-slate-200/60 p-0.5 text-xs shadow-2xs">
+        <div className="flex rounded-lg border bg-slate-200/60 p-0.5 text-xs ">
           <button
             type="button"
             onClick={() => setFilterSide("both")}
             className={cn(
-              "rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all active:scale-95",
-              filterSide === "both" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900",
+              "rounded-md px-2.5 py-1 text-[11px] font-semibold transition-[color,background-color,border-color,transform] duration-150 active:scale-95",
+              filterSide === "both" ? "bg-card text-slate-900 " : "text-slate-600 hover:text-slate-900",
             )}
           >
             All
@@ -126,8 +126,8 @@ export function ChainTable({
             type="button"
             onClick={() => setFilterSide("calls")}
             className={cn(
-              "rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all active:scale-95",
-              filterSide === "calls" ? "bg-profit text-white shadow-xs" : "text-slate-600 hover:text-slate-900",
+              "rounded-md px-2.5 py-1 text-[11px] font-semibold transition-[color,background-color,border-color,transform] duration-150 active:scale-95",
+              filterSide === "calls" ? "bg-profit text-white " : "text-slate-600 hover:text-slate-900",
             )}
           >
             Calls
@@ -136,8 +136,8 @@ export function ChainTable({
             type="button"
             onClick={() => setFilterSide("puts")}
             className={cn(
-              "rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all active:scale-95",
-              filterSide === "puts" ? "bg-loss text-white shadow-xs" : "text-slate-600 hover:text-slate-900",
+              "rounded-md px-2.5 py-1 text-[11px] font-semibold transition-[color,background-color,border-color,transform] duration-150 active:scale-95",
+              filterSide === "puts" ? "bg-loss text-white " : "text-slate-600 hover:text-slate-900",
             )}
           >
             Puts
@@ -147,7 +147,7 @@ export function ChainTable({
 
       <div className="max-h-[560px] overflow-auto no-scrollbar">
         <table className={cn("w-full text-[11.5px] sm:text-[12px]", filterSide === "both" ? "min-w-[760px]" : "min-w-full")}>
-          <thead className="sticky top-0 z-10 bg-slate-50 text-[10.5px] sm:text-[11px] text-muted-foreground shadow-2xs">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-[10.5px] sm:text-[11px] text-muted-foreground ">
             {filterSide === "both" && (
               <tr className="border-b">
                 <th colSpan={6} className="py-1 text-center font-semibold text-slate-600">

@@ -75,7 +75,7 @@ function MiniTrendlineSvg({
     <div className="flex items-center gap-1.5" title={`${touches} verified touches`}>
       <svg width="84" height="26" viewBox="0 0 90 28" className="overflow-visible">
         {/* Background guideline */}
-        <line x1="4" y1={isSupport ? 25 : 3} x2="86" y2={isSupport ? 25 : 3} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="2,2" />
+        <line x1="4" y1={isSupport ? 25 : 3} x2="86" y2={isSupport ? 25 : 3} stroke="var(--border)" strokeWidth="1" strokeDasharray="2,2" />
         {/* Sloped Trendline */}
         <line
           x1="8"
@@ -211,7 +211,7 @@ export function TrendlinesTable({
   }, [trendlines]);
 
   return (
-    <Card className={`border-border/80 shadow-xs ${className ?? ""}`}>
+    <Card className={`border-border/80  ${className ?? ""}`}>
       <CardHeader className="pb-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -234,9 +234,9 @@ export function TrendlinesTable({
                 variant={showTrendlinesOnChart ? "default" : "outline"}
                 size="sm"
                 onClick={onToggleTrendlines}
-                className={`h-7 px-2.5 text-xs font-mono transition-all ${
+                className={`h-7 px-2.5 text-xs font-mono transition-colors ${
                   showTrendlinesOnChart
-                    ? "bg-blue-600 text-white hover:bg-blue-700 shadow-xs"
+                    ? "bg-blue-600 text-white hover:bg-blue-700 "
                     : "text-muted-foreground opacity-60 hover:opacity-100"
                 }`}
                 title="Enable / Disable Trendlines on Candlestick Chart"
@@ -251,9 +251,9 @@ export function TrendlinesTable({
                 variant={showClustersOnChart ? "default" : "outline"}
                 size="sm"
                 onClick={onToggleClusters}
-                className={`h-7 px-2.5 text-xs font-mono transition-all ${
+                className={`h-7 px-2.5 text-xs font-mono transition-colors ${
                   showClustersOnChart
-                    ? "bg-amber-600 text-white hover:bg-amber-700 shadow-xs"
+                    ? "bg-amber-600 text-white hover:bg-amber-700 "
                     : "text-muted-foreground opacity-60 hover:opacity-100"
                 }`}
                 title="Enable / Disable Multi-Swing Cross Levels on Candlestick Chart"
@@ -266,7 +266,7 @@ export function TrendlinesTable({
         </div>
 
         {/* Nearest Structural Levels Strip */}
-        <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-lg border bg-muted/20 p-2 text-xs">
+        <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-lg bg-secondary/60 p-2 text-xs">
           <div className="flex items-center justify-between px-1">
             <span className="text-muted-foreground flex items-center gap-1.5">
               <span className="size-1.5 rounded-full bg-blue-500" />
@@ -286,11 +286,11 @@ export function TrendlinesTable({
 
           <div className="flex items-center justify-between px-1 border-t sm:border-t-0 sm:border-l pt-1 sm:pt-0 sm:pl-3">
             <span className="text-muted-foreground flex items-center gap-1.5">
-              <span className="size-1.5 rounded-full bg-rose-500" />
+              <span className="size-1.5 rounded-full bg-loss" />
               Nearest Trendline Resistance:
             </span>
             {nearestResistance ? (
-              <span className="font-mono font-semibold text-rose-600">
+              <span className="font-mono font-semibold text-loss">
                 ${usd(nearestResistance.current_price, 1)}{" "}
                 <span className="text-[11px] font-normal text-muted-foreground">
                   ({signed(nearestResistance.distance_pct, 2)}%)
@@ -352,7 +352,7 @@ export function TrendlinesTable({
                                 type="button"
                                 onClick={() => onToggleItem(tl.id)}
                                 title={isHidden ? "Click to show on chart" : "Click to hide from chart"}
-                                className={`inline-flex items-center justify-center size-6 rounded transition-all ${
+                                className={`inline-flex items-center justify-center size-6 rounded transition-colors ${
                                   isHidden
                                     ? "text-muted-foreground/40 hover:text-foreground hover:bg-muted"
                                     : "text-blue-600 hover:bg-blue-50"
@@ -372,7 +372,7 @@ export function TrendlinesTable({
                                 className={`text-[10px] font-medium ${
                                   isSupport
                                     ? "bg-blue-600 hover:bg-blue-700 text-white"
-                                    : "border-rose-400 text-rose-700 bg-rose-50"
+                                    : "border-loss/60 text-loss bg-loss-soft"
                                 }`}
                               >
                                 {isSupport ? <ArrowUpRight className="size-3 mr-1" /> : <ArrowDownRight className="size-3 mr-1" />}
@@ -404,8 +404,8 @@ export function TrendlinesTable({
                                 isClose
                                   ? "bg-amber-100 text-amber-800 border border-amber-300"
                                   : tl.distance_pct >= 0
-                                  ? "text-rose-600"
-                                  : "text-emerald-600"
+                                  ? "text-loss"
+                                  : "text-profit"
                               }`}
                             >
                               {signed(tl.distance_pct, 2)}%
@@ -424,7 +424,7 @@ export function TrendlinesTable({
 
                           <TableCell className="text-right">
                             <Badge
-                              variant={tl.status === "approaching" ? "solid" : "outline"}
+                              variant={tl.status === "approaching" ? "warn" : "outline"}
                               className={`text-[9px] uppercase px-1.5 py-0 ${
                                 isHidden
                                   ? "border-slate-300 text-slate-400 bg-slate-50"
@@ -432,7 +432,7 @@ export function TrendlinesTable({
                                   ? "bg-amber-500 text-white"
                                   : tl.status === "broken"
                                   ? "border-slate-300 text-slate-500"
-                                  : "border-emerald-300 text-emerald-700 bg-emerald-50"
+                                  : "border-profit/25 text-profit bg-profit-soft"
                               }`}
                             >
                               {isHidden ? "Hidden" : tl.status}
@@ -445,7 +445,7 @@ export function TrendlinesTable({
                 </Table>
               </div>
             ) : (
-              <div className="rounded-lg border border-dashed py-8 text-center text-xs text-muted-foreground">
+              <div className="rounded-xl bg-secondary/50 py-8 text-center text-xs text-muted-foreground">
                 No active trendlines detected in current range. They will automatically formulate when pivot swings align.
               </div>
             )}
@@ -490,7 +490,7 @@ export function TrendlinesTable({
                                 type="button"
                                 onClick={() => onToggleItem(c.id)}
                                 title={isHidden ? "Click to show on chart" : "Click to hide from chart"}
-                                className={`inline-flex items-center justify-center size-6 rounded transition-all ${
+                                className={`inline-flex items-center justify-center size-6 rounded transition-colors ${
                                   isHidden
                                     ? "text-muted-foreground/40 hover:text-foreground hover:bg-muted"
                                     : "text-amber-600 hover:bg-amber-50"
@@ -508,8 +508,8 @@ export function TrendlinesTable({
                               variant="outline"
                               className={`text-[10px] font-medium ${
                                 isSupport
-                                  ? "border-emerald-300 text-emerald-800 bg-emerald-50"
-                                  : "border-rose-300 text-rose-800 bg-rose-50"
+                                  ? "border-profit/25 text-profit bg-profit-soft"
+                                  : "border-loss/25 text-loss bg-loss-soft"
                               }`}
                             >
                               {formattedKind}
@@ -533,8 +533,8 @@ export function TrendlinesTable({
                                 isClose
                                   ? "bg-amber-100 text-amber-800 border border-amber-300"
                                   : c.distance_pct >= 0
-                                  ? "text-rose-600"
-                                  : "text-emerald-600"
+                                  ? "text-loss"
+                                  : "text-profit"
                               }`}
                             >
                               {signed(c.distance_pct, 2)}%
@@ -549,13 +549,13 @@ export function TrendlinesTable({
 
                           <TableCell className="text-right">
                             <Badge
-                              variant={c.status === "approaching" ? "solid" : "outline"}
+                              variant={c.status === "approaching" ? "warn" : "outline"}
                               className={`text-[9px] uppercase px-1.5 py-0 ${
                                 isHidden
                                   ? "border-slate-300 text-slate-400 bg-slate-50"
                                   : c.status === "approaching"
                                   ? "bg-amber-500 text-white"
-                                  : "border-emerald-300 text-emerald-700 bg-emerald-50"
+                                  : "border-profit/25 text-profit bg-profit-soft"
                               }`}
                             >
                               {isHidden ? "Hidden" : c.status}
@@ -568,7 +568,7 @@ export function TrendlinesTable({
                 </Table>
               </div>
             ) : (
-              <div className="rounded-lg border border-dashed py-8 text-center text-xs text-muted-foreground">
+              <div className="rounded-xl bg-secondary/50 py-8 text-center text-xs text-muted-foreground">
                 No multi-swing horizontal cross levels clustered in this timeframe.
               </div>
             )}

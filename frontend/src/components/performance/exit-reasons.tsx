@@ -17,7 +17,7 @@ export function ExitReasons({ rows }: { rows: Structure[] }) {
   return (
     <ResponsiveContainer width="100%" height={288}>
       <PieChart>
-        <Pie data={data} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="82%" paddingAngle={1} stroke="none" isAnimationActive={false}>
+        <Pie data={data} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="82%" paddingAngle={1} stroke="none" animationDuration={450} animationEasing="ease-out">
           {data.map((d, i) => (
             <Cell key={d.name} fill={PALETTE[i % PALETTE.length]} />
           ))}

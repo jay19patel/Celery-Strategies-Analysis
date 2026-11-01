@@ -131,7 +131,7 @@ function TradeCard({ s, expanded, onToggle }: { s: Structure; expanded: boolean;
         </div>
       </button>
       {expanded && (
-        <div className="animate-in fade-in slide-in-from-top-1 border-t border-slate-100 px-4 py-3 duration-200">
+        <div className="animate-in fade-in duration-150 border-t border-slate-100 px-4 py-3">
           <Detail s={s} />
         </div>
       )}

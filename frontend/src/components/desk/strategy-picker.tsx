@@ -33,8 +33,8 @@ export function StrategyPicker({ strategies, params, onChange }: { strategies: S
             key={s.key}
             onClick={() => onChange({ strategy: s.key })}
             className={cn(
-              "shrink-0 rounded-lg border bg-card px-2.5 sm:px-3 py-1.5 text-[12px] sm:text-[12.5px] font-medium transition-all active:scale-95 hover:border-slate-300 shadow-2xs",
-              params.strategy === s.key && "border-primary bg-accent text-accent-foreground ring-1 ring-primary/20",
+              "shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-[color,background-color,transform] duration-150 active:scale-95",
+              params.strategy === s.key ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground hover:bg-secondary/70",
             )}
           >
             {s.label}
@@ -43,8 +43,8 @@ export function StrategyPicker({ strategies, params, onChange }: { strategies: S
         <button
           onClick={() => onChange({ strategy: "custom" })}
           className={cn(
-            "shrink-0 rounded-lg border border-dashed bg-card px-2.5 sm:px-3 py-1.5 text-[12px] sm:text-[12.5px] font-medium transition-all active:scale-95 hover:border-slate-400 shadow-2xs",
-            params.strategy === "custom" && "border-primary bg-accent text-accent-foreground",
+            "shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-[color,background-color,transform] duration-150 active:scale-95",
+            params.strategy === "custom" ? "bg-primary text-primary-foreground" : "bg-secondary text-primary hover:bg-secondary/70",
           )}
         >
           Custom legs

@@ -29,16 +29,16 @@ export function StrategySection({ rows, closed, selected, onSelect }: { rows: Ro
         <div className="px-4 pt-3" style={{ height: Math.max(120, 34 * chart.length + 30) }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chart} layout="vertical" margin={{ top: 0, right: 12, left: 0, bottom: 0 }}>
-              <XAxis type="number" tick={{ fontSize: 10, fill: "#64748b" }} stroke="#e2e8f0" tickFormatter={(v: number) => signed(v, 2)} />
-              <YAxis type="category" dataKey="label" tick={{ fontSize: 11, fill: "#334155" }} width={120} stroke="#e2e8f0" />
+              <XAxis type="number" tick={{ fontSize: 10, fill: "var(--chart-text)" }} stroke="var(--border)" tickFormatter={(v: number) => signed(v, 2)} />
+              <YAxis type="category" dataKey="label" tick={{ fontSize: 11, fill: "var(--foreground)" }} width={120} stroke="var(--border)" />
               <Tooltip
-                cursor={{ fill: "#f8fafc" }}
+                cursor={{ fill: "var(--muted)" }}
                 contentStyle={{ fontSize: 12, borderRadius: 8 }}
                 formatter={(v, _n, item) => [`${signed(Number(v), 4)} net`, (item.payload as { hint: string }).hint]}
               />
-              <Bar dataKey="pnl" radius={3} maxBarSize={24} isAnimationActive={false}>
+              <Bar dataKey="pnl" radius={3} maxBarSize={24} animationDuration={450} animationEasing="ease-out">
                 {chart.map((c) => (
-                  <Cell key={c.label} fill={c.pnl >= 0 ? "#0e8a3e" : "#cf1f2e"} />
+                  <Cell key={c.label} fill={c.pnl >= 0 ? "var(--profit)" : "var(--loss)"} />
                 ))}
               </Bar>
             </BarChart>

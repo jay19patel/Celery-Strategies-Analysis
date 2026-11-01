@@ -93,10 +93,10 @@ function brief(closed: Structure[], orders: OrderRecord[], decisions: Decision[]
 
 function Kpi({ label, value, hint, className }: { label: string; value: React.ReactNode; hint: React.ReactNode; className?: string }) {
   return (
-    <div className="rounded-xl border bg-card p-4">
-      <div className="mb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">{label}</div>
-      <div className={cn("num text-2xl font-bold text-slate-800", className)}>{value}</div>
-      <div className="mt-1 text-[11px] text-slate-400">{hint}</div>
+    <div className="rounded-2xl bg-card p-4">
+      <div className="mb-1 text-[12px] font-medium text-muted-foreground">{label}</div>
+      <div className={cn("num text-2xl font-semibold tracking-[-0.02em] text-foreground", className)}>{value}</div>
+      <div className="mt-1 text-[11.5px] text-muted-foreground">{hint}</div>
     </div>
   );
 }
@@ -137,8 +137,8 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
 
   return (
     <Dialog open={!!date} onOpenChange={(o) => { if (!o) { onClose(); setTab("overview"); } }}>
-      <DialogContent className="max-w-5xl gap-0 p-0 sm:max-w-5xl sm:p-0">
-        <DialogHeader className="flex-row items-center gap-3 border-b bg-slate-50 px-4 py-4 pr-10 sm:px-6">
+      <DialogContent className="max-w-5xl gap-0 bg-background p-0 sm:max-w-5xl sm:p-0">
+        <DialogHeader className="flex-row items-center gap-3 border-b border-separator bg-card px-4 py-4 pr-12 sm:px-6">
           <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-blue-100 bg-accent text-primary">
             <BarChart2 className="size-5" />
           </div>
@@ -192,7 +192,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
                   />
                 </div>
 
-                <div className="overflow-hidden rounded-xl border border-l-4 border-indigo-100 border-l-indigo-600 bg-card">
+                <div className="overflow-hidden rounded-2xl bg-card">
                   <div className="flex items-center justify-between border-b border-indigo-100 bg-indigo-50/60 px-5 py-3">
                     <div className="flex items-center gap-2 text-sm font-bold text-indigo-900">
                       <Sparkles className="size-4 text-indigo-600" /> The day in brief
@@ -210,7 +210,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
                   </div>
                 </div>
 
-                <div className="rounded-xl border bg-card p-5">
+                <div className="rounded-2xl bg-card p-5">
                   <div className="mb-4 flex items-center justify-between">
                     <h3 className="flex items-center gap-2 text-sm font-bold text-slate-800">Strategy contribution &amp; performance</h3>
                     <span className="text-xs text-slate-400">P&amp;L per strategy on this day</span>
@@ -240,7 +240,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
               </TabsContent>
 
               <TabsContent value="timeline" className="space-y-6">
-                <div className="overflow-hidden rounded-xl border bg-card">
+                <div className="overflow-hidden rounded-2xl bg-card">
                   <div className="flex items-center justify-between border-b bg-slate-50 px-5 py-3">
                     <h3 className="flex items-center gap-2 text-sm font-bold text-slate-800"><Clock className="size-4 text-primary" /> What happened, in order</h3>
                     {data.events.length >= 300 && <span className="text-xs text-slate-400">the latest 300 events</span>}
@@ -261,7 +261,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
                     )}
                   </div>
                 </div>
-                <div className="overflow-hidden rounded-xl border bg-card">
+                <div className="overflow-hidden rounded-2xl bg-card">
                   <div className="border-b bg-slate-50 px-5 py-3">
                     <h3 className="flex items-center gap-2 text-sm font-bold text-slate-800"><Ban className="size-4 text-amber-500" /> Why the auto-trader stood aside</h3>
                   </div>
@@ -295,7 +295,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
               </TabsContent>
 
               <TabsContent value="orders">
-                <div className="overflow-hidden rounded-xl border bg-card">
+                <div className="overflow-hidden rounded-2xl bg-card">
                   <div className="flex items-center justify-between border-b bg-slate-50 px-5 py-3">
                     <h3 className="flex items-center gap-2 text-sm font-bold text-slate-800"><Send className="size-4 text-slate-500" /> Order routing &amp; execution</h3>
                     <span className="text-xs text-slate-400">{orders.length} orders recorded</span>
@@ -338,7 +338,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
               </TabsContent>
 
               <TabsContent value="system">
-                <div className="overflow-hidden rounded-xl border bg-card">
+                <div className="overflow-hidden rounded-2xl bg-card">
                   <div className="flex items-center justify-between border-b bg-slate-50 px-5 py-3">
                     <h3 className="flex items-center gap-2 text-sm font-bold text-slate-800"><AlertTriangle className="size-4 text-amber-500" /> Operational errors &amp; warning events</h3>
                     <Badge variant={problems.length ? "warn" : "profit"}>{problems.length} events</Badge>
@@ -362,7 +362,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
               </TabsContent>
 
               <TabsContent value="trades">
-                <div className="overflow-hidden rounded-xl border bg-card">
+                <div className="overflow-hidden rounded-2xl bg-card">
                   {closed.length ? (
                     <Table>
                       <TableHeader>

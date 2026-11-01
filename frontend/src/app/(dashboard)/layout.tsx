@@ -7,6 +7,8 @@ import { Loader2, RefreshCw, ShieldAlert, WifiOff } from "lucide-react";
 
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { Header } from "@/components/layout/header";
+import { PositionsBar } from "@/components/layout/positions-bar";
+import { PriceTicker } from "@/components/layout/price-ticker";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Button } from "@/components/ui/button";
 import { LiveProvider, useApi } from "@/lib/live";
@@ -32,8 +34,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     return (
       <div className="grid min-h-screen place-items-center p-6 text-center text-sm text-muted-foreground">
         <div>
-          <div className="font-medium text-slate-800">The backend is not reachable.</div>
-          <div className="mt-1">Start it with <code className="num rounded bg-slate-100 px-1.5 py-0.5">./start.sh</code>, then retry.</div>
+          <div className="text-[17px] font-semibold text-foreground">The backend is not reachable.</div>
+          <div className="mt-1">Start it with <code className="rounded-md bg-secondary px-1.5 py-0.5 font-mono">./start.sh</code>, then retry.</div>
           <Button variant="outline" size="sm" className="mt-4" onClick={() => mutate()} disabled={isValidating}>
             {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />} Retry
           </Button>
@@ -44,18 +46,19 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   if (!session?.authenticated) {
     return (
       <div className="grid min-h-screen place-items-center">
-        <Loader2 className="size-5 animate-spin text-slate-400" />
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   return (
     <LiveProvider>
+      <PriceTicker />
       <Sidebar />
-      <div className="min-w-0 lg:pl-60">
+      <div className="min-w-0 pt-(--ticker-h) lg:pl-64">
         <Header />
         {error && (
-          <div className="flex items-center gap-2 border-b border-amber-200 bg-warn-soft px-4 py-2 text-[12.5px] text-amber-900 lg:px-6">
+          <div className="flex items-center gap-2 bg-warn-soft px-4 py-2 text-[13px] text-amber-900 lg:px-6">
             <WifiOff className="size-3.5 shrink-0" />
             <span className="min-w-0">Lost contact with the backend — showing the last data received. Retrying automatically.</span>
             <Button variant="ghost" size="xs" className="ml-auto" onClick={() => mutate()} disabled={isValidating}>
@@ -64,7 +67,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </div>
         )}
         {session.using_default_pin && (
-          <div className="flex items-start gap-2 border-b border-amber-200 bg-warn-soft px-4 py-2 text-[12.5px] leading-snug text-amber-900 lg:px-6">
+          <div className="flex items-start gap-2 bg-warn-soft px-4 py-2 text-[13px] leading-snug text-amber-900 lg:px-6">
             <ShieldAlert className="mt-px size-3.5 shrink-0" />
             <span className="min-w-0">
               The dashboard PIN is still the published default.{" "}
@@ -74,9 +77,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </div>
         )}
         {/* The bottom padding keeps the phone tab bar (and the home indicator below it) off the last card. */}
-        <main key={pathname} className="page-in mx-auto max-w-[1600px] space-y-4 px-4 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:space-y-5 sm:px-5 sm:pt-5 lg:p-6">
+        <main key={pathname} className="mx-auto max-w-[1600px] space-y-5 px-4 pt-3 pb-[calc(9.5rem+env(safe-area-inset-bottom))] sm:px-6 sm:pt-5 lg:space-y-6 lg:px-8 lg:pt-6 lg:pb-16">
           {children}
         </main>
+        <PositionsBar />
         <BottomNav />
       </div>
     </LiveProvider>

@@ -39,7 +39,7 @@ export function StrategyCatalog({
             <div className="flex items-center justify-between gap-2">
               <Badge
                 variant={
-                  spec.view === "bullish" ? "profit" : spec.view === "bearish" ? "loss" : spec.view === "volatile" ? "solid" : "default"
+                  spec.view === "bullish" ? "profit" : spec.view === "bearish" ? "loss" : spec.view === "volatile" ? "warn" : "default"
                 }
                 className="text-[10px] capitalize"
               >

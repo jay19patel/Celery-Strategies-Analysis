@@ -2,21 +2,16 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import {
-  Bot,
-  Crosshair,
-  ListFilter,
-  Loader2,
-  Sparkles,
-} from "lucide-react";
+import { Bot, Crosshair, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 
 import { PageHeader } from "@/components/shared/page";
-import { LoadError } from "@/components/shared/states";
+import { Empty, LoadError } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
@@ -80,27 +75,27 @@ export default function StrategiesPage() {
         title="Strategies"
         description="The directional models that trade the perpetuals: which are on, which symbols each runs, and every signal they have fired."
         actions={
-          <div className="flex items-center gap-3">
-            <Link href="/">
-              <Button variant="outline" size="sm" className="gap-2 text-xs">
-                <Sparkles className="size-3.5 text-primary" /> Options Desk
-              </Button>
-            </Link>
-            <Link href="/auto">
-              <Button size="sm" className="gap-2 text-xs">
-                <Bot className="size-3.5" /> Auto Options
-              </Button>
-            </Link>
-          </div>
+          <>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/">
+                <Sparkles className="text-primary" /> Options Desk
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/auto">
+                <Bot /> Auto Options
+              </Link>
+            </Button>
+          </>
         }
       />
 
       {/* Runner Status Banner */}
       {job && (
-        <Card className="border-border/60 bg-muted/20">
-          <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4 text-xs">
+        <Card>
+          <CardContent className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs">
             <div className="flex items-center gap-3">
-              <span className="flex size-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="size-2 shrink-0 rounded-full bg-profit" />
               <div>
                 <span className="font-semibold text-foreground">{job.label || "Strategy Runner"}</span>
                 <span className="mx-2 text-muted-foreground">•</span>
@@ -110,13 +105,13 @@ export default function StrategiesPage() {
 
             <div className="flex flex-wrap items-center gap-4 text-muted-foreground">
               <div>
-                Runs: <span className="font-mono font-medium text-foreground">{job.runs}</span>
+                Runs <span className="num font-medium text-foreground">{job.runs}</span>
               </div>
               <div>
-                Last Run: <span className="font-mono font-medium text-foreground">{job.last_run ? ago(job.last_run) : "—"}</span>
+                Last run <span className="num font-medium text-foreground">{job.last_run ? ago(job.last_run) : "—"}</span>
               </div>
               {job.last_result && (
-                <div className="rounded bg-background px-2 py-0.5 font-mono text-[11px] border">
+                <div className="num rounded-md border bg-muted px-2 py-0.5 text-[11px]">
                   {job.last_result}
                 </div>
               )}
@@ -129,23 +124,21 @@ export default function StrategiesPage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold tracking-tight text-foreground flex items-center gap-2">
-            <Crosshair className="size-4 text-primary" /> Directional Algorithmic Strategies
+            <Crosshair className="size-4 text-primary" /> Directional strategies
           </h2>
           <span className="text-xs text-muted-foreground">Evaluated on closed candles</span>
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
           {strategies.map((strat) => (
-            <Card key={strat.name} className={`flex flex-col justify-between ${strat.enabled ? "" : "opacity-60"}`}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <Badge variant={strat.enabled ? "solid" : "default"}>
-                    {strat.enabled ? "Active" : "Disabled"}
-                  </Badge>
+            <Card key={strat.name} className="flex flex-col">
+              <CardHeader className="flex-col items-stretch gap-1.5 border-b-0 pb-3">
+                <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs text-muted-foreground font-semibold">
-                      {strat.interval}
-                    </span>
+                    <Badge variant={strat.enabled ? "profit" : "default"}>{strat.enabled ? "On" : "Off"}</Badge>
+                    <span className="num text-xs font-medium text-muted-foreground">{strat.interval}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
                     {saving === strat.name ? (
                       <Loader2 className="size-4 animate-spin text-muted-foreground" />
                     ) : (
@@ -157,23 +150,21 @@ export default function StrategiesPage() {
                     )}
                   </div>
                 </div>
-                <CardTitle className="text-base font-bold mt-1">{strat.label}</CardTitle>
-                <p className="text-xs text-muted-foreground leading-relaxed mt-1">{strat.summary}</p>
+                <CardTitle className={`mt-1 text-[15px] ${strat.enabled ? "" : "text-muted-foreground"}`}>{strat.label}</CardTitle>
+                <p className="text-xs leading-relaxed text-muted-foreground">{strat.summary}</p>
               </CardHeader>
 
-              <CardContent className="space-y-3 pt-0 text-xs">
+              <CardContent className="mt-auto space-y-3 pt-0 text-xs">
                 {/* The second switch: which symbols this strategy may trade. */}
-                <div className="rounded-lg border bg-muted/30 p-2.5 space-y-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Symbols
-                  </div>
+                <div className="space-y-2 rounded-lg bg-secondary/60 p-2.5">
+                  <div className="text-[11px] font-medium text-muted-foreground">Symbols</div>
                   <div className="flex flex-wrap gap-2">
                     {underlyings.map((symbol) => {
                       const on = strat.symbols.includes(symbol);
                       const key = `${strat.name}:${symbol}`;
                       return (
                         <div key={symbol} className="flex items-center gap-1.5 rounded-md border bg-background px-2 py-1">
-                          <span className="font-mono text-[11px] font-semibold">{symbol}</span>
+                          <span className="num text-[11px] font-semibold">{symbol}</span>
                           {saving === key ? (
                             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                           ) : (
@@ -200,27 +191,21 @@ export default function StrategiesPage() {
                   )}
                 </div>
 
-                <div className="rounded-lg border bg-muted/30 p-2.5 space-y-1.5 text-[11px]">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Stop Rule:</span>
-                    <span className="font-medium text-right text-foreground">{strat.stop_rule}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Target Rule:</span>
-                    <span className="font-medium text-right text-foreground">{strat.target_rule}</span>
-                  </div>
-                </div>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 rounded-lg bg-secondary/60 p-2.5 text-[11px]">
+                  <dt className="text-muted-foreground">Stop</dt>
+                  <dd className="text-right font-medium text-foreground">{strat.stop_rule}</dd>
+                  <dt className="text-muted-foreground">Target</dt>
+                  <dd className="text-right font-medium text-foreground">{strat.target_rule}</dd>
+                </dl>
 
                 {/* Latest Evaluations */}
-                <div className="space-y-2 pt-1 border-t">
-                  <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                    Latest Bar Scan
-                  </div>
+                <div className="space-y-1.5 border-t pt-3">
+                  <div className="text-[11px] font-medium text-muted-foreground">Latest bar</div>
                   {strat.latest?.map((ev, i) => (
-                    <div key={i} className="flex items-start justify-between gap-2 text-[11px] rounded bg-muted/20 p-1.5 border">
-                      <span className="font-mono font-bold">{ev.symbol}</span>
-                      <span className="text-right text-muted-foreground truncate max-w-[200px]" title={ev.reason}>
-                        {ev.reason || "Scanning..."}
+                    <div key={i} className="flex items-start gap-3 rounded-md border px-2 py-1.5 text-[11px]">
+                      <span className="num shrink-0 font-semibold">{ev.symbol}</span>
+                      <span className="ml-auto line-clamp-2 text-right text-muted-foreground" title={ev.reason}>
+                        {ev.reason || "Waiting for the next closed bar"}
                       </span>
                     </div>
                   ))}
@@ -233,50 +218,43 @@ export default function StrategiesPage() {
 
       {/* Signals stream. The options structure catalog lives on the Options Desk, with the chain
           and the builder that uses it. */}
-      <div className="space-y-4">
-        <h2 className="flex items-center gap-2 text-sm font-semibold tracking-tight text-foreground">
-          <ListFilter className="size-4 text-primary" /> Signals Stream ({signals?.length ?? 0})
-        </h2>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-3">
-              <div>
-                <CardTitle className="text-sm font-semibold">Signals Log</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Signals fired by directional strategies with entry, stop-loss, and target levels.
-                </p>
+      <Card>
+            <CardHeader>
+              <div className="space-y-1">
+                <CardTitle>
+                  Signals <span className="num font-normal text-muted-foreground">{signals?.length ?? 0}</span>
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">Every signal a directional strategy fired, with its entry, stop and target.</p>
               </div>
-
-              <div className="flex items-center gap-2">
-                <select
-                  value={selectedStrategy}
-                  onChange={(e) => setSelectedStrategy(e.target.value)}
-                  className="h-8 rounded-md border border-input bg-background px-2.5 py-1 text-xs"
-                >
-                  <option value="">All Strategies</option>
+              <Select value={selectedStrategy || "all"} onValueChange={(v) => setSelectedStrategy(v === "all" ? "" : v)}>
+                <SelectTrigger size="sm" className="text-xs" aria-label="Filter by strategy">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="all">All strategies</SelectItem>
                   {strategies.map((s) => (
-                    <option key={s.name} value={s.name}>
+                    <SelectItem key={s.name} value={s.name}>
                       {s.label}
-                    </option>
+                    </SelectItem>
                   ))}
-                </select>
-              </div>
+                </SelectContent>
+              </Select>
             </CardHeader>
-            <CardContent>
+            <CardContent className={signals && signals.length > 0 ? "p-0" : undefined}>
               {signals && signals.length > 0 ? (
-                <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-28 text-xs">Time</TableHead>
-                        <TableHead className="text-xs">Symbol</TableHead>
-                        <TableHead className="text-xs">Strategy</TableHead>
-                        <TableHead className="text-xs">Side</TableHead>
-                        <TableHead className="text-xs">Action</TableHead>
-                        <TableHead className="text-xs">Entry</TableHead>
-                        <TableHead className="text-xs">Stop</TableHead>
-                        <TableHead className="text-xs">Target</TableHead>
-                        <TableHead className="text-xs">R:R</TableHead>
-                        <TableHead className="text-xs">Reason</TableHead>
+                        <TableHead className="w-28">Time</TableHead>
+                        <TableHead>Symbol</TableHead>
+                        <TableHead>Strategy</TableHead>
+                        <TableHead>Side</TableHead>
+                        <TableHead>Action</TableHead>
+                        <TableHead>Entry</TableHead>
+                        <TableHead>Stop</TableHead>
+                        <TableHead>Target</TableHead>
+                        <TableHead>R:R</TableHead>
+                        <TableHead>Reason</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -284,11 +262,11 @@ export default function StrategiesPage() {
                         const isBuy = sig.side.toLowerCase() === "buy";
                         const isSell = sig.side.toLowerCase() === "sell";
                         return (
-                          <TableRow key={sig.id} className="text-xs">
-                            <TableCell className="font-mono text-muted-foreground">
+                          <TableRow key={sig.id}>
+                            <TableCell className="num text-muted-foreground">
                               {ago(sig.ts)}
                             </TableCell>
-                            <TableCell className="font-mono font-semibold">{sig.symbol}</TableCell>
+                            <TableCell className="num font-semibold">{sig.symbol}</TableCell>
                             <TableCell className="font-medium">{sig.strategy}</TableCell>
                             <TableCell>
                               {sig.side ? (
@@ -303,29 +281,28 @@ export default function StrategiesPage() {
                               <Badge
                                 variant={
                                   sig.action === "open"
-                                    ? "solid"
+                                    ? "primary"
                                     : sig.action === "error"
                                     ? "loss"
                                     : "outline"
                                 }
-                                className="text-[10px]"
                               >
                                 {sig.action}
                               </Badge>
                             </TableCell>
-                            <TableCell className="font-mono">
+                            <TableCell className="num">
                               {sig.entry ? `$${num(sig.entry, 2)}` : "—"}
                             </TableCell>
-                            <TableCell className="font-mono text-rose-600">
+                            <TableCell className="num text-loss">
                               {sig.stop ? `$${num(sig.stop, 2)}` : "—"}
                             </TableCell>
-                            <TableCell className="font-mono text-emerald-600">
+                            <TableCell className="num text-profit">
                               {sig.target ? `$${num(sig.target, 2)}` : "—"}
                             </TableCell>
-                            <TableCell className="font-mono">
+                            <TableCell className="num">
                               {sig.rr ? `${sig.rr.toFixed(1)}:1` : "—"}
                             </TableCell>
-                            <TableCell className="text-muted-foreground max-w-xs truncate" title={sig.reason}>
+                            <TableCell className="max-w-xs truncate text-muted-foreground" title={sig.reason}>
                               {sig.reason}
                             </TableCell>
                           </TableRow>
@@ -333,56 +310,13 @@ export default function StrategiesPage() {
                       })}
                     </TableBody>
                   </Table>
-                </div>
               ) : (
-                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/80 bg-muted/10 px-6 py-10 text-center">
-                  <div className="relative mb-3 flex size-12 items-center justify-center rounded-full bg-primary/10">
-                    <Crosshair className="size-6 text-primary animate-pulse" />
-                    <span className="absolute -top-0.5 -right-0.5 flex size-3">
-                      <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex size-3 rounded-full bg-emerald-500" />
-                    </span>
-                  </div>
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Real-Time Algorithmic Scanner Active
-                  </h3>
-                  <p className="mt-1 max-w-md text-xs text-muted-foreground leading-relaxed">
-                    The engine is continuously evaluating closed candles every 20 seconds. Directional signals with automated entries, stops, and targets will log here automatically.
-                  </p>
-
-                  <div className="mt-4 grid w-full max-w-lg grid-cols-1 gap-2 sm:grid-cols-3 text-left">
-                    <div className="rounded-lg border bg-background/80 p-2.5 shadow-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-[10px] font-bold text-muted-foreground">5m</span>
-                        <Badge variant="outline" className="text-[9px] px-1 py-0">SCANNING</Badge>
-                      </div>
-                      <div className="mt-1 font-semibold text-xs text-foreground">EMA × VWAP</div>
-                      <div className="mt-0.5 text-[10px] text-muted-foreground">Waiting for 9 EMA crossover</div>
-                    </div>
-
-                    <div className="rounded-lg border bg-background/80 p-2.5 shadow-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-[10px] font-bold text-muted-foreground">15m</span>
-                        <Badge variant="outline" className="text-[9px] px-1 py-0">SCANNING</Badge>
-                      </div>
-                      <div className="mt-1 font-semibold text-xs text-foreground">Put/Call Shift</div>
-                      <div className="mt-0.5 text-[10px] text-muted-foreground">Waiting for 0.15+ OI shift</div>
-                    </div>
-
-                    <div className="rounded-lg border bg-background/80 p-2.5 shadow-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-[10px] font-bold text-muted-foreground">15m</span>
-                        <Badge variant="outline" className="text-[9px] px-1 py-0">SCANNING</Badge>
-                      </div>
-                      <div className="mt-1 font-semibold text-xs text-foreground">Supertrend</div>
-                      <div className="mt-0.5 text-[10px] text-muted-foreground">Waiting for 10,3 flip</div>
-                    </div>
-                  </div>
-                </div>
+                <Empty title="No signals yet">
+                  Each enabled strategy checks every closed candle; a signal it fires logs here with its entry, stop and target.
+                </Empty>
               )}
             </CardContent>
-          </Card>
-      </div>
+      </Card>
     </div>
   );
 }

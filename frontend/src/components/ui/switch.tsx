@@ -5,20 +5,21 @@ import { Switch as SwitchPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 
+// The iOS switch, in its green, at a size that suits a pointer as well as a thumb.
 function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimitive.Root>) {
   return (
     <SwitchPrimitive.Root
       data-slot="switch"
       className={cn(
-        "peer inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-transparent shadow-xs outline-none transition-all",
-        "data-[state=checked]:bg-profit data-[state=unchecked]:bg-slate-300 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50",
+        "peer inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full p-0.5 outline-none transition-colors duration-200",
+        "data-[state=checked]:bg-[#34c759] data-[state=unchecked]:bg-slate-200 dark:data-[state=checked]:bg-[#30d158] focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
         className,
       )}
       {...props}
     >
       <SwitchPrimitive.Thumb
         data-slot="switch-thumb"
-        className="pointer-events-none block size-4 rounded-full bg-white shadow ring-0 transition-transform data-[state=checked]:translate-x-[18px] data-[state=unchecked]:translate-x-0.5"
+        className="pointer-events-none block size-[18px] rounded-full bg-white shadow-[0_2px_6px_rgb(0_0_0/0.2),0_0_1px_rgb(0_0_0/0.15)] transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] data-[state=checked]:translate-x-4 data-[state=unchecked]:translate-x-0"
       />
     </SwitchPrimitive.Root>
   );

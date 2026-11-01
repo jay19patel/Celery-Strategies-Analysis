@@ -5,11 +5,13 @@ import { Toaster as Sonner, type ToasterProps } from "sonner";
 function Toaster(props: ToasterProps) {
   return (
     <Sonner
-      theme="light"
-      position="bottom-right"
+      theme="system"
+      position="top-center"
       richColors
       closeButton
-      toastOptions={{ classNames: { toast: "text-[13px]" } }}
+      offset={{ top: "calc(env(safe-area-inset-top) + 12px)" }}
+      mobileOffset={{ top: "calc(env(safe-area-inset-top) + 8px)" }}
+      toastOptions={{ classNames: { toast: "text-[13px] !rounded-2xl" } }}
       {...props}
     />
   );

@@ -23,7 +23,7 @@ function Row({ c, best }: { c: ZhCandidate; best: boolean }) {
           <div className="flex items-center gap-1.5">
             <ChevronDown className={cn("size-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
             {price(c.strike)}
-            <Badge variant={c.kind === "call" ? "primary" : "solid"}>{c.kind}</Badge>
+            <Badge variant={c.kind === "call" ? "primary" : "loss"}>{c.kind}</Badge>
             {best && <Badge variant="primary">best EV</Badge>}
           </div>
         </TableCell>

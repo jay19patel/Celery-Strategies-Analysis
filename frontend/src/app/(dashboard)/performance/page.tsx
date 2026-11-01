@@ -13,6 +13,7 @@ import { StrategySection } from "@/components/performance/strategy-section";
 import { SummaryTable } from "@/components/performance/summary-table";
 import { TradesTable } from "@/components/performance/trades-table";
 import { Confirm } from "@/components/shared/confirm";
+import { PageHeader, SectionLabel } from "@/components/shared/page";
 import { Stat } from "@/components/shared/stat";
 import { Empty, LoadError, Loading } from "@/components/shared/states";
 import { Button } from "@/components/ui/button";
@@ -26,11 +27,12 @@ import type { Accounts, Broker, SettingsResponse, Stats, Structure } from "@/lib
 export default function PerformancePage() {
   const [broker, setBroker] = useState<Broker>("paper");
   const [strategy, setStrategy] = useState("");
-  const accounts = useApi<Accounts>("/portfolio/accounts", { refreshInterval: 5_000 });
+  // The live account figures refresh as often as the Positions page; closed results only change on a close.
+  const accounts = useApi<Accounts>("/portfolio/accounts", { refreshInterval: 3_000 });
   const settings = useApi<SettingsResponse>("/settings");
   const stats = useApi<Stats>(`/portfolio/stats?broker=${broker}`, { refreshInterval: 15_000 });
   const closed = useApi<Structure[]>(`/trading/structures?status=closed&broker=${broker}&limit=1000`, { refreshInterval: 15_000 });
-  const open = useApi<Structure[]>(`/trading/structures?status=open&broker=${broker}`, { refreshInterval: 5_000 });
+  const open = useApi<Structure[]>(`/trading/structures?status=open&broker=${broker}`, { refreshInterval: 3_000 });
 
   const account = accounts.data?.accounts[broker];
   const real = account && !("error" in account) ? account : undefined;
@@ -52,14 +54,18 @@ export default function PerformancePage() {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-3">
-        <Tabs value={broker} onValueChange={(v) => { setBroker(v as Broker); setStrategy(""); }}>
-          <TabsList>
-            <TabsTrigger value="paper">Paper</TabsTrigger>
-            <TabsTrigger value="delta">Delta</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
+      <PageHeader
+        title="Performance"
+        description="What each broker's account holds, what its closed trades made after every fee, and where the money came from."
+        actions={
+          <Tabs value={broker} onValueChange={(v) => { setBroker(v as Broker); setStrategy(""); }}>
+            <TabsList>
+              <TabsTrigger value="paper">Paper</TabsTrigger>
+              <TabsTrigger value="delta">Delta</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        }
+      />
 
       <LoadError error={accounts.error} />
       {!accounts.data ? (
@@ -103,6 +109,7 @@ export default function PerformancePage() {
         )}
       </div>
 
+      <SectionLabel title="Closed trades" hint="booked results, after every fee; they change only when a trade closes" />
       <LoadError error={stats.error} />
       {!o ? (
         <Loading rows={2} />
@@ -115,10 +122,10 @@ export default function PerformancePage() {
             hint="before fees"
           />
           <Stat
-            label="Total Charges"
+            label="Charges"
             value={usd(o.fees, 4)}
-            valueClass="text-amber-600"
-            hint="broker & exchange"
+            valueClass={o.fees ? "text-warn" : undefined}
+            hint="broker & exchange, closed trades"
           />
           <Stat label="Net realised" value={signed(o.pnl, 4)} valueClass={pnlClass(o.pnl)} hint="after all fees" />
           <Stat label="Trades" value={num(o.trades, 0)} hint={`${o.wins} won · ${o.losses} lost`} />

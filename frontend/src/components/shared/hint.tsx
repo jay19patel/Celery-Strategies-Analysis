@@ -9,7 +9,9 @@ export function Hint({ children }: { children: ReactNode }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Info className="inline size-3.5 cursor-help text-slate-400" />
+        <button type="button" aria-label="More info" className="inline-flex cursor-help rounded-full align-middle text-slate-400 outline-none hover:text-slate-600 focus-visible:ring-[3px] focus-visible:ring-ring/50">
+          <Info className="size-3.5" />
+        </button>
       </TooltipTrigger>
       <TooltipContent>{children}</TooltipContent>
     </Tooltip>

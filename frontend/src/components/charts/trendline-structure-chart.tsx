@@ -13,6 +13,8 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
+
+import { CHART_FONT, chartTheme, chartThemeOptions, useChartTheme } from "@/lib/theme";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -107,29 +109,36 @@ export function TrendlineStructureChart({
     return out;
   }, [bars]);
 
+  // The appearance follows the system; a switch restyles the chart without rebuilding it.
+  const theme = useChartTheme();
+  useEffect(() => {
+    chartRef.current?.applyOptions(chartThemeOptions(theme));
+  }, [theme, built]);
+
   // Initialize chart
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
+    const t0 = chartTheme();
     const chart = createChart(chartContainerRef.current, {
       height,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#64748b",
+        textColor: t0.text,
         fontSize: 11,
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        fontFamily: CHART_FONT,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "#f1f5f9" },
-        horzLines: { color: "#f1f5f9" },
+        vertLines: { color: t0.grid },
+        horzLines: { color: t0.grid },
       },
       rightPriceScale: {
-        borderColor: "#e2e8f0",
+        borderColor: t0.border,
         scaleMargins: { top: 0.1, bottom: 0.1 },
       },
       timeScale: {
-        borderColor: "#e2e8f0",
+        borderColor: t0.border,
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: (t: Time) => {
@@ -145,8 +154,8 @@ export function TrendlineStructureChart({
         },
       },
       crosshair: {
-        vertLine: { color: "#94a3b8", width: 1, style: LineStyle.Dashed },
-        horzLine: { color: "#94a3b8", width: 1, style: LineStyle.Dashed },
+        vertLine: { color: t0.crosshair, width: 1, style: LineStyle.Dashed },
+        horzLine: { color: t0.crosshair, width: 1, style: LineStyle.Dashed },
       },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
       handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
@@ -313,7 +322,7 @@ export function TrendlineStructureChart({
   const displayPrice = hoverData?.price ?? (sortedBars.length ? sortedBars[sortedBars.length - 1].close : currentPrice);
 
   return (
-    <Card className={`border-border/80 shadow-xs ${className ?? ""}`}>
+    <Card className={`border-border/80  ${className ?? ""}`}>
       <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between pb-2">
         <div className="flex flex-wrap items-center gap-3">
           <div className="space-y-0.5">
@@ -328,13 +337,13 @@ export function TrendlineStructureChart({
 
           {/* Timeframe Switcher */}
           {onIntervalChange && (
-            <div className="flex items-center rounded-lg border bg-muted/40 p-1">
+            <div className="flex items-center rounded-lg bg-secondary/60 p-1">
               {(["15m", "1h", "1d"] as const).map((tf) => (
                 <button
                   key={tf}
                   type="button"
                   onClick={() => onIntervalChange(tf)}
-                  className={`rounded-md px-2.5 py-0.5 font-mono text-xs font-semibold transition-all ${
+                  className={`rounded-md px-2.5 py-0.5 font-mono text-xs font-semibold transition-colors ${
                     interval === tf
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
@@ -350,47 +359,38 @@ export function TrendlineStructureChart({
         {/* Clean Layer Toggles */}
         <div className="flex flex-wrap items-center gap-1.5">
           <Button
-            variant={showSupportRays ? "default" : "outline"}
+            variant="outline"
             size="sm"
+            aria-pressed={showSupportRays}
             onClick={() => setShowSupportRays((v) => !v)}
-            className={`h-7 px-2.5 text-xs font-mono transition-all ${
-              showSupportRays
-                ? "bg-blue-600 text-white hover:bg-blue-700 shadow-xs"
-                : "text-muted-foreground opacity-60 hover:opacity-100"
-            }`}
+            className={`h-7 px-2.5 text-xs ${showSupportRays ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"}`}
             title="Toggle Support Trendlines on Line Chart"
           >
-            <span className="size-2 rounded-full mr-1.5 bg-blue-300" />
+            <span className="size-2 rounded-full bg-blue-500" />
             Support ({supportCount})
           </Button>
 
           <Button
-            variant={showResistanceRays ? "default" : "outline"}
+            variant="outline"
             size="sm"
+            aria-pressed={showResistanceRays}
             onClick={() => setShowResistanceRays((v) => !v)}
-            className={`h-7 px-2.5 text-xs font-mono transition-all ${
-              showResistanceRays
-                ? "bg-rose-600 text-white hover:bg-rose-700 shadow-xs"
-                : "text-muted-foreground opacity-60 hover:opacity-100"
-            }`}
+            className={`h-7 px-2.5 text-xs ${showResistanceRays ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"}`}
             title="Toggle Resistance Trendlines on Line Chart"
           >
-            <span className="size-2 rounded-full mr-1.5 bg-rose-300" />
+            <span className="size-2 rounded-full bg-rose-500" />
             Resistance ({resistanceCount})
           </Button>
 
           <Button
-            variant={showCrossLevels ? "default" : "outline"}
+            variant="outline"
             size="sm"
+            aria-pressed={showCrossLevels}
             onClick={() => setShowCrossLevels((v) => !v)}
-            className={`h-7 px-2.5 text-xs font-mono transition-all ${
-              showCrossLevels
-                ? "bg-amber-600 text-white hover:bg-amber-700 shadow-xs"
-                : "text-muted-foreground opacity-60 hover:opacity-100"
-            }`}
+            className={`h-7 px-2.5 text-xs ${showCrossLevels ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"}`}
             title="Toggle Multi-Swing Cross Levels on Line Chart"
           >
-            <span className="size-2 rounded-full mr-1.5 bg-amber-300" />
+            <span className="size-2 rounded-full bg-amber-500" />
             Cross Levels ({clusters.length})
           </Button>
 
@@ -408,7 +408,7 @@ export function TrendlineStructureChart({
 
       <CardContent className="pt-0">
         {/* Floating Mini HUD */}
-        <div className="mb-2 flex flex-wrap items-center justify-between rounded-lg border bg-muted/20 px-3 py-1.5 text-xs font-mono">
+        <div className="mb-2 flex flex-wrap items-center justify-between rounded-lg bg-secondary/60 px-3 py-1.5 text-xs font-mono">
           <div className="flex items-center gap-3">
             <span className="font-bold text-foreground">
               {symbol} Close: <b className="text-primary">${displayPrice ? usd(displayPrice, 1) : "—"}</b>
@@ -427,7 +427,7 @@ export function TrendlineStructureChart({
               </span>
             )}
             {nearestResistance && (
-              <span className="text-rose-600">
+              <span className="text-loss">
                 Res: <b>${usd(nearestResistance.current_price, 1)}</b> ({signed(nearestResistance.distance_pct, 2)}%)
               </span>
             )}

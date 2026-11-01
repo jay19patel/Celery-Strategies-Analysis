@@ -233,13 +233,13 @@ export default function SystemPage() {
                     {data.jobs.map((j) => (
                       <TableRow key={j.id}>
                         <TableCell className="font-medium">{j.label}</TableCell>
-                        <TableCell className="text-muted-foreground">{j.schedule}</TableCell>
+                        <TableCell className="min-w-[120px] max-w-[240px] whitespace-normal text-muted-foreground">{j.schedule}</TableCell>
                         <TableCell className="num text-right">{num(j.runs, 0)}</TableCell>
                         <TableCell className={cn("num text-right", j.failures ? "text-loss" : "")}>{num(j.failures, 0)}</TableCell>
                         <TableCell className="text-muted-foreground">{ago(j.last_run)}</TableCell>
                         <TableCell className="num text-right">{j.last_ms === null ? "—" : `${num(j.last_ms, 0)} ms`}</TableCell>
-                        <TableCell className="max-w-[340px] truncate whitespace-normal">
-                          {j.last_error ? <span className="text-xs text-loss">{j.last_error}</span> : <span className="text-xs text-muted-foreground">{j.last_result || "—"}</span>}
+                        <TableCell className="min-w-[200px] max-w-[340px] whitespace-normal">
+                          {j.last_error ? <span className="line-clamp-2 text-xs text-loss" title={j.last_error}>{j.last_error}</span> : <span className="line-clamp-2 text-xs text-muted-foreground" title={j.last_result || undefined}>{j.last_result || "—"}</span>}
                         </TableCell>
                         <TableCell className="text-muted-foreground">{until(j.next_run)}</TableCell>
                         <TableCell className="text-right">

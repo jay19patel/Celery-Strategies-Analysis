@@ -43,8 +43,9 @@ const REFRESH: Record<string, string[]> = {
 function wsUrl(): string {
   const configured = process.env.NEXT_PUBLIC_WS_URL;
   if (configured) return configured;
+  // The dashboard's /api is proxied, but /ws is not: the socket goes to the backend's own port.
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/ws`;
+  return `${proto}//${window.location.hostname}:8000/ws`;
 }
 
 function announce(e: LiveEvent) {

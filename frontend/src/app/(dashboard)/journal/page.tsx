@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { DayAudit } from "@/components/journal/day-audit";
+import { PageHeader } from "@/components/shared/page";
 import { LoadError, Loading } from "@/components/shared/states";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -88,26 +89,24 @@ export default function JournalPage() {
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-lg font-bold text-slate-800">
-            <CalendarDays className="size-5 text-primary" /> Trade journal &amp; daily audit
-          </h1>
-          <p className="mt-0.5 text-xs text-slate-500">Click any day for its full audit: what opened and closed, every order, why the auto-trader stood aside, and what went wrong.</p>
-        </div>
-        <div className="flex w-full items-center gap-1 rounded-lg border bg-card px-2 py-1.5 shadow-xs sm:w-auto sm:gap-2 sm:px-3">
-          <Button variant="ghost" size="icon-sm" onClick={() => shift(-1)} aria-label="Previous month">
-            <ChevronLeft />
-          </Button>
-          <span className="flex-1 text-center text-sm font-semibold text-slate-700 sm:w-36 sm:flex-none">{label}</span>
-          <Button variant="ghost" size="icon-sm" onClick={() => shift(1)} aria-label="Next month">
-            <ChevronRight />
-          </Button>
-          <Button variant="outline" size="xs" className="ml-2" onClick={() => setYm({ year: now.getFullYear(), month: now.getMonth() + 1 })}>
-            Today
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Journal"
+        description="Tap any day for its full audit: what opened and closed, every order, why the auto-trader stood aside, and what went wrong."
+        actions={
+          <div className="flex w-full items-center gap-1 rounded-full bg-card p-1 sm:w-auto">
+            <Button variant="ghost" size="icon-sm" className="rounded-full" onClick={() => shift(-1)} aria-label="Previous month">
+              <ChevronLeft />
+            </Button>
+            <span className="flex-1 text-center text-[15px] font-semibold sm:w-36 sm:flex-none">{label}</span>
+            <Button variant="ghost" size="icon-sm" className="rounded-full" onClick={() => shift(1)} aria-label="Next month">
+              <ChevronRight />
+            </Button>
+            <Button variant="secondary" size="xs" className="ml-1 rounded-full" onClick={() => setYm({ year: now.getFullYear(), month: now.getMonth() + 1 })}>
+              Today
+            </Button>
+          </div>
+        }
+      />
 
       <LoadError error={error} />
       {data && <MonthSummary m={data} accounts={accounts} label={monthName} />}

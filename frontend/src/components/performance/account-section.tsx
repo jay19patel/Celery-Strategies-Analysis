@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { dayKey } from "@/components/performance/derive";
 import { Confirm } from "@/components/shared/confirm";
 import { Pnl } from "@/components/shared/money";
+import { SectionLabel } from "@/components/shared/page";
 import { Stat } from "@/components/shared/stat";
 import { LoadError } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
@@ -60,8 +61,11 @@ export function AccountSection({
   const start = typeof x.starting_balance === "number" ? x.starting_balance : null;
   const unrealised = open.reduce((a, s) => a + (s.live?.pnl ?? 0), 0);
   const realised = stats?.overall.pnl ?? null;
-  const feesPaid = stats?.overall.fees ?? (typeof x.fees_paid === "number" ? x.fees_paid : 0);
-  const grossPnl = stats?.overall.gross_pnl ?? (realised !== null ? realised + feesPaid : null);
+  // Fees split the way the page is: charged on trades already closed, and on trades still open.
+  const closedFees = stats?.overall.fees ?? 0;
+  const openFees = open.reduce((a, s) => a + s.fees, 0);
+  const allFees = typeof x.fees_paid === "number" ? x.fees_paid : closedFees + openFees;
+  const grossPnl = stats?.overall.gross_pnl ?? (realised !== null ? realised + closedFees : null);
   const tz = String(settings?.day_timezone ?? "UTC");
   const today = stats?.daily[dayKey(tz)] ?? 0;
   const limitPct = Number(settings?.daily_loss_limit_pct ?? 0);
@@ -83,20 +87,19 @@ export function AccountSection({
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 2xl:grid-cols-7">
-        <Stat label="Equity" value={usd(account.equity)} hint={account.currency} />
+      {/* What the account holds right now: moves with the market while anything is open. */}
+      <SectionLabel
+        title="Live account"
+        live={open.length > 0}
+        hint={open.length ? `${open.length} open structure${open.length === 1 ? "" : "s"} · valued at what closing now would book` : "nothing open, so these figures are settled"}
+      />
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 2xl:grid-cols-6">
+        <Stat label="Equity" value={usd(account.equity)} hint={start ? `${signedPct(((account.equity - start) / start) * 100)} since start` : account.currency} />
         <Stat label="Wallet balance" value={usd(account.cash)} hint="cash, before open legs" />
         <Stat label="Available" value={usd(account.available)} hint="for new margin" />
-        <Stat label="Margin used" value={usd(account.margin_used)} />
-        <Stat label="Unrealised P&L" value={signed(unrealised, 4)} valueClass={pnlClass(unrealised)} hint={`${open.length} open structure${open.length === 1 ? "" : "s"}`} />
-        <Stat label="Total Charges / Fees" value={usd(feesPaid, 4)} valueClass="text-amber-600" hint="exchange & broker fees" />
-        <Stat
-          className="col-span-2 sm:col-span-1 lg:col-span-2 2xl:col-span-1"
-          label="Net Realised P&L"
-          value={realised === null ? "—" : signed(realised, 4)}
-          valueClass={pnlClass(realised)}
-          hint={grossPnl !== null ? `Gross: ${signed(grossPnl, 2)}` : (start ? `${signedPct(((account.equity - start) / start) * 100)} since start` : "closed structures")}
-        />
+        <Stat label="Margin used" value={usd(account.margin_used)} hint={account.equity > 0 ? `${((100 * account.margin_used) / account.equity).toFixed(1)}% of equity` : undefined} />
+        <Stat label="Unrealised P&L" value={open.length ? signed(unrealised, 4) : "—"} valueClass={pnlClass(unrealised)} hint={open.length ? "if every open leg closed now" : "no open structure"} />
+        <Stat label="Fees on open trades" value={usd(openFees, 4)} valueClass={openFees ? "text-warn" : undefined} hint={open.length ? "charged on entry so far" : "no open structure"} />
       </div>
 
       <div className="grid gap-4 sm:gap-5 xl:grid-cols-2">
@@ -110,7 +113,9 @@ export function AccountSection({
               ["Currency", account.currency],
               ...(start !== null ? [["Starting balance", usd(start)]] : []),
               ...(grossPnl !== null ? [["Gross trading P&L", signed(grossPnl, 4)]] : []),
-              ["Total fees & charges paid", usd(feesPaid, 4)],
+              ["Fees on closed trades", usd(closedFees, 4)],
+              ["Fees on open trades", usd(openFees, 4)],
+              ["Fees paid in total", usd(allFees, 4)],
               ...(realised !== null ? [["Net realised P&L", signed(realised, 4)]] : []),
               ...(typeof x.created_at === "number" ? [["Account opened", dateTime(x.created_at)]] : []),
               ["Auto-trading", status?.auto ? "on" : "off"],
@@ -162,7 +167,7 @@ export function AccountSection({
                   <span className={cn("num", used >= 80 ? "text-loss" : "text-muted-foreground")}>{limitPct ? `${num(used, 0)}% used` : ""}</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                  <div className={cn("h-full rounded-full transition-[width] duration-700 ease-out", used >= 80 ? "bg-loss" : used >= 50 ? "bg-amber-500" : "bg-profit")} style={{ width: `${limitPct ? used : 0}%` }} />
+                  <div className={cn("h-full rounded-full transition-[width] duration-300 ease-out", used >= 80 ? "bg-loss" : used >= 50 ? "bg-amber-500" : "bg-profit")} style={{ width: `${limitPct ? used : 0}%` }} />
                 </div>
               </div>
               {status?.halted && (

@@ -14,12 +14,12 @@ export function ExpiryPicker({ overview, expiry, onChange }: { overview: Overvie
           key={e.expiry}
           onClick={() => onChange(e.expiry)}
           className={cn(
-            "shrink-0 rounded-lg border bg-card px-2.5 sm:px-3 py-1.5 text-left transition-all active:scale-95 hover:border-slate-300 shadow-2xs",
-            e.expiry === expiry && "border-primary bg-accent ring-1 ring-primary/20",
+            "group shrink-0 rounded-xl px-3 py-1.5 text-left transition-[color,background-color,transform] duration-150 active:scale-95",
+            e.expiry === expiry ? "bg-primary text-primary-foreground" : "bg-card hover:bg-card/70",
           )}
         >
           <div className="text-[12px] sm:text-[12.5px] font-semibold">{e.label}</div>
-          <div className="num text-[10px] sm:text-[10.5px] text-muted-foreground">
+          <div className={cn("num text-[11px]", e.expiry === expiry ? "text-primary-foreground/75" : "text-muted-foreground")}>
             {hours(e.hours)} · IV {pct(e.atm_iv, 1, true)}
           </div>
         </button>

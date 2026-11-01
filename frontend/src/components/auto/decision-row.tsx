@@ -34,7 +34,7 @@ export function DecisionRow({ d }: { d: Decision }) {
         {d.ai?.used && <Bot className="size-4 shrink-0 text-primary" aria-label="AI reviewed" />}
       </button>
       {open && (
-        <div className="animate-in fade-in slide-in-from-top-1 space-y-4 bg-slate-50/50 px-4 pb-4 duration-200 sm:pl-11">
+        <div className="animate-in fade-in duration-150 space-y-4 bg-slate-50/50 px-4 pb-4 sm:pl-11">
           {d.regime && m && (
             <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-muted-foreground">
               <span>regime <b className="capitalize text-slate-800">{d.regime.label}</b></span>
@@ -54,7 +54,7 @@ export function DecisionRow({ d }: { d: Decision }) {
           {d.regime?.pacing && <Notice tone="warn">{d.regime.pacing}</Notice>}
 
           {d.candidates && d.candidates.length > 0 && (
-            <div className="overflow-hidden rounded-lg border bg-card">
+            <div className="overflow-hidden rounded-xl bg-card">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -87,7 +87,7 @@ export function DecisionRow({ d }: { d: Decision }) {
           )}
 
           {d.ai && (
-            <div className="rounded-lg border bg-card p-3 text-[12.5px]">
+            <div className="rounded-xl bg-card p-3 text-[12.5px]">
               <div className="mb-1.5 flex flex-wrap items-center gap-2 font-medium">
                 <Bot className="size-4 text-primary" /> AI review
                 {d.ai.used ? (
@@ -109,7 +109,7 @@ export function DecisionRow({ d }: { d: Decision }) {
           {d.orders && (
             <div className="flex flex-wrap gap-2 text-[12px]">
               {Object.entries(d.orders).map(([broker, o]) => (
-                <div key={broker} className="min-w-0 break-words rounded-md border bg-card px-2.5 py-1.5">
+                <div key={broker} className="min-w-0 break-words rounded-lg bg-card px-2.5 py-1.5">
                   <span className="font-semibold capitalize">{broker}</span>:{" "}
                   {o.refused ? <span className="text-muted-foreground">{o.refused}</span> : <span className={o.status === "open" ? "text-profit" : "text-loss"}>{o.status} ×{o.qty} <span className="num">{o.structure_id}</span>{o.error ? ` — ${o.error}` : ""}</span>}
                 </div>

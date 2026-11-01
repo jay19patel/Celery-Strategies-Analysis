@@ -13,6 +13,7 @@ import { PreviewPanel } from "@/components/desk/preview-panel";
 import { RegimeCard } from "@/components/desk/regime-card";
 import { StrategyCatalog } from "@/components/desk/strategy-catalog";
 import { StrategyPicker, type TicketParams } from "@/components/desk/strategy-picker";
+import { PageHeader } from "@/components/shared/page";
 import { Empty, LoadError, Loading } from "@/components/shared/states";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -88,6 +89,7 @@ export default function DeskPage() {
 
   return (
     <>
+      <PageHeader title="Options Desk" description="Build a structure from the live chain, check it, and place it on paper or Delta." />
       <div className="flex flex-wrap items-center gap-3">
         {underlyings.length > 1 && (
           <Tabs value={underlying} onValueChange={(v) => { setUnderlying(v); setExpiry(null); setParams((p) => ({ ...p, legs: [] })); }}>
@@ -110,7 +112,7 @@ export default function DeskPage() {
           <Card>
             <CardHeader>
               <CardTitle>
-                <Ticket className="size-4 text-slate-400" /> Strategy builder
+                <Ticket className="size-4 text-primary" /> Strategy builder
               </CardTitle>
               {preview.isValidating && <Loader2 className="size-4 animate-spin text-slate-400" />}
             </CardHeader>
@@ -149,7 +151,7 @@ export default function DeskPage() {
       <Card>
         <CardHeader>
           <CardTitle>
-            <CandlestickChart className="size-4 text-slate-400" /> {overview?.perpetual ?? underlying} · 15m
+            <CandlestickChart className="size-4 text-primary" /> {overview?.perpetual ?? underlying} · 15m
           </CardTitle>
           <span className="text-[11.5px] text-muted-foreground">strikes and breakevens of the structure above</span>
         </CardHeader>
@@ -161,7 +163,7 @@ export default function DeskPage() {
       <Card>
         <CardHeader>
           <CardTitle>
-            <Grid3x3 className="size-4 text-slate-400" /> Option chain
+            <Grid3x3 className="size-4 text-primary" /> Option chain
           </CardTitle>
           <span className="text-[11.5px] text-muted-foreground">click a bid to sell, an ask to buy</span>
         </CardHeader>

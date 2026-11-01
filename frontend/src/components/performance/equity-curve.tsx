@@ -13,14 +13,14 @@ interface Row {
   trade: Point | null;
 }
 
-const UP = "#0e8a3e";
-const DOWN = "#cf1f2e";
+const UP = "var(--profit)";
+const DOWN = "var(--loss)";
 
 function CurveTooltip({ active, payload, asEquity }: { active?: boolean; payload?: { payload: Row }[]; asEquity: boolean }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
   return (
-    <div className="rounded-md border bg-card px-3 py-2 text-xs shadow-md">
+    <div className="rounded-xl bg-popover px-3 py-2 text-xs shadow-[0_8px_30px_rgb(0_0_0/0.16)]">
       <div className="text-muted-foreground">{dateTime(p.ts)}</div>
       <div className="num mt-1 font-semibold">{asEquity ? `Equity ${usd(p.value)}` : `Total ${signed(p.value)}`}</div>
       {p.trade ? (
@@ -83,26 +83,26 @@ export function EquityCurve({ curve, start = 0, opened }: { curve: Point[]; star
             <stop offset={1} stopColor={DOWN} stopOpacity={0.18} />
           </linearGradient>
         </defs>
-        <CartesianGrid stroke="#f1f5f9" vertical={false} />
+        <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
         <XAxis
           dataKey="ts"
           type="number"
           domain={["dataMin", "dataMax"]}
           tickFormatter={(t: number) => new Date(t * 1000).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
-          tick={{ fontSize: 10, fill: "#64748b" }}
-          stroke="#e2e8f0"
+          tick={{ fontSize: 10, fill: "var(--chart-text)" }}
+          stroke="var(--border)"
           minTickGap={40}
         />
         <YAxis
           domain={[lo, hi]}
-          tick={{ fontSize: 10, fill: "#64748b" }}
-          stroke="#e2e8f0"
+          tick={{ fontSize: 10, fill: "var(--chart-text)" }}
+          stroke="var(--border)"
           width={64}
           tickFormatter={(v: number) => (asEquity ? `$${usd(v, digits)}` : signed(v, digits))}
         />
-        <ReferenceLine y={start} stroke="#94a3b8" strokeDasharray="3 3" />
+        <ReferenceLine y={start} stroke="var(--chart-ref)" strokeDasharray="3 3" />
         <Tooltip content={<CurveTooltip asEquity={asEquity} />} />
-        <Area type="linear" dataKey="value" baseValue={start} stroke="none" fill="url(#equityWater)" isAnimationActive={false} />
+        <Area type="linear" dataKey="value" baseValue={start} stroke="none" fill="url(#equityWater)" animationDuration={450} animationEasing="ease-out" />
         <Line
           type="linear"
           dataKey="value"
@@ -110,7 +110,7 @@ export function EquityCurve({ curve, start = 0, opened }: { curve: Point[]; star
           strokeWidth={2}
           dot={(p: { cx?: number; cy?: number; payload?: Row; index?: number }) => <Dot key={p.index} cx={p.cx} cy={p.cy} payload={p.payload} dense={dense} />}
           activeDot={{ r: 6 }}
-          isAnimationActive={false}
+          animationDuration={450} animationEasing="ease-out"
         />
       </ComposedChart>
     </ResponsiveContainer>

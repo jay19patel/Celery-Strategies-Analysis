@@ -17,6 +17,8 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
+
+import { CHART_FONT, chartTheme, chartThemeOptions, useChartTheme } from "@/lib/theme";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
 import type { Bar, HorizontalClusterItem, StructureZone, TrendlineItem } from "@/lib/types";
@@ -141,6 +143,7 @@ export function PriceChart({
   // rebuild is always followed by a refill — without it, a rebuild triggered by something the
   // refill effects do not watch leaves the new chart empty of exactly those things.
   const [built, setBuilt] = useState(0);
+  const theme = useChartTheme();
 
   // Paint zones (FVG & OB) & Trendlines on the background canvas
   const paintOverlay = useCallback(() => {
@@ -299,7 +302,7 @@ export function PriceChart({
         const textX = Math.max(8, plotRight - textWidth - 14);
 
         // Small badge background behind text
-        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.fillStyle = theme.labelBg;
         ctx.fillRect(textX - 4, y - 13, textWidth + 8, 13);
         ctx.strokeStyle = strokeColor;
         ctx.lineWidth = 0.75;
@@ -376,31 +379,37 @@ export function PriceChart({
         }
       }
     }
-  }, [bars.length, clusters, height, showClusters, showFvg, showOb, showTrendlines, showZones, trendlines, zones]);
+  }, [bars.length, clusters, height, showClusters, showFvg, showOb, showTrendlines, showZones, theme, trendlines, zones]);
+
+  // The appearance follows the system; a switch restyles the chart without rebuilding it.
+  useEffect(() => {
+    chart.current?.applyOptions(chartThemeOptions(theme));
+  }, [theme, built]);
 
   // Initialize chart
   useEffect(() => {
     if (!box.current) return;
 
+    const t0 = chartTheme();
     const c = createChart(box.current, {
       height,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#64748b",
+        textColor: t0.text,
         fontSize: 11,
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        fontFamily: CHART_FONT,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "#f1f5f9" },
-        horzLines: { color: "#f1f5f9" },
+        vertLines: { color: t0.grid },
+        horzLines: { color: t0.grid },
       },
       rightPriceScale: {
-        borderColor: "#e2e8f0",
+        borderColor: t0.border,
         scaleMargins: { top: 0.08, bottom: showVolume ? 0.22 : 0.08 },
       },
       timeScale: {
-        borderColor: "#e2e8f0",
+        borderColor: t0.border,
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: (time: unknown) => {
@@ -415,8 +424,8 @@ export function PriceChart({
       },
       crosshair: {
         mode: 1,
-        vertLine: { color: "#94a3b8", width: 1, style: LineStyle.Dotted },
-        horzLine: { color: "#94a3b8", width: 1, style: LineStyle.Dotted },
+        vertLine: { color: t0.crosshair, width: 1, style: LineStyle.Dotted },
+        horzLine: { color: t0.crosshair, width: 1, style: LineStyle.Dotted },
       },
       autoSize: true,
     });
@@ -699,7 +708,7 @@ export function PriceChart({
     <div ref={containerRef} className="relative w-full">
       {/* Chart & Overlay Canvas Container with Fixed Corner Legend */}
       <div
-        className="relative w-full rounded-md border bg-white overflow-hidden shadow-xs"
+        className="relative w-full overflow-hidden rounded-xl"
         style={{ height }}
         onMouseLeave={() => {
           setHoverBar(null);
@@ -715,7 +724,7 @@ export function PriceChart({
         {/* ====================================================================== */}
         {activeBar && (
           <div
-            className={`absolute top-2.5 left-2.5 z-20 rounded-lg border border-slate-200/90 bg-white/92 backdrop-blur-md shadow-md transition-all duration-150 select-none text-xs font-mono ${
+            className={`absolute top-2.5 left-2.5 z-20 rounded-lg border border-slate-200/90 bg-card/90 backdrop-blur-md shadow-md transition-colors duration-150 select-none text-xs font-mono ${
               isLegendCollapsed ? "w-auto px-2.5 py-1.5" : "w-[310px] sm:w-[350px] p-2.5"
             }`}
           >
@@ -739,7 +748,7 @@ export function PriceChart({
                   className={`rounded-full px-1.5 py-0.2 text-[9px] font-semibold uppercase ${
                     hoverBar
                       ? "bg-blue-100 text-blue-700 border border-blue-200"
-                      : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : "bg-profit-soft text-profit border border-profit/25"
                   }`}
                 >
                   {hoverBar ? "Hover" : "Latest"}
@@ -758,7 +767,7 @@ export function PriceChart({
             {isLegendCollapsed ? (
               <div className="mt-1 flex items-center gap-2 text-[11px]">
                 <span className="font-bold text-slate-900">${activeBar.close.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
-                <span className={`font-semibold ${changePct >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                <span className={`font-semibold ${changePct >= 0 ? "text-profit" : "text-loss"}`}>
                   {changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}%
                 </span>
                 {hoveredZone && (
@@ -785,7 +794,7 @@ export function PriceChart({
                   </div>
                   <div className="rounded bg-slate-50/80 px-1.5 py-1 border border-slate-100">
                     <span className="text-slate-400 text-[9px] uppercase tracking-wider block">Close</span>
-                    <span className={`font-semibold ${changePct >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                    <span className={`font-semibold ${changePct >= 0 ? "text-profit" : "text-loss"}`}>
                       ${activeBar.close.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                     </span>
                   </div>
@@ -795,7 +804,7 @@ export function PriceChart({
                 <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-1.5 text-[10.5px]">
                   <div className="flex items-center gap-1.5">
                     <span className="text-slate-400">Change:</span>
-                    <span className={`font-bold ${changePct >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                    <span className={`font-bold ${changePct >= 0 ? "text-profit" : "text-loss"}`}>
                       {changePct >= 0 ? "+" : ""}{changeUsd.toFixed(1)} ({changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}%)
                     </span>
                   </div>
@@ -813,8 +822,8 @@ export function PriceChart({
                     <span className="flex items-center gap-1 font-semibold text-amber-600">
                       <span className="size-2 rounded-full bg-amber-500" /> EMA 20
                     </span>
-                    <span className="flex items-center gap-1 font-semibold text-rose-600">
-                      <span className="size-2 rounded-full bg-rose-500" /> EMA 50
+                    <span className="flex items-center gap-1 font-semibold text-loss">
+                      <span className="size-2 rounded-full bg-loss" /> EMA 50
                     </span>
                   </div>
                 )}
@@ -840,8 +849,8 @@ export function PriceChart({
                     className={`mt-2 rounded-md border p-2 text-[10.5px] ${
                       hoveredZone.kind === "fvg"
                         ? hoveredZone.direction === "bull"
-                          ? "border-emerald-300 bg-emerald-50/90 text-emerald-950"
-                          : "border-rose-300 bg-rose-50/90 text-rose-950"
+                          ? "border-profit/25 bg-profit-soft text-profit"
+                          : "border-loss/25 bg-loss-soft text-loss"
                         : "border-amber-300 bg-amber-50/90 text-amber-950"
                     }`}
                   >
@@ -850,7 +859,7 @@ export function PriceChart({
                         <span className="size-2 rounded-full bg-current" />
                         {hoveredZone.kind === "fvg" ? "Fair Value Gap" : "Order Block"} ({hoveredZone.direction === "bull" ? "Bullish Demand" : "Bearish Supply"})
                       </span>
-                      <span className="capitalize text-[9.5px] bg-white/80 px-1.5 py-0.2 rounded border border-current font-semibold">
+                      <span className="capitalize text-[9.5px] bg-card/90 px-1.5 py-0.2 rounded border border-current font-semibold">
                         {hoveredZone.state}
                       </span>
                     </div>

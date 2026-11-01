@@ -226,13 +226,13 @@ export function DirectPerpPanel({
               setUserStop(null);
               setUserTarget(null);
             }}
-            className={`flex items-center justify-center gap-2 rounded-lg border py-2.5 font-bold transition-all ${
+            className={`flex items-center justify-center gap-2 rounded-lg border py-2.5 font-bold transition-colors ${
               isBuy
-                ? "border-emerald-500 bg-emerald-50 text-emerald-800 shadow-sm"
+                ? "border-profit bg-profit-soft text-profit shadow-sm"
                 : "border-input bg-card text-muted-foreground hover:bg-muted"
             }`}
           >
-            <ArrowUpRight className="size-4 text-emerald-600" /> BUY / LONG
+            <ArrowUpRight className="size-4 text-profit" /> BUY / LONG
           </button>
 
           <button
@@ -242,13 +242,13 @@ export function DirectPerpPanel({
               setUserStop(null);
               setUserTarget(null);
             }}
-            className={`flex items-center justify-center gap-2 rounded-lg border py-2.5 font-bold transition-all ${
+            className={`flex items-center justify-center gap-2 rounded-lg border py-2.5 font-bold transition-colors ${
               !isBuy
-                ? "border-rose-500 bg-rose-50 text-rose-800 shadow-sm"
+                ? "border-loss bg-loss-soft text-loss shadow-sm"
                 : "border-input bg-card text-muted-foreground hover:bg-muted"
             }`}
           >
-            <ArrowDownRight className="size-4 text-rose-600" /> SELL / SHORT
+            <ArrowDownRight className="size-4 text-loss" /> SELL / SHORT
           </button>
         </div>
 
@@ -297,7 +297,7 @@ export function DirectPerpPanel({
 
           <div className="space-y-1.5">
             <Label className="text-xs font-medium text-muted-foreground">Entry Price</Label>
-            <div className="h-8 flex items-center px-2.5 rounded-md border bg-muted/30 font-mono text-xs font-bold text-foreground">
+            <div className="h-8 flex items-center px-2.5 rounded-md bg-secondary/60 font-mono text-xs font-bold text-foreground">
               ${currentPrice ? usd(currentPrice, 1) : "—"}
             </div>
             <span className="text-[10px] text-muted-foreground block">
@@ -310,7 +310,7 @@ export function DirectPerpPanel({
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label className="text-xs font-semibold text-rose-600">Stop Loss ($)</Label>
+              <Label className="text-xs font-semibold text-loss">Stop Loss ($)</Label>
               <span className="text-[10px] text-muted-foreground font-mono">
                 {riskDist > 0 ? `-${((riskDist / currentPrice) * 100).toFixed(1)}%` : ""}
               </span>
@@ -320,14 +320,14 @@ export function DirectPerpPanel({
               step="0.5"
               value={stop || ""}
               onChange={(e) => setUserStop(parseFloat(e.target.value) || 0)}
-              className="h-8 font-mono text-xs border-rose-200 focus-visible:ring-rose-500"
+              className="h-8 font-mono text-xs border-loss/25 focus-visible:ring-loss"
               placeholder="0.0"
             />
           </div>
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label className="text-xs font-semibold text-emerald-600">Take Profit ($)</Label>
+              <Label className="text-xs font-semibold text-profit">Take Profit ($)</Label>
               <span className="text-[10px] text-muted-foreground font-mono">
                 {rewardDist > 0 ? `+${((rewardDist / currentPrice) * 100).toFixed(1)}%` : ""}
               </span>
@@ -337,14 +337,14 @@ export function DirectPerpPanel({
               step="0.5"
               value={target || ""}
               onChange={(e) => setUserTarget(parseFloat(e.target.value) || 0)}
-              className="h-8 font-mono text-xs border-emerald-200 focus-visible:ring-emerald-500"
+              className="h-8 font-mono text-xs border-profit/25 focus-visible:ring-profit"
               placeholder="0.0"
             />
           </div>
         </div>
 
         {/* Statistical Summary Box */}
-        <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+        <div className="rounded-lg bg-secondary/60 p-3 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground">Risk : Reward</span>
@@ -354,8 +354,8 @@ export function DirectPerpPanel({
             </div>
 
             <div className="flex items-center gap-4 text-xs font-mono">
-              <span className="text-rose-600">Max Risk: ~${num(estDollarRisk, 2)}</span>
-              <span className="text-emerald-600">Est Gain: ~${num(estDollarReward, 2)}</span>
+              <span className="text-loss">Max Risk: ~${num(estDollarRisk, 2)}</span>
+              <span className="text-profit">Est Gain: ~${num(estDollarReward, 2)}</span>
             </div>
           </div>
 
@@ -375,7 +375,7 @@ export function DirectPerpPanel({
           onClick={handleOpenPosition}
           disabled={executing || currentPrice <= 0 || stop <= 0 || target <= 0}
           className={`w-full gap-2 font-bold text-xs ${
-            !isBuy ? "bg-rose-600 hover:bg-rose-700" : "bg-emerald-600 hover:bg-emerald-700"
+            !isBuy ? "bg-loss hover:bg-loss/90" : "bg-profit hover:bg-profit/90"
           }`}
         >
           {executing ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}

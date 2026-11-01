@@ -171,29 +171,29 @@ export function DirectOptionModal({
             <button
               type="button"
               onClick={() => setUserSide("buy")}
-              className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 font-bold transition-all ${
+              className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 font-bold transition-colors ${
                 isBuy
-                  ? "border-emerald-500 bg-emerald-50 text-emerald-800 shadow-sm"
+                  ? "border-profit bg-profit-soft text-profit shadow-sm"
                   : "border-input bg-card text-muted-foreground hover:bg-muted"
               }`}
             >
-              <ArrowUpRight className="size-4 text-emerald-600" /> BUY (Long {target.kind.toUpperCase()})
+              <ArrowUpRight className="size-4 text-profit" /> BUY (Long {target.kind.toUpperCase()})
             </button>
             <button
               type="button"
               onClick={() => setUserSide("sell")}
-              className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 font-bold transition-all ${
+              className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 font-bold transition-colors ${
                 !isBuy
-                  ? "border-rose-500 bg-rose-50 text-rose-800 shadow-sm"
+                  ? "border-loss bg-loss-soft text-loss shadow-sm"
                   : "border-input bg-card text-muted-foreground hover:bg-muted"
               }`}
             >
-              <ArrowDownRight className="size-4 text-rose-600" /> SELL (Short {target.kind.toUpperCase()})
+              <ArrowDownRight className="size-4 text-loss" /> SELL (Short {target.kind.toUpperCase()})
             </button>
           </div>
 
           {/* Pricing Strip */}
-          <div className="grid grid-cols-4 gap-2 rounded-lg border bg-muted/30 p-2.5 text-center font-mono">
+          <div className="grid grid-cols-4 gap-2 rounded-lg bg-secondary/60 p-2.5 text-center font-mono">
             <div>
               <div className="text-[10px] text-muted-foreground uppercase">Mark</div>
               <div className="font-bold text-foreground">${target.mark != null ? price(target.mark) : "—"}</div>
@@ -253,7 +253,7 @@ export function DirectOptionModal({
           </div>
 
           {/* Statistical Breakdown Box */}
-          <div className="space-y-2 rounded-lg border bg-card p-3">
+          <div className="space-y-2 rounded-xl bg-secondary/60 p-3">
             <div className="flex justify-between border-b pb-1.5 text-xs">
               <span className="text-muted-foreground">{isBuy ? "Net Premium Outlay" : "Upfront Premium Received"}:</span>
               <span className="font-mono font-bold text-foreground">${num(totalPremium, 2)}</span>
@@ -264,11 +264,11 @@ export function DirectOptionModal({
             </div>
             <div className="flex justify-between border-b pb-1.5 text-xs">
               <span className="text-muted-foreground">Max Profit:</span>
-              <span className="font-mono font-semibold text-emerald-600">{maxProfitText}</span>
+              <span className="font-mono font-semibold text-profit">{maxProfitText}</span>
             </div>
             <div className="flex justify-between text-xs">
               <span className="text-muted-foreground">Max Loss:</span>
-              <span className="font-mono font-semibold text-rose-600">{maxLossText}</span>
+              <span className="font-mono font-semibold text-loss">{maxLossText}</span>
             </div>
             <div className="rounded bg-muted/40 p-1.5 text-[11px] text-muted-foreground">
               💡 {ruleText}
@@ -284,7 +284,7 @@ export function DirectOptionModal({
             size="sm"
             onClick={handleExecute}
             disabled={executing || mark <= 0}
-            className={`gap-1.5 text-xs ${!isBuy ? "bg-rose-600 hover:bg-rose-700" : ""}`}
+            className={`gap-1.5 text-xs ${!isBuy ? "bg-loss hover:bg-loss/90" : ""}`}
           >
             {executing ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
             {isBuy ? `Buy ${qty}x Option` : `Sell (Short) ${qty}x Option`}

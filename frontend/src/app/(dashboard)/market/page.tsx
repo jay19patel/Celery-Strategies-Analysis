@@ -31,6 +31,7 @@ import { DirectPerpPanel } from "@/components/desk/direct-perp-panel";
 import { FibonacciCard } from "@/components/desk/fibonacci-card";
 import { TrendlinesTable } from "@/components/desk/trendlines-table";
 import { PageHeader } from "@/components/shared/page";
+import { Rolling } from "@/components/shared/rolling";
 import { Empty, LoadError, Loading } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,12 +95,12 @@ function SymbolPriceCard({
   const basis = data?.mark && data?.spot ? ((data.mark - data.spot) / data.spot) * 100 : null;
 
   return (
-    <div
+    <button
+      type="button"
       onClick={onSelect}
-      className={`relative cursor-pointer rounded-xl border p-4 transition-all shadow-sm ${
-        active
-          ? "border-primary bg-primary/5 ring-1 ring-primary/30"
-          : "border-border/70 bg-card hover:border-primary/40 hover:bg-muted/10"
+      aria-pressed={active}
+      className={`relative w-full rounded-2xl p-4 text-left outline-none transition-[border-color,background-color,box-shadow] duration-150 focus-visible:ring-[3px] focus-visible:ring-ring/50 ${
+        active ? "bg-card ring-2 ring-primary" : "bg-card hover:ring-1 hover:ring-separator"
       }`}
     >
       <div className="flex items-start justify-between">
@@ -107,22 +108,17 @@ function SymbolPriceCard({
           <div className="flex items-center gap-2">
             <span className="font-bold text-sm tracking-wide text-foreground">{sym}USD</span>
             <span className="text-[11px] text-muted-foreground">perpetual</span>
-            {active && (
-              <Badge variant="default" className="text-[9px] uppercase px-1.5 py-0 bg-primary text-primary-foreground">
-                ACTIVE DESK
-              </Badge>
-            )}
           </div>
-          <div className="mt-1.5 font-mono text-2xl font-bold tracking-tight text-foreground">
-            ${last ? usd(last, sym === "BTC" ? 1 : 2) : "—"}
+          <div className="num mt-1.5 text-2xl font-semibold tracking-tight text-foreground">
+            {last ? <Rolling text={`$${usd(last, sym === "BTC" ? 1 : 2)}`} /> : "—"}
           </div>
         </div>
 
         <span
-          className={`flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+          className={`num flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
             isUp
-              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-              : "bg-rose-50 text-rose-700 border border-rose-200"
+              ? "bg-profit-soft text-profit"
+              : "bg-loss-soft text-loss"
           }`}
         >
           {isUp ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
@@ -132,7 +128,7 @@ function SymbolPriceCard({
 
       {/* 24h Range Bar Slider */}
       <div className="mt-3 space-y-1">
-        <div className="flex justify-between text-[11px] text-muted-foreground font-mono">
+        <div className="num flex justify-between text-[11px] text-muted-foreground">
           <span>
             24h Low <b className="text-foreground">${low ? num(low, 0) : "—"}</b>
           </span>
@@ -140,69 +136,63 @@ function SymbolPriceCard({
             High <b className="text-foreground">${high ? num(high, 0) : "—"}</b>
           </span>
         </div>
-        <div className="relative h-1.5 w-full rounded-full bg-muted overflow-hidden">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-500"
-            style={{ width: "100%" }}
-          />
-        </div>
-        <div className="relative h-2 w-full">
+        <div className="relative h-1.5 w-full rounded-full bg-muted">
           <span
-            className="absolute -top-1 size-3 -translate-x-1/2 rounded-full border-2 border-background bg-slate-900 shadow-sm"
+            className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card bg-slate-900 shadow-sm"
             style={{ left: `${inRange}%` }}
           />
         </div>
       </div>
 
       {/* 3x3 Stats Grid from v3 */}
-      <div className="mt-3.5 grid grid-cols-3 gap-2 border-t pt-3 text-[11px] font-mono">
+      <div className="mt-3.5 grid grid-cols-3 gap-x-2 gap-y-2.5 border-t pt-3 text-[11px]">
         <div>
-          <div className="text-[10px] text-muted-foreground uppercase">Mark</div>
-          <div className="font-semibold text-foreground">${data?.mark ? usd(data.mark, 1) : "—"}</div>
+          <div className="text-[11px] text-muted-foreground">Mark</div>
+          <div className="num font-semibold text-foreground">${data?.mark ? usd(data.mark, 1) : "—"}</div>
         </div>
         <div>
-          <div className="text-[10px] text-muted-foreground uppercase">Index / Spot</div>
-          <div className="font-semibold text-foreground">${data?.spot ? usd(data.spot, 1) : "—"}</div>
+          <div className="text-[11px] text-muted-foreground">Index / Spot</div>
+          <div className="num font-semibold text-foreground">${data?.spot ? usd(data.spot, 1) : "—"}</div>
         </div>
         <div>
-          <div className="text-[10px] text-muted-foreground uppercase" title="Mark against index">
+          <div className="text-[11px] text-muted-foreground" title="Mark against index">
             Basis
           </div>
           <div
-            className={`font-semibold ${
-              basis && basis > 0 ? "text-emerald-600" : basis && basis < 0 ? "text-rose-600" : ""
+            className={`num font-semibold ${
+              basis && basis > 0 ? "text-profit" : basis && basis < 0 ? "text-loss" : ""
             }`}
           >
             {basis != null ? `${signed(basis, 3)}%` : "—"}
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-muted-foreground uppercase">24h Open</div>
-          <div className="font-semibold text-foreground">${s?.open_24h ? num(s.open_24h, 0) : "—"}</div>
+          <div className="text-[11px] text-muted-foreground">24h Open</div>
+          <div className="num font-semibold text-foreground">${s?.open_24h ? num(s.open_24h, 0) : "—"}</div>
         </div>
         <div>
-          <div className="text-[10px] text-muted-foreground uppercase">24h Turnover</div>
-          <div className="font-semibold text-foreground">
+          <div className="text-[11px] text-muted-foreground">24h Turnover</div>
+          <div className="num font-semibold text-foreground">
             ${s?.turnover_24h_usd ? (s.turnover_24h_usd / 1_000_000).toFixed(1) + "M" : "—"}
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-muted-foreground uppercase">Open Interest</div>
-          <div className="font-semibold text-foreground">
+          <div className="text-[11px] text-muted-foreground">Open Interest</div>
+          <div className="num font-semibold text-foreground">
             ${s?.oi_usd ? (s.oi_usd / 1_000_000).toFixed(1) + "M" : "—"}
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-muted-foreground uppercase">Bid</div>
-          <div className="font-semibold text-emerald-600">${s?.bid ? usd(s.bid, 1) : "—"}</div>
+          <div className="text-[11px] text-muted-foreground">Bid</div>
+          <div className="num font-semibold text-profit">${s?.bid ? usd(s.bid, 1) : "—"}</div>
         </div>
         <div>
-          <div className="text-[10px] text-muted-foreground uppercase">Ask</div>
-          <div className="font-semibold text-rose-600">${s?.ask ? usd(s.ask, 1) : "—"}</div>
+          <div className="text-[11px] text-muted-foreground">Ask</div>
+          <div className="num font-semibold text-loss">${s?.ask ? usd(s.ask, 1) : "—"}</div>
         </div>
         <div>
-          <div className="text-[10px] text-muted-foreground uppercase">Spread</div>
-          <div className="font-semibold text-foreground">
+          <div className="text-[11px] text-muted-foreground">Spread</div>
+          <div className="num font-semibold text-foreground">
             {spread != null ? `$${num(spread, 1)}` : "—"}
             {spreadPct != null && (
               <span className="text-[9.5px] text-muted-foreground ml-1">({spreadPct.toFixed(3)}%)</span>
@@ -212,10 +202,10 @@ function SymbolPriceCard({
       </div>
 
       {/* Funding rate strip */}
-      <div className="mt-2.5 flex items-center justify-between border-t pt-2 text-[11px] font-mono">
-        <span className="text-muted-foreground">8h Funding Rate</span>
+      <div className="mt-2.5 flex items-center justify-between border-t pt-2 text-[11px]">
+        <span className="text-muted-foreground">8h funding</span>
         <span
-          className={`font-semibold ${(s?.funding_rate_pct ?? 0) >= 0 ? "text-rose-600" : "text-emerald-600"}`}
+          className={`num font-semibold ${(s?.funding_rate_pct ?? 0) >= 0 ? "text-loss" : "text-profit"}`}
         >
           {s?.funding_rate_pct != null ? `${(s.funding_rate_pct * 100).toFixed(4)}%` : "—"}
           <span className="ml-1 text-[10px] text-muted-foreground font-normal">
@@ -223,7 +213,7 @@ function SymbolPriceCard({
           </span>
         </span>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -477,7 +467,7 @@ export default function MarketDeskPage() {
         actions={
           <div className="flex flex-wrap items-center gap-2.5">
             {/* Timezone Selector */}
-            <div className="flex items-center rounded-lg border bg-muted/40 p-1 text-xs">
+            <div className="flex items-center rounded-lg bg-secondary/60 p-1 text-xs">
               <span className="flex items-center gap-1 px-1.5 text-muted-foreground">
                 <Globe className="size-3" />
               </span>
@@ -486,7 +476,7 @@ export default function MarketDeskPage() {
                   key={tz}
                   type="button"
                   onClick={() => setTimezone(tz)}
-                  className={`rounded-md px-2 py-0.5 font-mono text-[11px] font-semibold transition-all ${
+                  className={`rounded-md px-2 py-0.5 font-mono text-[11px] font-semibold transition-colors ${
                     timezone === tz
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
@@ -498,13 +488,13 @@ export default function MarketDeskPage() {
             </div>
 
             {/* Underlying Selector */}
-            <div className="flex items-center rounded-lg border bg-muted/40 p-1">
+            <div className="flex items-center rounded-lg bg-secondary/60 p-1">
               {underlyings.map((u) => (
                 <button
                   key={u}
                   type="button"
                   onClick={() => setUnderlying(u)}
-                  className={`rounded-md px-3 py-1 text-xs font-semibold transition-all ${
+                  className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
                     underlying === u
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
@@ -546,83 +536,22 @@ export default function MarketDeskPage() {
         />
       </div>
 
-      {/* Live Market Stats Strip */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <div className="rounded-xl border bg-card p-3 shadow-sm">
-          <div className="text-[11px] font-medium text-muted-foreground">{underlying} Mark Price</div>
-          <div className="mt-1 font-mono text-lg font-bold">
-            ${currentPrice ? usd(currentPrice, 2) : "—"}
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-card p-3 shadow-sm">
-          <div className="text-[11px] font-medium text-muted-foreground">24h Change</div>
-          <div
-            className={`mt-1 flex items-center gap-1 font-mono text-base font-semibold ${
-              (stats?.change_24h_pct ?? 0) >= 0 ? "text-emerald-600" : "text-rose-600"
-            }`}
-          >
-            {(stats?.change_24h_pct ?? 0) >= 0 ? (
-              <ArrowUpRight className="size-4" />
-            ) : (
-              <ArrowDownRight className="size-4" />
-            )}
-            {signed(stats?.change_24h_pct, 2)}%
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-card p-3 shadow-sm">
-          <div className="text-[11px] font-medium text-muted-foreground">24h Range</div>
-          <div className="mt-1 font-mono text-xs font-medium text-foreground">
-            L: ${stats?.low_24h ? num(stats.low_24h, 0) : "—"}
-            <span className="mx-1 text-muted-foreground">/</span>
-            H: ${stats?.high_24h ? num(stats.high_24h, 0) : "—"}
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-card p-3 shadow-sm">
-          <div className="text-[11px] font-medium text-muted-foreground">Funding Rate</div>
-          <div className="mt-1 font-mono text-base font-medium">
-            {stats?.funding_rate_pct != null ? `${(stats.funding_rate_pct * 100).toFixed(4)}%` : "—"}
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-card p-3 shadow-sm">
-          <div className="text-[11px] font-medium text-muted-foreground">24h Turnover</div>
-          <div className="mt-1 font-mono text-base font-medium">
-            ${stats?.turnover_24h_usd ? num(stats.turnover_24h_usd / 1_000_000, 1) + "M" : "—"}
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-card p-3 shadow-sm">
-          <div className="text-[11px] font-medium text-muted-foreground">Open Interest</div>
-          <div className="mt-1 font-mono text-base font-medium">
-            ${stats?.oi_usd ? num(stats.oi_usd / 1_000_000, 1) + "M" : "—"}
-          </div>
-        </div>
-      </div>
-
       {/* Market Pulse Banner */}
       {pulse && (
-        <Card className="border-border/60 bg-gradient-to-r from-card via-card to-muted/20">
+        <Card>
           <CardContent className="p-4 sm:p-5">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <span className="flex size-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                    Live Market Pulse
-                  </span>
-                  <Badge variant={pulse.loud ? "solid" : "default"} className="uppercase text-[10px]">
-                    {pulse.state || "Active"}
-                  </Badge>
+                  <span className="text-xs font-medium text-muted-foreground">Market pulse</span>
+                  <Badge variant={pulse.loud ? "warn" : "default"}>{pulse.state || "Active"}</Badge>
                   {typeof pulse.way === "string" && pulse.way && (
                     <Badge variant={pulse.way === "up" ? "profit" : pulse.way === "down" ? "loss" : "outline"}>
-                      {pulse.way.toUpperCase()}
+                      {pulse.way}
                     </Badge>
                   )}
                   {Array.isArray(pulse.way) && pulse.way.length > 0 && pulse.way[0]?.edge !== null && pulse.way[0]?.edge !== undefined && (
-                    <Badge variant={pulse.way[0].edge > 0 ? "profit" : pulse.way[0].edge < 0 ? "loss" : "outline"} className="text-[10px]">
+                    <Badge variant={pulse.way[0].edge > 0 ? "profit" : pulse.way[0].edge < 0 ? "loss" : "outline"} className="num">
                       {pulse.way[0].edge > 0 ? `+${(pulse.way[0].edge * 100).toFixed(1)}% edge` : `${(pulse.way[0].edge * 100).toFixed(1)}% edge`}
                     </Badge>
                   )}
@@ -638,7 +567,7 @@ export default function MarketDeskPage() {
                   {pulse.reasons.map((r, i) => (
                     <span
                       key={i}
-                      className="rounded-md border bg-background/80 px-2 py-0.5 text-[11px] text-muted-foreground"
+                      className="rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground"
                     >
                       {r}
                     </span>
@@ -665,13 +594,13 @@ export default function MarketDeskPage() {
             </div>
 
             {/* Multi-Timeframe Switcher (15m, 1h, 1d) */}
-            <div className="flex items-center rounded-lg border bg-muted/40 p-1">
+            <div className="flex items-center rounded-lg bg-secondary/60 p-1">
               {(["15m", "1h", "1d"] as const).map((tf) => (
                 <button
                   key={tf}
                   type="button"
                   onClick={() => setChartInterval(tf)}
-                  className={`rounded-md px-2.5 py-0.5 font-mono text-xs font-semibold transition-all ${
+                  className={`rounded-md px-2.5 py-0.5 font-mono text-xs font-semibold transition-colors ${
                     chartInterval === tf
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
@@ -685,97 +614,89 @@ export default function MarketDeskPage() {
 
           {/* Layer Controls Bar (Default ALL ON, click to toggle) */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mr-0.5">
-              Layers:
-            </span>
+            <span className="mr-0.5 text-[11px] font-medium text-muted-foreground">Layers</span>
 
             <Button
-              variant={layers.fvg ? "default" : "outline"}
+              variant="outline"
               size="sm"
+              aria-pressed={layers.fvg}
               onClick={() => toggleLayer("fvg")}
-              className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                layers.fvg
-                  ? "bg-purple-600 text-white hover:bg-purple-700 shadow-xs"
-                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              className={`h-7 px-2.5 text-xs ${
+                layers.fvg ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"
               }`}
               title="Toggle Fair Value Gaps (shaded imbalance zones)"
             >
-              <span className="size-2 rounded-full mr-1.5 bg-purple-300" />
+              <span className="size-2 rounded-full bg-purple-500" />
               FVG ({fvgZones.length})
             </Button>
 
             <Button
-              variant={layers.ob ? "default" : "outline"}
+              variant="outline"
               size="sm"
+              aria-pressed={layers.ob}
               onClick={() => toggleLayer("ob")}
-              className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                layers.ob
-                  ? "bg-orange-600 text-white hover:bg-orange-700 shadow-xs"
-                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              className={`h-7 px-2.5 text-xs ${
+                layers.ob ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"
               }`}
               title="Toggle Order Blocks"
             >
-              <span className="size-2 rounded-full mr-1.5 bg-orange-300" />
+              <span className="size-2 rounded-full bg-orange-500" />
               OB ({obZones.length})
             </Button>
 
             <Button
-              variant={layers.ema ? "default" : "outline"}
+              variant="outline"
               size="sm"
+              aria-pressed={layers.ema}
               onClick={() => toggleLayer("ema")}
-              className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                layers.ema
-                  ? "bg-amber-500 text-white hover:bg-amber-600 shadow-xs"
-                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              className={`h-7 px-2.5 text-xs ${
+                layers.ema ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"
               }`}
               title="Toggle EMA 20 (yellow) & EMA 50 (red)"
             >
-              <span className="size-2 rounded-full mr-1.5 bg-amber-200" />
+              <span className="size-2 rounded-full bg-amber-500" />
               EMA (20/50)
             </Button>
 
             <Button
-              variant={layers.smc ? "default" : "outline"}
+              variant="outline"
               size="sm"
+              aria-pressed={layers.smc}
               onClick={() => toggleLayer("smc")}
-              className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                layers.smc
-                  ? "bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs"
-                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              className={`h-7 px-2.5 text-xs ${
+                layers.smc ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"
               }`}
               title="Toggle Smart Money Concepts (BOS / CHoCH break markers)"
             >
-              <span className="size-2 rounded-full mr-1.5 bg-emerald-300" />
+              <span className="size-2 rounded-full bg-emerald-500" />
               SMC Breaks
             </Button>
 
             <Button
-              variant={layers.levels ? "default" : "outline"}
+              variant="outline"
               size="sm"
+              aria-pressed={layers.levels}
               onClick={() => toggleLayer("levels")}
-              className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                layers.levels
-                  ? "bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs"
-                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              className={`h-7 px-2.5 text-xs ${
+                layers.levels ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"
               }`}
               title="Toggle Key Levels (POC, VAH/VAL, S&R)"
             >
-              <span className="size-2 rounded-full mr-1.5 bg-indigo-300" />
+              <span className="size-2 rounded-full bg-indigo-500" />
               Levels
             </Button>
 
             <Button
-              variant={layers.volume ? "default" : "outline"}
+              variant="outline"
               size="sm"
+              aria-pressed={layers.volume}
               onClick={() => toggleLayer("volume")}
-              className={`h-7 px-2.5 text-xs font-mono transition-all ${
-                layers.volume
-                  ? "bg-slate-700 text-white hover:bg-slate-800 shadow-xs"
-                  : "text-muted-foreground opacity-60 hover:opacity-100"
+              className={`h-7 px-2.5 text-xs ${
+                layers.volume ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"
               }`}
               title="Toggle Volume Histogram"
             >
-              <span className="size-2 rounded-full mr-1.5 bg-slate-300" />
+              <span className="size-2 rounded-full bg-slate-500" />
               Volume
             </Button>
           </div>
@@ -835,10 +756,10 @@ export default function MarketDeskPage() {
                   <span className="rounded-md border border-purple-200 bg-purple-50/80 px-2 py-0.5 text-purple-800">
                     Fresh: <b>{fvgZones.filter((z) => z.state === "fresh").length}</b>
                   </span>
-                  <span className="rounded-md border border-emerald-200 bg-emerald-50/80 px-2 py-0.5 text-emerald-800">
+                  <span className="rounded-md border border-profit/25 bg-profit-soft px-2 py-0.5 text-profit">
                     Bullish: <b>{fvgZones.filter((z) => z.direction === "bull").length}</b>
                   </span>
-                  <span className="rounded-md border border-rose-200 bg-rose-50/80 px-2 py-0.5 text-rose-800">
+                  <span className="rounded-md border border-loss/25 bg-loss-soft px-2 py-0.5 text-loss">
                     Bearish: <b>{fvgZones.filter((z) => z.direction === "bear").length}</b>
                   </span>
                 </div>
@@ -849,9 +770,9 @@ export default function MarketDeskPage() {
               {(nearestFvgAbove || nearestFvgBelow) && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {nearestFvgAbove && (
-                    <div className="flex items-center justify-between rounded-lg border border-rose-200/80 bg-rose-50/40 p-2.5 text-xs">
+                    <div className="flex items-center justify-between rounded-lg border border-loss/25 bg-loss-soft p-2.5 text-xs">
                       <div className="space-y-0.5">
-                        <div className="text-[10px] uppercase font-bold text-rose-700 flex items-center gap-1">
+                        <div className="text-[10px] uppercase font-bold text-loss flex items-center gap-1">
                           <TrendingDown className="size-3" /> Nearest Overhead FVG (Resistance)
                         </div>
                         <div className="font-mono font-bold text-foreground">
@@ -870,9 +791,9 @@ export default function MarketDeskPage() {
                   )}
 
                   {nearestFvgBelow && (
-                    <div className="flex items-center justify-between rounded-lg border border-emerald-200/80 bg-emerald-50/40 p-2.5 text-xs">
+                    <div className="flex items-center justify-between rounded-lg border border-profit/25 bg-profit-soft p-2.5 text-xs">
                       <div className="space-y-0.5">
-                        <div className="text-[10px] uppercase font-bold text-emerald-700 flex items-center gap-1">
+                        <div className="text-[10px] uppercase font-bold text-profit flex items-center gap-1">
                           <TrendingUp className="size-3" /> Nearest Below FVG (Support)
                         </div>
                         <div className="font-mono font-bold text-foreground">
@@ -904,7 +825,7 @@ export default function MarketDeskPage() {
                     return (
                       <div
                         key={idx}
-                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border bg-card p-2.5 text-xs hover:border-purple-300 transition-colors"
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl bg-secondary/60 p-2.5 text-xs hover:border-purple-300 transition-colors"
                       >
                         <div className="flex items-center gap-2.5">
                           <Badge
@@ -948,7 +869,7 @@ export default function MarketDeskPage() {
                           {/* Distance */}
                           <span
                             className={`font-mono font-semibold ${
-                              dist > 0 ? "text-rose-600" : dist < 0 ? "text-emerald-600" : "text-slate-600"
+                              dist > 0 ? "text-loss" : dist < 0 ? "text-profit" : "text-slate-600"
                             }`}
                           >
                             {dist > 0 ? `+${dist.toFixed(2)}%` : `${dist.toFixed(2)}%`}
@@ -1042,7 +963,7 @@ export default function MarketDeskPage() {
                 <Card key={idx} className="relative overflow-hidden">
                   <div
                     className={`absolute top-0 left-0 h-1 w-full ${
-                      isUp ? "bg-emerald-500" : isDown ? "bg-rose-500" : "bg-slate-300"
+                      isUp ? "bg-profit" : isDown ? "bg-loss" : "bg-slate-300"
                     }`}
                   />
                   <CardHeader className="pb-2">
@@ -1123,13 +1044,13 @@ export default function MarketDeskPage() {
                       return (
                         <div
                           key={i}
-                          className="flex items-center justify-between rounded-lg border bg-card px-3 py-2 text-xs"
+                          className="flex items-center justify-between rounded-xl bg-secondary/60 px-3 py-2 text-xs"
                         >
                           <div className="flex items-center gap-2.5">
-                            <Badge variant={sw.kind === "choch" ? "solid" : "default"} className="font-mono text-[10px] uppercase">
+                            <Badge variant={sw.kind === "choch" ? "primary" : "default"} className="num uppercase">
                               {sw.kind}
                             </Badge>
-                            <span className={`font-semibold ${isUp ? "text-emerald-600" : "text-rose-600"}`}>
+                            <span className={`font-semibold ${isUp ? "text-profit" : "text-loss"}`}>
                               {sw.direction.toUpperCase()}
                             </span>
                             <span className="font-mono font-bold">${num(sw.level, 1)}</span>
@@ -1168,7 +1089,7 @@ export default function MarketDeskPage() {
                     {gaps.map((g, i) => (
                       <div
                         key={i}
-                        className="flex items-center justify-between rounded-lg border bg-card px-3 py-2 text-xs"
+                        className="flex items-center justify-between rounded-xl bg-secondary/60 px-3 py-2 text-xs"
                       >
                         <div className="flex items-center gap-2.5">
                           <Badge variant={g.direction === "up" ? "profit" : "loss"} className="text-[10px] uppercase font-mono">
@@ -1204,7 +1125,7 @@ export default function MarketDeskPage() {
             {/* Resistance Levels */}
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold text-rose-600 flex items-center gap-2">
+                <CardTitle className="text-sm font-semibold text-loss flex items-center gap-2">
                   <ArrowUpRight className="size-4" /> Levels & Resistances Above
                 </CardTitle>
               </CardHeader>
@@ -1214,10 +1135,10 @@ export default function MarketDeskPage() {
                     {structure.nearby.above.map((lvl, i) => (
                       <div
                         key={i}
-                        className="flex items-center justify-between rounded-lg border border-rose-100 bg-rose-50/30 px-3 py-2 text-xs"
+                        className="flex items-center justify-between rounded-lg border border-loss/25 bg-loss-soft px-3 py-2 text-xs"
                       >
                         <div>
-                          <span className="font-mono font-bold text-rose-900">${num(lvl.price, 2)}</span>
+                          <span className="font-mono font-bold text-loss">${num(lvl.price, 2)}</span>
                           <span className="ml-2 text-muted-foreground">{lvl.label}</span>
                         </div>
                         <Badge variant="outline" className="font-mono text-[10px]">
@@ -1235,7 +1156,7 @@ export default function MarketDeskPage() {
             {/* Support Levels */}
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold text-emerald-600 flex items-center gap-2">
+                <CardTitle className="text-sm font-semibold text-profit flex items-center gap-2">
                   <ArrowDownRight className="size-4" /> Levels & Supports Below
                 </CardTitle>
               </CardHeader>
@@ -1245,10 +1166,10 @@ export default function MarketDeskPage() {
                     {structure.nearby.below.map((lvl, i) => (
                       <div
                         key={i}
-                        className="flex items-center justify-between rounded-lg border border-emerald-100 bg-emerald-50/30 px-3 py-2 text-xs"
+                        className="flex items-center justify-between rounded-lg border border-profit/25 bg-profit-soft px-3 py-2 text-xs"
                       >
                         <div>
-                          <span className="font-mono font-bold text-emerald-900">${num(lvl.price, 2)}</span>
+                          <span className="font-mono font-bold text-profit">${num(lvl.price, 2)}</span>
                           <span className="ml-2 text-muted-foreground">{lvl.label}</span>
                         </div>
                         <Badge variant="outline" className="font-mono text-[10px]">

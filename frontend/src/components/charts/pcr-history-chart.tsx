@@ -111,11 +111,11 @@ export function PcrHistoryChart({
         </div>
 
         {/* Metric Selector Toggle */}
-        <div className="flex items-center rounded-lg border bg-muted/40 p-1">
+        <div className="flex items-center rounded-lg bg-secondary/60 p-1">
           <button
             type="button"
             onClick={() => setMetric("pcr")}
-            className={`rounded-md px-2.5 py-0.5 text-xs font-semibold transition-all ${
+            className={`rounded-md px-2.5 py-0.5 text-xs font-semibold transition-colors ${
               metric === "pcr"
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -126,7 +126,7 @@ export function PcrHistoryChart({
           <button
             type="button"
             onClick={() => setMetric("iv")}
-            className={`rounded-md px-2.5 py-0.5 text-xs font-semibold transition-all ${
+            className={`rounded-md px-2.5 py-0.5 text-xs font-semibold transition-colors ${
               metric === "iv"
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -137,7 +137,7 @@ export function PcrHistoryChart({
           <button
             type="button"
             onClick={() => setMetric("oi")}
-            className={`rounded-md px-2.5 py-0.5 text-xs font-semibold transition-all ${
+            className={`rounded-md px-2.5 py-0.5 text-xs font-semibold transition-colors ${
               metric === "oi"
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -151,19 +151,19 @@ export function PcrHistoryChart({
       <CardContent className="space-y-3 pt-2">
         {/* KPI Strip */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 font-mono text-xs">
-          <div className="rounded border bg-muted/20 p-2">
+          <div className="rounded bg-secondary/60 p-2">
             <div className="text-[10px] text-muted-foreground uppercase">PCR (Open Interest)</div>
             <div className="font-bold text-foreground text-sm">{latest?.pcr_oi ? latest.pcr_oi.toFixed(3) : "—"}</div>
           </div>
-          <div className="rounded border bg-muted/20 p-2">
+          <div className="rounded bg-secondary/60 p-2">
             <div className="text-[10px] text-muted-foreground uppercase">PCR (Volume)</div>
             <div className="font-bold text-foreground text-sm">{latest?.pcr_volume ? latest.pcr_volume.toFixed(3) : "—"}</div>
           </div>
-          <div className="rounded border bg-muted/20 p-2">
+          <div className="rounded bg-secondary/60 p-2">
             <div className="text-[10px] text-muted-foreground uppercase">Max Pain Strike</div>
             <div className="font-bold text-foreground text-sm">${latest?.max_pain ? num(latest.max_pain, 0) : "—"}</div>
           </div>
-          <div className="rounded border bg-muted/20 p-2">
+          <div className="rounded bg-secondary/60 p-2">
             <div className="text-[10px] text-muted-foreground uppercase">25Δ Skew</div>
             <div className="font-bold text-foreground text-sm">{latest?.skew_25d ? `${(latest.skew_25d * 100).toFixed(1)}%` : "—"}</div>
           </div>
@@ -180,38 +180,38 @@ export function PcrHistoryChart({
                     <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="timeStr" tick={{ fontSize: 10, fill: "#64748b" }} tickLine={false} />
-                <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10, fill: "#64748b" }} tickLine={false} />
-                <ReferenceLine y={1.0} stroke="#94a3b8" strokeDasharray="3 3" label={{ value: "1.0 Neutral", fill: "#94a3b8", fontSize: 10, position: "insideTopRight" }} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--chart-grid)" />
+                <XAxis dataKey="timeStr" tick={{ fontSize: 10, fill: "var(--chart-text)" }} tickLine={false} />
+                <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10, fill: "var(--chart-text)" }} tickLine={false} />
+                <ReferenceLine y={1.0} stroke="var(--chart-ref)" strokeDasharray="3 3" label={{ value: "1.0 Neutral", fill: "var(--chart-ref)", fontSize: 10, position: "insideTopRight" }} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "11px" }}
+                  contentStyle={{ backgroundColor: "var(--popover)", color: "var(--popover-foreground)", borderRadius: 12, border: "none", boxShadow: "0 8px 30px rgb(0 0 0 / 0.16)", fontSize: 12 }}
                   formatter={(val: unknown) => [String(val), "Put/Call OI"]}
                 />
-                <Area type="monotone" dataKey="pcrOi" stroke="#0ea5e9" strokeWidth={2} fillOpacity={1} fill="url(#pcrGradient)" />
-                <Line type="monotone" dataKey="pcrVol" stroke="#f59e0b" strokeWidth={1.5} dot={false} />
+                <Area type="monotone" dataKey="pcrOi" stroke="#0ea5e9" strokeWidth={2} fillOpacity={1} fill="url(#pcrGradient)" animationDuration={450} animationEasing="ease-out" />
+                <Line type="monotone" dataKey="pcrVol" stroke="#f59e0b" strokeWidth={1.5} dot={false} animationDuration={450} animationEasing="ease-out" />
               </AreaChart>
             ) : metric === "iv" ? (
               <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="timeStr" tick={{ fontSize: 10, fill: "#64748b" }} tickLine={false} />
-                <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10, fill: "#64748b" }} tickLine={false} unit="%" />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--chart-grid)" />
+                <XAxis dataKey="timeStr" tick={{ fontSize: 10, fill: "var(--chart-text)" }} tickLine={false} />
+                <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10, fill: "var(--chart-text)" }} tickLine={false} unit="%" />
                 <Tooltip
-                  contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "11px" }}
+                  contentStyle={{ backgroundColor: "var(--popover)", color: "var(--popover-foreground)", borderRadius: 12, border: "none", boxShadow: "0 8px 30px rgb(0 0 0 / 0.16)", fontSize: 12 }}
                   formatter={(val: unknown) => [`${val}%`, "ATM IV"]}
                 />
-                <Line type="monotone" dataKey="atmIvPct" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="atmIvPct" stroke="#8b5cf6" strokeWidth={2} dot={false} animationDuration={450} animationEasing="ease-out" />
               </LineChart>
             ) : (
               <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="timeStr" tick={{ fontSize: 10, fill: "#64748b" }} tickLine={false} />
-                <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10, fill: "#64748b" }} tickLine={false} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--chart-grid)" />
+                <XAxis dataKey="timeStr" tick={{ fontSize: 10, fill: "var(--chart-text)" }} tickLine={false} />
+                <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10, fill: "var(--chart-text)" }} tickLine={false} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "11px" }}
+                  contentStyle={{ backgroundColor: "var(--popover)", color: "var(--popover-foreground)", borderRadius: 12, border: "none", boxShadow: "0 8px 30px rgb(0 0 0 / 0.16)", fontSize: 12 }}
                 />
-                <Area type="monotone" dataKey="callOi" stackId="1" stroke="#10b981" fill="#10b981" fillOpacity={0.6} name="Call OI" />
-                <Area type="monotone" dataKey="putOi" stackId="1" stroke="#ef4444" fill="#ef4444" fillOpacity={0.6} name="Put OI" />
+                <Area type="monotone" dataKey="callOi" stackId="1" stroke="#10b981" fill="#10b981" fillOpacity={0.6} name="Call OI" animationDuration={450} animationEasing="ease-out" />
+                <Area type="monotone" dataKey="putOi" stackId="1" stroke="#ef4444" fill="#ef4444" fillOpacity={0.6} name="Put OI" animationDuration={450} animationEasing="ease-out" />
               </AreaChart>
             )}
           </ResponsiveContainer>
