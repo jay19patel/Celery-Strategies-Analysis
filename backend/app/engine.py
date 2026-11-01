@@ -118,6 +118,7 @@ class Engine:
         sch.every("market.verdicts", "Mark the cards' past claims", 900, self.market.settle)
         sch.every("strategies.run", "Directional strategies on closed bars", 20, self.runner.run)
         sch.every("guard.structures", "Exits: take profit, stop loss, expiry", 5, self.guard.check_structures)
+        sch.every("guard.daily", "Daily loss limit", 30, self.guard.check_daily_loss, run_now=True)
         sch.every("auto.cycle", "Auto options decision", s.auto_interval_minutes * 60, self.auto.cycle)
         sch.windowed(
             "zerohero.scan",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -101,3 +102,17 @@ def test_event_window_trigger_schedules_at_active_interval_when_inside() -> None
     next_fire = trigger.get_next_fire_time(prev_fire, now_dt)
     assert next_fire is not None
     assert next_fire.timestamp() == pytest.approx(now_dt.timestamp() + 45.0, abs=1.0)
+
+
+async def test_the_engine_schedules_every_guard(tmp_path: Path) -> None:
+    """The daily loss limit is a job like any other: dropped from the schedule, it silently stops
+    halting anything and the day's starting equity is never recorded."""
+    from app.config import Config
+    from app.engine import Engine
+
+    engine = Engine(Config(db_path=str(tmp_path / "test.db"), engine_enabled=False))
+    engine._schedule()
+    try:
+        assert {"guard.structures", "guard.daily", "auto.cycle", "housekeeping"} <= set(engine.scheduler.jobs)
+    finally:
+        engine.scheduler.shutdown()
