@@ -17,7 +17,7 @@ router = APIRouter()
 
 @router.websocket("/ws")
 async def stream(ws: WebSocket) -> None:
-    if not security.valid_session(ws.cookies.get(security.COOKIE)):
+    if not (security.valid_session(ws.cookies.get(security.COOKIE)) or security.redeem_ticket(ws.query_params.get("ticket"))):
         await ws.close(code=4401)
         return
     await ws.accept()

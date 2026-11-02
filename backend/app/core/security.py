@@ -20,7 +20,9 @@ from app.config import DEFAULT_AUTH_PIN, get_config
 from app.core.db import kv_get, kv_set
 
 COOKIE = "tb_session"
+TICKET_SECONDS = 60
 _hasher = PasswordHasher()
+_redeemed: dict[str, int] = {}  # ticket nonce -> its expiry: each ticket opens one socket
 
 
 def _secret() -> bytes:
@@ -80,3 +82,28 @@ def valid_session(token: str | None, now: float | None = None) -> bool:
         return False
     expected = hmac.new(_secret(), expires.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(sig, expected)
+
+
+def _sign_ticket(body: str) -> str:
+    return hmac.new(_secret(), f"ws:{body}".encode(), hashlib.sha256).hexdigest()  # never a session's signature
+
+
+def issue_ticket(now: float | None = None) -> str:
+    """A one-time pass to /ws for a dashboard served from another host than the backend: its session
+    cookie belongs to the dashboard's host, so the browser never sends it to the backend's socket."""
+    body = f"{int((now or time.time()) + TICKET_SECONDS)}.{secrets.token_hex(8)}"
+    return f"{body}.{_sign_ticket(body)}"
+
+
+def redeem_ticket(ticket: str | None, now: float | None = None) -> bool:
+    parts = (ticket or "").split(".")
+    if len(parts) != 3 or not parts[0].isdigit():
+        return False
+    now = now or time.time()
+    expires, nonce, sig = int(parts[0]), parts[1], parts[2]
+    if expires < now or nonce in _redeemed or not hmac.compare_digest(sig, _sign_ticket(f"{parts[0]}.{nonce}")):
+        return False
+    for old in [n for n, exp in _redeemed.items() if exp < now]:
+        del _redeemed[old]
+    _redeemed[nonce] = expires
+    return True

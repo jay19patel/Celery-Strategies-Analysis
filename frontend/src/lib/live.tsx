@@ -7,7 +7,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import useSWR, { useSWRConfig, type SWRConfiguration } from "swr";
 import { toast } from "sonner";
 
-import { fetcher } from "@/lib/api";
+import { api, fetcher } from "@/lib/api";
 import { signed } from "@/lib/format";
 import type { LiveEvent, LivePrice } from "@/lib/types";
 
@@ -40,12 +40,13 @@ const REFRESH: Record<string, string[]> = {
   DataReset: ["/portfolio", "/trading", "/auto", "/zerohero", "/strategies", "/system", "/ai", "/market", "/desk", "/notifications"],
 };
 
-function wsUrl(): string {
+async function wsUrl(): Promise<string> {
   const configured = process.env.NEXT_PUBLIC_WS_URL;
   if (configured) return configured;
-  // The dashboard's /api is proxied, but /ws is not: the socket goes to the backend's own port.
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.hostname}:8000/ws`;
+  // The dashboard's /api is proxied, but /ws is not, and the session cookie belongs to the
+  // dashboard's host: the backend says where its socket is and hands a one-time ticket into it.
+  const { url, ticket } = await api<{ url: string; ticket: string }>("/auth/ws");
+  return `${url}?ticket=${encodeURIComponent(ticket)}`;
 }
 
 function announce(e: LiveEvent) {
@@ -92,9 +93,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
 
-    const connect = () => {
+    const connect = async () => {
       try {
-        ws = new WebSocket(wsUrl());
+        const url = await wsUrl();
+        if (stopped) return;
+        ws = new WebSocket(url);
       } catch {
         setConnected(false);
         if (!stopped) {
@@ -132,7 +135,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       };
       ws.onerror = () => ws?.close();
     };
-    connect();
+    void connect();
     return () => {
       stopped = true;
       clearTimeout(timer);

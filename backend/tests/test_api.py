@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -70,6 +71,22 @@ def test_the_live_stream_needs_the_session(client: TestClient) -> None:
     login(client)
     with client.websocket_connect("/ws") as ws:
         assert ws.receive_json()["type"] == "Hello"
+
+
+def test_a_dashboard_on_another_host_gets_in_with_a_one_time_ticket(client: TestClient) -> None:
+    """The session cookie belongs to the dashboard's host, so a socket to the backend's own host
+    carries none: the dashboard asks for a ticket through its /api proxy and spends it once."""
+    assert client.get("/api/auth/ws").status_code == 401  # a ticket needs the session
+    login(client)
+    r = client.get("/api/auth/ws", headers={"host": "tbapis.example.com", "x-forwarded-proto": "https"}).json()
+    assert r["url"] == "wss://tbapis.example.com/ws"
+    client.cookies.clear()  # the browser's socket to the backend's host: no cookie, only the ticket
+    with client.websocket_connect(f"/ws?ticket={r['ticket']}") as ws:
+        assert ws.receive_json()["type"] == "Hello"
+    for bad in (r["ticket"], "1.2.3", security.issue_session()):  # spent, forged, a session posing as one
+        with pytest.raises(WebSocketDisconnect), client.websocket_connect(f"/ws?ticket={bad}") as ws:
+            ws.receive_json()
+    assert not security.redeem_ticket(security.issue_ticket(now=time.time() - 120))  # expired
 
 
 def test_settings_never_return_a_secret(client: TestClient) -> None:

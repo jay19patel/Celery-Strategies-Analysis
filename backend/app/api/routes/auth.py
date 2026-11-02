@@ -64,6 +64,15 @@ def session_status(request: Request) -> dict:
     return {"authenticated": ok, "using_default_pin": security.using_default_pin() if ok else None}
 
 
+@router.get("/ws")
+def ws_ticket(request: Request) -> dict:
+    """Where the live socket is and a one-time ticket into it. Asked through the same /api proxy as
+    every other call, so the Host is the backend's own public address."""
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    return {"url": f"{'wss' if proto == 'https' else 'ws'}://{request.headers.get('host', request.url.netloc)}/ws",
+            "ticket": security.issue_ticket()}
+
+
 @router.post("/pin")
 def change_pin(body: ChangePin) -> dict:
     security.change_pin(body.current, body.new)

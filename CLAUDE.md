@@ -86,7 +86,8 @@ Enforced by tests (`backend/tests`). Breaking one should fail the build.
 9. **Secrets stay in the process.** No endpoint returns a key, secret or token; `Settings.public()`
    masks them; `SettingsChanged` carries field names only; LLM keys never enter the database.
 10. **Private by default.** Every `/api` route and `/ws` needs the PIN session unless listed in
-    `PUBLIC_PATHS`; `/ws` is checked before `accept()`.
+    `PUBLIC_PATHS`; `/ws` is checked before `accept()`, on the session cookie or a one-time,
+    60-second ticket from `/api/auth/ws` (a dashboard on another host sends no cookie to it).
 11. **The model chooses, it never invents.** The AI reviewer may approve one listed candidate or
     skip; anything else is a skip, and every hard gate runs after it. What it is sent is
     `analyst.ALLOWED` — market numbers only, never a balance, position, order or P&L.
