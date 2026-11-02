@@ -13,7 +13,7 @@ from app.market.feed import MarketFeed
 from app.market.indicators import parkinson_vol, realised_vol
 from app.options import regime as regime_mod
 from app.options.assess import DEFAULT_FEE, FeeRate, assess
-from app.options.strategies import BUILDERS, CATALOG, Plan, build, custom
+from app.options.strategies import BUILDERS, CATALOG, Plan, build, custom, spec_for
 from app.settings import Settings
 
 RV_BARS = {"24h": 97, "7d": 673}
@@ -58,7 +58,8 @@ class Desk:
 
     def realised(self, underlying: str) -> dict[str, float | None]:
         """Realised volatility over 24h and 7d from the stored 15m bars (close-to-close), over 24h from
-        their ranges, and the highest of them as the reference a premium is measured against."""
+        their ranges; the highest of them is the reference a seller's premium is measured against,
+        the lowest (`floor`) the one a buyer's is — each side judged on the number least kind to it."""
         bars = self.feed.bars(chain.PERPETUALS[underlying], RV_BARS["7d"])
         last = bars[-1]["time"] if bars else 0
         cached = self._rv.get(underlying)
@@ -71,6 +72,7 @@ class Desk:
         out["range_24h"] = parkinson_vol(bars[-96:], 0.25) if len(bars) >= 96 else None
         known = [v for v in out.values() if v]
         out["reference"] = max(known) if known else None
+        out["floor"] = min(known) if known else None
         self._rv[underlying] = (last, out)
         return out
 
@@ -153,4 +155,6 @@ class Desk:
         rates = {leg.symbol: await self.fee_rate(leg.symbol) for leg in plan.legs}
         summary = chain.expiry_summary(self.quotes(plan.underlying, plan.expiry), plan.spot, time.time())
         hours = max(0.0, (plan.expiry - time.time()) / 3600)
-        return assess(plan, qty, summary.get("atm_iv"), hours, self.settings(), rates, self.realised(plan.underlying)["reference"])
+        spec = spec_for(plan.strategy)
+        rv = self.realised(plan.underlying)["floor" if spec and spec.premium == "debit" else "reference"]
+        return assess(plan, qty, summary.get("atm_iv"), hours, self.settings(), rates, rv)

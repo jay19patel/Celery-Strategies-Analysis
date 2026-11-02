@@ -408,3 +408,16 @@ async def test_the_test_set_opens_one_of_each_family_side_by_side_on_paper(env: 
     again = await env.trading.open_test_set()
     assert not [r for r in again if r.get("status") == "open"]
 
+
+
+async def test_each_side_is_judged_on_the_realised_volatility_least_kind_to_it(env: Any, monkeypatch: Any) -> None:
+    """A seller's edge is measured at the highest realised volatility, a buyer's at the lowest: with
+    the measures far apart, neither a long straddle nor a condor passes on the number that flatters it."""
+    env.configure(max_spread_pct=100, min_credit_width_pct=0, min_pop_pct=0)
+    monkeypatch.setattr(env.desk, "realised", lambda u: {"reference": 0.90, "floor": 0.05})
+    edge = lambda a: next(c for c in a["checks"] if c["name"] == "edge at realised vol")["ok"]  # noqa: E731
+    assert not edge(await env.desk.assess(env.desk.plan("BTC", "long_straddle"), 1))  # bought at 5%, it does not pay
+    assert not edge(await env.desk.assess(env.desk.plan("BTC", "iron_condor"), 1))  # sold at 90%, neither does this
+    monkeypatch.setattr(env.desk, "realised", lambda u: {"reference": 0.05, "floor": 0.90})  # the numbers each would pick
+    assert edge(await env.desk.assess(env.desk.plan("BTC", "long_straddle"), 1))
+    assert edge(await env.desk.assess(env.desk.plan("BTC", "iron_condor"), 1))

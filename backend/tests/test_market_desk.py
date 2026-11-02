@@ -99,3 +99,16 @@ async def test_the_bar_collector_fills_both_ends_and_never_rewrites() -> None:
     count = len(rows)
     await feed.collect_bars("15m")
     assert len(feed.bars("BTCUSD", 100_000)) == count  # nothing twice
+
+
+async def test_trendlines_read_a_bounded_window(desk: MarketDesk, monkeypatch: Any) -> None:
+    """Pairing every two swings over every bar is quadratic: over the full structure window it took
+    minutes of CPU on the server and starved the event loop, so trendlines see only the recent bars."""
+    from app.analysis import service, trendlines
+
+    seen: list[int] = []
+    real = trendlines.analyze_trendlines
+    monkeypatch.setattr(trendlines, "analyze_trendlines", lambda bars: seen.append(len(bars)) or real(bars))
+    monkeypatch.setattr(service, "TRENDLINE_BARS", 300)  # under the fixture's 800 stored bars
+    structure = await desk.structure("BTC")
+    assert seen == [300] and structure["bars"] > 300  # the rest of the structure still reads every bar

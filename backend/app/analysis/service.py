@@ -49,6 +49,9 @@ log = logging.getLogger(__name__)
 
 OUTLOOK_BARS = 40_000  # a year of 15m bars is 35,040
 STRUCTURE_BARS = 5_000
+# Trendlines pair every two swings and walk the bars after them: 5,000 bars took minutes of CPU a
+# bar on the server and starved the event loop. Three weeks find the same lines near the price.
+TRENDLINE_BARS = 2_000
 PROFILE_BASE_BARS = 3 * 1440  # three days of minutes
 CONTEXT_BARS = 700  # a week of 15m bars for the analyst's market context
 OPTIONS_HISTORY_DAYS = 30
@@ -167,7 +170,7 @@ class MarketDesk:
                 "flow": orderflow.read(bars).to_dict(),
                 "levels": reading.levels_block(bars),
                 "smc": structure.read(bars).to_dict(),
-                "trendlines": trendlines.analyze_trendlines(bars),
+                "trendlines": trendlines.analyze_trendlines(bars[-TRENDLINE_BARS:]),
                 "fibonacci": fibonacci.read(bars).to_dict(),
             }
 
