@@ -36,7 +36,7 @@ MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@+\-]{2,120}$")
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
 Underlying = Literal["BTC", "ETH"]
-Directional = Literal["ema_vwap", "ema_9_15", "pcr_options", "supertrend"]
+Directional = Literal["ema_vwap", "ema_9_15", "pcr_options", "supertrend", "trend_4h_short", "trend_4h_long"]
 Strategy = Literal[
     "iron_condor", "iron_butterfly", "short_strangle", "short_straddle",
     "long_straddle", "bull_put_spread", "bear_call_spread",
@@ -69,7 +69,9 @@ class Settings(BaseModel):
     auto_options: bool = True
     # Off by default: Supertrend and the 9/15 cross lost before costs as well as after them over the
     # stored year of 15m bars and month of 1m bars (`python -m app.backtest.perp`). Opt in to test them.
-    directional_strategies: list[Directional] = Field(default_factory=lambda: ["ema_vwap", "pcr_options"])
+    # The 4h trend short held on two years of BTC+ETH and on eight perpetuals it was not chosen on;
+    # the long only on those eight, so it is off (`app/strategies/trend_4h.py`).
+    directional_strategies: list[Directional] = Field(default_factory=lambda: ["ema_vwap", "pcr_options", "trend_4h_short"])
     # Two switches, as in v3: the strategy itself above, and which underlyings it may trade here.
     # A strategy absent from this map, or mapped to an empty list, runs on every enabled underlying.
     strategy_symbols: dict[Directional, list[Underlying]] = Field(default_factory=dict)

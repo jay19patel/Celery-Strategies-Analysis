@@ -104,6 +104,7 @@ async def test_a_position_on_the_perpetual_does_not_take_the_options_slot(env: A
     # The option structure it just opened does, though — that is the per-underlying cap doing its job.
     again = await auto.decide("BTC", ["paper"])
     assert again["action"] == "skip" and "no room" in again["reason"] and "options" in again["reason"]
+    assert again["id"] is None and len(AutoTrader.decisions()) == 1  # a skip before any broker is not stored
 
 
 def test_what_goes_to_the_model_is_market_data_only(env: Any) -> None:

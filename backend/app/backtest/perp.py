@@ -157,13 +157,13 @@ def report(strategy: Strategy, bars: list[dict[str, Any]], underlying: str, cost
 
 
 def stored_bars(underlying: str, interval: str) -> list[dict[str, Any]]:
-    """The strategy's own bars from the database: 15m as stored, anything else folded from 1m."""
+    """The strategy's own bars from the database: folded from the year of 15m bars, or from the
+    month of 1m bars for a timeframe below 15m."""
     from app.market.feed import MarketFeed
 
     symbol = PERPETUALS[underlying]
-    if interval == "15m":
-        return MarketFeed.bars(symbol, 100_000, "15m")
-    return resample.fold(MarketFeed.bars(symbol, 100_000, "1m"), "1m", interval)
+    source = "15m" if resample.seconds(interval) >= 900 else "1m"
+    return resample.fold(MarketFeed.bars(symbol, 100_000, source), source, interval)
 
 
 def main() -> None:
@@ -177,7 +177,7 @@ def main() -> None:
     # Delta India perpetual taker fee ~0.05% each way plus about a tick of spread; check the product spec.
     parser.add_argument("--cost-pct", type=float, default=0.11, help="round trip: fees both ways and the spread, %% of notional")
     parser.add_argument("--funding-pct", type=float, default=0.01, help="paid per 8h held, %% of notional")
-    parser.add_argument("--max-hold-hours", type=float, default=24.0)
+    parser.add_argument("--max-hold-hours", type=float, default=None, help="default: the strategy's own, else 24")
     args = parser.parse_args()
 
     strategy = REGISTRY[args.strategy]
@@ -185,7 +185,8 @@ def main() -> None:
         parser.error(f"{args.strategy} reads the market desk or the options history, which this backtest does not replay")
     init_db(get_config().db_path)
     bars = stored_bars(args.underlying, strategy.interval)
-    print(json.dumps(report(strategy, bars, args.underlying, args.cost_pct, args.funding_pct, args.max_hold_hours), indent=2))
+    hold = args.max_hold_hours or strategy.max_hold_hours or 24.0
+    print(json.dumps(report(strategy, bars, args.underlying, args.cost_pct, args.funding_pct, hold), indent=2))
 
 
 if __name__ == "__main__":

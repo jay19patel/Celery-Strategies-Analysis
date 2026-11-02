@@ -1,4 +1,4 @@
-import { Activity, Bot, CalendarDays, Crosshair, Layers, LineChart, ListChecks, Radar, Settings, Sparkles, Zap, type LucideIcon } from "lucide-react";
+import { Activity, Bell, Bot, CalendarDays, Crosshair, Layers, LineChart, ListChecks, Radar, Settings, Sparkles, Zap, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -26,6 +26,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
       { href: "/performance", label: "Performance", icon: LineChart, tint: "bg-[#34c759]" },
       { href: "/journal", label: "Journal", icon: CalendarDays, tint: "bg-[#ff3b30]" },
       { href: "/orders", label: "Orders", icon: ListChecks, tint: "bg-[#af52de]" },
+      { href: "/notifications", label: "Notifications", icon: Bell, tint: "bg-[#ff2d55]" },
     ],
   },
   {

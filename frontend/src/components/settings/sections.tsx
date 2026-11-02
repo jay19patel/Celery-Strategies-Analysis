@@ -149,14 +149,42 @@ export function BrokersTab({ onCleared }: { onCleared: (r: SettingsResponse) => 
 
 // -- paper --------------------------------------------------------------------------------
 
+type TestRow = { underlying: string; kind: string; label?: string; status?: string; error?: string; refused?: string };
+
 export function PaperTab() {
+  const testAll = async () => {
+    const rows = await api<TestRow[]>("/trading/test-all", "POST");
+    for (const r of rows) {
+      const title = `${r.underlying} ${r.kind}`;
+      if (r.status === "open") toast.success(`${title}: opened`, { description: r.label });
+      else toast.error(`${title}: not opened`, { description: r.refused || r.error || r.status });
+    }
+  };
   return (
-    <Section title="Paper account" description="The starting balance applies to a fresh paper account (reset it on the Performance page).">
-      <FieldGrid>
-        <NumberField name="paper_starting_balance" label="Starting balance (USD)" />
-        <NumberField name="paper_slippage_pct" label="Slippage when a side is empty (%)" hint="Applied to the mark only when the leg has no bid or ask." />
-      </FieldGrid>
-    </Section>
+    <div className="space-y-6">
+      <Section title="Paper account" description="The starting balance applies to a fresh paper account (reset it on the Performance page).">
+        <FieldGrid>
+          <NumberField name="paper_starting_balance" label="Starting balance (USD)" />
+          <NumberField name="paper_slippage_pct" label="Slippage when a side is empty (%)" hint="Applied to the mark only when the leg has no bid or ask." />
+        </FieldGrid>
+      </Section>
+      <Section
+        title="Test all positions"
+        description="On paper only: for BTC and ETH, one iron condor, one zero-hero call and one perpetual (BTC sell, ETH buy), all at the smallest size and through the normal gates. A slot already taken is reported, not forced."
+      >
+        <Confirm
+          title="Open test positions on paper?"
+          description="Up to six paper positions open now and are managed by the guard like any other. Close them from Positions."
+          confirmLabel="Open them"
+          onConfirm={() => testAll().catch((e) => toast.error(message(e)))}
+          trigger={(open) => (
+            <Button variant="outline" size="sm" onClick={open}>
+              <PlugZap /> Open test positions
+            </Button>
+          )}
+        />
+      </Section>
+    </div>
   );
 }
 
@@ -278,8 +306,8 @@ export function RiskTab() {
         <FieldGrid>
           <NumberField name="risk_per_trade_pct" label="Worst case per structure (% of equity)" hint="Auto-trader lot sizing." />
           <NumberField name="max_lots" label="Maximum lots per structure" integer />
-          <NumberField name="max_open_structures" label="Maximum open structures" integer />
-          <NumberField name="max_per_underlying" label="Maximum per underlying" integer />
+          <NumberField name="max_open_structures" label="Maximum open structures" integer hint="Auto-trader only: manual tickets are not counted or capped." />
+          <NumberField name="max_per_underlying" label="Maximum per underlying" integer hint="Auto-trader only." />
           <NumberField name="daily_loss_limit_pct" label="Daily loss limit (% of equity)" hint="0 switches it off." />
           <SelectField
             name="day_timezone"

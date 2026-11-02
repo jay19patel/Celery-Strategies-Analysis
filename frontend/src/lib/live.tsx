@@ -23,13 +23,13 @@ const LiveContext = createContext<Live>({ connected: false, prices: {}, events: 
 
 // Which cached reads each event makes stale.
 const REFRESH: Record<string, string[]> = {
-  StructureOpened: ["/trading", "/portfolio", "/auto"],
-  StructureClosed: ["/trading", "/portfolio", "/auto"],
-  StructureFailed: ["/trading", "/portfolio"],
-  StructureError: ["/trading", "/portfolio"],
-  RiskHalt: ["/trading", "/portfolio", "/auto"],
-  RiskResumed: ["/portfolio", "/auto"],
-  KillSwitch: ["/trading", "/portfolio"],
+  StructureOpened: ["/trading", "/portfolio", "/auto", "/notifications"],
+  StructureClosed: ["/trading", "/portfolio", "/auto", "/notifications"],
+  StructureFailed: ["/trading", "/portfolio", "/notifications"],
+  StructureError: ["/trading", "/portfolio", "/notifications"],
+  RiskHalt: ["/trading", "/portfolio", "/auto", "/notifications"],
+  RiskResumed: ["/portfolio", "/auto", "/notifications"],
+  KillSwitch: ["/trading", "/portfolio", "/notifications"],
   AutoDecision: ["/auto", "/portfolio/journal"],
   ZeroHeroDecision: ["/zerohero", "/portfolio/journal"],
   AiBrief: ["/ai"],
@@ -37,7 +37,7 @@ const REFRESH: Record<string, string[]> = {
   Signal: ["/strategies", "/trading", "/portfolio"],
   MarketAnalysis: ["/desk"],
   PaperReset: ["/portfolio", "/trading"],
-  DataReset: ["/portfolio", "/trading", "/auto", "/zerohero", "/strategies", "/system", "/ai", "/market", "/desk"],
+  DataReset: ["/portfolio", "/trading", "/auto", "/zerohero", "/strategies", "/system", "/ai", "/market", "/desk", "/notifications"],
 };
 
 function wsUrl(): string {

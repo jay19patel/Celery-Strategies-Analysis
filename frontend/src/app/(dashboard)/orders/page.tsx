@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { BrokerTabs, type BrokerFilter } from "@/components/shared/broker-tabs";
 import { PageHeader } from "@/components/shared/page";
+import { Pager } from "@/components/shared/pager";
 import { Empty, LoadError, Loading } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -11,17 +12,26 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { dateTime, price, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
-import type { OrderRecord } from "@/lib/types";
+import type { OrderPage, OrderRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const STATUS_TONE = { filled: "profit", failed: "loss", unknown: "warn", pending: "default" } as const;
 type StatusFilter = "all" | OrderRecord["status"];
+const PAGE_SIZE = 20;
 
 export default function OrdersPage() {
   const [broker, setBroker] = useState<BrokerFilter>("");
   const [status, setStatus] = useState<StatusFilter>("all");
-  const { data, error, isLoading } = useApi<OrderRecord[]>(`/trading/orders?broker=${broker}&limit=500`, { refreshInterval: 10_000 });
-  const rows = (data ?? []).filter((o) => status === "all" || o.status === status);
+  const [page, setPage] = useState(1);
+  const { data, error, isLoading } = useApi<OrderPage>(
+    `/trading/orders/page?broker=${broker}&status=${status === "all" ? "" : status}&page=${page}&size=${PAGE_SIZE}`,
+    { refreshInterval: 10_000 },
+  );
+  const rows = data?.rows ?? [];
+  const filter = <T,>(set: (v: T) => void) => (v: T) => {
+    set(v);
+    setPage(1); // a new filter starts from its newest orders
+  };
 
   return (
     <>
@@ -30,8 +40,8 @@ export default function OrdersPage() {
         description="Every leg order sent to a broker: entries, closes, unwinds and settlements."
         actions={
           <>
-            <BrokerTabs value={broker} onChange={setBroker} />
-            <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
+            <BrokerTabs value={broker} onChange={filter(setBroker)} />
+            <Select value={status} onValueChange={(v) => filter(setStatus)(v as StatusFilter)}>
               <SelectTrigger size="sm" className="w-32">
                 <SelectValue />
               </SelectTrigger>
@@ -116,6 +126,7 @@ export default function OrdersPage() {
               ))}
             </TableBody>
           </Table>
+          {data && <Pager data={data} label="orders" onPage={setPage} />}
           </>
         )}
       </Card>

@@ -6,6 +6,7 @@ import { Lock, OctagonX } from "lucide-react";
 import { toast } from "sonner";
 
 import { ALL_NAV, isActive } from "@/components/layout/nav";
+import { NotificationsBell } from "@/components/layout/notifications-bell";
 import { Confirm } from "@/components/shared/confirm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -89,6 +90,8 @@ export function Header() {
             </Button>
           )}
         />
+
+        <NotificationsBell />
 
         <Button variant="outline" size="icon-sm" onClick={lock} title="Lock the dashboard" className="rounded-full" aria-label="Lock">
           <Lock className="size-4" />

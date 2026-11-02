@@ -325,7 +325,7 @@ export default function ZeroHeroPage() {
               </div>
             ))
           ) : (
-            <Empty title="No scans recorded yet">The scan writes a row every cycle once zero-hero is switched on.</Empty>
+            <Empty title="No scans recorded yet">A row is written only when a scan reaches a broker (open, shadow or refusal); scans that skip are not stored.</Empty>
           )}
         </CardContent>
       </Card>

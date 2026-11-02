@@ -14,6 +14,8 @@ from app.strategies.ema_9_15 import Ema915
 from app.strategies.ema_vwap import MIN_SESSION_BARS, EmaVwap, session_vwap
 from app.strategies.pcr_options import MIN_SHIFT, PcrOptions
 from app.strategies.supertrend import REWARD_MULTIPLE, SupertrendTrend
+from app.strategies.trend_4h import MIN_BARS, STOP_ATR, Trend4hLong, Trend4hShort
+from app.strategies.trend_4h import REWARD_MULTIPLE as TREND_REWARD
 
 DAY = 86_400
 MIDNIGHT = 1_700_006_400  # 00:00 UTC
@@ -246,4 +248,57 @@ def test_no_flip_is_no_signal() -> None:
 def test_every_strategy_describes_its_own_stop_and_target() -> None:
     for strategy in REGISTRY.values():
         info = strategy.describe()
-        assert info["stop_rule"] and info["target_rule"] and info["interval"] in ("5m", "15m")
+        assert info["stop_rule"] and info["target_rule"] and info["interval"] in ("5m", "15m", "4h")
+
+
+# -- 4h trend ----------------------------------------------------------------------------------------
+
+FOUR_H = 14_400
+
+
+def wave(drift: float, flip: int) -> list[Candle]:
+    """A 4h series drifting `drift` a bar with swings on top, cut on the first bar past MIN_BARS where
+    Supertrend flips to `flip`."""
+    closes = [200 + drift * i + 4 * math.sin(i / 7) for i in range(1200)]
+    bars = [Candle(i * FOUR_H, closes[i - 1] if i else c, max(closes[i - 1] if i else c, c) + 0.3,
+                   min(closes[i - 1] if i else c, c) - 0.3, c, 1.0) for i, c in enumerate(closes)]
+    st = supertrend([c.high for c in bars], [c.low for c in bars], [c.close for c in bars], 10, 3.0)
+    offset = len(bars) - len(st)
+    for i in range(MIN_BARS - offset, len(st)):
+        if st[i][1] == flip and st[i - 1][1] != flip:
+            return bars[: offset + i + 1]
+    raise AssertionError("the fixture never flips")
+
+
+def four_h(candles: list[Candle]) -> Context:
+    return Context("BTCUSD", "BTC", "4h", candles, cost_pct=0.12)
+
+
+def test_a_4h_flip_down_below_the_200_ema_sells_with_a_wide_stop_and_a_far_target() -> None:
+    bars = wave(-0.08, -1)
+    d = Trend4hShort().decide(four_h(bars))
+    assert d.side == "sell", d.reason
+    risk = (d.stop or 0) - (d.entry or 0)
+    assert risk > 0
+    assert math.isclose((d.entry or 0) - (d.target or 0), TREND_REWARD * risk, rel_tol=1e-3)
+    assert Trend4hLong().decide(four_h(bars)).side is None  # one side each
+
+
+def test_a_4h_flip_up_above_the_200_ema_buys() -> None:
+    d = Trend4hLong().decide(four_h(wave(0.08, 1)))
+    assert d.side == "buy", d.reason
+    assert (d.stop or 0) < (d.entry or 0) < (d.target or 0)
+
+
+def test_a_4h_flip_against_the_200_ema_is_refused() -> None:
+    d = Trend4hLong().decide(four_h(wave(-0.08, 1)))  # a bounce inside a downtrend
+    assert d.side is None and "200 EMA" in d.reason
+
+
+def test_the_4h_trend_waits_for_a_settled_200_ema() -> None:
+    d = Trend4hShort().decide(four_h(wave(-0.08, -1)[-(MIN_BARS - 1):]))
+    assert d.side is None and f"needs {MIN_BARS}" in d.reason
+
+
+def test_the_4h_trend_holds_for_days() -> None:
+    assert (Trend4hShort.max_hold_hours or 0) >= 24 * 5 and STOP_ATR >= 1.5

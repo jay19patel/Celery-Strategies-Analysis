@@ -292,6 +292,33 @@ export interface Structure {
   orders?: OrderRecord[];
 }
 
+export interface AppNotification {
+  id: number;
+  ts: number;
+  type: string;
+  level: "info" | "warning" | "error";
+  message: string;
+  data: Record<string, unknown> | null;
+  read_at: number | null;
+}
+
+export interface NotificationPage {
+  rows: AppNotification[];
+  total: number;
+  unread: number;
+  page: number;
+  pages: number;
+  size: number;
+}
+
+export interface OrderPage {
+  rows: OrderRecord[];
+  total: number;
+  page: number;
+  pages: number;
+  size: number;
+}
+
 export interface Account {
   broker: Broker;
   currency: string;

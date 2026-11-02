@@ -90,8 +90,9 @@ Enforced by tests (`backend/tests`). Breaking one should fail the build.
 11. **The model chooses, it never invents.** The AI reviewer may approve one listed candidate or
     skip; anything else is a skip, and every hard gate runs after it. What it is sent is
     `analyst.ALLOWED` — market numbers only, never a balance, position, order or P&L.
-12. **Every decision is written down.** Each auto cycle is a `Decision` row with what it saw, every
-    strategy it considered and why each was dropped, the model's answer, and what each broker did.
+12. **Every attempt is written down.** Each auto or zero-hero cycle that reaches a broker is a
+    `Decision` row with what it saw, every strategy it considered and why each was dropped, the
+    model's answer, and what each broker did. A skip before any broker is not stored.
 13. **Bounded.** Ticks are never stored. Bars (15m a year, 1m 30 days) and option-chain snapshots
     (`data/chains/`, every 5 min, 90 days) are kept for backtests; events and briefs are pruned after
     30 days, decisions after 90.
@@ -132,7 +133,7 @@ invalidates in `lib/live.tsx`.
 ./start_backend.sh         # backend only (production mode, single worker)
 make install               # .venv with the backend, npm install for the dashboard
 make check                 # ruff, eslint, tsc, pytest
-cd backend && ../.venv/bin/python -m app.backtest.perp supertrend --underlying BTC   # perp backtest on stored bars
+cd backend && ../.venv/bin/python -m app.backtest.perp trend_4h_short --underlying BTC   # perp backtest on stored bars
 ```
 
 Tests run the engine's parts over a real captured option chain (`tests/fixtures/btc_chain.json`)

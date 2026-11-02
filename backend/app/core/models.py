@@ -125,6 +125,7 @@ class EventLog(SQLModel, table=True):
     level: str  # info | warning | error
     message: str
     data: Any = Field(default=None, sa_column=Column(JSON))
+    read_at: float | None = None  # when it was read as a notification
 
 
 class Bar(SQLModel, table=True):

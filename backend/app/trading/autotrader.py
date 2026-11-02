@@ -105,7 +105,7 @@ class AutoTrader:
         """
         with session() as db:
             rows = db.exec(select(Structure).where(Structure.broker == broker, col(Structure.status).in_(HELD))).all()
-        held = [st for st in rows if not is_directional(st)]
+        held = [st for st in rows if st.source == "auto" and not is_directional(st)]  # a dashboard ticket is not an auto slot
         if len(held) >= s.max_open_structures:
             return f"holds {len(held)} option structures (max {s.max_open_structures})"
         if sum(st.underlying == underlying for st in held) >= s.max_per_underlying:
@@ -152,6 +152,10 @@ class AutoTrader:
         except Exception as exc:  # a bug must not stop the scheduler; it is recorded and shown
             log.exception("auto_decision_failed underlying=%s", underlying)
             dec.action, dec.reason = "error", f"{type(exc).__name__}: {exc}"
+        # A skip that never reached a broker (no room, no expiry, no strategy passed) is not written
+        # down: `_open` saves its row first, so every attempt on a broker still is.
+        if dec.action == "skip" and dec.id is None:
+            return dec.model_dump()
         with session() as db:
             db.add(dec)
             db.commit()

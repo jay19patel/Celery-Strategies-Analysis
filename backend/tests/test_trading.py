@@ -11,7 +11,7 @@ from sqlmodel import select
 
 from app.brokers.base import Fill, LegOrder
 from app.core.db import session
-from app.core.models import OrderRecord, PaperAccount
+from app.core.models import OrderRecord, PaperAccount, Structure
 from app.errors import BrokerError, BrokerTimeout, Refused
 from app.trading.guard import Guard
 from app.trading.risk import halt_reason
@@ -127,9 +127,11 @@ async def test_an_unknown_outcome_blocks_the_broker_until_resolved(env: Any) -> 
 
 async def test_gates_refuse_with_the_rule_named(env: Any) -> None:
     plan = condor(env)
-    await env.trading.open("paper", plan, QTY, "manual", "req-gate-1")
+    await env.trading.open("paper", plan, QTY, "auto", "req-gate-1")
     with pytest.raises(Refused, match="max per underlying"):
-        await env.trading.open("paper", plan, QTY, "manual", "req-gate-2")
+        await env.trading.open("paper", plan, QTY, "auto", "req-gate-2")
+    # The caps pace the auto-trader only: a dashboard ticket opens beside its structure and takes no slot.
+    assert (await env.trading.open("paper", plan, QTY, "manual", "req-gate-manual"))["status"] == "open"
     env.configure(max_per_underlying=5)
     with pytest.raises(Refused, match="quantity"):
         await env.trading.open("paper", plan, 10_000, "manual", "req-gate-3")
@@ -390,3 +392,19 @@ async def test_the_valuation_splits_fees_paid_exit_fees_and_the_spread(env: Any)
     assert live["exit_fees"] == pytest.approx(_exit_fees(env, view), abs=1e-5)
     spread = live["pnl_mid"] - live["pnl"] - live["exit_fees"]
     assert spread > 0  # buying back shorts at the ask and selling longs at the bid costs the spread
+
+
+async def test_the_test_set_opens_one_of_each_family_side_by_side_on_paper(env: Any) -> None:
+    """Settings' "open test positions": an option structure, a zero-hero buy and a perpetual on each
+    underlying, all held at once; a second press finds every slot taken and opens nothing."""
+    rows = await env.trading.open_test_set()
+    btc = {r["kind"]: r for r in rows if r["underlying"] == "BTC"}
+    assert {k: r.get("status") for k, r in btc.items()} == {"options": "open", "zero-hero": "open", "perpetual": "open"}, rows
+    assert all(r.get("refused") for r in rows if r["underlying"] == "ETH")  # no ETH market in the fixture: said, not forced
+    with session() as s:
+        held = s.exec(select(Structure).where(Structure.status == "open")).all()
+    assert len(held) == 3 and {st.broker for st in held} == {"paper"}
+
+    again = await env.trading.open_test_set()
+    assert not [r for r in again if r.get("status") == "open"]
+

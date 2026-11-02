@@ -140,6 +140,31 @@ async def test_a_strategy_switched_off_for_a_symbol_is_not_evaluated_there(perp:
     assert only_eth.calls == 0 and not perp.trading.structures("open")
 
 
+async def test_a_long_lookback_is_folded_from_the_15m_store_and_held_for_its_own_time(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The 1m base reaches back ~56 hours; a 4h strategy needs weeks. It gets 4h bars folded from the
+    stored 15m series, and its position is held for the strategy's own time, not the setting's."""
+    import app.trading.runner as runner_mod
+
+    class Slow(Always):
+        interval = "4h"
+        lookback = 40  # the fake store's 800 15m bars hold 50 4h ones
+        max_hold_hours = 240.0
+
+        def decide(self, ctx: Context) -> Decision:
+            self.seen = ctx.candles
+            return super().decide(ctx)
+
+    slow = Slow("slow", 3.0)
+    monkeypatch.setattr(runner_mod, "REGISTRY", {"slow": slow})
+    s = perp.settings().model_copy(update={"directional_strategies": ["slow"]})
+    runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)
+    await runner._symbol("BTC", s)
+    assert len(slow.seen) == 40 and all(c.time % 14_400 == 0 for c in slow.seen)
+    held = perp.trading.structures("open")
+    assert len(held) == 1
+    assert held[0]["expiry"] - held[0]["opened_at"] == pytest.approx(240 * 3600, abs=5)
+
+
 async def test_the_funding_rate_is_part_of_a_signals_cost(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     import app.trading.runner as runner_mod
 

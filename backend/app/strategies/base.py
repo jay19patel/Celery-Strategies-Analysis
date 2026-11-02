@@ -101,6 +101,7 @@ class Strategy(ABC):
     target_rule: ClassVar[str]
     interval: ClassVar[str]
     lookback: ClassVar[int]  # closed bars of `interval` handed over
+    max_hold_hours: ClassVar[float | None] = None  # its own time limit; None: `perp_max_hold_hours`
     wants_outlook: ClassVar[bool] = False
     wants_structure: ClassVar[bool] = False
     wants_options_history: ClassVar[bool] = False
@@ -109,4 +110,4 @@ class Strategy(ABC):
     def decide(self, ctx: Context) -> Decision: ...
 
     def describe(self) -> dict[str, Any]:
-        return {k: getattr(self, k) for k in ("name", "label", "summary", "stop_rule", "target_rule", "interval", "lookback")}
+        return {k: getattr(self, k) for k in ("name", "label", "summary", "stop_rule", "target_rule", "interval", "lookback", "max_hold_hours")}

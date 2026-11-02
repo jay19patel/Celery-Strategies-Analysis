@@ -155,6 +155,51 @@ def test_accounts_carry_the_fees_of_closed_structures(client: TestClient) -> Non
     assert r.status_code == 200, r.text
 
 
+def test_orders_come_a_page_at_a_time_newest_first_with_the_total(client: TestClient) -> None:
+    from app.core.db import session
+    from app.core.models import OrderRecord
+
+    with session() as s:
+        for i in range(45):
+            s.add(OrderRecord(client_order_id=f"o{i}", structure_id="s1", broker="paper" if i % 3 else "delta", purpose="open",
+                              symbol="BTCUSD", side="buy", size=1, limit_price=1.0, status="failed" if i % 5 == 0 else "filled",
+                              created_at=float(i), updated_at=float(i)))
+        s.commit()
+    login(client)
+    first = client.get("/api/trading/orders/page?size=20").json()
+    assert (first["total"], first["pages"], len(first["rows"])) == (45, 3, 20)
+    assert first["rows"][0]["client_order_id"] == "o44"  # newest first
+    last = client.get("/api/trading/orders/page?size=20&page=3").json()
+    assert len(last["rows"]) == 5 and last["rows"][-1]["client_order_id"] == "o0"
+    assert client.get("/api/trading/orders/page?page=99").json()["page"] == 3  # past the end: the last page
+    paper_failed = client.get("/api/trading/orders/page?broker=paper&status=failed").json()
+    assert paper_failed["total"] == sum(1 for i in range(45) if i % 3 and i % 5 == 0)
+    assert all(r["broker"] == "paper" and r["status"] == "failed" for r in paper_failed["rows"])
+
+
+def test_notifications_are_the_position_and_risk_events_kept_read_or_unread(client: TestClient) -> None:
+    from app.core.db import session
+    from app.core.models import EventLog
+
+    with session() as s:
+        for i, kind in enumerate(["StructureOpened", "SettingsChanged", "StructureClosed", "RiskHalt", "Signal", "StructureOpened"]):
+            s.add(EventLog(ts=float(i), type=kind, level="info", message=f"{kind} {i}"))
+        s.commit()
+    login(client)
+    page = client.get("/api/notifications").json()
+    assert [r["type"] for r in page["rows"]] == ["StructureOpened", "RiskHalt", "StructureClosed", "StructureOpened"]  # newest first, no noise
+    assert page["total"] == page["unread"] == 4
+
+    newest = page["rows"][0]["id"]
+    assert client.post("/api/notifications/read", json={"ids": [newest]}).json() == {"marked": 1, "unread": 3}
+    unread = client.get("/api/notifications?unread=true").json()
+    assert unread["total"] == 3 and newest not in [r["id"] for r in unread["rows"]]
+    assert client.get("/api/notifications").json()["rows"][0]["read_at"] is not None  # still listed, as read
+
+    assert client.post("/api/notifications/read", json={}).json() == {"marked": 3, "unread": 0}
+    assert client.get("/api/notifications?unread=true").json()["total"] == 0
+
+
 def test_reset_data_needs_the_pin_keeps_settings_and_spares_open_positions(client: TestClient) -> None:
     from sqlmodel import select
 

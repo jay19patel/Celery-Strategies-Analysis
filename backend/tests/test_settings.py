@@ -19,6 +19,7 @@ def test_defaults_are_paper_only_and_delta_on_demo() -> None:
     assert s.max_spread_pct <= 15  # a wing quoted wider than this gives the credit back to the book
     assert set(s.directional_strategies) < set(REGISTRY)
     assert not {"supertrend", "ema_9_15"} & set(s.directional_strategies)  # no edge in the backtest
+    assert "trend_4h_short" in s.directional_strategies and "trend_4h_long" not in s.directional_strategies
 
 
 def test_real_money_needs_the_phrase() -> None:

@@ -39,7 +39,7 @@ from app.options.strategies import ZERO_HERO, single
 from app.settings import Settings
 from app.trading.desk import Desk
 from app.trading.risk import day_start, trading_day
-from app.trading.service import TradingService
+from app.trading.service import HELD, TradingService
 from app.trading.timing import get_zerohero_window
 
 log = logging.getLogger(__name__)
@@ -196,18 +196,19 @@ class ZeroHero:
         except Exception as exc:  # a bug must not stop the scheduler; it is recorded and shown
             log.exception("zerohero_decision_failed underlying=%s", underlying)
             dec.action, dec.reason = "error", f"{type(exc).__name__}: {exc}"
+        # A skip that never reached a broker is not written down: a scan every minute that found
+        # nothing is noise, and the page's live scan already says why. `_open` saves its row first.
+        if dec.action == "skip" and dec.id is None:
+            return dec.model_dump()
         with session() as db:
             db.add(dec)
             db.commit()
             db.refresh(dec)
-        # Only a scan that got as far as a candidate is worth an event; a closed window every
-        # minute for twenty hours a day is noise, and noise is how a log stops being read.
-        if dec.action != "skip" or (dec.candidates or []):
-            self.hub.publish(
-                "ZeroHeroDecision", f"{underlying}: {dec.action} — {dec.reason}",
-                "error" if dec.action == "error" else "info",
-                decision_id=dec.id, underlying=underlying, action=dec.action, strategy=ZERO_HERO,
-            )
+        self.hub.publish(
+            "ZeroHeroDecision", f"{underlying}: {dec.action} — {dec.reason}",
+            "error" if dec.action == "error" else "info",
+            decision_id=dec.id, underlying=underlying, action=dec.action, strategy=ZERO_HERO,
+        )
         return dec.model_dump()
 
     async def _decide(self, dec: Decision, underlying: str) -> None:
@@ -246,7 +247,28 @@ class ZeroHero:
         if not brokers:
             dec.reason = f"{why} — auto-trading is off on every active broker"
             return
-        await self._open(dec, plan, best, brokers, why, s)
+        full = {b: r for b in brokers if (r := self._room(b, underlying, s))}
+        if len(full) == len(brokers):
+            dec.reason = "no room: " + "; ".join(f"{b} {r}" for b, r in full.items())
+            return
+        await self._open(dec, plan, best, [b for b in brokers if b not in full], why, s)
+
+    def _room(self, broker: str, underlying: str, s: Settings) -> str:
+        """Why `broker` cannot take another zero-hero buy on `underlying`, or "". One position per
+        symbol, and none once the day's attempts are used — checked here so a full broker is a skip
+        that is not written down, rather than a refusal recorded every minute of the window."""
+        with session() as db:
+            held = db.exec(
+                select(Structure).where(
+                    Structure.broker == broker, Structure.strategy == ZERO_HERO,
+                    Structure.underlying == underlying, col(Structure.status).in_(HELD),
+                )
+            ).first()
+        if held is not None:
+            return f"already holds a {underlying} zero-hero position: one per symbol"
+        if (attempts := self.spent_today(broker)[1]) >= s.zh_max_attempts_day:
+            return f"{attempts} of {s.zh_max_attempts_day} attempts already used today"
+        return ""
 
     async def _open(self, dec: Decision, plan: Any, best: dict[str, Any], brokers: list[str], why: str, s: Settings) -> None:
         with session() as db:  # the id makes the request: a re-run of this decision opens nothing twice

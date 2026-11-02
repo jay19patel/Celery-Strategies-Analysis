@@ -98,7 +98,7 @@ async def test_a_zero_hero_buy_and_a_condor_do_not_take_each_others_slots(env) -
     env.configure(max_open_structures=1, max_per_underlying=1)
     spot = env.desk.spot("BTC")
     condor = env.desk.plan("BTC", "iron_condor")
-    opened = await env.trading.open("paper", condor, 1, "manual", "r1")
+    opened = await env.trading.open("paper", condor, 1, "auto", "r1")
     assert opened["status"] == "open"
 
     call = sorted(
@@ -112,7 +112,7 @@ async def test_a_zero_hero_buy_and_a_condor_do_not_take_each_others_slots(env) -
     from app.errors import Refused
 
     with pytest.raises(Refused, match="max"):  # while a second condor still is refused
-        await env.trading.gate("paper", condor, 1, "manual")
+        await env.trading.gate("paper", condor, 1, "auto")
 
 
 # -- the momentum trigger -----------------------------------------------------------------------
@@ -385,24 +385,47 @@ async def test_the_cycle_does_nothing_at_all_while_it_is_switched_off(env) -> No
 
 
 @pytest.mark.asyncio
-async def test_every_scan_is_written_down_even_when_it_refuses(env) -> None:
-    """Invariant 12: 'why did it not trade?' always has an answer."""
+async def test_a_scan_that_skips_before_any_broker_is_not_written_down(env) -> None:
+    """A scan every minute that found nothing is noise: it is answered, not stored."""
     env.configure(zh_enabled=True)
     zhx = zero_hero(env)
-    await zhx.cycle()
-    rows = zhx.decisions()
-    assert len(rows) == 1
-    assert rows[0]["strategy"] == ZERO_HERO
-    assert rows[0]["action"] == "skip" and rows[0]["reason"]
-    assert rows[0]["regime"]["gates"]  # which of the five refused it
+    d = await zhx.decide("BTC")
+    assert d["action"] == "skip" and d["reason"] and d["id"] is None
+    assert zhx.decisions() == []
+
+
+@pytest.mark.asyncio
+async def test_one_zero_hero_position_per_symbol(env) -> None:
+    from app.core.db import session
+    from app.options.strategies import single
+
+    zhx = zero_hero(env)
+    s = env.settings()
+    assert zhx._room("paper", "BTC", s) == ""
+    st, _ = zh_structure(time.time() + 3 * 3600)
+    with session() as db:
+        db.add(st)
+        db.commit()
+    assert "one per symbol" in zhx._room("paper", "BTC", s)
+    assert zhx._room("paper", "ETH", s) == ""  # the other symbol keeps its own slot
+
+    # And the gate refuses a second one however it arrives.
+    quotes = env.feed.quotes("BTC")
+    call = next(q for q in quotes if q.kind == "call" and q.ask)
+    plan = single(call, "buy", env.desk.spot("BTC"), ZERO_HERO)
+    with pytest.raises(Exception, match="one per symbol"):
+        await env.trading.gate("paper", plan, 1, "zerohero")
 
 
 @pytest.mark.asyncio
 async def test_zero_hero_decisions_do_not_appear_on_the_auto_traders_page(env) -> None:
+    from app.core.db import session
+    from app.core.models import Decision
     from app.trading.autotrader import AutoTrader
 
-    env.configure(zh_enabled=True)
-    await zero_hero(env).cycle()
+    with session() as db:
+        db.add(Decision(ts=time.time(), underlying="BTC", action="shadow", strategy=ZERO_HERO))
+        db.commit()
     assert zero_hero(env).decisions()  # on its own page
     assert not AutoTrader.decisions()  # and not on the condor desk's
 

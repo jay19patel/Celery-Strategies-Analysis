@@ -73,3 +73,14 @@ async def close_all(body: CloseAll, engine: EngineDep) -> dict[str, Any]:
 @router.get("/orders")
 def orders(engine: EngineDep, broker: str = "", limit: int = 300) -> list[dict[str, Any]]:
     return engine.trading.orders(broker, limit)
+
+
+@router.get("/orders/page")
+def order_page(engine: EngineDep, broker: str = "", status: str = "", page: int = 1, size: int = 20) -> dict[str, Any]:
+    return engine.trading.order_page(broker, status, page, size)
+
+
+@router.post("/test-all")
+async def test_all(engine: EngineDep) -> list[dict[str, Any]]:
+    """Paper only: opens one of everything that may be held at once, to see them side by side."""
+    return await engine.trading.open_test_set()

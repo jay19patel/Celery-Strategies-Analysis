@@ -40,8 +40,11 @@ class StrategySpec:
 CATALOG: dict[str, StrategySpec] = {s.key: s for s in (
     StrategySpec("iron_condor", "Iron Condor", "neutral", "credit", "defined",
                  "Sell an OTM call and put, buy further wings. Profits while price stays between the short strikes."),
+    # Its breakevens sit close to the strike, so its probability of profit is under 50% by
+    # construction; the credit it takes for that is what credit / width and the edge judge.
     StrategySpec("iron_butterfly", "Iron Butterfly", "neutral", "credit", "defined",
-                 "Sell the ATM straddle, buy wings. More credit than a condor, needs price to pin near the strike."),
+                 "Sell the ATM straddle, buy wings. More credit than a condor, needs price to pin near the strike.",
+                 required_checks=("liquidity", "credit / width", "edge at realised vol")),
     StrategySpec("bull_put_spread", "Bull Put Spread", "bullish", "credit", "defined",
                  "Sell an OTM put, buy a lower put. Profits if price holds above the short strike."),
     StrategySpec("bear_call_spread", "Bear Call Spread", "bearish", "credit", "defined",
@@ -50,8 +53,11 @@ CATALOG: dict[str, StrategySpec] = {s.key: s for s in (
                  "Sell an OTM call and put with no wings. Wide profit zone, unlimited risk beyond it."),
     StrategySpec("short_straddle", "Short Straddle", "neutral", "credit", "undefined",
                  "Sell the ATM call and put. Maximum theta, unlimited risk; needs a very quiet market."),
+    # A buyer: it loses a little most of the time and wins big sometimes, so its probability of
+    # profit is low by construction. Whether realised volatility pays for the premium is its gate.
     StrategySpec("long_straddle", "Long Straddle", "volatile", "debit", "defined",
-                 "Buy the ATM call and put. Pays when price moves further than the premium, either way."),
+                 "Buy the ATM call and put. Pays when price moves further than the premium, either way.",
+                 required_checks=("liquidity", "edge at realised vol")),
 )}
 
 # Structures the system can price, hold and exit, but the options auto-trader does not pick and the

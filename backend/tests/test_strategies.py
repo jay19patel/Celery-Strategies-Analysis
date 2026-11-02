@@ -87,3 +87,16 @@ def test_range_volatility_reads_the_same_market_as_closes_and_the_reference_is_t
     m = measure(bars, price, {"atm_iv": 0.70})
     readings = [v for v in (m["rv_24h"], m["rv_7d"], m["rv_range_24h"]) if v]
     assert m["vol_premium"] == pytest.approx(0.70 - max(readings))
+
+
+def test_a_long_straddle_is_gated_on_its_edge_not_on_a_sellers_probability_of_profit() -> None:
+    """Its POP is under 50% by construction: a 55% floor refused it on every cycle, whatever the edge."""
+    plan = build("long_straddle", load_quotes(), SPOT, 0.18, 2.0)
+    assert plan is not None
+    s = Settings(max_spread_pct=100, min_pop_pct=55)
+    moving = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.60)
+    pop = next(c for c in moving["checks"] if c["name"] == "probability of profit")
+    assert not pop["ok"] and not pop["required"]  # still reported, no longer binding
+    assert moving["ok"]
+    still = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.10)
+    assert not still["ok"]  # a buyer the market does not pay for is still refused, on its edge

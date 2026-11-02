@@ -8,5 +8,6 @@ from app.strategies.ema_9_15 import Ema915
 from app.strategies.ema_vwap import EmaVwap
 from app.strategies.pcr_options import PcrOptions
 from app.strategies.supertrend import SupertrendTrend
+from app.strategies.trend_4h import Trend4hLong, Trend4hShort
 
-REGISTRY: dict[str, Strategy] = {s.name: s for s in (EmaVwap(), Ema915(), PcrOptions(), SupertrendTrend())}
+REGISTRY: dict[str, Strategy] = {s.name: s for s in (EmaVwap(), Ema915(), PcrOptions(), SupertrendTrend(), Trend4hShort(), Trend4hLong())}

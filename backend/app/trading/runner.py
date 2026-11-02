@@ -1,7 +1,8 @@
 """The directional strategies, run on every closed bar.
 
 Every few seconds the runner folds the stored 1m base into each strategy's timeframe — a fold emits
-a bar only once the minutes after it exist, so a forming bar is never handed over — and evaluates
+a bar only once the minutes after it exist, so a forming bar is never handed over; a strategy whose
+lookback reaches further back than the base is folded from the stored 15m series instead — and evaluates
 each enabled strategy once per new closed bar. Late is stale: a bar that closed more than one bar
 ago (the engine was down) is skipped, not traded.
 
@@ -47,6 +48,7 @@ class StrategyRunner:
         self.hub = hub
         self.evaluated: dict[tuple[str, str], int] = {}  # (strategy, symbol) -> last bar decided on
         self.latest: dict[tuple[str, str], dict[str, Any]] = {}  # the live readout for the dashboard
+        self.history: dict[tuple[str, str], tuple[int, list[dict[str, Any]]]] = {}  # (symbol, interval) -> (newest 15m bar, folded)
 
     async def run(self) -> str:
         s: Settings = self.settings()
@@ -69,7 +71,9 @@ class StrategyRunner:
             if not s.strategy_on(name, underlying):
                 continue  # enabled, but not for this underlying
             strategy = REGISTRY[name]
-            bars = frames.setdefault(strategy.interval, resample.fold(base, "1m", strategy.interval))
+            if strategy.interval not in frames:
+                frames[strategy.interval] = await self._bars(symbol, strategy, base)
+            bars = frames[strategy.interval]
             if not bars:
                 continue
             bar_time = int(bars[-1]["time"])
@@ -93,6 +97,19 @@ class StrategyRunner:
         if not fired:
             return f"{symbol}: no signal"
         return await self._trade(underlying, symbol, fired, s)
+
+    async def _bars(self, symbol: str, strategy: Any, base: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The strategy's closed bars: from the 1m base when it reaches back far enough, else from the
+        stored 15m series — read again only when a newer 15m bar has been stored."""
+        span = resample.seconds(strategy.interval)
+        if strategy.lookback * span <= BASE_READ * 60:
+            return resample.fold(base, "1m", strategy.interval)
+        newest = self.trading.feed.latest_bar_time(symbol, "15m")
+        cached = self.history.get((symbol, strategy.interval))
+        if cached is None or cached[0] != newest:
+            rows = await asyncio.to_thread(self.trading.feed.bars, symbol, (strategy.lookback + 2) * span // 900, "15m")
+            cached = self.history[(symbol, strategy.interval)] = (newest, resample.fold(rows, "15m", strategy.interval))
+        return cached[1]
 
     async def _context(self, strategy: Any, underlying: str, symbol: str, bars: list[dict[str, Any]]) -> Context:
         rate = await self.trading.desk.fee_rate(symbol)
@@ -141,7 +158,7 @@ class StrategyRunner:
                     raise Refused(f"{s.risk_per_trade_pct:g}% of equity {account.equity:,.2f} does not cover one contract's loss at the stop")
                 view = await self.trading.open_directional(
                     broker, underlying, best.side or "", qty, best.stop or 0.0, best.target or 0.0,
-                    best_name, "auto", f"{best_name}:{symbol}:{bar_time}", best.reason,
+                    best_name, "auto", f"{best_name}:{symbol}:{bar_time}", best.reason, REGISTRY[best_name].max_hold_hours,
                 )
                 orders[broker] = {"structure_id": view["id"], "status": view["status"], "qty": qty, "error": view["error"]}
             except (Refused, BrokerError) as exc:
