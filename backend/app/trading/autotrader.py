@@ -180,7 +180,7 @@ class AutoTrader:
         dec.expiry = expiry
         regime = self.desk.regime(underlying, expiry)
         regime["hours_to_expiry"] = round((expiry - time.time()) / 3600, 2)
-        dec.regime = {k: regime[k] for k in ("label", "direction", "direction_parts", "metrics", "scores", "notes", "hours_to_expiry")}
+        dec.regime = {k: regime.get(k) for k in ("label", "direction", "direction_parts", "metrics", "scores", "notes", "hours_to_expiry", "gamma")}
 
         bar, pacing = self._bar(underlying, s)
         dec.regime["min_score"] = bar  # what the bar actually was, so a past decision reads back straight

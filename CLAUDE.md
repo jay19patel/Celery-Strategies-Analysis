@@ -22,8 +22,9 @@ Settings page; `.env` holds only process bootstrap and the LLM provider keys.
 ## Architecture
 
 ```
-Delta WS (perp + every option ticker) ─┐
+Delta WS (tickers, every trade, book) ─┐
 Delta REST (chain every 30s, bars 5m) ─┴─► MarketFeed ─► Desk (chain, regime, plan, assess)
+                                            └─ Tape ─► FlowBar (1m footprint) ─► MarketDesk (flow, gex, bias)
                                                            │
    dashboard click ─► routes/trading ─┐                    │
    AutoTrader (every N min) ──────────┴─► TradingService.gate/open/close ─► Broker (paper | delta)
@@ -34,21 +35,30 @@ Delta REST (chain every 30s, bars 5m) ─┴─► MarketFeed ─► Desk (chain
 
 - `app/engine.py` — wires every component once and owns the schedule. It is the only writer of
   trading state, settings and toggles, in one process: run the backend as a single worker.
-- `app/core/` — `db.py` (SQLite, WAL), `models.py` (every table), `events.py` (`EventHub`: each
+- `app/core/` — `db.py` (SQLite, WAL, incremental auto-vacuum; `maintain` hourly), `models.py` (every table),
+  `logstore.py` (every WARNING/ERROR as one counted event-log row per message per 10 minutes), `events.py` (`EventHub`: each
   subscriber has its own queue, so a slow notifier never delays anything), `scheduler.py`
   (APScheduler wrapper that records every run for the System page), `security.py` (PIN, sessions).
 - `app/settings.py` — every runtime setting as one Pydantic model: ranges, choices and the
   fail-closed rules live here.
 - `app/market/delta.py` — the only code that talks to Delta REST. `feed.py` — the only code that
   talks to the Delta WebSocket, plus the REST refresh that keeps the book complete and working when
-  the socket is refused. `options.py` — quotes and chain arithmetic (ATM IV, skew, put/call, max
-  pain, walls, implied move).
+  the socket is refused; it cleans every bar (`clean_candles`: a bad print is dropped or its wick
+  trimmed). `tape.py` — the trade tape and the book folded into one footprint minute per symbol,
+  and option premium by kind and side. `options.py` — quotes and chain arithmetic (ATM IV, skew,
+  put/call, max pain, walls, implied move).
+- `app/analysis/` — `flow.py` (delta, CVD, imbalances, absorption, exhaustion, delta profile from the
+  tape), `bias.py` (the day's bias and style, every point with its reason), `service.py`
+  (`MarketDesk`: every reading, cached, and the jobs that record the options minute and the bias).
 - `app/options/` — pure, no clock beyond what is passed, no network:
   `pricing.py` (payoff, exact max profit/loss and breakevens from the strike knots, POP and expected
   value under a driftless lognormal), `strategies.py` (catalog and builders: strikes by |delta| or
   ATM, wings a share of spot out, priced at bid for sales and ask for purchases), `regime.py`
   (volatility premium and direction → a rule score per strategy, every point with its reason),
-  `assess.py` (a plan priced and checked: liquidity, credit/width, POP, **edge at realised vol**).
+  `assess.py` (a plan priced and checked: liquidity, credit/width, POP, **edge at realised vol**),
+  `gex.py` (gamma exposure by strike, the flip and the walls), `ideas.py` (single-option ideas).
+- `app/strategies/` — pure `decide()` per directional strategy; `auction.py` holds the four built on
+  value, the tape and gamma. The runner refuses any signal against a day bias of 0.5 or stronger.
 - `app/trading/service.py` — the only code that opens and closes structures. Bought legs fill first
   on entry and sold legs are bought back first on exit, so a short is never naked mid-way; a failed
   leg unwinds what filled. `desk.py` — the read side shared by the page and the auto-trader.
@@ -94,9 +104,12 @@ Enforced by tests (`backend/tests`). Breaking one should fail the build.
 12. **Every attempt is written down.** Each auto or zero-hero cycle that reaches a broker is a
     `Decision` row with what it saw, every strategy it considered and why each was dropped, the
     model's answer, and what each broker did. A skip before any broker is not stored.
-13. **Bounded.** Ticks are never stored. Bars (15m a year, 1m 30 days) and option-chain snapshots
-    (`data/chains/`, every 5 min, 90 days) are kept for backtests; events and briefs are pruned after
-    30 days, decisions after 90.
+13. **Bounded, for years of uptime.** Ticks are never stored: the tape is kept as one footprint
+    minute per symbol (`FlowBar`, 30 days). Bars (15m a year, 1m 30 days), option-chain snapshots
+    (`data/chains/`, 90 days) and the options minute (30 days) are kept for backtests; the day's bias
+    two years; events and briefs 30 days, warnings and errors 90, decisions 90. No in-memory cache
+    is keyed by something that grows forever (an option listing, a client address). A skip is shown
+    live and never stored.
 14. **No unbounded loss on real money.** A structure without a bounded max loss is refused on Delta
     live; elsewhere it is sized on a move of three expected moves, not on its stop.
 

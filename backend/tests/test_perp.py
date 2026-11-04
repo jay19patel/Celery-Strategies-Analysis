@@ -111,6 +111,33 @@ class Always(Strategy):
         return Decision("buy", f"{self.name} fired", entry=price, stop=price - 200, target=price + 200 * self.reward)
 
 
+@pytest.fixture(autouse=True)
+def no_day_bias(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fake feed's "today" depends on the clock; the runner tests pin the bias to none."""
+    from app.analysis.service import MarketDesk
+
+    async def unready(self: Any, underlying: str) -> dict[str, Any]:
+        return {"ready": False}
+
+    monkeypatch.setattr(MarketDesk, "bias", unready)
+
+
+async def test_a_signal_against_a_strong_day_bias_is_shown_and_not_taken(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.trading.runner as runner_mod
+    from app.analysis.service import MarketDesk
+
+    async def sold_hard(self: Any, underlying: str) -> dict[str, Any]:
+        return {"ready": True, "label": "bearish", "score": -0.7}
+
+    monkeypatch.setattr(MarketDesk, "bias", sold_hard)
+    monkeypatch.setattr(runner_mod, "REGISTRY", {"long": Always("long", 3.0)})
+    s = perp.settings().model_copy(update={"directional_strategies": ["long"]})
+    runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)
+    assert await runner._symbol("BTC", s) == "BTCUSD: no signal"
+    assert not perp.trading.structures("open") and runner.signals() == []
+    assert "bearish (-0.70)" in runner.latest[("long", "BTCUSD")]["reason"]
+
+
 async def test_the_runner_trades_the_best_signal_once_per_bar(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     import app.trading.runner as runner_mod
 
@@ -123,8 +150,8 @@ async def test_the_runner_trades_the_best_signal_once_per_bar(perp: Any, monkeyp
     held = perp.trading.structures("open")
     assert len(held) == 1 and held[0]["strategy"] == "best"
     signals = runner.signals()
-    assert {r["strategy"]: r["action"] for r in signals} == {"best": "open", "slow": "skip"}
-    assert "better trade" in next(r for r in signals if r["strategy"] == "slow")["reason"]
+    assert {r["strategy"]: r["action"] for r in signals} == {"best": "open"}  # the loser is not stored...
+    assert "better trade" in runner.latest[("slow", "BTCUSD")]["reason"]  # ...only shown live
     await runner._symbol("BTC", s)  # the same closed bar is never decided twice
     assert slow.calls == best.calls == 1
 

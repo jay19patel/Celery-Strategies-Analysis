@@ -38,6 +38,8 @@ def _client(request: Request) -> str:
 @router.post("/login")
 def login(body: Login, request: Request, response: Response) -> dict:
     who, now = _client(request), time.time()
+    for ip in [ip for ip, ts in _failures.items() if now - ts[-1] >= LOCKOUT_SECONDS]:
+        del _failures[ip]  # scanners hit the login from new addresses forever; forget the stale ones
     recent = [t for t in _failures.get(who, []) if now - t < LOCKOUT_SECONDS]
     if len(recent) >= MAX_FAILURES:
         raise TooManyAttempts(f"too many wrong PINs: try again in {int(LOCKOUT_SECONDS - (now - recent[0]))}s")

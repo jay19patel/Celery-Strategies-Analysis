@@ -175,6 +175,36 @@ class OptionsHistory(SQLModel, table=True):
     put_oi: float | None = None
     max_pain: float | None = None
     implied_move_pct: float | None = None
+    # Gamma exposure (`options.gex`): its sign is the regime, the flip and walls where it changes.
+    net_gex: float | None = None
+    gamma_flip: float | None = None
+    gex_call_wall: float | None = None
+    gex_put_wall: float | None = None
+    # Option premium in USD that crossed the spread since the row before (the trade tape).
+    call_bought: float | None = None
+    call_sold: float | None = None
+    put_bought: float | None = None
+    put_sold: float | None = None
+
+
+class FlowBar(SQLModel, table=True):
+    """One minute of the perpetual's tape (`market.tape`): the footprint, the delta and the resting
+    book near the mid. Ticks are never stored; this is the finest grain kept, for `FLOW_DAYS`."""
+
+    symbol: str = Field(primary_key=True)
+    time: int = Field(primary_key=True)  # minute open, unix seconds
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float  # contracts that traded
+    buy: float  # of which a buyer crossed the spread
+    sell: float
+    trades: int
+    max_trade: float
+    levels: Any = Field(default=None, sa_column=Column(JSON))  # [[price step, bought, sold], ...]
+    bid_depth: float | None = None  # resting size within 0.5% of the mid, mean over the minute
+    ask_depth: float | None = None
 
 
 class SignalLog(SQLModel, table=True):
@@ -195,3 +225,21 @@ class SignalLog(SQLModel, table=True):
     target: float | None = None
     rr: float | None = None
     orders: Any = Field(default=None, sa_column=Column(JSON))
+
+
+class DailyBias(SQLModel, table=True):
+    """The bias the desk gave a UTC day once it had opened (`analysis.bias`), and, once it ended,
+    whether the day went that way. What its hit rate is measured from. Kept two years."""
+
+    underlying: str = Field(primary_key=True)
+    day: int = Field(primary_key=True)  # UTC midnight, unix seconds
+    ts: float
+    score: float
+    label: str  # bullish | bearish | neutral
+    style: str  # range | trend | mixed
+    gamma: str | None = None
+    open: float
+    reasons: Any = Field(default=None, sa_column=Column(JSON))
+    close: float | None = None
+    ret_pct: float | None = None
+    correct: bool | None = None

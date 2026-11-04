@@ -1061,3 +1061,82 @@ export interface OptionIdeas {
   ideas: OptionIdea[];
   note: string;
 }
+
+/** A flow event read off the tape (`analysis/flow.py`). */
+export interface FlowEvent {
+  kind: "absorption" | "exhaustion";
+  side: "bullish" | "bearish";
+  time: number;
+  price: number;
+  detail: string;
+}
+
+export interface FootprintBar {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  delta: number;
+  levels: [number, number, number][]; // price, bought, sold
+}
+
+export interface OrderFlow {
+  ready: boolean;
+  note?: string;
+  bars?: number;
+  interval?: string;
+  price?: number;
+  delta?: number;
+  cvd?: number;
+  series?: { time: number; close: number; delta: number; cvd: number }[];
+  imbalances?: { price: number; side: "buy" | "sell"; ratio: number | null }[];
+  stacked?: { side: "buy" | "sell"; low: number; high: number; levels: number }[];
+  events?: FlowEvent[];
+  divergence?: { side: "bullish" | "bearish"; detail: string } | null;
+  profile?: { ready: boolean; poc?: number; buyers_at?: number | null; sellers_at?: number | null; rows?: { price: number; bought: number; sold: number; delta: number }[] };
+  book_imbalance?: number | null;
+  footprint?: FootprintBar[];
+}
+
+export interface OptionsPremium {
+  call_bought: number;
+  call_sold: number;
+  put_bought: number;
+  put_sold: number;
+}
+
+export interface GammaExposure {
+  ready: boolean;
+  note?: string;
+  spot?: number;
+  net?: number;
+  regime?: "positive" | "negative";
+  flip?: number | null;
+  call_wall?: number | null;
+  put_wall?: number | null;
+  by_strike?: { strike: number; call: number; put: number }[];
+  history: { ts: number; spot: number | null; net: number | null; flip: number | null }[];
+  options_today: OptionsPremium | null;
+}
+
+export interface DayBias {
+  ready: boolean;
+  note?: string;
+  score?: number;
+  label?: "bullish" | "bearish" | "neutral";
+  style?: "range" | "trend" | "mixed";
+  gamma?: "positive" | "negative" | null;
+  open?: number;
+  price?: number;
+  reasons?: { text: string; points: number }[];
+  levels?: { vah: number; val: number; poc: number; flip: number | null; call_wall: number | null; put_wall: number | null };
+  options_today?: OptionsPremium | null;
+  record: {
+    days: { day: number; score: number; label: string; style: string; ret_pct: number | null; correct: boolean | null }[];
+    scored: number;
+    right: number;
+    hit_rate_pct: number | null;
+    note: string;
+  };
+}

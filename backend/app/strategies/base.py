@@ -26,6 +26,8 @@ class Context:
     outlook: dict[str, Any] = field(default_factory=dict)  # when the strategy wants_outlook
     structure: dict[str, Any] = field(default_factory=dict)  # when it wants_structure
     options_history: list[dict[str, Any]] = field(default_factory=list)  # when it wants_options_history
+    flow: dict[str, Any] = field(default_factory=dict)  # the tape's reading (`analysis.flow`), when it wants_flow
+    bias: dict[str, Any] = field(default_factory=dict)  # the day's bias (`analysis.bias`), when it wants_bias
     cost_pct: float = 0.0  # one round trip, % of notional: fees both ways and the spread
 
 
@@ -105,6 +107,8 @@ class Strategy(ABC):
     wants_outlook: ClassVar[bool] = False
     wants_structure: ClassVar[bool] = False
     wants_options_history: ClassVar[bool] = False
+    wants_flow: ClassVar[bool] = False
+    wants_bias: ClassVar[bool] = False
 
     @abstractmethod
     def decide(self, ctx: Context) -> Decision: ...

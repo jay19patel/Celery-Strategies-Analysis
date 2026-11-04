@@ -38,6 +38,8 @@ from app.trading.service import TradingService
 log = logging.getLogger(__name__)
 
 BASE_READ = 3_400  # minutes: enough for the longest lookback (200 x 15m) plus slack for holes
+FLOW_MINUTES = 5  # the tape is read in 5-minute bars, the timeframe the flow strategies trade
+BIAS_GATE = 0.5  # a day's bias this strong refuses a signal against it
 
 
 class StrategyRunner:
@@ -91,6 +93,9 @@ class StrategyRunner:
                 self._readout(name, symbol, bar_time, None, f"error: {type(exc).__name__}: {exc}")
                 self._log(name, symbol, strategy.interval, bar_time, Decision(None, str(exc)[:500]), "error")
                 continue
+            if decision.side and (against := await self._against_bias(underlying, decision.side)):
+                self._readout(name, symbol, bar_time, decision, f"{decision.reason} — {against}")
+                continue
             self._readout(name, symbol, bar_time, decision, decision.reason)
             if decision.side:
                 fired.append((name, decision, bar_time))
@@ -123,8 +128,20 @@ class StrategyRunner:
             outlook=await self.market.outlook(underlying) if strategy.wants_outlook else {},
             structure=await self.market.structure(underlying) if strategy.wants_structure else {},
             options_history=self.market.options_history(underlying, 8) if strategy.wants_options_history else [],
+            flow=await self.market.flow(underlying, FLOW_MINUTES) if strategy.wants_flow else {},
+            bias=await self.market.bias(underlying) if strategy.wants_bias else {},
             cost_pct=2 * rate.taker * 100 + spread + self._funding_pct(underlying),
         )
+
+    async def _against_bias(self, underlying: str, side: str) -> str:
+        """Why a signal is refused for fighting a strong day bias, or "". Every strategy passes this,
+        the ones written before the bias existed included: a short into a day bid this hard is a
+        trade against the auction, whatever its own indicator said."""
+        b = await self.market.bias(underlying)
+        score = float(b.get("score") or 0.0) if b.get("ready") else 0.0
+        if (side == "sell" and score >= BIAS_GATE) or (side == "buy" and score <= -BIAS_GATE):
+            return f"not taken: today's bias is {b['label']} ({score:+.2f}), and this trade is against it"
+        return ""
 
     def _funding_pct(self, underlying: str) -> float:
         """One funding payment at the current rate, as % of notional. A position held for hours pays
@@ -142,9 +159,10 @@ class StrategyRunner:
 
         fired.sort(key=lambda f: edge(f[1]), reverse=True)
         best_name, best, bar_time = fired[0]
+        # A signal that does not trade is shown live and not stored: only opens and errors are kept.
         for name, decision, bt in fired[1:]:
-            self._log(name, symbol, REGISTRY[name].interval, bt, decision, "skip",
-                      note=f"{REGISTRY[best_name].label} had the better trade ({edge(best):.2f}:1 against {edge(decision):.2f}:1)")
+            self._readout(name, symbol, bt, decision,
+                          f"{decision.reason} — {REGISTRY[best_name].label} had the better trade ({edge(best):.2f}:1 against {edge(decision):.2f}:1)")
 
         brokers = [b for b in s.active_brokers if s.auto_on(b)]
         orders: dict[str, Any] = {}
@@ -166,7 +184,11 @@ class StrategyRunner:
         if not brokers:
             orders["-"] = {"refused": "auto-trading is off on every active broker"}
         opened = any(o.get("status") == "open" for o in orders.values())
-        self._log(best_name, symbol, REGISTRY[best_name].interval, bar_time, best, "open" if opened else "skip", orders=orders)
+        if opened:
+            self._log(best_name, symbol, REGISTRY[best_name].interval, bar_time, best, "open", orders=orders)
+        else:
+            refusals = "; ".join(f"{b}: {o.get('refused') or o.get('error') or o.get('status')}" for b, o in orders.items())
+            self._readout(best_name, symbol, bar_time, best, f"{best.reason} — not opened: {refusals}")
         return f"{symbol}: {best_name} {best.side} -> {'opened' if opened else 'not opened'}"
 
     def _readout(self, name: str, symbol: str, bar_time: int, decision: Decision | None, reason: str) -> None:

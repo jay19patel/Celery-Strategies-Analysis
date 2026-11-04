@@ -30,7 +30,7 @@ from app.api.routes import (
     zerohero,
 )
 from app.config import Config, get_config
-from app.core import security
+from app.core import logstore, security
 from app.core.db import init_db
 from app.engine import Engine
 from app.errors import AppError
@@ -45,6 +45,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         init_db(cfg.db_path)
+        captured = logstore.install()  # from here on, every warning and error is kept, counted, on the System page
         engine = Engine(cfg)
         app.state.engine = engine
         await engine.start()
@@ -52,6 +53,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             logging.getLogger("tradebuddy").warning("the dashboard PIN is the published default: change it on the Settings page")
         yield
         await engine.stop()
+        logstore.uninstall(captured)
 
     app = FastAPI(title="TradeBuddy API", version="5.0.0", lifespan=lifespan)
     app.add_middleware(

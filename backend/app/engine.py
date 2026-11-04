@@ -19,14 +19,27 @@ from sqlmodel import col, delete, select
 
 from app.ai.analyst import Analyst
 from app.ai.llm import LLM
-from app.analysis.service import OPTIONS_HISTORY_DAYS, MarketDesk
+from app.analysis.service import BIAS_DAYS, FLOW_DAYS, OPTIONS_HISTORY_DAYS, MarketDesk, store_flow_bars
 from app.brokers.base import Broker
 from app.brokers.delta import DeltaBroker
 from app.brokers.paper import PaperBroker
 from app.config import Config
-from app.core.db import kv_get, kv_set, session
+from app.core import logstore
+from app.core.db import kv_get, kv_set, maintain, session
 from app.core.events import EventHub
-from app.core.models import AiBrief, DayRisk, Decision, EventLog, Leg, OptionsHistory, OrderRecord, SignalLog, Structure
+from app.core.models import (
+    AiBrief,
+    DailyBias,
+    DayRisk,
+    Decision,
+    EventLog,
+    FlowBar,
+    Leg,
+    OptionsHistory,
+    OrderRecord,
+    SignalLog,
+    Structure,
+)
 from app.core.scheduler import Scheduler
 from app.errors import AppError, BrokerError, Refused
 from app.market import recorder
@@ -95,6 +108,9 @@ class Engine:
     async def start(self) -> None:
         await self.hub.start()
         if self.cfg.engine_enabled:
+            cleaned = await asyncio.to_thread(self.feed.clean_stored)
+            if any(cleaned.values()):
+                log.warning("bad_bars_cleaned dropped=%s trimmed=%s", cleaned["dropped"], cleaned["trimmed"])
             self.feed.start()
             self._schedule()
             self.scheduler.start()
@@ -112,6 +128,8 @@ class Engine:
         sch.every("market.refresh", "Option chains and prices (REST)", OPTIONS_REFRESH, self.feed.refresh, run_now=True)
         sch.every("market.bars", "Store 15m bars (a year)", 300, self.feed.collect_bars, run_now=True)
         sch.every("market.base", "Store 1m base bars (30 days)", 30, lambda: self.feed.collect_bars("1m"), run_now=True)
+        sch.every("market.flow", "Store the tape's finished minutes (footprint, delta, book)", 20, self.store_flow)
+        sch.every("market.bias", "Record each day's bias, mark the days that ended", 900, self.market.record_bias)
         sch.every("options.history", "Record the options book each minute", 60, self.market.record_options)
         sch.every("market.chains", "Record every option quote for backtests (90 days)", CHAIN_RECORD_SECONDS, self.record_chains)
         sch.every("market.analyst", "Market analysis and insights", 300, self.market.analyse)
@@ -244,18 +262,32 @@ class Engine:
             rows += await asyncio.to_thread(recorder.record, self.chain_dir, u, self.feed.quotes(u), self.feed.spot(u))
         return f"{rows} option quotes recorded"
 
+    async def store_flow(self) -> str:
+        rows = self.feed.tape.closed(time.time())
+        if rows:
+            await asyncio.to_thread(store_flow_bars, rows)
+        return f"{len(rows)} minutes stored; {self.feed.tape.rejected} bad prints left out since start"
+
     async def housekeeping(self) -> str:
         now = time.time()
         with session() as s:
-            events = s.exec(delete(EventLog).where(col(EventLog.ts) < now - EVENT_RETENTION_DAYS * 86_400)).rowcount
+            # Warnings and errors are kept longer than the rest: a fault is often looked for late.
+            events = s.exec(delete(EventLog).where(
+                col(EventLog.ts) < now - EVENT_RETENTION_DAYS * 86_400, EventLog.level == "info",
+            )).rowcount or 0
+            events += s.exec(delete(EventLog).where(col(EventLog.ts) < now - logstore.KEEP_DAYS * 86_400)).rowcount or 0
             briefs = s.exec(delete(AiBrief).where(col(AiBrief.ts) < now - EVENT_RETENTION_DAYS * 86_400)).rowcount
             decisions = s.exec(delete(Decision).where(col(Decision.ts) < now - DECISION_RETENTION_DAYS * 86_400)).rowcount
             s.exec(delete(SignalLog).where(col(SignalLog.ts) < now - DECISION_RETENTION_DAYS * 86_400))
             s.exec(delete(OptionsHistory).where(col(OptionsHistory.ts) < now - OPTIONS_HISTORY_DAYS * 86_400))
+            s.exec(delete(FlowBar).where(col(FlowBar.time) < now - FLOW_DAYS * 86_400))
+            s.exec(delete(DailyBias).where(col(DailyBias.day) < now - BIAS_DAYS * 86_400))
             s.commit()
         bars = await asyncio.to_thread(self.feed.prune_bars)
         chains = await asyncio.to_thread(recorder.prune, self.chain_dir)
-        return f"pruned {events} events, {briefs} briefs, {decisions} decisions, {bars} bars, {chains} chain files"
+        db = await asyncio.to_thread(maintain)
+        return (f"pruned {events} events, {briefs} briefs, {decisions} decisions, {bars} bars, {chains} chain files; "
+                f"database gave back {db['freed_pages']} pages")
 
     async def reset_data(self) -> dict[str, int]:
         """Every record of what the desk did — structures and their legs, orders, decisions, signals,

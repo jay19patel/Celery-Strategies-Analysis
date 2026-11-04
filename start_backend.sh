@@ -81,6 +81,8 @@ UVICORN_CMD=(
     --timeout-graceful-shutdown 15
     --lifespan on
     --log-level "$LOG_LEVEL_LOWER"
+    # A line per dashboard poll fills the journal and buries the warnings; errors still log.
+    --no-access-log
 )
 
 # ------------------------------------------------------------------------------

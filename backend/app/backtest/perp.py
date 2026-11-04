@@ -181,8 +181,8 @@ def main() -> None:
     args = parser.parse_args()
 
     strategy = REGISTRY[args.strategy]
-    if strategy.wants_outlook or strategy.wants_structure or strategy.wants_options_history:
-        parser.error(f"{args.strategy} reads the market desk or the options history, which this backtest does not replay")
+    if strategy.wants_outlook or strategy.wants_structure or strategy.wants_options_history or strategy.wants_flow or strategy.wants_bias:
+        parser.error(f"{args.strategy} reads the market desk, the options history, the tape or the day's bias, which this backtest does not replay")
     init_db(get_config().db_path)
     bars = stored_bars(args.underlying, strategy.interval)
     hold = args.max_hold_hours or strategy.max_hold_hours or 24.0

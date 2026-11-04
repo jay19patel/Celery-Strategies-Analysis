@@ -20,8 +20,10 @@ from typing import Any
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlmodel import col, select
 
+from app.analysis import bias as bias_mod
 from app.analysis import (
     fibonacci,
+    flow,
     liquidity,
     nearby,
     orderflow,
@@ -37,12 +39,14 @@ from app.analysis import (
 from app.analysis.insights import insights, lean, market_context
 from app.core.db import session
 from app.core.events import EventHub
-from app.core.models import OptionsHistory
+from app.core.models import Bar, DailyBias, FlowBar, OptionsHistory
 from app.errors import NotFound
 from app.market.delta import Candle
 from app.market.feed import SERIES, MarketFeed
 from app.market.indicators import atr
 from app.market.options import PERPETUALS, history_row, summarize
+from app.market.tape import step_for
+from app.options import gex
 
 log = logging.getLogger(__name__)
 
@@ -54,9 +58,53 @@ TRENDLINE_BARS = 2_000
 PROFILE_BASE_BARS = 3 * 1440  # three days of minutes
 CONTEXT_BARS = 700  # a week of 15m bars for the analyst's market context
 OPTIONS_HISTORY_DAYS = 30
+FLOW_DAYS = 30  # the tape's minutes: a month of footprints
+BIAS_DAYS = 730  # one small row a day per underlying: two years of track record
 # The outlook's counted odds are for a bracketed trade: this stop and target, as % of price.
 VERDICT_STOP_PCT, VERDICT_TARGET_PCT = 1.0, 2.0
 MAX_CHART_BARS = 20_000
+
+
+def flow_rows(symbol: str, since: float) -> list[dict[str, Any]]:
+    with session() as s:
+        rows = s.exec(select(FlowBar).where(FlowBar.symbol == symbol, col(FlowBar.time) >= since).order_by(col(FlowBar.time))).all()
+    return [r.model_dump() for r in rows]
+
+
+def options_premium(underlying: str, since: float) -> dict[str, float] | None:
+    """Option premium that crossed the spread since `since`, from the minute rows."""
+    with session() as s:
+        rows = s.exec(select(OptionsHistory).where(
+            OptionsHistory.underlying == underlying, col(OptionsHistory.ts) >= since, col(OptionsHistory.call_bought).is_not(None),
+        )).all()
+    if not rows:
+        return None
+    return {k: round(sum(getattr(r, k) or 0.0 for r in rows), 2) for k in ("call_bought", "call_sold", "put_bought", "put_sold")}
+
+
+def settle_biases(underlying: str, today: int, symbol: str) -> str:
+    """Mark every recorded day that has ended against its own close."""
+    marked = 0
+    with session() as s:
+        open_days = s.exec(select(DailyBias).where(DailyBias.underlying == underlying, col(DailyBias.close).is_(None), DailyBias.day < today)).all()
+        for row in open_days:
+            close = s.exec(select(Bar.close).where(
+                Bar.symbol == symbol, Bar.interval == "15m", col(Bar.time) < row.day + 86_400, col(Bar.time) >= row.day,
+            ).order_by(col(Bar.time).desc()).limit(1)).first()
+            if close is None:
+                continue
+            ret, right = bias_mod.settle(row.label, row.open, float(close))
+            row.close, row.ret_pct, row.correct = float(close), round(100 * ret, 3), right
+            s.add(row)
+            marked += 1
+        s.commit()
+    return f"{underlying}: {marked} day(s) marked" if marked else ""
+
+
+def store_flow_bars(rows: list[dict[str, Any]]) -> None:
+    with session() as s:
+        s.exec(sqlite_insert(FlowBar).values(rows).on_conflict_do_nothing())
+        s.commit()
 
 
 def candles(rows: list[dict[str, Any]]) -> list[Candle]:
@@ -105,6 +153,92 @@ class MarketDesk:
         rows = await self._rows(symbol, OUTLOOK_BARS)
         summary = self.summary(underlying)
         return await self._cached("outlook", symbol, rows, lambda: outlook.build(symbol, candles(rows), summary, VERDICT_STOP_PCT, VERDICT_TARGET_PCT))
+
+    async def flow(self, underlying: str, minutes: int = 5) -> dict[str, Any]:
+        """Order flow from the recorded tape (`analysis.flow`), over the last day of its minutes."""
+        symbol = self.perpetual(underlying)
+        rows = await asyncio.to_thread(flow_rows, symbol, time.time() - 86_400)
+        last = int(rows[-1]["time"]) if rows else 0
+        hit = self._cache.get((f"flow{minutes}", symbol))
+        if hit and hit[0] == last and last:
+            return hit[1]
+        step = step_for(symbol, rows[-1]["close"]) if rows else 1.0
+        view = await asyncio.to_thread(flow.read, rows, minutes, step) | {"symbol": symbol, "underlying": underlying}
+        self._cache[(f"flow{minutes}", symbol)] = (last, view)
+        return view
+
+    async def bias(self, underlying: str) -> dict[str, Any]:
+        """The day's bias (`analysis.bias`) from the stored bars, gamma, the tape and funding."""
+        symbol = self.perpetual(underlying)
+        now = time.time()
+        hit = self._cache.get(("bias", symbol))
+        if hit and now - hit[0] < 60:
+            return hit[1]
+        today = int(now // 86_400 * 86_400)
+        rows = await self._rows(symbol, 96 * 40)  # 40 days of 15m bars: enough 4h bars for structure
+        spot = self.feed.spot(underlying) or (rows[-1]["close"] if rows else 0.0)
+        g = gex.exposure(self.feed.quotes(underlying), spot, now) if spot else {"ready": False}
+        flow_today = await asyncio.to_thread(flow_rows, symbol, today)
+        cvd = (sum(r["buy"] - r["sell"] for r in flow_today), sum(r["volume"] for r in flow_today)) if flow_today else None
+        premium = await asyncio.to_thread(options_premium, underlying, today)
+        perp = self.feed.perp(underlying)
+        view = bias_mod.read(
+            candles(rows), now, gex=g if g.get("ready") else None, cvd=cvd, options=premium,
+            funding_pct=(perp.stats.get("funding_rate_pct") if perp else None),
+        ) | {"underlying": underlying, "symbol": symbol, "gex": {k: v for k, v in g.items() if k != "by_strike"}, "options_today": premium}
+        self._cache[("bias", symbol)] = (int(now), view)
+        return view
+
+    async def gamma(self, underlying: str) -> dict[str, Any]:
+        """Gamma exposure by strike now (`options.gex`), its last day recorded each minute, and the
+        option premium that crossed the spread today."""
+        now = time.time()
+        spot = self.feed.spot(underlying)
+        view = gex.exposure(self.feed.quotes(underlying), spot, now) if spot else {"ready": False, "note": f"no fresh {underlying} price"}
+        since = now - 86_400
+        with session() as s:
+            rows = s.exec(select(OptionsHistory).where(
+                OptionsHistory.underlying == underlying, col(OptionsHistory.ts) >= since, col(OptionsHistory.net_gex).is_not(None),
+            ).order_by(col(OptionsHistory.ts))).all()
+        history = [{"ts": r.ts, "spot": r.spot, "net": r.net_gex, "flip": r.gamma_flip} for r in rows[::5]]  # one point per 5 minutes
+        premium = await asyncio.to_thread(options_premium, underlying, int(now // 86_400 * 86_400))
+        return view | {"underlying": underlying, "history": history, "options_today": premium}
+
+    async def record_bias(self) -> str:
+        """Once a UTC day is half an hour old, its bias is written down; once it has ended, marked."""
+        now = time.time()
+        today = int(now // 86_400 * 86_400)
+        out = []
+        for underlying in self.settings().underlyings:
+            with session() as s:
+                have = s.get(DailyBias, (underlying, today))
+            # Not before the chain is live: a bias written without its gamma is wrong all day, and the
+            # day's record is written once.
+            if have is None and now - today >= 1800 and self.feed.quotes(underlying):
+                view = await self.bias(underlying)
+                if view.get("ready"):
+                    with session() as s:
+                        s.add(DailyBias(underlying=underlying, day=today, ts=now, score=view["score"], label=view["label"],
+                                        style=view["style"], gamma=view["gamma"], open=view["open"], reasons=view["reasons"]))
+                        s.commit()
+                    out.append(f"{underlying}: {view['label']} ({view['score']:+.2f}, {view['style']})")
+            out.append(await asyncio.to_thread(settle_biases, underlying, today, self.perpetual(underlying)))
+        return "; ".join(x for x in out if x)
+
+    @staticmethod
+    def bias_record(underlying: str, days: int = 90) -> dict[str, Any]:
+        """The recorded days and how often a directional bias got the day's sign right."""
+        since = time.time() - days * 86_400
+        with session() as s:
+            rows = [r.model_dump() for r in s.exec(
+                select(DailyBias).where(DailyBias.underlying == underlying, col(DailyBias.day) >= since).order_by(col(DailyBias.day).desc())
+            ).all()]
+        scored = [r for r in rows if r["correct"] is not None]
+        return {
+            "days": rows, "scored": len(scored), "right": sum(1 for r in scored if r["correct"]),
+            "hit_rate_pct": round(100 * sum(1 for r in scored if r["correct"]) / len(scored), 1) if scored else None,
+            "note": "neutral days are not scored; a hit rate means little before about 30 scored days",
+        }
 
     async def pulse(self, underlying: str) -> dict[str, Any]:
         symbol = self.perpetual(underlying)
@@ -223,9 +357,18 @@ class MarketDesk:
     async def record_options(self) -> str:
         """One row per underlying per minute: the ATM IV and put/call history the exchange does not keep."""
         rows = []
+        now = time.time()
         for underlying in self.settings().underlyings:
+            flow = self.feed.tape.take_options(underlying)
             if summary := self.summary(underlying):
-                rows.append(history_row(summary) | {"ts": float(int(time.time() // 60 * 60))})
+                g = gex.exposure(self.feed.quotes(underlying), summary["spot"], now) if summary.get("spot") else {}
+                rows.append(history_row(summary) | {
+                    "ts": float(int(now // 60 * 60)),
+                    "net_gex": g.get("net"), "gamma_flip": g.get("flip"),
+                    "gex_call_wall": g.get("call_wall"), "gex_put_wall": g.get("put_wall"),
+                    "call_bought": round(flow.call_buy, 2), "call_sold": round(flow.call_sell, 2),
+                    "put_bought": round(flow.put_buy, 2), "put_sold": round(flow.put_sell, 2),
+                })
         if rows:
             with session() as s:
                 s.exec(sqlite_insert(OptionsHistory).values(rows).on_conflict_do_nothing())

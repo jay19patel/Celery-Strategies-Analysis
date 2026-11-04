@@ -16,20 +16,23 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import random
+import statistics
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlmodel import col, delete, select
+from sqlmodel import col, delete, select, update
 from websockets.asyncio.client import connect
 
 from app.core.db import session
 from app.core.models import Bar
-from app.market.delta import DeltaClient
-from app.market.options import PERPETUALS, OptionQuote, parse_ticker
+from app.market.delta import Candle, DeltaClient
+from app.market.options import PERPETUALS, UNDERLYING_OF, OptionQuote, parse_symbol, parse_ticker
+from app.market.tape import Tape
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +44,9 @@ OPTIONS_REFRESH = 30.0
 # profile are folded from. Everything else is folded, never fetched separately (`analysis.resample`).
 SERIES = {"15m": 365, "1m": 30}  # interval -> days kept
 SERIES_SECONDS = {"15m": 900, "1m": 60}
+MAX_JUMP = 0.25  # a bar whose body is 25% from the last good close is a bad print, not a market
+MAX_WICK = {"1m": 0.05, "15m": 0.10}  # a wick this far beyond its own body is trimmed to it
+BOOK_EVERY = 5.0  # seconds between reads of one symbol's order book
 
 
 def _f(value: Any) -> float | None:
@@ -48,6 +54,34 @@ def _f(value: Any) -> float | None:
         return None if value in (None, "") else float(value)
     except (TypeError, ValueError):
         return None
+
+
+def clean_candles(candles: list[Candle], reference: float | None = None, max_wick: float = 0.10) -> list[Candle]:
+    """Candles that could have traded, in time order: what an empty book printed is not a market.
+
+    Delta's ETH perpetual has printed lows of 0.05 and closes of 1.0 in a 2,000 market, sometimes for
+    hours. One such bar is a 99.99% move to every indicator, profile and backtest that reads it. Each
+    bar is judged against the last good close (`reference`, else the median of the first closes):
+    a body more than `MAX_JUMP` away is dropped (a hole, which every reader already tolerates). A
+    wick reaching more than `max_wick` beyond its own body is trimmed back to it, keeping the bar's
+    open, close and volume: BTC's real 15m crash wicks reach about 4%, the bad prints 14-28%.
+    """
+    ordered = sorted(candles, key=lambda c: c.time)
+    if not ordered:
+        return []
+    good = reference or statistics.median(c.close for c in ordered[:50])
+    out = []
+    for c in ordered:
+        if not all(math.isfinite(x) and x > 0 for x in (c.open, c.high, c.low, c.close)) or good <= 0:
+            continue
+        if abs(c.open / good - 1) > MAX_JUMP or abs(c.close / good - 1) > MAX_JUMP:
+            continue
+        top, bottom = max(c.open, c.close), min(c.open, c.close)
+        high = c.high if c.high <= top * (1 + max_wick) else top
+        low = c.low if c.low >= bottom * (1 - max_wick) else bottom
+        out.append(Candle(c.time, c.open, max(high, top), min(low, bottom), c.close, c.volume))
+        good = c.close
+    return out
 
 
 @dataclass
@@ -89,6 +123,8 @@ class MarketFeed:
         self.ws = {"connected": False, "since": None, "last_message": None, "reconnects": 0, "messages": 0, "error": ""}
         self.rest_status = {"last_refresh": None, "error": ""}
         self._latest_bar_times: dict[tuple[str, str], int] = {}
+        self.tape = Tape()
+        self._book_at: dict[str, float] = {}  # symbol -> when its book was last read
 
     # -- lifecycle ---------------------------------------------------------------------------
 
@@ -213,7 +249,7 @@ class MarketFeed:
         candles = await self.rest.candles(symbol, interval, start, end)
         rows = [
             {"symbol": symbol, "interval": interval, "time": c.time, "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume}
-            for c in candles if start <= c.time <= end
+            for c in clean_candles([c for c in candles if start <= c.time <= end], self._close_before(symbol, interval, start), MAX_WICK[interval])
         ]
         if rows:
             max_t = max(r["time"] for r in rows)
@@ -236,6 +272,40 @@ class MarketFeed:
             latest = int(val) if val else 0
             self._latest_bar_times[(symbol, interval)] = latest
             return latest
+
+    @staticmethod
+    def _close_before(symbol: str, interval: str, start: int) -> float | None:
+        """The last stored close before `start`: what the next bars are judged against."""
+        with session() as s:
+            row = s.exec(
+                select(Bar.close).where(Bar.symbol == symbol, Bar.interval == interval, col(Bar.time) < start)
+                .order_by(col(Bar.time).desc()).limit(1)
+            ).first()
+        return float(row) if row else None
+
+    @staticmethod
+    def clean_stored() -> dict[str, int]:
+        """`clean_candles` over everything already stored, once at start-up: bars kept from before the
+        rule existed are dropped or trimmed like new ones. One series at a time, as plain tuples."""
+        dropped = trimmed = 0
+        with session() as s:
+            series = s.exec(select(Bar.symbol, Bar.interval).distinct()).all()
+        for symbol, interval in series:
+            with session() as s:
+                rows = s.exec(
+                    select(Bar.time, Bar.open, Bar.high, Bar.low, Bar.close, Bar.volume)
+                    .where(Bar.symbol == symbol, Bar.interval == interval).order_by(col(Bar.time))
+                ).all()
+                kept = {c.time: c for c in clean_candles([Candle(*r) for r in rows], max_wick=MAX_WICK.get(interval, 0.10))}
+                gone = [r[0] for r in rows if r[0] not in kept]
+                fixed = [kept[r[0]] for r in rows if r[0] in kept and (kept[r[0]].high, kept[r[0]].low) != (r[2], r[3])]
+                for i in range(0, len(gone), 500):
+                    s.exec(delete(Bar).where(Bar.symbol == symbol, Bar.interval == interval, col(Bar.time).in_(gone[i : i + 500])))
+                for c in fixed:
+                    s.exec(update(Bar).where(Bar.symbol == symbol, Bar.interval == interval, Bar.time == c.time).values(high=c.high, low=c.low))
+                s.commit()
+            dropped, trimmed = dropped + len(gone), trimmed + len(fixed)
+        return {"dropped": dropped, "trimmed": trimmed}
 
     @staticmethod
     def prune_bars() -> int:
@@ -263,12 +333,41 @@ class MarketFeed:
     # -- WebSocket ---------------------------------------------------------------------------
 
     def subscribe_payload(self) -> dict[str, Any]:
-        symbols = [PERPETUALS[u] for u in self.underlyings] + ["call_options", "put_options"]
-        return {"type": "subscribe", "payload": {"channels": [{"name": "v2/ticker", "symbols": symbols}]}}
+        perps = [PERPETUALS[u] for u in self.underlyings]
+        symbols = [*perps, "call_options", "put_options"]
+        return {"type": "subscribe", "payload": {"channels": [
+            {"name": "v2/ticker", "symbols": symbols},
+            {"name": "all_trades", "symbols": symbols},  # every print, with the side that crossed the spread
+            {"name": "l2_orderbook", "symbols": perps},
+        ]}}
+
+    def wanted(self, raw: str) -> bool:
+        """Whether a raw message is worth parsing. The book arrives as ~60 KB of JSON a few times a
+        second per symbol; one look every `BOOK_EVERY` seconds is all the minute's mean needs, and
+        skipping the rest before `json.loads` keeps a small server's CPU for the trading."""
+        if '"type":"l2_orderbook"' not in raw:
+            return True
+        at = raw.find('"symbol":"')
+        symbol = raw[at + 10 : raw.find('"', at + 10)] if at >= 0 else ""
+        now = time.time()
+        if now - self._book_at.get(symbol, 0.0) < BOOK_EVERY:
+            return False
+        self._book_at[symbol] = now
+        return True
 
     def handle(self, msg: Any) -> None:
-        if not isinstance(msg, dict) or msg.get("type") != "v2/ticker":
+        if not isinstance(msg, dict):
             return
+        kind = msg.get("type")
+        if kind == "all_trades":
+            self._trade(msg)
+            return
+        if kind == "l2_orderbook":
+            levels = lambda side: [(float(x["limit_price"]), float(x["size"])) for x in msg.get(side) or []]  # noqa: E731
+            self.tape.book(str(msg.get("symbol", "")), levels("buy"), levels("sell"))
+            return
+        if kind != "v2/ticker":
+            return  # including `all_trades_snapshot`: replayed on every reconnect, it would count twice
         now = time.time()
         self.ws["last_message"] = now
         self.ws["messages"] += 1
@@ -280,6 +379,20 @@ class MarketFeed:
         elif (perp := parse_perp(msg, now)) is not None:
             self.perps[symbol] = perp
 
+    def _trade(self, msg: dict[str, Any]) -> None:
+        symbol = str(msg.get("symbol", ""))
+        price, size = _f(msg.get("price")) or 0.0, _f(msg.get("size")) or 0.0
+        taker_buy = msg.get("buyer_role") == "taker"
+        ts = (_f(msg.get("timestamp")) or time.time() * 1e6) / 1e6
+        if symbol[:2] in ("C-", "P-"):
+            parsed = parse_symbol(symbol)
+            if parsed and parsed[1] in self.underlyings:
+                quote = self.book.get(symbol)
+                cv = quote.contract_value if quote else (0.01 if parsed[1] == "ETH" else 0.001)
+                self.tape.option_trade(parsed[1], parsed[0], price, size * cv, taker_buy)
+        elif symbol in UNDERLYING_OF:
+            self.tape.trade(symbol, price, size, taker_buy, ts)
+
     async def _run_ws(self) -> None:
         backoff = 1.0
         while True:
@@ -290,7 +403,8 @@ class MarketFeed:
                     await ws.send(json.dumps(self.subscribe_payload()))
                     while True:
                         raw = await asyncio.wait_for(ws.recv(), timeout=self.SILENCE_TIMEOUT)
-                        self.handle(json.loads(raw))
+                        if self.wanted(raw):
+                            self.handle(json.loads(raw))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

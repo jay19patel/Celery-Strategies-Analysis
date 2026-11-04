@@ -11,6 +11,7 @@ from app.errors import NotFound, Refused
 from app.market import options as chain
 from app.market.feed import MarketFeed
 from app.market.indicators import parkinson_vol, realised_vol
+from app.options import gex
 from app.options import ideas as ideas_mod
 from app.options import regime as regime_mod
 from app.options.assess import DEFAULT_FEE, FeeRate, assess, leg_fee
@@ -80,7 +81,9 @@ class Desk:
     def regime(self, underlying: str, expiry: float | None = None) -> dict[str, Any]:
         expiry = expiry or self.default_expiry(underlying)
         bars = self.feed.bars(chain.PERPETUALS[underlying], 3000)
-        result = regime_mod.analyze(bars, self.spot(underlying), self.summary(underlying, expiry))
+        spot = self.spot(underlying)
+        exposure = gex.exposure(self.feed.quotes(underlying), spot, time.time())
+        result = regime_mod.analyze(bars, spot, self.summary(underlying, expiry), exposure.get("regime"))
         return result | {"underlying": underlying, "expiry": expiry}
 
     async def ideas(self, underlying: str, expiry: float) -> dict[str, Any]:
@@ -122,18 +125,27 @@ class Desk:
 
     # -- structures ------------------------------------------------------------------------
 
+    @staticmethod
+    def _fee_key(symbol: str) -> str:
+        """Every option of an underlying shares one fee schedule. Keyed per contract, the cache (and the
+        REST client's product cache under it) would gain the day's new listings for as long as the
+        process runs, which is meant to be years."""
+        parsed = chain.parse_symbol(symbol)
+        return f"{parsed[1]} options" if parsed else symbol
+
     async def fee_rate(self, symbol: str) -> FeeRate:
-        if symbol not in self._fees:
+        key = self._fee_key(symbol)
+        if key not in self._fees:
             try:
                 product = await self.feed.rest.product(symbol)
                 specs = product.get("product_specs") or {}
-                self._fees[symbol] = FeeRate(
+                self._fees[key] = FeeRate(
                     taker=float(product.get("taker_commission_rate") or DEFAULT_FEE[0]),
                     premium_cap=float(specs.get("premium_commission_rate") or DEFAULT_FEE[1]),
                 )
             except Exception:
                 return FeeRate(*DEFAULT_FEE)  # not cached: the next call tries the spec again
-        return self._fees[symbol]
+        return self._fees[key]
 
     async def contract_value(self, symbol: str) -> float:
         """Underlying per contract, from the product spec (BTCUSD and BTC options: 0.001 BTC)."""
@@ -144,7 +156,7 @@ class Desk:
 
     def cached_fee(self, symbol: str) -> FeeRate:
         """The fee rate without a network call: what `fee_rate` read before, else the conservative default."""
-        return self._fees.get(symbol, FeeRate(*DEFAULT_FEE))
+        return self._fees.get(self._fee_key(symbol), FeeRate(*DEFAULT_FEE))
 
     def plan(
         self, underlying: str, strategy: str, expiry: float | None = None, legs: list[dict[str, Any]] | None = None,

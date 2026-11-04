@@ -36,7 +36,10 @@ MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@+\-]{2,120}$")
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
 Underlying = Literal["BTC", "ETH", "XAUT"]
-Directional = Literal["ema_vwap", "ema_9_15", "pcr_options", "supertrend", "trend_4h_short", "trend_4h_long"]
+Directional = Literal[
+    "ema_vwap", "ema_9_15", "pcr_options", "supertrend", "trend_4h_short", "trend_4h_long",
+    "value_area_return", "sweep_absorption", "exhaustion_fade", "flow_breakout",
+]
 Strategy = Literal[
     "iron_condor", "iron_butterfly", "short_strangle", "short_straddle",
     "long_straddle", "bull_put_spread", "bear_call_spread",

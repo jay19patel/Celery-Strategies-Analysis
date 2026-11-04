@@ -20,6 +20,7 @@ import { PriceChart, type ChartMarker, type Level } from "@/components/charts/pr
 import { TrendlineStructureChart } from "@/components/charts/trendline-structure-chart";
 import { AiBriefCard } from "@/components/desk/ai-brief-card";
 import { DirectPerpPanel } from "@/components/desk/direct-perp-panel";
+import { BiasCard, FlowCard, FootprintCard, GexCard } from "@/components/market/order-flow";
 import { PageHeader } from "@/components/shared/page";
 import { Rolling } from "@/components/shared/rolling";
 import { LoadError, Loading } from "@/components/shared/states";
@@ -39,6 +40,7 @@ import type {
   SettingsResponse,
   StructureZone,
   Fib,
+  GammaExposure,
   TrendlinesResponse,
 } from "@/lib/types";
 
@@ -217,6 +219,7 @@ export default function MarketDeskPage() {
     clusters: boolean;
     ema: boolean;
     fib: boolean;
+    gex: boolean;
     profile: boolean;
   }>(() => {
     if (typeof window !== "undefined") {
@@ -235,16 +238,17 @@ export default function MarketDeskPage() {
             ema: parsed.ema ?? true,
             fib: parsed.fib ?? true,
             profile: parsed.profile ?? true,
+            gex: parsed.gex ?? true,
           };
         }
       } catch {
         /* ignore private mode */
       }
     }
-    return { fvg: true, ob: true, smc: true, levels: true, volume: true, trendlines: true, clusters: true, ema: true, fib: true, profile: true };
+    return { fvg: true, ob: true, smc: true, levels: true, volume: true, trendlines: true, clusters: true, ema: true, fib: true, profile: true, gex: true };
   });
 
-  const toggleLayer = (layerKey: "fvg" | "ob" | "smc" | "levels" | "volume" | "trendlines" | "clusters" | "ema" | "fib" | "profile") => {
+  const toggleLayer = (layerKey: "fvg" | "ob" | "smc" | "levels" | "volume" | "trendlines" | "clusters" | "ema" | "fib" | "profile" | "gex") => {
     setLayers((prev) => {
       const next = { ...prev, [layerKey]: !prev[layerKey] };
       try {
@@ -281,6 +285,7 @@ export default function MarketDeskPage() {
     { refreshInterval: 60_000 },
   );
 
+  const { data: gexData } = useApi<GammaExposure>(`/desk/gex?underlying=${underlying}`, { refreshInterval: 60_000 });
   const { data: fibData } = useApi<Fib>(`/desk/fibonacci?underlying=${underlying}&interval=${chartInterval}&limit=500`, {
     refreshInterval: 60_000,
   });
@@ -340,8 +345,14 @@ export default function MarketDeskPage() {
         .filter((l) => l.kind === "retracement")
         .forEach((l) => list.push({ price: l.price, label: `Fib ${l.label}`, color: "#a855f7", dashed: !l.golden }));
     }
+    // Where the option book's hedging changes: the gamma flip and the two walls.
+    if (layers.gex && gexData?.ready) {
+      if (gexData.flip) list.push({ price: gexData.flip, label: "γ flip", color: "#6366f1" });
+      if (gexData.call_wall) list.push({ price: gexData.call_wall, label: "Call wall", color: "#16a34a", dashed: true });
+      if (gexData.put_wall) list.push({ price: gexData.put_wall, label: "Put wall", color: "#dc2626", dashed: true });
+    }
     return list;
-  }, [fibData, layers.fib, layers.levels, structure, volumeProfile]);
+  }, [fibData, gexData, layers.fib, layers.gex, layers.levels, structure, volumeProfile]);
 
   // Extract all institutional zones (FVGs & OBs) from engine structure
   const structureZones = useMemo<StructureZone[]>(() => {
@@ -688,6 +699,20 @@ export default function MarketDeskPage() {
               <span className="size-2 rounded-full bg-purple-500" />
               Fib
             </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={layers.gex}
+              onClick={() => toggleLayer("gex")}
+              className={`h-7 px-2.5 text-xs ${
+                layers.gex ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"
+              }`}
+              title="Toggle the gamma flip and the call and put walls"
+            >
+              <span className="size-2 rounded-full bg-indigo-500" />
+              GEX
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="pt-1">
@@ -897,6 +922,14 @@ export default function MarketDeskPage() {
           />
         </div>
       </div>
+
+      {/* The auction: the day's bias and the option book's gamma, then the tape itself */}
+      <div className="grid gap-5 xl:grid-cols-2">
+        <BiasCard underlying={underlying} />
+        <GexCard underlying={underlying} />
+      </div>
+      <FlowCard underlying={underlying} />
+      <FootprintCard underlying={underlying} />
 
       {/* Structure: the trendline chart and its levels, full width — this is the page's widest read */}
       <div className="space-y-5">

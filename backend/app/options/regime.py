@@ -109,7 +109,7 @@ def label(m: dict[str, Any], d: float) -> str:
     return "range"
 
 
-def score(m: dict[str, Any], d: float, regime: str) -> dict[str, dict[str, Any]]:
+def score(m: dict[str, Any], d: float, regime: str, gamma: str | None = None) -> dict[str, dict[str, Any]]:
     vp_pts = 100 * m["vol_premium"] if m["vol_premium"] is not None else None
     expanding = bool(m["rv_ratio"] and m["rv_ratio"] > 1.3)
     compressed = bool(m["rv_ratio"] and m["rv_ratio"] < 0.75)
@@ -134,13 +134,18 @@ def score(m: dict[str, Any], d: float, regime: str) -> dict[str, dict[str, Any]]
         return [(f"IV {100 * m['atm_iv']:.1f}% vs realised {100 * (m['atm_iv'] - m['vol_premium']):.1f}%: {abs(vp_pts):.1f} vol pts {word}", pts)]
 
     trend = abs(d)
+    # The option book's own hedging (`options.gex`): positive gamma damps moves, negative chases them.
+    pinned = [("positive gamma: hedgers damp moves", 8)] if gamma == "positive" else [("negative gamma: hedgers chase moves", -12)] if gamma == "negative" else []
+    released = [("negative gamma: hedgers chase moves", 10)] if gamma == "negative" else [("positive gamma: hedgers damp moves", -6)] if gamma == "positive" else []
     add("iron_condor", [
+        *pinned,
         *premium(True),
         ("trend against a neutral structure", -trend * 35),
         ("price ranging", 10 if regime in ("range", "quiet range") else 0),
         ("realised volatility expanding", -10 if expanding else 0),
     ])
     add("iron_butterfly", [
+        *pinned,
         *premium(True),
         ("trend against a pinned structure", -trend * 45),
         ("price near max pain", 8 if near_pain else 0),
@@ -148,12 +153,14 @@ def score(m: dict[str, Any], d: float, regime: str) -> dict[str, dict[str, Any]]
         ("realised volatility expanding", -15 if expanding else 0),
     ])
     add("short_strangle", [
+        *pinned,
         *premium(True),
         ("trend against a neutral structure", -trend * 35),
         ("price ranging", 8 if regime in ("range", "quiet range") else 0),
         ("unbounded risk while volatility expands", -18 if expanding else 0),
     ])
     add("short_straddle", [
+        *pinned,
         *premium(True),
         ("trend against a pinned structure", -trend * 50),
         ("price near max pain", 6 if near_pain else 0),
@@ -170,6 +177,7 @@ def score(m: dict[str, Any], d: float, regime: str) -> dict[str, dict[str, Any]]
         ("uptrend against a bearish spread", -d * 45 if d > 0 else 0),
     ])
     add("long_straddle", [
+        *released,
         *premium(False),
         ("volatility compressed, often released", 10 if compressed else 0),
         ("movement under way", trend * 10),
@@ -177,7 +185,7 @@ def score(m: dict[str, Any], d: float, regime: str) -> dict[str, dict[str, Any]]
     return out
 
 
-def analyze(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any]) -> dict[str, Any]:
+def analyze(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any], gamma: str | None = None) -> dict[str, Any]:
     m = measure(bars, spot, summary)
     d, parts = direction(m)
     regime = label(m, d)
@@ -191,6 +199,7 @@ def analyze(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any]) ->
         "direction": round(d, 3),
         "direction_parts": parts,
         "metrics": {k: (round(v, 6) if isinstance(v, float) else v) for k, v in m.items()},
-        "scores": score(m, d, regime),
+        "scores": score(m, d, regime, gamma),
+        "gamma": gamma,
         "notes": notes,
     }

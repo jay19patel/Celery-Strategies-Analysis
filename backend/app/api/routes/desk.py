@@ -55,3 +55,18 @@ async def bars(engine: EngineDep, underlying: str = "BTC", interval: str = "15m"
 @router.get("/options-history")
 def options_history(engine: EngineDep, underlying: str = "BTC", hours: float = 24) -> list[dict[str, Any]]:
     return engine.market.options_history(underlying, hours, 60 if hours <= 24 else 900)
+
+
+@router.get("/flow")
+async def order_flow(engine: EngineDep, underlying: str = "BTC", minutes: int = 5) -> dict[str, Any]:
+    return await engine.market.flow(underlying, min(max(minutes, 1), 60))
+
+
+@router.get("/gex")
+async def gamma(engine: EngineDep, underlying: str = "BTC") -> dict[str, Any]:
+    return await engine.market.gamma(underlying)
+
+
+@router.get("/bias")
+async def day_bias(engine: EngineDep, underlying: str = "BTC") -> dict[str, Any]:
+    return await engine.market.bias(underlying) | {"record": engine.market.bias_record(underlying)}
