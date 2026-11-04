@@ -177,33 +177,6 @@ class OptionsHistory(SQLModel, table=True):
     implied_move_pct: float | None = None
 
 
-class Prediction(SQLModel, table=True):
-    """A Market Desk card's claim, written down when it was made and marked once its horizon passed,
-    beside what saying nothing would have scored (`analysis.verdict`)."""
-
-    symbol: str = Field(primary_key=True)
-    source: str = Field(primary_key=True)  # which card
-    bar_time: int = Field(primary_key=True)
-    ts: float
-    horizon_hours: float
-    stance: str
-    measure: str
-    label: str
-    confidence: float
-    price: float
-    numbers: Any = Field(default=None, sa_column=Column(JSON))
-    settled_at: float | None = Field(default=None, index=True)
-    actual_return: float | None = None
-    actual_vol: float | None = None
-    prior_vol: float | None = None
-    actual_excursion: float | None = None
-    regime: str | None = None
-    exit_reason: str | None = None
-    r_multiple: float | None = None
-    correct: int | None = None
-    baseline_correct: int | None = None
-
-
 class SignalLog(SQLModel, table=True):
     """A directional strategy's answer on a closed bar that said something: a signal (and what each
     broker did with it) or an error. Bars where it saw nothing are not stored, only shown live."""

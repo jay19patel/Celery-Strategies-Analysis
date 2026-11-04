@@ -23,7 +23,7 @@ import { ago, dateTime, num, pct, price, signed, signedPct, until, usd } from "@
 import { useApi } from "@/lib/live";
 import type { ZhDecision, ZhScan, ZhStatus } from "@/lib/types";
 
-const UNDERLYINGS = ["BTC", "ETH"];
+const UNDERLYINGS = ["BTC", "ETH", "XAUT"];
 
 function countdown(hours: number | null): string {
   if (hours === null) return "—";

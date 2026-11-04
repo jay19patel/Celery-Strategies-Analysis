@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import useSWR from "swr";
 import Link from "next/link";
 import { ArrowDownRight, ArrowUpRight, Calculator, Check, Loader2, Play, ShieldAlert, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -13,9 +14,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, requestId } from "@/lib/api";
-import { num, price, usd } from "@/lib/format";
+import { num, pct, price } from "@/lib/format";
 import { useApi } from "@/lib/live";
-import type { Broker, BrokerStatus, OptionKind, Side, Structure } from "@/lib/types";
+import type { Broker, BrokerStatus, OptionKind, Preview, Side, Structure } from "@/lib/types";
 
 export interface OptionLegTarget {
   symbol: string;
@@ -44,7 +45,6 @@ export function DirectOptionModal({
   onOpenChange: (open: boolean) => void;
 }) {
   const { mutate } = useSWRConfig();
-  const { data: brokersData } = useApi<BrokerStatus[]>("/settings/delta/test");
   const { data: sysStatus } = useApi<{ brokers: BrokerStatus[] }>("/system/status");
 
   const brokers = useMemo<BrokerStatus[]>(() => {
@@ -57,7 +57,7 @@ export function DirectOptionModal({
   const activeBrokers = brokers.filter((b) => b.active);
   const [userBroker, setUserBroker] = useState<Broker | null>(null);
   const [userSide, setUserSide] = useState<Side | null>(null);
-  const [qty, setQty] = useState<number>(1);
+  const [userQty, setUserQty] = useState<number | null>(null); // null: sized to the capital
   const [executing, setExecuting] = useState(false);
 
   const broker = userBroker && activeBrokers.some((b) => b.name === userBroker)
@@ -65,10 +65,25 @@ export function DirectOptionModal({
     : (activeBrokers[0]?.name as Broker) ?? "paper";
   const side = userSide ?? initialSide;
 
+  // The leg priced and sized by the backend, exactly as the strategy builder and the auto-trader
+  // size a trade: the worst case is `risk_per_trade_pct` of the broker's equity, at most `max_lots`.
+  const [sizingQty, setSizingQty] = useState(1);
+  const body = target ? { underlying, strategy: "custom", legs: [{ symbol: target.symbol, side, ratio: 1 }], qty: userQty ?? sizingQty } : null;
+  const preview = useSWR<Preview>(open && body ? ["/strategies/preview", JSON.stringify(body)] : null, ([path, b]: [string, string]) => api<Preview>(path, "POST", JSON.parse(b)), {
+    keepPreviousData: true,
+    shouldRetryOnError: false,
+  });
+  const sizing = preview.data?.sizing.find((s) => s.broker === broker);
+  const suggested = sizing?.suggested_qty !== undefined ? Math.max(1, sizing.suggested_qty) : null;
+  if (userQty === null && suggested !== null && suggested !== sizingQty) setSizingQty(suggested);
+  const qty = userQty ?? sizingQty;
+  const analysis = preview.data?.qty === qty ? preview.data.analysis : null;
+
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
       setUserSide(null);
       setUserBroker(null);
+      setUserQty(null);
     }
     onOpenChange(nextOpen);
   };
@@ -81,21 +96,12 @@ export function DirectOptionModal({
   const strike = target.strike;
   const spot = spotPrice || strike;
 
-  // Statistical calculations (no AI needed - pure options arithmetic)
-  const totalPremium = mark * qty;
-  const breakeven = isCall ? strike + mark : Math.max(0, strike - mark);
-
-  const maxProfitText = isBuy
-    ? isCall
-      ? "Unlimited"
-      : `$${num((strike - mark) * qty, 2)}`
-    : `$${num(totalPremium, 2)} (Full Premium)`;
-
-  const maxLossText = isBuy
-    ? `-$${num(totalPremium, 2)} (100% Defined)`
-    : isCall
-    ? "Unlimited (Margin risk)"
-    : `-$${num((strike - mark) * qty, 2)}`;
+  // Dollar figures from the backend's own analysis: premium x contract size x lots, with fees.
+  const premium = analysis ? Math.abs(analysis.net_premium) : null;
+  const breakeven = analysis?.breakevens[0] ?? (isCall ? strike + mark : Math.max(0, strike - mark));
+  const money = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `$${num(v, 4)}`);
+  const maxProfitText = !analysis ? "—" : analysis.max_profit === null ? "Unlimited" : money(analysis.max_profit);
+  const maxLossText = !analysis ? "—" : analysis.max_loss === null ? "Unlimited" : `-${money(analysis.max_loss)}`;
 
   const ruleText = isBuy
     ? isCall
@@ -104,14 +110,6 @@ export function DirectOptionModal({
     : isCall
     ? `Keeps full premium if ${underlying} stays ≤ $${num(strike, 0)}`
     : `Keeps full premium if ${underlying} stays ≥ $${num(strike, 0)}`;
-
-  function handleAutoFill() {
-    // Statistical sizing: default safe 1 lot or 2 lots based on premium
-    setQty(mark > 1000 ? 1 : mark > 200 ? 2 : 5);
-    toast.info("Auto-set statistical sizing", {
-      description: `Qty set based on premium outlay of $${num(mark, 0)}/contract`,
-    });
-  }
 
   async function handleExecute() {
     if (!target) return;
@@ -170,7 +168,7 @@ export function DirectOptionModal({
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => setUserSide("buy")}
+              onClick={() => { setUserSide("buy"); setUserQty(null); }}
               className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 font-bold transition-colors ${
                 isBuy
                   ? "border-profit bg-profit-soft text-profit shadow-sm"
@@ -181,7 +179,7 @@ export function DirectOptionModal({
             </button>
             <button
               type="button"
-              onClick={() => setUserSide("sell")}
+              onClick={() => { setUserSide("sell"); setUserQty(null); }}
               className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 font-bold transition-colors ${
                 !isBuy
                   ? "border-loss bg-loss-soft text-loss shadow-sm"
@@ -216,7 +214,7 @@ export function DirectOptionModal({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Broker</Label>
-              <Select value={broker} onValueChange={(v) => setUserBroker(v as Broker)}>
+              <Select value={broker} onValueChange={(v) => { setUserBroker(v as Broker); setUserQty(null); }}>
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue />
                 </SelectTrigger>
@@ -233,30 +231,41 @@ export function DirectOptionModal({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label className="text-xs">Contracts / Lots</Label>
-                <button
-                  type="button"
-                  onClick={handleAutoFill}
-                  className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
-                >
-                  <Calculator className="size-3" /> Auto-fill
-                </button>
+                {userQty !== null && (
+                  <button
+                    type="button"
+                    onClick={() => setUserQty(null)}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+                  >
+                    <Calculator className="size-3" /> Fit my capital
+                  </button>
+                )}
               </div>
               <Input
                 type="number"
                 min={1}
-                max={100}
                 value={qty}
-                onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))}
+                onChange={(e) => setUserQty(Math.max(1, parseInt(e.target.value) || 1))}
                 className="h-8 font-mono text-xs"
               />
             </div>
           </div>
 
+          {sizing && !sizing.error && (
+            <p className="text-[11px] text-muted-foreground">
+              {userQty === null ? "Sized to your capital" : "Your quantity"}: equity ${num(sizing.equity, 2)}, worst case{" "}
+              {sizing.worst_case_pct != null && analysis ? pct(sizing.worst_case_pct, 2) : "unlimited"} of it
+              {suggested !== null && userQty !== null && ` (capital fits ${suggested})`}
+              {sizing.margin_ok === false && <span className="text-loss"> · not enough margin for {qty}</span>}
+            </p>
+          )}
+          {sizing?.error && <p className="text-[11px] text-loss">{sizing.error}</p>}
+
           {/* Statistical Breakdown Box */}
           <div className="space-y-2 rounded-xl bg-secondary/60 p-3">
             <div className="flex justify-between border-b pb-1.5 text-xs">
               <span className="text-muted-foreground">{isBuy ? "Net Premium Outlay" : "Upfront Premium Received"}:</span>
-              <span className="font-mono font-bold text-foreground">${num(totalPremium, 2)}</span>
+              <span className="font-mono font-bold text-foreground">{money(premium)}</span>
             </div>
             <div className="flex justify-between border-b pb-1.5 text-xs">
               <span className="text-muted-foreground">Breakeven at Expiry:</span>

@@ -100,3 +100,18 @@ def test_a_long_straddle_is_gated_on_its_edge_not_on_a_sellers_probability_of_pr
     assert moving["ok"]
     still = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.10)
     assert not still["ok"]  # a buyer the market does not pay for is still refused, on its edge
+
+
+def test_gold_is_an_underlying_and_its_options_settle_at_its_own_hour() -> None:
+    """XAUT options settle at 16:00 UTC, BTC's at 12:00: one hour for every chain put gold's expiry
+    four hours early — wrong time left, wrong exits."""
+    from datetime import UTC, datetime
+
+    from app.market.options import PERPETUALS, parse_symbol
+
+    assert PERPETUALS["XAUT"] == "XAUTUSD"
+    assert Settings(underlyings=["BTC", "ETH", "XAUT"]).underlyings == ["BTC", "ETH", "XAUT"]
+    _, underlying, strike, expiry = parse_symbol("C-XAUT-4120-051126")
+    assert (underlying, strike) == ("XAUT", 4120.0)
+    assert datetime.fromtimestamp(expiry, UTC) == datetime(2026, 11, 5, 16, tzinfo=UTC)
+    assert datetime.fromtimestamp(parse_symbol("C-BTC-80000-051126")[3], UTC).hour == 12

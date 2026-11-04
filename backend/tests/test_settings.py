@@ -17,9 +17,7 @@ def test_defaults_are_paper_only_and_delta_on_demo() -> None:
     assert sorted(s.auto_strategies) == sorted(k for k in STRATEGY_KEYS if k not in UNDEFINED_RISK)
     assert not set(UNDEFINED_RISK) & set(s.auto_strategies)
     assert s.max_spread_pct <= 15  # a wing quoted wider than this gives the credit back to the book
-    assert set(s.directional_strategies) < set(REGISTRY)
-    assert not {"supertrend", "ema_9_15"} & set(s.directional_strategies)  # no edge in the backtest
-    assert "trend_4h_short" in s.directional_strategies and "trend_4h_long" not in s.directional_strategies
+    assert set(s.directional_strategies) == set(REGISTRY)  # every strategy on
 
 
 def test_real_money_needs_the_phrase() -> None:

@@ -16,7 +16,6 @@ from __future__ import annotations
 import pytest
 
 from app.analysis import resample
-from app.market.delta import Candle
 
 MINUTE = 60
 HOUR = 3600
@@ -160,25 +159,6 @@ def test_gaps_are_reported_not_filled():
     assert holes == [(MIDNIGHT + 3 * MINUTE, MIDNIGHT + 7 * MINUTE)]
 
 
-def test_validate_names_everything_wrong_with_a_series():
-    rows = minutes(10)
-    del rows[4:7]
-    rows.append(dict(rows[0], time=MIDNIGHT + 30))  # misaligned, and out of order after the gap
-    rows.append(dict(rows[0]))  # a duplicate of the first bar
-    report = resample.validate(rows, "1m")
-    assert report["ok"] is False
-    assert report["duplicates"] == [MIDNIGHT]
-    assert report["misaligned"] == [MIDNIGHT + 30]
-    assert report["out_of_order"] is True
-    assert report["missing_bars"] == 3
-
-
-def test_a_clean_series_validates():
-    report = resample.validate(minutes(120), "1m")
-    assert report["ok"] is True
-    assert report["bars"] == 120 and report["missing_bars"] == 0
-
-
 # -- what cannot be folded ------------------------------------------------------------
 
 
@@ -204,12 +184,6 @@ def test_rows_that_are_not_the_source_they_are_called_are_refused():
 def test_folding_to_the_same_interval_passes_the_rows_through():
     rows = minutes(5)
     assert [b["time"] for b in resample.fold(rows, "1m", "1m")] == [r["time"] for r in rows]
-
-
-def test_to_candles_drops_what_a_candle_cannot_hold():
-    (candle,) = resample.to_candles(minutes(1))
-    assert isinstance(candle, Candle)
-    assert candle.time == MIDNIGHT and candle.close == 101.0
 
 
 # -- the duplication that is allowed, on condition it is checked -----------------------

@@ -35,14 +35,6 @@ async def accounts(engine: EngineDep) -> dict[str, Any]:
     return {"accounts": await engine.accounts(), "brokers": engine.broker_status(), "today": today}
 
 
-@router.post("/report")
-async def send_report(engine: EngineDep) -> dict[str, Any]:
-    """Today's report, now, to every enabled notification channel."""
-    if not engine.notifier.enabled(engine.settings()):
-        raise Refused("no notification channel is enabled and complete (Settings → Notifications)")
-    return {"results": await engine.daily_report()}
-
-
 @router.get("/stats")
 def stats(engine: EngineDep, broker: str = "") -> dict[str, Any]:
     return engine.trading.stats(broker)

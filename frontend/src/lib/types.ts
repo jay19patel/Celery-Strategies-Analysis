@@ -782,10 +782,9 @@ export interface MarketStructure {
   };
   profile: {
     ready?: boolean;
-    poc?: number;
-    vah?: number;
-    val?: number;
     source?: string;
+    session?: VolumeProfile | null;
+    composite?: VolumeProfile | null;
     [key: string]: unknown;
   };
   flow: {
@@ -830,31 +829,14 @@ export interface MarketStructure {
   };
 }
 
-export interface VerdictItem {
-  key: string;
-  stance: string;
+/** One distribution of volume over price (`analysis/profile.py`). */
+export interface VolumeProfile {
   label: string;
-  detail: string;
-  confidence: number;
-  horizon_hours: number;
-  numbers: Record<string, unknown>;
-  measure: string;
-  scorable: boolean;
+  poc: number;
+  value_low: number;
+  value_high: number;
   source: string;
-  symbol: string;
-}
-
-export interface MarketVerdicts {
-  symbol: string;
-  days: number;
-  verdicts: VerdictItem[];
-  record: {
-    cards: Record<string, unknown>[];
-    total: number;
-    min_marked: number;
-    tests: number;
-  };
-  history: Record<string, unknown>[];
+  nodes: { price: number; volume: number; share: number; in_value: boolean; poc: boolean }[];
 }
 
 export interface MarketAnalysisResponse {
@@ -1033,4 +1015,49 @@ export interface Fib {
   in_golden: boolean;
   symbol?: string;
   interval?: string;
+}
+
+/** One single-option trade with an edge at realised volatility (`options/ideas.py`). */
+export interface OptionIdea {
+  symbol: string;
+  kind: "call" | "put";
+  strike: number;
+  expiry: number;
+  hours_left: number;
+  side: Side;
+  price: number;
+  fair: number;
+  vol_used: number;
+  edge: number;
+  edge_per_lot: number;
+  edge_on_risk_pct: number;
+  pop: number | null;
+  max_loss: number | null;
+  max_loss_per_lot: number | null;
+  target_price: number;
+  needed_move_pct: number | null;
+  p_target: number | null;
+  hold_hours: number | null;
+  exit: string;
+  iv: number | null;
+  delta: number | null;
+  bid: number | null;
+  ask: number | null;
+  mark: number | null;
+  spread_pct: number;
+  view: "bullish" | "bearish";
+  trend: "with" | "against" | "neutral";
+}
+
+export interface OptionIdeas {
+  underlying: string;
+  expiry: number;
+  spot: number;
+  lean: "bullish" | "bearish" | "neutral";
+  direction: number;
+  vol_buyer: number | null;
+  vol_seller: number | null;
+  considered: number;
+  ideas: OptionIdea[];
+  note: string;
 }

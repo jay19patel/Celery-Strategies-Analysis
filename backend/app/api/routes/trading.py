@@ -47,11 +47,6 @@ def structures(engine: EngineDep, status: str = "", broker: str = "", limit: int
     return engine.trading.structures(status, broker, limit)
 
 
-@router.get("/structures/{sid}")
-def structure(sid: str, engine: EngineDep) -> dict[str, Any]:
-    return engine.trading.structure(sid)
-
-
 @router.post("/structures/{sid}/close")
 async def close(sid: str, engine: EngineDep) -> dict[str, Any]:
     return await engine.trading.close(sid, "closed from the dashboard")

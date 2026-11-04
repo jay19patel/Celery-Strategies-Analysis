@@ -27,6 +27,11 @@ def option_chain(engine: EngineDep, underlying: str = "BTC", expiry: float | Non
     return engine.desk.chain(underlying, expiry or engine.desk.default_expiry(underlying))
 
 
+@router.get("/market/ideas")
+async def option_ideas(engine: EngineDep, underlying: str = "BTC", expiry: float | None = None) -> dict[str, Any]:
+    return await engine.desk.ideas(underlying, expiry or engine.desk.default_expiry(underlying))
+
+
 @router.get("/market/regime")
 def regime(engine: EngineDep, underlying: str = "BTC", expiry: float | None = None) -> dict[str, Any]:
     return engine.desk.regime(underlying, expiry)

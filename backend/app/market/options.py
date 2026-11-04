@@ -10,8 +10,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 EXPIRY_HOUR_UTC = 12  # Delta India BTC/ETH options settle at 12:00 UTC (17:30 IST)
+EXPIRY_HOURS_UTC = {"XAUT": 16}  # gold settles at 16:00 UTC (21:30 IST), per its product's settlement_time
 YEAR_HOURS = 365 * 24
-PERPETUALS = {"BTC": "BTCUSD", "ETH": "ETHUSD"}
+PERPETUALS = {"BTC": "BTCUSD", "ETH": "ETHUSD", "XAUT": "XAUTUSD"}
 UNDERLYING_OF = {perp: u for u, perp in PERPETUALS.items()}
 PERP_SLIPPAGE = 0.0005  # applied to a perpetual's mark when a side of its book is empty
 CHAIN_WIDTH = 0.15  # strikes within ±15% of spot are sent to the dashboard
@@ -69,7 +70,7 @@ def parse_symbol(symbol: str) -> tuple[str, str, float, float] | None:
         return None
     try:
         strike = float(parts[2])
-        day = datetime.strptime(parts[3], "%d%m%y").replace(hour=EXPIRY_HOUR_UTC, tzinfo=UTC)
+        day = datetime.strptime(parts[3], "%d%m%y").replace(hour=EXPIRY_HOURS_UTC.get(parts[1], EXPIRY_HOUR_UTC), tzinfo=UTC)
     except ValueError:
         return None
     return ("call" if parts[0] == "C" else "put"), parts[1], strike, day.timestamp()

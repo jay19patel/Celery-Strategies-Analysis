@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlmodel import col, delete, select
+from sqlmodel import col, select
 
 from app.analysis import (
     fibonacci,
@@ -32,13 +32,12 @@ from app.analysis import (
     resample,
     structure,
     trendlines,
-    verdict,
     zones,
 )
-from app.analysis.insights import insights, lean, market_context, outcome
+from app.analysis.insights import insights, lean, market_context
 from app.core.db import session
 from app.core.events import EventHub
-from app.core.models import OptionsHistory, Prediction
+from app.core.models import OptionsHistory
 from app.errors import NotFound
 from app.market.delta import Candle
 from app.market.feed import SERIES, MarketFeed
@@ -55,32 +54,13 @@ TRENDLINE_BARS = 2_000
 PROFILE_BASE_BARS = 3 * 1440  # three days of minutes
 CONTEXT_BARS = 700  # a week of 15m bars for the analyst's market context
 OPTIONS_HISTORY_DAYS = 30
-PREDICTION_DAYS = 180
-# A directional claim is marked on what a bracketed trade would have done, net of a round trip.
-VERDICT_STOP_PCT, VERDICT_TARGET_PCT, VERDICT_COST_PCT = 1.0, 2.0, 0.14
+# The outlook's counted odds are for a bracketed trade: this stop and target, as % of price.
+VERDICT_STOP_PCT, VERDICT_TARGET_PCT = 1.0, 2.0
 MAX_CHART_BARS = 20_000
 
 
 def candles(rows: list[dict[str, Any]]) -> list[Candle]:
     return [Candle(int(r["time"]), r["open"], r["high"], r["low"], r["close"], r.get("volume") or 0.0) for r in rows]
-
-
-def one_claim_per_bar(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One directional reading per bar, for the chart: the outlook where it spoke, else the card
-    most sure of itself. Stacking every card's marker on one candle is a smear, not a record."""
-    best: dict[int, dict[str, Any]] = {}
-    for r in rows:
-        if r["stance"] not in ("bullish", "bearish"):
-            continue
-        bar = int(r["bar_time"])
-        rank = (r["source"] == "outlook", float(r["confidence"] or 0))
-        if bar not in best or rank > best[bar]["_rank"]:
-            best[bar] = {
-                "_rank": rank, "bar_time": bar, "source": r["source"], "stance": r["stance"], "label": r["label"],
-                "price": r["price"], "horizon_hours": r["horizon_hours"], "settled": r["settled_at"] is not None,
-                "correct": None if r["correct"] is None else bool(r["correct"]), "actual_return": r["actual_return"],
-            }
-    return [{k: v for k, v in row.items() if k != "_rank"} for _, row in sorted(best.items())]
 
 
 class MarketDesk:
@@ -90,7 +70,6 @@ class MarketDesk:
         self.hub = hub
         self.latest: dict[str, dict[str, Any]] = {}  # perpetual -> the analyst's last context and findings
         self._cache: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
-        self._recorded_bar: dict[str, int] = {}
 
     @staticmethod
     def perpetual(underlying: str) -> str:
@@ -288,7 +267,6 @@ class MarketDesk:
             ctx["lean"] = lean(found)
             ctx["errors"] = errors
             self.latest[symbol] = {"ts": time.time(), "context": ctx, "insights": found}
-            await self._record_claims(underlying, symbol, ctx, found, summary)
             out.append(f"{underlying}: {len(found)} findings")
         self.hub.publish("MarketAnalysis", "; ".join(out), persist=False)
         return "; ".join(out)
@@ -301,101 +279,3 @@ class MarketDesk:
         except Exception as exc:
             errors.append(f"{name}: {exc}")
             return []
-
-    async def _record_claims(self, underlying: str, symbol: str, ctx: dict[str, Any], found: list[dict[str, Any]], summary: dict[str, Any] | None) -> None:
-        bar_time, price = ctx.get("bar_time"), ctx.get("price")
-        if not bar_time or not isinstance(price, int | float) or price <= 0 or self._recorded_bar.get(symbol) == bar_time:
-            return
-        self._recorded_bar[symbol] = bar_time
-        view = await self.outlook(underlying)
-        claims = verdict.all_for(symbol, summary, self.options_history(underlying, 24), found, ctx.get("lean"), view if view.get("ready") else None)
-        rows = [
-            {
-                "symbol": symbol, "source": v["source"], "bar_time": int(bar_time), "ts": time.time(),
-                "horizon_hours": v["horizon_hours"], "stance": v["stance"], "measure": v["measure"], "label": v["label"],
-                "confidence": v["confidence"], "price": float(price), "numbers": v.get("numbers") or {},
-            }
-            for v in claims
-        ]
-        if rows:
-            with session() as s:
-                s.exec(sqlite_insert(Prediction).values(rows).on_conflict_do_nothing())
-                s.commit()
-
-    async def verdicts(self, underlying: str, days: float = 30) -> dict[str, Any]:
-        """Each card's verdict now, and how that card has done beside saying nothing at all."""
-        symbol = self.perpetual(underlying)
-        analysis = self.latest.get(symbol) or {}
-        view = await self.outlook(underlying)
-        now = verdict.all_for(
-            symbol, self.summary(underlying), self.options_history(underlying, 24), analysis.get("insights") or [],
-            (analysis.get("context") or {}).get("lean"), view if view.get("ready") else None,
-        )
-        days = min(max(days, 1), PREDICTION_DAYS)
-        with session() as s:
-            rows = [r.model_dump() for r in s.exec(select(Prediction).where(Prediction.symbol == symbol, col(Prediction.ts) >= time.time() - days * 86_400)).all()]
-        settled = [r for r in rows if r["settled_at"] is not None]
-        return {"symbol": symbol, "days": days, "verdicts": now, "record": verdict.score(settled), "history": one_claim_per_bar(rows)}
-
-    async def settle(self) -> str:
-        """Mark every claim whose horizon has passed against what the stored bars did."""
-        now = time.time()
-        with session() as s:
-            due = [r.model_dump() for r in s.exec(select(Prediction).where(col(Prediction.settled_at).is_(None))).all()
-                   if r.bar_time + r.horizon_hours * 3600 + 900 <= now]
-        marked = 0
-        for symbol in sorted({r["symbol"] for r in due}):
-            mine = [r for r in due if r["symbol"] == symbol]
-            span_bars = int((now - min(r["bar_time"] for r in mine)) / 900) * 2 + 16
-            bars = candles(await self._rows(symbol, min(span_bars, OUTLOOK_BARS)))
-            marked += self._mark(mine, bars, now)
-        with session() as s:
-            s.exec(delete(Prediction).where(col(Prediction.ts) < now - PREDICTION_DAYS * 86_400))
-            s.exec(delete(OptionsHistory).where(col(OptionsHistory.ts) < now - OPTIONS_HISTORY_DAYS * 86_400))
-            s.commit()
-        return f"marked {marked} of {len(due)} due"
-
-    @staticmethod
-    def _mark(rows: list[dict[str, Any]], bars: list[Candle], now: float) -> int:
-        """A directional claim is marked on what a bracketed trade would have done — target before
-        stop, net of costs; a volatility claim against the span before it."""
-        by_time = {int(c.time): i for i, c in enumerate(bars)}
-        marked = 0
-        for row in rows:
-            hours, bar_time = float(row["horizon_hours"]), int(row["bar_time"])
-            actual = outcome(bars, bar_time, hours, 0.0)
-            if actual is None:
-                continue
-            before = outcome(bars, bar_time - int(hours * 3600), hours, 0.0)
-            prior_vol = float(before["realized_vol"]) if before else float(actual["realized_vol"])
-            sigma = outlook.sigma_over(prior_vol, hours)
-            claimed = naive = None
-            index = by_time.get(bar_time)
-            if index is not None and row["stance"] in ("bullish", "bearish"):
-                ahead = max(1, round(hours * 3600 / 900))
-                side = "buy" if row["stance"] == "bullish" else "sell"
-                claimed = reading.barrier_outcome(bars, index, side, VERDICT_STOP_PCT, VERDICT_TARGET_PCT, ahead, VERDICT_COST_PCT)
-                naive = reading.barrier_outcome(bars, index, "buy", VERDICT_STOP_PCT, VERDICT_TARGET_PCT, ahead, VERDICT_COST_PCT)
-                if claimed is None or naive is None:
-                    claimed = naive = None
-            try:
-                judged = verdict.settle(row, float(actual["ret"]), float(actual["realized_vol"]), prior_vol, sigma, claimed, naive)
-            except (TypeError, ValueError) as exc:
-                log.warning("verdict_unreadable source=%s bar=%s error=%s", row["source"], bar_time, exc)
-                continue
-            if judged is None:
-                continue
-            correct, baseline = judged
-            with session() as s:
-                p = s.get(Prediction, (row["symbol"], row["source"], bar_time))
-                if p is None:
-                    continue
-                p.settled_at, p.actual_return, p.actual_vol, p.prior_vol = now, float(actual["ret"]), float(actual["realized_vol"]), prior_vol
-                p.actual_excursion, p.correct, p.baseline_correct = float(actual["excursion"]), int(correct), int(baseline)
-                p.regime = reading.regime_at(bars, index) if index is not None else "unknown"
-                p.exit_reason = claimed.exit if claimed else ""
-                p.r_multiple = claimed.r_multiple if claimed else None
-                s.add(p)
-                s.commit()
-            marked += 1
-        return marked

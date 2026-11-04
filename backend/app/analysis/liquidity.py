@@ -149,12 +149,6 @@ def month_start(ts: int) -> int:
     return int(datetime(d.year, d.month, 1, tzinfo=UTC).timestamp())
 
 
-def sessions_at(ts: int) -> list[str]:
-    """Which sessions are open at this bar. More than one, often — that is the point."""
-    hour = (int(ts) % DAY) / 3600
-    return [name for name, lo, hi in SESSIONS if lo <= hour < hi]
-
-
 # -- pivots, and the pools they stack into --------------------------------------------
 
 
@@ -233,7 +227,6 @@ def pools(
         start = bisect.bisect_right(times, pool.last_time)
         pool.swept_at = next((c.time for c in candles[start:] if beyond(c)), None)
     return kept
-
 
 
 def _suffix_extremes(candles: list[Candle]) -> tuple[list[float], list[float]]:

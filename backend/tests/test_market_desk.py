@@ -7,11 +7,8 @@ import time
 from typing import Any
 
 import pytest
-from sqlmodel import select
 
 from app.analysis.service import MarketDesk
-from app.core.db import session
-from app.core.models import Prediction
 
 
 @pytest.fixture
@@ -50,31 +47,6 @@ async def test_the_options_book_is_recorded_each_minute(desk: MarketDesk) -> Non
     await desk.record_options()  # the same minute: one row
     rows = desk.options_history("BTC", 1)
     assert len(rows) == 1 and rows[0]["pcr_oi"]
-
-
-async def test_claims_are_written_once_a_bar_and_marked_when_due(desk: MarketDesk, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def no_series(*_: Any) -> list:
-        return []
-
-    monkeypatch.setattr(desk, "_series", no_series)
-    await desk.analyse()
-    await desk.analyse()
-    with session() as s:
-        rows = s.exec(select(Prediction)).all()
-    assert rows and len({(r.source, r.bar_time) for r in rows}) == len(rows)
-
-    # Pretend they were made two days ago on bars that exist, so every horizon has passed.
-    bars = desk.feed.bars("BTCUSD", 800)
-    old = int(bars[-200]["time"])
-    with session() as s:
-        for r in s.exec(select(Prediction)).all():
-            s.delete(r)
-            s.add(Prediction(**(r.model_dump() | {"bar_time": old, "ts": time.time() - 2 * 86_400})))
-        s.commit()
-    note = await desk.settle()
-    assert note.startswith("marked") and not note.startswith("marked 0 ")
-    view = await desk.verdicts("BTC")
-    assert view["verdicts"] and "record" in view
 
 
 async def test_the_bar_collector_fills_both_ends_and_never_rewrites() -> None:

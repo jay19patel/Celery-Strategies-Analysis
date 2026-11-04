@@ -30,6 +30,14 @@ export interface Level {
   dashed?: boolean;
 }
 
+/** One price bin of a volume profile, drawn as a bar from the right edge of the plot. */
+export interface ProfileNode {
+  price: number;
+  volume: number;
+  in_value: boolean;
+  poc: boolean;
+}
+
 export interface ChartMarker {
   time: number;
   kind: "choch" | "bos";
@@ -79,6 +87,7 @@ const EMPTY_MARKERS: ChartMarker[] = [];
 const EMPTY_ZONES: StructureZone[] = [];
 const EMPTY_TRENDLINES: TrendlineItem[] = [];
 const EMPTY_CLUSTERS: HorizontalClusterItem[] = [];
+const EMPTY_PROFILE: ProfileNode[] = [];
 
 export function PriceChart({
   bars,
@@ -87,6 +96,7 @@ export function PriceChart({
   zones = EMPTY_ZONES,
   trendlines = EMPTY_TRENDLINES,
   clusters = EMPTY_CLUSTERS,
+  profile = EMPTY_PROFILE,
   symbol = "BTC",
   interval = "15m",
   timezone = "IST",
@@ -100,6 +110,7 @@ export function PriceChart({
   showTrendlines = true,
   showClusters = true,
   showEma = true,
+  showProfile = true,
 }: {
   bars: Bar[];
   levels?: Level[];
@@ -107,6 +118,7 @@ export function PriceChart({
   zones?: StructureZone[];
   trendlines?: TrendlineItem[];
   clusters?: HorizontalClusterItem[];
+  profile?: ProfileNode[];
   symbol?: string;
   interval?: string;
   timezone?: "Local" | "UTC" | "IST";
@@ -120,6 +132,7 @@ export function PriceChart({
   showTrendlines?: boolean;
   showClusters?: boolean;
   showEma?: boolean;
+  showProfile?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -174,6 +187,22 @@ export function PriceChart({
     const ts = c.timeScale();
     const rightScaleWidth = c.priceScale("right").width() || 65;
     const plotRight = Math.max(10, w - rightScaleWidth);
+
+    // 0. Volume profile: one bar per price bin from the right edge, widest at the point of control.
+    if (showProfile && profile.length > 1) {
+      const peak = Math.max(...profile.map((n) => n.volume)) || 1;
+      const prices = profile.map((n) => n.price).sort((a, b) => a - b);
+      const step = (prices[prices.length - 1] - prices[0]) / (prices.length - 1);
+      const maxWidth = plotRight * 0.22;
+      for (const n of profile) {
+        const top = cs.priceToCoordinate(n.price + step / 2);
+        const bottom = cs.priceToCoordinate(n.price - step / 2);
+        if (top === null || bottom === null) continue;
+        const barWidth = (n.volume / peak) * maxWidth;
+        ctx.fillStyle = n.poc ? "rgba(245, 158, 11, 0.55)" : n.in_value ? "rgba(59, 130, 246, 0.28)" : "rgba(100, 116, 139, 0.18)";
+        ctx.fillRect(plotRight - barWidth, Math.min(top, bottom) + 0.5, barWidth, Math.max(1, Math.abs(bottom - top) - 1));
+      }
+    }
 
     // 1. Paint Trendlines (Diagonal Support & Resistance channels)
     if (showTrendlines && trendlines.length) {
@@ -379,7 +408,7 @@ export function PriceChart({
         }
       }
     }
-  }, [bars.length, clusters, height, showClusters, showFvg, showOb, showTrendlines, showZones, theme, trendlines, zones]);
+  }, [bars.length, clusters, height, profile, showClusters, showFvg, showOb, showProfile, showTrendlines, showZones, theme, trendlines, zones]);
 
   // The appearance follows the system; a switch restyles the chart without rebuilding it.
   useEffect(() => {

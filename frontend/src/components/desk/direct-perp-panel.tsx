@@ -67,7 +67,7 @@ export function DirectPerpPanel({
   const activeBrokers = brokers.filter((b) => b.active);
   const [userBroker, setUserBroker] = useState<Broker | null>(null);
   const [side, setSide] = useState<Side>("buy");
-  const [qty, setQty] = useState<number>(1);
+  const [userQty, setUserQty] = useState<number | null>(null); // null: sized to the capital at the stop
   const [userStop, setUserStop] = useState<number | null>(null);
   const [userTarget, setUserTarget] = useState<number | null>(null);
   const [executing, setExecuting] = useState(false);
@@ -95,7 +95,9 @@ export function DirectPerpPanel({
   );
 
   const activeSizing = ticket?.sizing?.find((s) => s.broker === broker);
-  const contractValue = ticket?.contract_value ?? (underlying === "BTC" ? 0.001 : 0.01);
+  const contractValue = ticket?.contract_value ?? (underlying === "ETH" ? 0.01 : 0.001);
+  // Sized as the strategies size: the loss at the stop is `risk_per_trade_pct` of equity.
+  const qty = userQty ?? Math.max(1, activeSizing?.suggested_qty ?? 1);
 
   // Auto-calculate statistical stop, target, and sizing (no AI - pure market statistics)
   const autoFillFromStats = () => {
@@ -124,11 +126,7 @@ export function DirectPerpPanel({
     setUserStop(Math.round(autoStop * 10) / 10);
     setUserTarget(Math.round(autoTarget * 10) / 10);
 
-    if (activeSizing?.suggested_qty && activeSizing.suggested_qty > 0) {
-      setQty(activeSizing.suggested_qty);
-    } else {
-      setQty(1);
-    }
+    setUserQty(null);
 
     toast.info("Auto-set statistical levels", {
       description: `Stop & Target set from ${structure?.atr ? "ATR(14) & Confluence levels" : "market volatility"}`,
@@ -281,17 +279,20 @@ export function DirectPerpPanel({
               min={1}
               max={1000}
               value={qty}
-              onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))}
+              onChange={(e) => setUserQty(Math.max(1, parseInt(e.target.value) || 1))}
               className="h-8 font-mono text-xs"
             />
-            {activeSizing?.suggested_qty != null && (
+            {activeSizing?.suggested_qty != null && userQty !== null && (
               <button
                 type="button"
-                onClick={() => setQty(activeSizing.suggested_qty!)}
+                onClick={() => setUserQty(null)}
                 className="text-[10px] font-semibold text-primary hover:underline block text-left"
               >
-                Fits risk: {activeSizing.suggested_qty} lots
+                Fit my capital: {activeSizing.suggested_qty} lots
               </button>
+            )}
+            {userQty === null && activeSizing?.suggested_qty != null && (
+              <span className="block text-[10px] text-muted-foreground">sized to your capital at this stop</span>
             )}
           </div>
 

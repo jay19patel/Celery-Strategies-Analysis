@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -35,7 +35,7 @@ EVENT_FORMAT = "%Y-%m-%d %H:%M"
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@+\-]{2,120}$")
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
-Underlying = Literal["BTC", "ETH"]
+Underlying = Literal["BTC", "ETH", "XAUT"]
 Directional = Literal["ema_vwap", "ema_9_15", "pcr_options", "supertrend", "trend_4h_short", "trend_4h_long"]
 Strategy = Literal[
     "iron_condor", "iron_butterfly", "short_strangle", "short_straddle",
@@ -67,11 +67,10 @@ class Settings(BaseModel):
     auto_paper: bool = True
     auto_delta: bool = False
     auto_options: bool = True
-    # Off by default: Supertrend and the 9/15 cross lost before costs as well as after them over the
-    # stored year of 15m bars and month of 1m bars (`python -m app.backtest.perp`). Opt in to test them.
-    # The 4h trend short held on two years of BTC+ETH and on eight perpetuals it was not chosen on;
-    # the long only on those eight, so it is off (`app/strategies/trend_4h.py`).
-    directional_strategies: list[Directional] = Field(default_factory=lambda: ["ema_vwap", "pcr_options", "trend_4h_short"])
+    # Every strategy on, by the owner's choice. Note before trusting one: Supertrend and the 9/15 cross
+    # lost before costs as well as after them over the stored bars (`python -m app.backtest.perp`),
+    # and the 4h trend long held only on perpetuals it was not chosen on (`app/strategies/trend_4h.py`).
+    directional_strategies: list[Directional] = Field(default_factory=lambda: list(get_args(Directional)))
     # Two switches, as in v3: the strategy itself above, and which underlyings it may trade here.
     # A strategy absent from this map, or mapped to an empty list, runs on every enabled underlying.
     strategy_symbols: dict[Directional, list[Underlying]] = Field(default_factory=dict)

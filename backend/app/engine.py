@@ -19,14 +19,14 @@ from sqlmodel import col, delete, select
 
 from app.ai.analyst import Analyst
 from app.ai.llm import LLM
-from app.analysis.service import MarketDesk
+from app.analysis.service import OPTIONS_HISTORY_DAYS, MarketDesk
 from app.brokers.base import Broker
 from app.brokers.delta import DeltaBroker
 from app.brokers.paper import PaperBroker
 from app.config import Config
 from app.core.db import kv_get, kv_set, session
 from app.core.events import EventHub
-from app.core.models import AiBrief, DayRisk, Decision, EventLog, Leg, OrderRecord, Prediction, SignalLog, Structure
+from app.core.models import AiBrief, DayRisk, Decision, EventLog, Leg, OptionsHistory, OrderRecord, SignalLog, Structure
 from app.core.scheduler import Scheduler
 from app.errors import AppError, BrokerError, Refused
 from app.market import recorder
@@ -115,7 +115,6 @@ class Engine:
         sch.every("options.history", "Record the options book each minute", 60, self.market.record_options)
         sch.every("market.chains", "Record every option quote for backtests (90 days)", CHAIN_RECORD_SECONDS, self.record_chains)
         sch.every("market.analyst", "Market analysis and insights", 300, self.market.analyse)
-        sch.every("market.verdicts", "Mark the cards' past claims", 900, self.market.settle)
         sch.every("strategies.run", "Directional strategies on closed bars", 20, self.runner.run)
         sch.every("guard.structures", "Exits: take profit, stop loss, expiry", 5, self.guard.check_structures)
         sch.every("guard.daily", "Daily loss limit", 30, self.guard.check_daily_loss, run_now=True)
@@ -252,6 +251,7 @@ class Engine:
             briefs = s.exec(delete(AiBrief).where(col(AiBrief.ts) < now - EVENT_RETENTION_DAYS * 86_400)).rowcount
             decisions = s.exec(delete(Decision).where(col(Decision.ts) < now - DECISION_RETENTION_DAYS * 86_400)).rowcount
             s.exec(delete(SignalLog).where(col(SignalLog.ts) < now - DECISION_RETENTION_DAYS * 86_400))
+            s.exec(delete(OptionsHistory).where(col(OptionsHistory.ts) < now - OPTIONS_HISTORY_DAYS * 86_400))
             s.commit()
         bars = await asyncio.to_thread(self.feed.prune_bars)
         chains = await asyncio.to_thread(recorder.prune, self.chain_dir)
@@ -259,7 +259,7 @@ class Engine:
 
     async def reset_data(self) -> dict[str, int]:
         """Every record of what the desk did — structures and their legs, orders, decisions, signals,
-        events, AI briefs, the Market Desk's predictions, daily loss halts — deleted, and the paper
+        events, AI briefs, daily loss halts — deleted, and the paper
         account back to its starting balance. Settings, keys, the PIN and stored market history stay.
         Refused while any broker holds a structure: its legs would be orphaned, and on Delta they are
         real positions."""
@@ -269,7 +269,7 @@ class Engine:
                     raise Refused(f"close every position first: {held.id} on {held.broker} is {held.status}")
                 deleted = {
                     model.__tablename__: s.exec(delete(model)).rowcount or 0
-                    for model in (Leg, OrderRecord, Structure, Decision, SignalLog, EventLog, AiBrief, Prediction, DayRisk)
+                    for model in (Leg, OrderRecord, Structure, Decision, SignalLog, EventLog, AiBrief, DayRisk)
                 }
                 s.commit()
             self.paper.reset()

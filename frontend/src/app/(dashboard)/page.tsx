@@ -8,6 +8,7 @@ import { PriceChart, type Level } from "@/components/charts/price-chart";
 import { AiBriefCard } from "@/components/desk/ai-brief-card";
 import { ChainTable, type PickedLeg } from "@/components/desk/chain-table";
 import { ExpiryPicker, MarketStats } from "@/components/desk/market-bar";
+import { OptionIdeasCard } from "@/components/desk/option-ideas";
 import { OrderPanel } from "@/components/desk/order-panel";
 import { PreviewPanel } from "@/components/desk/preview-panel";
 import { RegimeCard } from "@/components/desk/regime-card";
@@ -159,6 +160,8 @@ export default function DeskPage() {
           {bars?.bars.length ? <PriceChart bars={bars.bars} levels={levels} height={460} /> : <Loading rows={4} className="p-2" />}
         </CardContent>
       </Card>
+
+      {expiry && <OptionIdeasCard underlying={underlying} expiry={expiry} />}
 
       <Card>
         <CardHeader>

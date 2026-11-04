@@ -119,7 +119,7 @@ export function BrokersTab({ onCleared }: { onCleared: (r: SettingsResponse) => 
           />
           <div className="space-y-1.5">
             <Label>Underlyings</Label>
-            <Toggles name="underlyings" options={[{ value: "BTC", label: "BTC" }, { value: "ETH", label: "ETH" }]} />
+            <Toggles name="underlyings" options={[{ value: "BTC", label: "BTC" }, { value: "ETH", label: "ETH" }, { value: "XAUT", label: "XAUT (gold)" }]} />
             <p className="text-[11.5px] text-muted-foreground">Which option chains are streamed and traded.</p>
           </div>
           <SecretField name="delta_api_key" label="API key" />
@@ -170,11 +170,11 @@ export function PaperTab() {
       </Section>
       <Section
         title="Test all positions"
-        description="On paper only: for BTC and ETH, one iron condor, one zero-hero call and one perpetual (BTC sell, ETH buy), all at the smallest size and through the normal gates. A slot already taken is reported, not forced."
+        description="On paper only: for BTC, ETH and XAUT, one iron condor, one zero-hero call and one perpetual (BTC sell, ETH buy, XAUT sell), all at the smallest size and through the normal gates. A slot already taken is reported, not forced."
       >
         <Confirm
           title="Open test positions on paper?"
-          description="Up to six paper positions open now and are managed by the guard like any other. Close them from Positions."
+          description="Up to nine paper positions open now and are managed by the guard like any other. Close them from Positions."
           confirmLabel="Open them"
           onConfirm={() => testAll().catch((e) => toast.error(message(e)))}
           trigger={(open) => (

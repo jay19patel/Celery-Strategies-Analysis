@@ -2,19 +2,13 @@
 
 from __future__ import annotations
 
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from app.core.scheduler import EventWindowTrigger, Scheduler
-from app.trading.timing import (
-    get_funding_window,
-    get_settlement_window,
-    get_zerohero_window,
-    next_daily_settlement_utc,
-)
+from app.core.scheduler import EventWindowTrigger
+from app.trading.timing import get_zerohero_window, next_daily_settlement_utc
 
 
 def test_next_daily_settlement_utc_returns_future_12utc() -> None:
@@ -46,17 +40,6 @@ def test_zerohero_window_bounds_match_start_and_end_hours() -> None:
     assert w_start == settlement - 4.0 * 3600.0
     assert w_end == settlement - 2.0 * 3600.0
     assert "13:30–15:30 IST" in desc
-
-
-def test_funding_window_triggers_before_funding_events() -> None:
-    """Funding window aligns with 8-hour intervals (00:00, 08:00, 16:00 UTC)."""
-    # 07:40 UTC: next funding is 08:00 UTC. 15m lead = window from 07:45 to 08:00
-    now_ts = datetime(2026, 10, 31, 7, 40, 0, tzinfo=UTC).timestamp()
-    w_start, w_end, desc = get_funding_window(now_ts, lead_minutes=15.0, window_duration_minutes=15.0)
-    expected_fund = datetime(2026, 10, 31, 8, 0, 0, tzinfo=UTC).timestamp()
-    assert w_end == expected_fund
-    assert w_start == expected_fund - 15 * 60
-    assert "Funding" in desc
 
 
 def test_event_window_trigger_schedules_at_window_start_when_outside() -> None:

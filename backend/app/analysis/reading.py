@@ -18,12 +18,11 @@ Pure: bars in, numbers out, no clock and no database.
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass
 from typing import Any
 
 from app.analysis import structure as st
 from app.market.delta import Candle
-from app.market.indicators import adx, atr, obv
+from app.market.indicators import atr, obv
 
 VOLUME_WINDOW = 96  # a day of 15-minute bars: what "normal volume" means here
 MIN_PATTERN_SAMPLE = 20  # fewer than this of a shape and its rate is not worth printing
@@ -166,99 +165,6 @@ def shape_record(candles: list[Candle], hours: float, bar_seconds: int = 900) ->
             "enough": enough,
         })
     return sorted(out, key=lambda s: -abs(s["edge"] or 0))
-
-
-# -- what the broker would actually have done ------------------------------------------
-
-
-@dataclass(frozen=True)
-class Outcome:
-    """How a bracketed trade from one bar actually ended."""
-
-    exit: str  # "tp" | "sl" | "timeout"
-    bars_held: int
-    net_pct: float  # after the round trip, as a % of entry
-    r_multiple: float  # in units of the risk taken, which is the only comparable scale
-
-    @property
-    def won(self) -> bool:
-        return self.net_pct > 0
-
-
-def barrier_outcome(
-    candles: list[Candle], i: int, side: str, stop_pct: float, target_pct: float,
-    lookahead: int, cost_pct: float = 0.14,
-) -> Outcome | None:
-    """Walk forward from bar `i` and return what a bracketed trade would have done.
-
-    This is the only honest outcome for this system. Everything was scored on "did the close go up
-    over N hours", but the Trader places a stop and a target (invariant 7) — so the page was
-    marking a question nobody trades. A claim can be "right" while the trade it implies was
-    stopped out eight hours earlier.
-
-    Three properties, each of which changes the answer:
-
-      SL wins a tie     when both barriers fall inside one candle, intrabar order is unknown, so
-                        the loss is assumed. Optimism here is how a backtest doubles its win rate.
-      entry at the next open  the signal bar's close is not tradeable.
-      net of costs      a 52% hit rate is a loss after fees, so fees come off before `won`.
-
-    Returns None when the bars do not cover the horizon — unsettled, not assumed flat.
-    """
-    if not 0 <= i < len(candles) - 1 or stop_pct <= 0 or target_pct <= 0:
-        return None
-    entry = candles[i + 1].open
-    if entry <= 0:
-        return None
-    long = side in ("buy", "long", "bull", "bullish", "up")
-    stop = entry * (1 - stop_pct / 100) if long else entry * (1 + stop_pct / 100)
-    target = entry * (1 + target_pct / 100) if long else entry * (1 - target_pct / 100)
-    risk = abs(entry - stop) / entry * 100
-
-    last = min(i + lookahead, len(candles) - 1)
-    if last <= i:
-        return None
-    for step, bar in enumerate(candles[i + 1 : last + 1], start=1):
-        hit_stop = bar.low <= stop if long else bar.high >= stop
-        hit_target = bar.high >= target if long else bar.low <= target
-        if hit_stop:  # before the target: one candle cannot say which came first
-            net = -stop_pct - cost_pct
-            return Outcome("sl", step, round(net, 4), round(net / risk, 3) if risk else 0.0)
-        if hit_target:
-            net = target_pct - cost_pct
-            return Outcome("tp", step, round(net, 4), round(net / risk, 3) if risk else 0.0)
-    if last < i + lookahead:
-        return None  # the horizon is not covered yet
-    close = candles[last].close
-    move = (close / entry - 1) * 100 * (1 if long else -1)
-    net = move - cost_pct
-    return Outcome("timeout", last - i, round(net, 4), round(net / risk, 3) if risk else 0.0)
-
-
-def regime_at(candles: list[Candle], i: int, window: int = 96) -> str:
-    """One word for the market a claim was made in, so the scorecard can be read per regime.
-
-    A card that is useless on average can be good in one regime and bad in another, and the
-    average buries both. Computed from the bars at scoring time rather than stored, so it applies
-    to every claim already on record instead of only to new ones.
-    """
-    if i < window + 15:
-        return "unknown"
-    window_bars = candles[max(0, i - window) : i + 1]
-    highs = [c.high for c in window_bars]
-    lows = [c.low for c in window_bars]
-    closes = [c.close for c in window_bars]
-    strength, _, _ = adx(highs, lows, closes, 14)  # (adx, +DI, -DI): only the first is the regime
-    if not strength:
-        return "unknown"
-    trending = strength[-1] >= 25
-    # Fast or slow against this market's own recent pace, not an absolute number.
-    recent = st.realised_vol(closes, min(48, len(closes) - 1), 900)
-    longer = st.realised_vol([c.close for c in candles[max(0, i - 4 * window) : i + 1]], min(384, i), 900)
-    fast = bool(recent and longer and recent > 1.2 * longer)
-    if trending:
-        return "trending fast" if fast else "trending"
-    return "ranging fast" if fast else "ranging"
 
 
 TIMEFRAMES = (

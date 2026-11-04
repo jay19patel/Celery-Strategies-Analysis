@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -36,6 +36,20 @@ const DESKS: Record<BriefKind, { title: string; sections: { key: string; label: 
     ],
   },
 };
+
+// The model writes **bold** around the numbers that matter. Bold reads as bold, and a bold phrase
+// that says which way gets that side's colour; levels and neutral numbers stay plain bold.
+const BULL = /\b(bull\w*|uptrend|up|upside|rall\w*|bounce|breakout|higher)\b|^\+\d/i;
+const BEAR = /\b(bear\w*|downtrend|down|downside|sell-?off|breakdown|lower|overbought)\b|^-\d/i;
+
+function Prose({ text }: { text: string }): ReactNode {
+  return text.split(/\*\*(.+?)\*\*/g).map((part, i) => {
+    if (i % 2 === 0) return part;
+    const bull = BULL.test(part), bear = BEAR.test(part);
+    const tone = bull && !bear ? "text-profit" : bear && !bull ? "text-loss" : "text-foreground";
+    return <strong key={i} className={`font-semibold ${tone}`}>{part}</strong>;
+  });
+}
 
 export function AiBriefCard({ underlying, kind = "options" }: { underlying: string; kind?: BriefKind }) {
   const { mutate } = useSWRConfig();
@@ -77,21 +91,21 @@ export function AiBriefCard({ underlying, kind = "options" }: { underlying: stri
         {brief?.error && <p className="text-loss">Last attempt failed: {brief.error.slice(0, 240)}</p>}
         {brief?.content && (
           <>
-            <p className="font-semibold text-slate-900">{brief.content.headline}</p>
+            <p className="font-semibold text-slate-900"><Prose text={brief.content.headline} /></p>
             {desk.sections.map(({ key, label }) => {
               const text = brief.content?.[key as keyof typeof brief.content];
               return typeof text === "string" && text ? (
                 <p key={key}>
                   <span className="font-medium text-slate-500">{label}. </span>
-                  {text}
+                  <Prose text={text} />
                 </p>
               ) : null;
             })}
-            <p className="text-slate-600">{brief.content.summary}</p>
+            <p className="text-slate-600"><Prose text={brief.content.summary} /></p>
             {brief.content.watch.length > 0 && (
               <ul className="space-y-0.5 text-[12px] text-muted-foreground">
                 {brief.content.watch.map((w) => (
-                  <li key={w}>→ {w}</li>
+                  <li key={w}>→ <Prose text={w} /></li>
                 ))}
               </ul>
             )}

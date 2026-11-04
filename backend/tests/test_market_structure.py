@@ -167,13 +167,6 @@ def test_week_and_month_boundaries_are_utc():
         assert datetime.fromtimestamp(at, tz=UTC).weekday() == 0
 
 
-def test_sessions_overlap_because_the_market_does():
-    assert lq.sessions_at(MIDNIGHT + 3 * HOUR) == ["asia"]
-    assert lq.sessions_at(MIDNIGHT + 7 * HOUR + 1800) == ["asia", "london"]
-    assert lq.sessions_at(MIDNIGHT + 14 * HOUR) == ["london", "newyork"]
-    assert lq.sessions_at(MIDNIGHT + 23 * HOUR) == []
-
-
 def test_only_finished_periods_become_reference_levels():
     """Today's high is not a level, it is a number that is still moving."""
     candles = walk(3 * DAY // 900, seed=19)

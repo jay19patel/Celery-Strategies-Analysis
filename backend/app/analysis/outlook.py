@@ -109,32 +109,6 @@ def p_touch_either(distance: float, sigma: float, terms: int = 40) -> float:
     return min(1.0, max(0.0, 1 - stay))
 
 
-def p_stop_first(stop_pct: float, target_pct: float) -> float | None:
-    """Of the trades that reach one of the two levels, the share that reach the stop first.
-
-    For a driftless walk with two barriers this is target / (stop + target). Volatility cancels:
-    only the ratio matters, so it is the same answer in a quiet market and a fast one. It is the
-    number that decides whether a trade is worth taking and the one almost nobody computes — a 1:3
-    reward-to-risk is a 75% chance of being stopped out, and it has to be, or it would be free money.
-
-    Conditional on one of them being hit. Over a fixed horizon some trades reach neither; see
-    `p_neither`, which is where a time-based exit actually lands.
-    """
-    if stop_pct <= 0 or target_pct <= 0:
-        return None
-    return target_pct / (stop_pct + target_pct)
-
-
-def p_neither(stop_pct: float, target_pct: float, sigma: float) -> float:
-    """Chance neither level is reached before the horizon is up — the trade times out.
-
-    Bounded below by the chance of staying inside the nearer barrier on both sides, which is the
-    honest approximation here: the exact two-sided, asymmetric, finite-horizon figure needs a
-    series that adds precision no one reading this page would use."""
-    near = min(stop_pct, target_pct) / 100
-    return max(0.0, 1 - p_touch_either(near, sigma))
-
-
 # -- where are we ---------------------------------------------------------------------
 
 
@@ -476,35 +450,6 @@ def summarise(frames: list[Timeframe], horizons: list[dict[str, Any]], counted: 
             "note": row.get("note", "") or frame.note,
         })
     return out
-
-
-def pattern_edge(view: dict[str, Any], interval: str, kind: str, direction: str) -> dict[str, Any] | None:
-    """How often this exact break has gone on the way it broke, against how often any bar did.
-
-    The closest counted answer to the question a breakout trade actually asks. The structure-bias
-    rate in `counted_edge` is a weaker proxy — it describes the market the break happened in, not
-    the break — so this is what a break should be judged on when the history has enough of them."""
-    for row in view.get("patterns", {}).get(interval) or []:
-        if row["kind"] == kind and row["direction"] == direction and row.get("followed_through") is not None:
-            return {
-                "edge": row["edge"], "conditional": row["followed_through"], "baseline": row["baseline"],
-                "sample": row["count"], "source": f"{kind} {direction} on {interval}",
-            }
-    return None
-
-
-def counted_edge(view: dict[str, Any], side: str, hours: float) -> dict[str, Any] | None:
-    """How far the counted odds favour `side` over the baseline at this horizon, or None when
-    there is not enough history to say. The sign is flipped for a short: "higher 46% of the time"
-    is a 4-point edge to the downside, not a 4-point deficit."""
-    row = next((d for d in view.get("direction") or [] if d["horizon_hours"] == hours), None)
-    if not row or row.get("conditional") is None or row.get("baseline") is None:
-        return None
-    edge = row["conditional"] - row["baseline"]
-    return {
-        "edge": round(edge if side == "buy" else -edge, 4),
-        "conditional": row["conditional"], "baseline": row["baseline"], "sample": row["conditional_sample"],
-    }
 
 
 def pattern_record(candles: list[Candle], hours: float, lookback: int = st.DEFAULT_LOOKBACK) -> list[dict[str, Any]]:

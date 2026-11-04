@@ -1,15 +1,10 @@
-"""Event-window timing utilities for options expiry, funding rates, and settlement windows.
-
-Provides reusable time calculations for scheduling trades that depend on fixed market deadlines:
-- Zero-Hero: Convexity momentum window (typically 4h to 2h before Delta daily 12:00 UTC settlement)
-- Pre-Settlement: Execution window right before options expire (e.g. 30m before 12:00 UTC)
-- Funding Arbitrage: Execution window right before 8-hour perp funding timestamps (00:00, 08:00, 16:00 UTC)
-"""
+"""Event-window timing: the zero-hero scan window, typically 4h to 2h before the daily 12:00 UTC
+settlement of Delta's options."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import zoneinfo
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -67,55 +62,4 @@ def get_zerohero_window(
         f"Expiry {dt_exp_ist.strftime('%d %b %H:%M IST')} "
         f"(Window: {dt_start_ist.strftime('%H:%M')}–{dt_end_ist.strftime('%H:%M IST')})"
     )
-    return w_start, w_end, desc
-
-
-def get_funding_window(
-    now_ts: float,
-    lead_minutes: float = 10.0,
-    window_duration_minutes: float = 15.0,
-) -> tuple[float, float, str]:
-    """Calculate the next 8-hour funding rate window (00:00, 08:00, 16:00 UTC).
-
-    Window starts `lead_minutes` before funding time and lasts `window_duration_minutes`.
-    """
-    now = datetime.fromtimestamp(now_ts, UTC)
-    # Find next funding hour among [0, 8, 16]
-    funding_hours = [0, 8, 16, 24]
-    current_hour = now.hour + now.minute / 60.0 + now.second / 3600.0
-
-    target_hour = next((h for h in funding_hours if h > current_hour), None)
-    if target_hour is None or target_hour == 24:
-        target_dt = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    else:
-        target_dt = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
-
-    target_ts = target_dt.timestamp()
-    w_start = target_ts - lead_minutes * 60
-    w_end = w_start + window_duration_minutes * 60
-
-    dt_ist = datetime.fromtimestamp(target_ts, tz=IST)
-    desc = f"Funding {dt_ist.strftime('%H:%M IST')}"
-    return w_start, w_end, desc
-
-
-def get_settlement_window(
-    now_ts: float,
-    lead_minutes: float = 30.0,
-) -> tuple[float, float, str]:
-    """Calculate the pre-settlement window right before daily 12:00 UTC expiry.
-
-    Useful for position unwinding, rolling, or theta risk prevention.
-    """
-    expiry = next_daily_settlement_utc(now_ts)
-    w_start = expiry - lead_minutes * 60
-    w_end = expiry
-
-    if now_ts >= w_end:
-        next_expiry = next_daily_settlement_utc(expiry + 3600)
-        w_start = next_expiry - lead_minutes * 60
-        w_end = next_expiry
-
-    dt_ist = datetime.fromtimestamp(w_start, tz=IST)
-    desc = f"Pre-Settlement {dt_ist.strftime('%H:%M IST')}"
     return w_start, w_end, desc

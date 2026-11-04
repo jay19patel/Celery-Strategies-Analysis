@@ -67,7 +67,6 @@ BUSY_VOLUME = 1.3
 BIG_RANGE = 1.5  # this bar's range against the ATR
 WIDE_RANGE = 1.0
 DECISIVE_BODY = 0.6  # the share of the range the body kept: a push, not a fight
-EXPANDING_RV = 1.4  # fast realised vol against slow
 
 # States, loudest first. `breakout` is the only one that needs a structure break in it.
 BREAKOUT = "breakout"

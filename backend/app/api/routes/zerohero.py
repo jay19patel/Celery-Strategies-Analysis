@@ -28,11 +28,6 @@ def decisions(engine: EngineDep, underlying: str = "", action: str = "", limit: 
     return engine.zerohero.decisions(underlying, action, limit)
 
 
-@router.get("/record")
-def record(engine: EngineDep, days: float = 30) -> dict[str, Any]:
-    return engine.zerohero.record(days)
-
-
 @router.post("/run")
 async def run_now(engine: EngineDep) -> dict[str, Any]:
     s = engine.settings()

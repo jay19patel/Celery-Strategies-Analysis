@@ -2,23 +2,15 @@
 
 import { useMemo, useState } from "react";
 import {
-  Activity,
   ArrowDownRight,
   ArrowUpRight,
   BarChart3,
-  Calendar,
-  Clock,
-  Compass,
   Globe,
   Layers,
   Loader2,
-  Minus,
   RefreshCw,
-  Scale,
-  Sparkles,
   TrendingDown,
   TrendingUp,
-  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
@@ -28,15 +20,12 @@ import { PriceChart, type ChartMarker, type Level } from "@/components/charts/pr
 import { TrendlineStructureChart } from "@/components/charts/trendline-structure-chart";
 import { AiBriefCard } from "@/components/desk/ai-brief-card";
 import { DirectPerpPanel } from "@/components/desk/direct-perp-panel";
-import { FibonacciCard } from "@/components/desk/fibonacci-card";
-import { TrendlinesTable } from "@/components/desk/trendlines-table";
 import { PageHeader } from "@/components/shared/page";
 import { Rolling } from "@/components/shared/rolling";
-import { Empty, LoadError, Loading } from "@/components/shared/states";
+import { LoadError, Loading } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { ago, num, signed, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
@@ -46,7 +35,6 @@ import type {
   MarketOutlook,
   MarketPulse,
   MarketStructure,
-  MarketVerdicts,
   Overview,
   SettingsResponse,
   StructureZone,
@@ -64,21 +52,13 @@ interface SwingEvent {
   volume_ratio: number;
 }
 
-interface GapEvent {
-  direction: "up" | "down";
-  low: number;
-  high: number;
-  bar_time: number;
-  filled: boolean;
-}
-
 function SymbolPriceCard({
   sym,
   active,
   data,
   onSelect,
 }: {
-  sym: "BTC" | "ETH";
+  sym: "BTC" | "ETH" | "XAUT";
   active: boolean;
   data: Overview | undefined;
   onSelect: () => void;
@@ -220,7 +200,7 @@ function SymbolPriceCard({
 export default function MarketDeskPage() {
   const { mutate } = useSWRConfig();
   const { data: settings } = useApi<SettingsResponse>("/settings");
-  const underlyings = settings?.values.underlyings ?? ["BTC", "ETH"];
+  const underlyings = settings?.values.underlyings ?? ["BTC", "ETH", "XAUT"];
   const [underlying, setUnderlying] = useState("BTC");
   const [chartInterval, setChartInterval] = useState<"15m" | "1h" | "1d">("15m");
   const [timezone, setTimezone] = useState<"Local" | "UTC" | "IST">("IST");
@@ -236,6 +216,8 @@ export default function MarketDeskPage() {
     trendlines: boolean;
     clusters: boolean;
     ema: boolean;
+    fib: boolean;
+    profile: boolean;
   }>(() => {
     if (typeof window !== "undefined") {
       try {
@@ -251,36 +233,24 @@ export default function MarketDeskPage() {
             trendlines: parsed.trendlines ?? true,
             clusters: parsed.clusters ?? true,
             ema: parsed.ema ?? true,
+            fib: parsed.fib ?? true,
+            profile: parsed.profile ?? true,
           };
         }
       } catch {
         /* ignore private mode */
       }
     }
-    return { fvg: true, ob: true, smc: true, levels: true, volume: true, trendlines: true, clusters: true, ema: true };
+    return { fvg: true, ob: true, smc: true, levels: true, volume: true, trendlines: true, clusters: true, ema: true, fib: true, profile: true };
   });
 
-  const toggleLayer = (layerKey: "fvg" | "ob" | "smc" | "levels" | "volume" | "trendlines" | "clusters" | "ema") => {
+  const toggleLayer = (layerKey: "fvg" | "ob" | "smc" | "levels" | "volume" | "trendlines" | "clusters" | "ema" | "fib" | "profile") => {
     setLayers((prev) => {
       const next = { ...prev, [layerKey]: !prev[layerKey] };
       try {
         localStorage.setItem("tradebuddy_chart_layers", JSON.stringify(next));
       } catch {
         /* ignore */
-      }
-      return next;
-    });
-  };
-
-  // Set of individual trendline or cluster IDs hidden from the chart
-  const [hiddenItemIds, setHiddenItemIds] = useState<Set<string>>(new Set());
-  const toggleItemVisibility = (id: string) => {
-    setHiddenItemIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
       }
       return next;
     });
@@ -298,9 +268,6 @@ export default function MarketDeskPage() {
   });
   const { data: structure } = useApi<MarketStructure>(`/desk/structure?underlying=${underlying}`, {
     refreshInterval: 30_000,
-  });
-  const { data: verdicts } = useApi<MarketVerdicts>(`/desk/verdicts?underlying=${underlying}&days=30`, {
-    refreshInterval: 60_000,
   });
 
   const barParams = useMemo(() => {
@@ -328,6 +295,9 @@ export default function MarketDeskPage() {
   const { data: ethOverview } = useApi<Overview>("/market/overview?underlying=ETH", {
     refreshInterval: 10_000,
   });
+  const { data: xautOverview } = useApi<Overview>("/market/overview?underlying=XAUT", {
+    refreshInterval: 10_000,
+  });
 
   async function handleAnalyseNow() {
     setAnalysing(true);
@@ -338,7 +308,6 @@ export default function MarketDeskPage() {
       mutate(`/desk/outlook?underlying=${underlying}`);
       mutate(`/desk/pulse?underlying=${underlying}`);
       mutate(`/desk/structure?underlying=${underlying}`);
-      mutate(`/desk/verdicts?underlying=${underlying}&days=30`);
       mutate(`/desk/options-history?underlying=${underlying}&hours=24`);
     } catch (err: unknown) {
       toast.error("Analysis failed", { description: err instanceof Error ? err.message : String(err) });
@@ -347,29 +316,32 @@ export default function MarketDeskPage() {
     }
   }
 
+  // Today's volume profile, or the 20-day composite before today has one.
+  const volumeProfile = structure?.profile?.session ?? structure?.profile?.composite ?? null;
+
   const chartLevels = useMemo<Level[]>(() => {
     const list: Level[] = [];
-    if (!structure) return list;
-
-    if (structure.profile?.poc) {
-      list.push({ price: structure.profile.poc, label: "POC", color: "#3b82f6" });
+    if (layers.levels && structure) {
+      if (volumeProfile) {
+        list.push({ price: volumeProfile.poc, label: "POC", color: "#f59e0b" });
+        list.push({ price: volumeProfile.value_high, label: "VAH", color: "#3b82f6", dashed: true });
+        list.push({ price: volumeProfile.value_low, label: "VAL", color: "#3b82f6", dashed: true });
+      }
+      structure.nearby?.above?.slice(0, 3).forEach((l) => {
+        list.push({ price: l.price, label: l.label, color: "#ef4444", dashed: true });
+      });
+      structure.nearby?.below?.slice(0, 3).forEach((l) => {
+        list.push({ price: l.price, label: l.label, color: "#10b981", dashed: true });
+      });
     }
-    if (structure.profile?.vah) {
-      list.push({ price: structure.profile.vah, label: "VAH", color: "#64748b", dashed: true });
+    // The current leg's retracements; the golden pocket (0.5-0.618) drawn solid.
+    if (layers.fib && fibData?.ready) {
+      fibData.levels
+        .filter((l) => l.kind === "retracement")
+        .forEach((l) => list.push({ price: l.price, label: `Fib ${l.label}`, color: "#a855f7", dashed: !l.golden }));
     }
-    if (structure.profile?.val) {
-      list.push({ price: structure.profile.val, label: "VAL", color: "#64748b", dashed: true });
-    }
-
-    structure.nearby?.above?.slice(0, 3).forEach((l) => {
-      list.push({ price: l.price, label: l.label, color: "#ef4444", dashed: true });
-    });
-    structure.nearby?.below?.slice(0, 3).forEach((l) => {
-      list.push({ price: l.price, label: l.label, color: "#10b981", dashed: true });
-    });
-
     return list;
-  }, [structure]);
+  }, [fibData, layers.fib, layers.levels, structure, volumeProfile]);
 
   // Extract all institutional zones (FVGs & OBs) from engine structure
   const structureZones = useMemo<StructureZone[]>(() => {
@@ -398,15 +370,10 @@ export default function MarketDeskPage() {
     return bel.length ? bel.reduce((prev, curr) => ((curr.distance_pct ?? -999) > (prev.distance_pct ?? -999) ? curr : prev)) : null;
   }, [fvgZones]);
 
-  // Extract recent SMC swings (CHoCH / BOS) and Gaps from 15m timeframe
+  // Recent SMC swings (CHoCH / BOS) on the 15m timeframe, the fallback for the chart markers
   const swings = useMemo<SwingEvent[]>(() => {
     const tf = outlook?.timeframes?.[0] as { swings?: SwingEvent[] } | undefined;
     return (tf?.swings ?? []).slice(-8).reverse();
-  }, [outlook]);
-
-  const gaps = useMemo<GapEvent[]>(() => {
-    const tf = outlook?.timeframes?.[0] as { gaps?: GapEvent[] } | undefined;
-    return (tf?.gaps ?? []).slice(-6).reverse();
   }, [outlook]);
 
   // Combine Smart Money Concepts breaks for Candlestick chart markers
@@ -440,22 +407,10 @@ export default function MarketDeskPage() {
     return list;
   }, [structure, swings]);
 
-  // Filtered trendlines and clusters for the chart based on master toggles and per-item toggles
-  const activeTrendlines = useMemo(() => {
-    if (!layers.trendlines) return [];
-    return (trendlinesData?.trendlines || []).filter((t) => !hiddenItemIds.has(t.id));
-  }, [layers.trendlines, trendlinesData?.trendlines, hiddenItemIds]);
-
-  const activeClusters = useMemo(() => {
-    if (!layers.clusters) return [];
-    return (trendlinesData?.horizontal_clusters || []).filter((c) => !hiddenItemIds.has(c.id));
-  }, [layers.clusters, trendlinesData?.horizontal_clusters, hiddenItemIds]);
-
   if (analysisErr) {
     return <LoadError error={analysisErr} />;
   }
 
-  const stats = analysis?.stats;
   const currentPrice = analysis?.price ?? pulse?.price ?? 0;
 
   return (
@@ -463,7 +418,7 @@ export default function MarketDeskPage() {
       {/* Top Header */}
       <PageHeader
         title="Market Desk"
-        description="Multi-timeframe market regime, volume profile, liquidity zones, and algorithmic market verdicts."
+        description="Multi-timeframe market regime, volume profile, liquidity zones and Fibonacci on one chart."
         actions={
           <div className="flex flex-wrap items-center gap-2.5">
             {/* Timezone Selector */}
@@ -521,7 +476,7 @@ export default function MarketDeskPage() {
       />
 
       {/* 24h Dual Rolling Price Cards (from v3) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <SymbolPriceCard
           sym="BTC"
           active={underlying === "BTC"}
@@ -533,6 +488,12 @@ export default function MarketDeskPage() {
           active={underlying === "ETH"}
           data={ethOverview}
           onSelect={() => setUnderlying("ETH")}
+        />
+        <SymbolPriceCard
+          sym="XAUT"
+          active={underlying === "XAUT"}
+          data={xautOverview}
+          onSelect={() => setUnderlying("XAUT")}
         />
       </div>
 
@@ -589,7 +550,7 @@ export default function MarketDeskPage() {
                 {underlying} Perpetual Structure Chart ({chartInterval})
               </CardTitle>
               <p className="text-xs text-muted-foreground">
-                Candlestick tape with dynamic Trendlines, Fair Value Gaps (FVG), Order Blocks, and Volume Profile.
+                Candles with Fair Value Gaps, Order Blocks, the volume profile and the Fibonacci retracements of the current leg.
               </p>
             </div>
 
@@ -699,6 +660,34 @@ export default function MarketDeskPage() {
               <span className="size-2 rounded-full bg-slate-500" />
               Volume
             </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={layers.profile}
+              onClick={() => toggleLayer("profile")}
+              className={`h-7 px-2.5 text-xs ${
+                layers.profile ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"
+              }`}
+              title="Toggle the volume profile (bars from the right edge; amber is the point of control)"
+            >
+              <span className="size-2 rounded-full bg-blue-500" />
+              Profile
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={layers.fib}
+              onClick={() => toggleLayer("fib")}
+              className={`h-7 px-2.5 text-xs ${
+                layers.fib ? "border-slate-300 bg-muted text-foreground" : "text-muted-foreground"
+              }`}
+              title="Toggle Fibonacci retracements of the current leg"
+            >
+              <span className="size-2 rounded-full bg-purple-500" />
+              Fib
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="pt-1">
@@ -714,8 +703,10 @@ export default function MarketDeskPage() {
               showFvg={layers.fvg}
               showOb={layers.ob}
               showMarkers={layers.smc}
-              showLevels={layers.levels}
+              showLevels
               showVolume={layers.volume}
+              profile={volumeProfile?.nodes}
+              showProfile={layers.profile}
               showTrendlines={false}
               showClusters={false}
               showEma={layers.ema}
@@ -921,337 +912,7 @@ export default function MarketDeskPage() {
           height={460}
         />
 
-        <TrendlinesTable
-          trendlines={trendlinesData?.trendlines || []}
-          clusters={trendlinesData?.horizontal_clusters || []}
-          currentPrice={currentPrice}
-          symbol={underlying}
-          interval={chartInterval}
-          showTrendlinesOnChart={true}
-          showClustersOnChart={true}
-          hiddenIds={hiddenItemIds}
-          onToggleItem={toggleItemVisibility}
-        />
-
-        <FibonacciCard fib={fibData} currentPrice={currentPrice} />
       </div>
-
-      {/* Comprehensive Analysis Tabs */}
-      <Tabs defaultValue="outlook" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4 sm:w-auto">
-          <TabsTrigger value="outlook" className="gap-2 text-xs">
-            <Compass className="size-3.5" /> Outlook
-          </TabsTrigger>
-          <TabsTrigger value="smc" className="gap-2 text-xs">
-            <Activity className="size-3.5" /> CHoCH / BOS & SMC
-          </TabsTrigger>
-          <TabsTrigger value="structure" className="gap-2 text-xs">
-            <Layers className="size-3.5" /> Structure & Levels
-          </TabsTrigger>
-          <TabsTrigger value="verdicts" className="gap-2 text-xs">
-            <Zap className="size-3.5" /> Verdicts ({verdicts?.verdicts?.length ?? 0})
-          </TabsTrigger>
-        </TabsList>
-
-        {/* Outlook Tab */}
-        <TabsContent value="outlook" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-3">
-            {outlook?.summary?.map((s, idx) => {
-              const isUp = s.direction > 0;
-              const isDown = s.direction < 0;
-              return (
-                <Card key={idx} className="relative overflow-hidden">
-                  <div
-                    className={`absolute top-0 left-0 h-1 w-full ${
-                      isUp ? "bg-profit" : isDown ? "bg-loss" : "bg-slate-300"
-                    }`}
-                  />
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-muted-foreground uppercase">{s.label}</span>
-                      <Badge variant={isUp ? "profit" : isDown ? "loss" : "default"}>
-                        {isUp ? (
-                          <span className="flex items-center gap-1">
-                            <TrendingUp className="size-3" /> Bullish
-                          </span>
-                        ) : isDown ? (
-                          <span className="flex items-center gap-1">
-                            <TrendingDown className="size-3" /> Bearish
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1">
-                            <Minus className="size-3" /> Neutral
-                          </span>
-                        )}
-                      </Badge>
-                    </div>
-                    <CardTitle className="text-sm font-medium">{s.good_for}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3 pt-0 text-xs">
-                    <div className="flex justify-between border-b pb-1.5">
-                      <span className="text-muted-foreground">Horizon</span>
-                      <span className="font-medium">{s.horizon_label}</span>
-                    </div>
-                    <div className="flex justify-between border-b pb-1.5">
-                      <span className="text-muted-foreground">Expected Move</span>
-                      <span className="font-mono font-medium">
-                        ±{s.move_pct}% (${num(s.move_usd, 0)})
-                      </span>
-                    </div>
-                    <div className="flex justify-between border-b pb-1.5">
-                      <span className="text-muted-foreground">Target Range</span>
-                      <span className="font-mono font-medium">
-                        ${num(s.band[0], 0)} – ${num(s.band[1], 0)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Sample Size</span>
-                      <span className="font-medium text-muted-foreground">{s.sample} bars</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-
-          {(!outlook?.summary || outlook.summary.length === 0) && (
-            <Card>
-              <CardContent className="py-8">
-                <Empty title="No outlook summary available for this underlying." />
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
-        {/* SMC / CHoCH & BOS Tab */}
-        <TabsContent value="smc" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            {/* Recent CHoCH & BOS Swings */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Activity className="size-4 text-primary" /> Market Structure Breaks (CHoCH / BOS)
-                </CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Change of Character (trend shifts) and Break of Structure (trend continuations) on 15m bars.
-                </p>
-              </CardHeader>
-              <CardContent>
-                {swings && swings.length > 0 ? (
-                  <div className="space-y-2">
-                    {swings.map((sw, i) => {
-                      const isUp = sw.direction === "up";
-                      return (
-                        <div
-                          key={i}
-                          className="flex items-center justify-between rounded-xl bg-secondary/60 px-3 py-2 text-xs"
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <Badge variant={sw.kind === "choch" ? "primary" : "default"} className="num uppercase">
-                              {sw.kind}
-                            </Badge>
-                            <span className={`font-semibold ${isUp ? "text-profit" : "text-loss"}`}>
-                              {sw.direction.toUpperCase()}
-                            </span>
-                            <span className="font-mono font-bold">${num(sw.level, 1)}</span>
-                          </div>
-
-                          <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground">
-                            <span>Displ: {sw.displacement.toFixed(1)}x ATR</span>
-                            <span>Vol: {sw.volume_ratio.toFixed(1)}x</span>
-                            <span>{ago(sw.bar_time)}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="py-6 text-center text-xs text-muted-foreground">
-                    No structural breaks identified in the recent window.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Fair Value Gaps (FVG) */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Layers className="size-4 text-primary" /> Fair Value Gaps (FVG / Imbalances)
-                </CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Unmitigated single-candle price inefficiencies acting as market magnets.
-                </p>
-              </CardHeader>
-              <CardContent>
-                {gaps && gaps.length > 0 ? (
-                  <div className="space-y-2">
-                    {gaps.map((g, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between rounded-xl bg-secondary/60 px-3 py-2 text-xs"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <Badge variant={g.direction === "up" ? "profit" : "loss"} className="text-[10px] uppercase font-mono">
-                            {g.direction} gap
-                          </Badge>
-                          <span className="font-mono font-semibold">
-                            ${num(g.low, 1)} – ${num(g.high, 1)}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-2 text-[11px]">
-                          <Badge variant={g.filled ? "default" : "outline"} className="text-[10px]">
-                            {g.filled ? "Filled" : "Unfilled Active"}
-                          </Badge>
-                          <span className="text-muted-foreground font-mono">{ago(g.bar_time)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="py-6 text-center text-xs text-muted-foreground">
-                    No active fair value gaps detected on current candles.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* Structure & Levels Tab */}
-        <TabsContent value="structure" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            {/* Resistance Levels */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold text-loss flex items-center gap-2">
-                  <ArrowUpRight className="size-4" /> Levels & Resistances Above
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {structure?.nearby?.above && structure.nearby.above.length > 0 ? (
-                  <div className="space-y-2">
-                    {structure.nearby.above.map((lvl, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between rounded-lg border border-loss/25 bg-loss-soft px-3 py-2 text-xs"
-                      >
-                        <div>
-                          <span className="font-mono font-bold text-loss">${num(lvl.price, 2)}</span>
-                          <span className="ml-2 text-muted-foreground">{lvl.label}</span>
-                        </div>
-                        <Badge variant="outline" className="font-mono text-[10px]">
-                          {lvl.confluence}x confluence
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-xs text-muted-foreground py-4 text-center">No immediate overhead levels.</div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Support Levels */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold text-profit flex items-center gap-2">
-                  <ArrowDownRight className="size-4" /> Levels & Supports Below
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {structure?.nearby?.below && structure.nearby.below.length > 0 ? (
-                  <div className="space-y-2">
-                    {structure.nearby.below.map((lvl, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between rounded-lg border border-profit/25 bg-profit-soft px-3 py-2 text-xs"
-                      >
-                        <div>
-                          <span className="font-mono font-bold text-profit">${num(lvl.price, 2)}</span>
-                          <span className="ml-2 text-muted-foreground">{lvl.label}</span>
-                        </div>
-                        <Badge variant="outline" className="font-mono text-[10px]">
-                          {lvl.confluence}x confluence
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-xs text-muted-foreground py-4 text-center">No immediate support levels.</div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Volume Profile & ATR details */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Card className="p-3">
-              <div className="text-[11px] font-medium text-muted-foreground">Volume Profile POC</div>
-              <div className="mt-1 font-mono text-base font-semibold text-blue-600">
-                ${structure?.profile?.poc ? num(structure.profile.poc, 2) : "—"}
-              </div>
-            </Card>
-            <Card className="p-3">
-              <div className="text-[11px] font-medium text-muted-foreground">Value Area High (VAH)</div>
-              <div className="mt-1 font-mono text-base font-medium">
-                ${structure?.profile?.vah ? num(structure.profile.vah, 2) : "—"}
-              </div>
-            </Card>
-            <Card className="p-3">
-              <div className="text-[11px] font-medium text-muted-foreground">Value Area Low (VAL)</div>
-              <div className="mt-1 font-mono text-base font-medium">
-                ${structure?.profile?.val ? num(structure.profile.val, 2) : "—"}
-              </div>
-            </Card>
-            <Card className="p-3">
-              <div className="text-[11px] font-medium text-muted-foreground">Current ATR (14)</div>
-              <div className="mt-1 font-mono text-base font-medium">
-                ${structure?.atr ? num(structure.atr, 2) : "—"}
-              </div>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* Verdicts Tab */}
-        <TabsContent value="verdicts" className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {verdicts?.verdicts?.map((v, i) => {
-              const isBull = v.stance.includes("bull") || v.stance === "up";
-              const isBear = v.stance.includes("bear") || v.stance === "down";
-              return (
-                <Card key={i} className="flex flex-col justify-between">
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-[11px] text-muted-foreground uppercase">{v.measure}</span>
-                      <Badge variant={isBull ? "profit" : isBear ? "loss" : "default"} className="text-[10px]">
-                        {String(v.stance || "").replace("_", " ").toUpperCase()}
-                      </Badge>
-                    </div>
-                    <CardTitle className="text-sm font-semibold">{v.label}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3 pt-0 text-xs">
-                    <p className="text-muted-foreground leading-relaxed">{v.detail}</p>
-                    <div className="flex items-center justify-between border-t pt-2 text-[11px]">
-                      <span className="text-muted-foreground">Confidence</span>
-                      <span className="font-mono font-semibold">{(v.confidence * 100).toFixed(0)}%</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-
-          {(!verdicts?.verdicts || verdicts.verdicts.length === 0) && (
-            <Card>
-              <CardContent className="py-8">
-                <Empty title="No verdicts recorded yet. Run 'Analyse Now' to trigger a scan." />
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-      </Tabs>
     </div>
   );
 }

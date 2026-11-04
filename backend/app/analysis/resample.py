@@ -37,24 +37,18 @@ the same higher timeframe today, tomorrow and inside a replay of last March.
 from __future__ import annotations
 
 import itertools
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
-
-from app.market.delta import Candle
 
 # Every interval the system folds to, and how long one of its bars is.
 BAR_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14_400, "1d": 86_400}
 
-# The base series: the only raw timeframe stored below 15m. Everything between them is folded.
-BASE_INTERVAL = "1m"
 
 # What a fold will accept before it refuses to emit the bar. A tenth of an hour missing barely
 # moves its high, low or close; a tenth of a day missing is two and a half hours of market nobody
 # saw, and the open or the close may be on the wrong side of it. So: strict for short folds where a
 # hole is a large share of the bar, looser for long ones where it is not.
 MIN_COVERAGE = {"3m": 1.0, "5m": 1.0, "15m": 1.0, "30m": 0.9, "1h": 0.9, "4h": 0.9, "1d": 0.9}
-
-OHLC_KEYS = ("time", "open", "high", "low", "close", "volume")
 
 
 class ResampleError(ValueError):
@@ -156,28 +150,7 @@ def _last(group: Sequence[Mapping[str, Any]], key: str) -> float | None:
     return None
 
 
-def to_candles(rows: Iterable[Mapping[str, Any]]) -> list[Candle]:
-    """Rows as `Candle`s, for the pure modules that take them. Lossy on purpose: a Candle has no
-    open interest or funding, so anything that needs those reads the rows."""
-    return [
-        Candle(int(r["time"]), float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]), float(r.get("volume") or 0))
-        for r in rows
-    ]
-
-
 # -- what is wrong with the base ------------------------------------------------------
-
-
-def duplicates(rows: Sequence[Mapping[str, Any]]) -> list[int]:
-    """Bar times that appear more than once. The stored table cannot hold one (the primary key
-    forbids it), so a hit here means the source it was read from can — which is worth knowing
-    before it is written anywhere."""
-    seen: set[int] = set()
-    dupes: set[int] = set()
-    for r in rows:
-        t = int(r["time"])
-        (dupes if t in seen else seen).add(t)
-    return sorted(dupes)
 
 
 def gaps(rows: Sequence[Mapping[str, Any]], interval: str) -> list[tuple[int, int]]:
@@ -188,35 +161,3 @@ def gaps(rows: Sequence[Mapping[str, Any]], interval: str) -> list[tuple[int, in
     step = seconds(interval)
     times = sorted(int(r["time"]) for r in rows)
     return [(a, b) for a, b in itertools.pairwise(times) if b - a > step]
-
-
-def out_of_order(rows: Sequence[Mapping[str, Any]]) -> bool:
-    times = [int(r["time"]) for r in rows]
-    return times != sorted(times)
-
-
-def misaligned(rows: Sequence[Mapping[str, Any]], interval: str) -> list[int]:
-    """Bar times that are not on a boundary of their own interval. One of these means the series
-    was stamped by something other than the clock, and every fold of it will be wrong."""
-    step = seconds(interval)
-    return [int(r["time"]) for r in rows if int(r["time"]) % step]
-
-
-def validate(rows: Sequence[Mapping[str, Any]], interval: str) -> dict[str, Any]:
-    """One summary of everything that can be wrong with a base series, for the System page and for
-    the backfill to print. `ok` is true only when nothing is."""
-    dupes, holes, bad = duplicates(rows), gaps(rows, interval), misaligned(rows, interval)
-    unordered = out_of_order(rows)
-    times = [int(r["time"]) for r in rows]
-    return {
-        "interval": interval,
-        "bars": len(rows),
-        "first": min(times) if times else None,
-        "last": max(times) if times else None,
-        "duplicates": dupes,
-        "gaps": [{"after": a, "before": b, "missing": (b - a) // seconds(interval) - 1} for a, b in holes],
-        "missing_bars": sum((b - a) // seconds(interval) - 1 for a, b in holes),
-        "misaligned": bad,
-        "out_of_order": unordered,
-        "ok": not (dupes or holes or bad or unordered),
-    }

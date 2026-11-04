@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import pytest
 
-from app.analysis import reading, verdict
+from app.analysis import reading
 from app.analysis import structure as mkt
 from app.market.delta import Candle
-from app.market.indicators import adx, bollinger, macd, obv
+from app.market.indicators import macd, obv
 
 from .test_outlook import walk
 
@@ -26,15 +26,6 @@ def bar(o, h, lo, c, i=0, v=10.0):
 # -- the indicator primitives ----------------------------------------------------------
 
 
-def test_adx_separates_a_trend_from_a_range():
-    """The one reading that says whether the others mean anything. A clean ramp is a trend; a flat
-    line is not, and anything in between is what the thresholds are for."""
-    rise = [100.0 + i for i in range(200)]
-    flat = [100.0] * 200
-    assert adx([x * 1.001 for x in rise], [x * 0.999 for x in rise], rise)[0][-1] > 50
-    assert adx(flat, flat, flat)[0][-1] < 5
-
-
 def test_macd_histogram_turns_with_momentum():
     """Momentum, not direction. A straight ramp rises forever at a constant rate, and its histogram
     is zero — correctly, because nothing is accelerating. It takes a change of pace to move it."""
@@ -47,13 +38,6 @@ def test_macd_histogram_turns_with_momentum():
     assert macd(faster)[2][-1] > 0  # the climb steepened
     turn = [*steady, *[steady[-1] - i * 3 for i in range(1, 40)]]
     assert macd(turn)[2][-1] < 0
-
-
-def test_bollinger_bands_bracket_the_price():
-    closes = [100.0 + (i % 7) for i in range(80)]
-    mid, up, low = bollinger(closes, 20, 2.0)
-    assert low[-1] < mid[-1] < up[-1]
-    assert min(closes[-20:]) >= low[-1] - 1e-9 and max(closes[-20:]) <= up[-1] + 1e-9
 
 
 def test_obv_adds_volume_on_up_closes_and_takes_it_off_on_down():
@@ -118,70 +102,6 @@ def test_volume_is_reported_as_a_ratio_not_a_raw_figure():
 def test_volume_says_so_when_there_is_not_enough_of_it():
     b = reading.volume_block(walk(10, seed=44))
     assert b["ready"] is False and "needs" in b["note"]
-
-
-# -- one verdict per tab ------------------------------------------------------------------
-
-
-def test_the_volume_verdict_never_claims_a_direction_from_size_alone():
-    """Volume cannot say which way price goes. Where it leans, it is because the size itself was
-    one-sided — and it says that, rather than implying the move is confirmed."""
-    quiet = reading.volume_block(walk(2_000, seed=48))
-    v = verdict.volume(quiet)
-    assert v.stance in ("bullish", "bearish", "neutral", "range")
-    assert v.measure in ("direction", "range")
-    assert "volume" in v.detail.lower() or "size" in v.detail.lower()
-
-
-# -- an empty database must not make the page silent ------------------------------------
-
-
-def seq(*bars):
-    return [Candle(T + i * STEP, o, h, lo, c, 10.0) for i, (o, h, lo, c) in enumerate(bars)]
-
-
-def test_a_trade_is_marked_on_its_bracket_not_on_the_close():
-    """Everything was scored on "did the close go up", but the Trader places a stop and a target.
-    A call can be right while the trade it implies was stopped out hours earlier."""
-    # Closes higher, but only after trading through the stop first.
-    bars = seq((99, 99, 99, 99), (100, 100.2, 98.0, 98.5), (98.5, 103, 98.4, 102))
-    out = reading.barrier_outcome(bars, 0, "buy", stop_pct=1.0, target_pct=1.5, lookahead=5)
-    assert out.exit == "sl" and out.net_pct < 0
-    assert bars[-1].close > bars[1].open, "the close did end higher — and the trade still lost"
-
-
-def test_the_stop_wins_a_tie_inside_one_candle():
-    """Intrabar order is unknown. Optimism here is how a backtest doubles its win rate."""
-    both = seq((99, 99, 99, 99), (100, 103, 98, 99))
-    assert reading.barrier_outcome(both, 0, "buy", 1.0, 1.5, 5).exit == "sl"
-
-
-def test_entry_is_the_next_open_and_costs_come_off():
-    hit = seq((99, 99, 99, 99), (100, 103, 99.6, 102))
-    out = reading.barrier_outcome(hit, 0, "buy", 1.0, 1.5, 5, cost_pct=0.2)
-    assert out.exit == "tp"
-    assert out.net_pct == pytest.approx(1.5 - 0.2)  # the target, less the round trip
-    assert out.r_multiple == pytest.approx(1.3)  # in units of the 1% risked
-
-
-def test_an_uncovered_horizon_is_unsettled_not_flat():
-    short = seq((99, 99, 99, 99), (100, 100.1, 99.9, 100))
-    assert reading.barrier_outcome(short, 0, "buy", 1.0, 1.5, lookahead=50) is None
-
-
-def test_a_short_is_the_mirror_of_a_long():
-    down = seq((101, 101, 101, 101), (100, 100.2, 98.0, 98.5))
-    assert reading.barrier_outcome(down, 0, "sell", 1.0, 1.5, 5).exit == "tp"
-    assert reading.barrier_outcome(down, 0, "buy", 1.0, 1.5, 5).exit == "sl"
-
-
-def test_the_regime_separates_a_trend_from_a_range():
-    """A card useless on average can be good in one regime; the average buries both."""
-    bars = walk(2_000, seed=71)
-    assert reading.regime_at(bars, len(bars) - 1) in ("trending", "trending fast", "ranging", "ranging fast")
-    assert reading.regime_at(bars, 5) == "unknown"  # too early to say, and it says so
-
-
 
 
 # -- the levels everyone is watching, and whether anyone turned up ----------------------

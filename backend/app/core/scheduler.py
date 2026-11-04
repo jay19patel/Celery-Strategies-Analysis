@@ -159,8 +159,6 @@ class Scheduler:
 
 
 def _now() -> Any:
-    from datetime import UTC, datetime
-
     return datetime.now(UTC)
 
 

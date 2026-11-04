@@ -38,31 +38,6 @@ def _rv(closes: list[float], bars: int) -> float | None:
     return math.sqrt(sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)) * ANNUAL
 
 
-def outcome(candles: list[Candle], bar_time: int, horizon_hours: float, breakout_pct: float) -> dict[str, float | bool] | None:
-    """What the market did over one claim's horizon, or None when the candles do not cover it.
-
-    The return from the claim bar's close to the close `horizon_hours` later, the realised
-    volatility of the closes between them, and the furthest the price travelled either way
-    against `breakout_pct` (0 = do not ask)."""
-    by_time = {c.time: c for c in candles}
-    start = by_time.get(bar_time)
-    end_time = bar_time + int(horizon_hours * 3600)
-    window = [c for c in candles if bar_time < c.time <= end_time]
-    if start is None or not window or window[-1].time < end_time - BAR_SECONDS:
-        return None  # the horizon is not covered: leave it unsettled and try again next pass
-    closes = [start.close, *(c.close for c in window)]
-    high = max(c.high for c in window)
-    low = min(c.low for c in window)
-    excursion = max(high / start.close - 1, 1 - low / start.close)
-    return {
-        "price": window[-1].close,
-        "ret": window[-1].close / start.close - 1,
-        "realized_vol": _rv(closes, len(closes) - 1) or 0.0,
-        "excursion": excursion,
-        "breakout": bool(breakout_pct) and excursion >= breakout_pct / 100,
-    }
-
-
 def market_context(
     symbol: str, candles: list[Candle], oi: list[Candle] | None = None, funding: list[Candle] | None = None,
     stats: dict[str, Any] | None = None, options: dict[str, Any] | None = None,

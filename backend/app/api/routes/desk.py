@@ -47,11 +47,6 @@ async def fib(engine: EngineDep, underlying: str = "BTC", interval: str = "15m",
     return await engine.market.fibonacci(underlying, interval, limit)
 
 
-@router.get("/verdicts")
-async def verdicts(engine: EngineDep, underlying: str = "BTC", days: float = 30) -> dict[str, Any]:
-    return await engine.market.verdicts(underlying, days)
-
-
 @router.get("/bars")
 async def bars(engine: EngineDep, underlying: str = "BTC", interval: str = "15m", days: float = 7, limit: int = 1500) -> dict[str, Any]:
     return await engine.market.bars(underlying, interval, days, limit)

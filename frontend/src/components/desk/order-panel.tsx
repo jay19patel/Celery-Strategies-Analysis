@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Send } from "lucide-react";
 import { toast } from "sonner";
@@ -25,6 +25,18 @@ export function OrderPanel({ preview, brokers, onQty }: { preview: Preview; brok
   const status = active.find((b) => b.name === broker);
   const sizing = preview.sizing.find((s) => s.broker === broker);
   const failed = preview.checks.filter((c) => c.required && !c.ok);
+
+  // Sized as the auto-trader sizes: the worst case is `risk_per_trade_pct` of this broker's equity,
+  // at most `max_lots`. Applied once per structure and broker; a quantity typed after that is kept.
+  const legsKey = preview.strategy === "custom" ? preview.plan.legs.map((l) => `${l.side}${l.ratio}${l.symbol}`).join(",") : "";
+  const sizeKey = `${broker}|${preview.strategy}|${preview.plan.underlying}|${preview.plan.expiry}|${legsKey}`;
+  const suggested = sizing?.suggested_qty;
+  const sizedFor = useRef("");
+  useEffect(() => {
+    if (suggested === undefined || sizedFor.current === sizeKey) return;
+    sizedFor.current = sizeKey;
+    onQty(Math.max(1, suggested));
+  }, [sizeKey, suggested, onQty]);
   const blocked = !status ? "choose a broker" : status.halted ? `halted: ${status.halted}` : status.not_ready;
 
   const place = async () => {

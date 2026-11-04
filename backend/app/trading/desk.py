@@ -11,8 +11,9 @@ from app.errors import NotFound, Refused
 from app.market import options as chain
 from app.market.feed import MarketFeed
 from app.market.indicators import parkinson_vol, realised_vol
+from app.options import ideas as ideas_mod
 from app.options import regime as regime_mod
-from app.options.assess import DEFAULT_FEE, FeeRate, assess
+from app.options.assess import DEFAULT_FEE, FeeRate, assess, leg_fee
 from app.options.strategies import BUILDERS, CATALOG, Plan, build, custom, spec_for
 from app.settings import Settings
 
@@ -81,6 +82,21 @@ class Desk:
         bars = self.feed.bars(chain.PERPETUALS[underlying], 3000)
         result = regime_mod.analyze(bars, self.spot(underlying), self.summary(underlying, expiry))
         return result | {"underlying": underlying, "expiry": expiry}
+
+    async def ideas(self, underlying: str, expiry: float) -> dict[str, Any]:
+        """Single-option buys and sells with an edge at realised volatility (`options.ideas`)."""
+        s: Settings = self.settings()
+        quotes = self.quotes(underlying, expiry)
+        spot = self.spot(underlying)
+        rv = self.realised(underlying)
+        rate = await self.fee_rate(quotes[0].symbol)  # one schedule for every option of an underlying
+        direction = float(self.regime(underlying, expiry).get("direction") or 0.0)
+        out = ideas_mod.ideas(
+            quotes, spot, time.time(), rv["floor"], rv["reference"],
+            lambda price: leg_fee(price, 1.0, spot, rate), direction, s.max_spread_pct,
+            s.debit_take_profit_pct, s.credit_take_profit_pct,
+        )
+        return out | {"underlying": underlying, "expiry": expiry}
 
     def chain(self, underlying: str, expiry: float) -> dict[str, Any]:
         spot = self.spot(underlying)

@@ -86,28 +86,7 @@ SOURCES: dict[str, dict[str, Any]] = {
 
 ORDER = (MATH, COUNTED, IMPLIED, WRITTEN)
 
-# Which card on the Market page rests on what. A card can only be as dependable as its source.
-CARD_SOURCE = {
-    "term_structure": IMPLIED,
-    "atm_iv": IMPLIED,
-    "pcr": IMPLIED,
-    "chain_oi": IMPLIED,
-    "insights": COUNTED,  # rules over measured numbers; nothing fitted
-    "volume": COUNTED,
-    "indicators": MATH,  # transforms of price; nothing fitted and nothing counted
-    "shapes": COUNTED,
-    "where": COUNTED,  # levels the traded size itself made
-    "levels": MATH,  # the highs and lows themselves; nothing fitted
-    "outlook": COUNTED,
-    "written": WRITTEN,
-}
-
-
 def legend() -> list[dict[str, Any]]:
     """The sources in order, for the page to render once at the top."""
     return [SOURCES[k] for k in ORDER]
 
-
-def of(card: str) -> dict[str, Any]:
-    """The source behind one card, falling back to counted history rather than claiming more."""
-    return SOURCES[CARD_SOURCE.get(card, COUNTED)]
