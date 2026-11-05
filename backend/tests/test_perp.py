@@ -296,3 +296,64 @@ async def test_a_position_the_exchange_will_not_protect_is_closed(perp: Any) -> 
     perp.configure(delta_active=True)
     view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-ex-4", "")
     assert view["status"] == "closed" and "exchange stop could not be placed" in view["close_reason"]
+
+
+# -- the trailing stop ------------------------------------------------------------------------------
+
+
+async def test_the_stop_trails_from_one_r_never_loosens_and_locks_the_gain_in(perp: Any) -> None:
+    guard = Guard(perp.trading, perp.settings, perp.hub)
+    view = await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 82_000, "supertrend", "auto", "req-trail-1", "")
+    entry = view["legs"][0]["entry_price"]
+    risk = entry - 79_500
+
+    def stop() -> float:
+        return perp.trading.structure(view["id"])["stop_price"]
+
+    perp.feed.set_perp(entry + 0.8 * risk, bid=entry + 0.8 * risk - 0.5, ask=entry + 0.8 * risk + 0.5)
+    await guard.check_structures()
+    assert stop() == 79_500  # under 1R in profit: the strategy's stop stands
+    perp.feed.set_perp(entry + 1.2 * risk, bid=entry + 1.2 * risk - 0.5, ask=entry + 1.2 * risk + 0.5)
+    await guard.check_structures()
+    assert stop() == max(entry + 1.2 * risk - risk, entry)  # at least break-even
+    perp.feed.set_perp(entry + 2.5 * risk, bid=entry + 2.5 * risk - 0.5, ask=entry + 2.5 * risk + 0.5)
+    await guard.check_structures()
+    assert stop() == pytest.approx(entry + 1.5 * risk)  # 1R behind the best mark
+    shown = perp.trading.structure(view["id"])
+    assert shown["trail"]["active"] and shown["trail"]["moved_r"] == pytest.approx(2.5, abs=0.01)  # from -1R to +1.5R
+    assert shown["stop_pct"] > 0 and shown["target_pct"] > 0  # the stop is now on the profit side
+    perp.feed.set_perp(entry + 2.0 * risk, bid=entry + 2.0 * risk - 0.5, ask=entry + 2.0 * risk + 0.5)
+    await guard.check_structures()
+    assert stop() == pytest.approx(entry + 1.5 * risk)  # a pullback never loosens it
+    back = entry + 1.4 * risk
+    perp.feed.set_perp(back, bid=back - 0.5, ask=back + 0.5)
+    await guard.check_structures()
+    closed = perp.trading.structure(view["id"])
+    assert closed["status"] == "closed" and closed["close_reason"].startswith("trailing stop") and closed["pnl"] > 0
+
+
+async def test_a_trailed_exchange_stop_is_placed_before_the_old_one_is_cancelled(perp: Any, exchange: Exchange) -> None:
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 82_000, "supertrend", "auto", "req-trail-2", "")
+    entry = view["legs"][0]["entry_price"]
+    up = entry + 1.5 * (entry - 79_500)
+    perp.feed.set_perp(up, bid=up - 0.5, ask=up + 0.5)
+    exchange.refuse = True  # the new stop is refused: the old, wider one stays and nothing is cancelled
+    await Guard(perp.trading, perp.settings, perp.hub).check_structures()
+    held = perp.trading.structure(view["id"])
+    assert held["stop_price"] == 79_500 and held["stop_order_id"] == "ex-0" and exchange.cancelled == []
+    exchange.refuse = False
+    await Guard(perp.trading, perp.settings, perp.hub).check_structures()
+    moved = perp.trading.structure(view["id"])
+    assert moved["stop_price"] > entry and moved["stop_order_id"] == "ex-1"
+    assert list(exchange.stops) == [f"{view['id']}0k", f"{view['id']}1k"]  # placed under a new id...
+    assert exchange.cancelled == ["ex-0"]  # ...and only then the old one went
+
+
+async def test_a_stop_that_just_filled_is_not_moved(perp: Any, exchange: Exchange) -> None:
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 82_000, "supertrend", "auto", "req-trail-3", "")
+    st, legs = perp.trading._load(view["id"])
+    exchange.trigger(79_480.0)
+    up = 81_500.0
+    perp.feed.set_perp(up, bid=up - 0.5, ask=up + 0.5)
+    await perp.trading.trail(st, legs)
+    assert len(exchange.stops) == 1 and exchange.cancelled == []

@@ -44,6 +44,32 @@ function Tile({ label, hint, className, children }: { label: string; hint: strin
   );
 }
 
+/** A move from entry as a signed percentage: green when it is on the profit side. */
+function Pct({ v }: { v: number | null | undefined }) {
+  if (v === null || v === undefined) return null;
+  return <span className={cn("num text-[12px] font-medium", v >= 0 ? "text-profit" : "text-loss")}>({v > 0 ? "+" : ""}{v.toFixed(2)}%)</span>;
+}
+
+/** How far the stop has trailed behind the best price, and what it has locked in. */
+function TrailNote({ s }: { s: Structure }) {
+  const t = s.trail!;
+  if (!t.active) {
+    return (
+      <p className="text-[11.5px] text-muted-foreground">
+        Trailing stop: not yet active · it starts once price is 1R in profit (R = entry to the strategy&apos;s stop
+        {s.initial_stop_pct != null ? `, ${Math.abs(s.initial_stop_pct).toFixed(2)}%` : ""}). Best so far {price(t.best)} <Pct v={t.best_pct} />.
+      </p>
+    );
+  }
+  return (
+    <Notice tone="info">
+      <strong>Trailing stop active.</strong> Moved {price(Math.abs(t.moved))} ({t.moved_r}R) from {price(t.initial_stop)} <Pct v={s.initial_stop_pct} /> to{" "}
+      {price(s.stop_price)} <Pct v={s.stop_pct} />. Best price {price(t.best)} <Pct v={t.best_pct} />
+      {t.locked_in_pct !== null && t.locked_in_pct >= 0 ? <> · at least {t.locked_in_pct.toFixed(2)}% is locked in</> : null}.
+    </Notice>
+  );
+}
+
 /** Where the P&L sits between the stop and the target, as a share of that span. */
 function Progress({ pnl, stop, target }: { pnl: number | null; stop: number | null; target: number | null }) {
   if (pnl === null || stop === null || target === null || target <= stop) return null;
@@ -216,22 +242,48 @@ export function StructureCard({ s }: { s: Structure }) {
           {perp && <KV label="Entry spot" value={price(s.entry_spot)} />}
           <KV label="Max profit" value={s.max_profit === null ? "unlimited" : usd(s.max_profit, 4)} />
           <KV label="Max loss" value={s.max_loss === null ? <span className="text-loss">unlimited</span> : usd(s.max_loss, 4)} />
-          {perp && <KV label="Stop" value={<span className="text-loss">{price(s.stop_price)}</span>} />}
-          {perp && <KV label="Target" value={<span className="text-profit">{price(s.target_price)}</span>} />}
+          {perp && (
+            <KV
+              label={s.trail?.active ? "Stop (trailed)" : "Stop"}
+              value={<span className={(s.stop_pct ?? -1) >= 0 ? "text-profit" : "text-loss"}>{price(s.stop_price)} <Pct v={s.stop_pct} /></span>}
+            />
+          )}
+          {perp && <KV label="Target" value={<span className="text-profit">{price(s.target_price)} <Pct v={s.target_pct} /></span>} />}
+          {!perp && !s.held_to_settlement && s.take_profit_usd !== null && (
+            <KV
+              label={`Take profit · ${s.take_profit_pct}% of ${s.kind === "credit" ? "max profit" : "debit"}`}
+              value={<span className="text-profit">{signed(s.take_profit_usd, 4)}{s.exit_prices && <span className="text-muted-foreground"> · option at {price(s.exit_prices.target)}</span>}</span>}
+            />
+          )}
+          {!perp && !s.held_to_settlement && s.stop_loss_usd !== null && (
+            <KV
+              label={`Stop loss · ${s.stop_loss_pct}% of ${s.kind === "credit" ? "credit" : "debit"}`}
+              value={<span className="text-loss">{signed(s.stop_loss_usd, 4)}{s.exit_prices && <span className="text-muted-foreground"> · option at {price(s.exit_prices.stop)}</span>}</span>}
+            />
+          )}
           <KV label={perp ? "Closes after" : "Expires in"} value={hours(s.hours_left)} />
           <KV label="Margin held" value={usd(s.margin, 2)} />
           <KV label="Opened" value={dateTime(s.opened_at)} />
         </div>
+        {perp && s.trail && <TrailNote s={s} />}
+        {s.held_to_settlement && (
+          <Notice>
+            Held to settlement: a credit capped by its wings has no stop, take profit or time exit. The most it can lose is{" "}
+            {usd(s.max_loss, 4)}; it can be closed by hand at any time.
+          </Notice>
+        )}
         {s.reason && <p className="text-[11.5px] leading-relaxed text-muted-foreground">{s.reason}</p>}
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-3">
           <span className="w-full text-[11.5px] text-muted-foreground sm:mr-auto sm:w-auto">
             {perp
-              ? `${s.strategy} · exits at its own stop and target`
-              : `take profit ${s.take_profit_pct}% of ${s.kind === "credit" ? "max profit" : "the debit"} · stop ${s.stop_loss_pct}%`}
+              ? `${s.strategy} · exits at its own stop and target, the stop trailing from +1R`
+              : s.held_to_settlement
+                ? "held to settlement"
+                : `take profit ${s.take_profit_pct}% of ${s.kind === "credit" ? "max profit" : "the debit"} · stop ${s.stop_loss_pct}%`}
           </span>
           {/* A perpetual's exits are prices its strategy set; the guard ignores these percentages. */}
-          {!perp && (
+          {!perp && !s.held_to_settlement && (
             <Button variant="outline" size="sm" onClick={() => setEditing(true)} className="h-10 flex-1 sm:h-8 sm:flex-none">
               <Pencil /> Exits
             </Button>

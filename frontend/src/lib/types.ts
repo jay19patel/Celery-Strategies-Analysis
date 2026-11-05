@@ -272,6 +272,22 @@ export interface Structure {
   stop_loss_pct: number;
   take_profit_usd: number | null;
   stop_loss_usd: number | null;
+  held_to_settlement: boolean; // a capped credit: no stop, take profit or time exit
+  // A perpetual's exits as % from entry (positive is profit), and its trailing stop.
+  stop_pct?: number | null;
+  target_pct?: number | null;
+  initial_stop_pct?: number | null;
+  trail?: {
+    active: boolean;
+    initial_stop: number | null;
+    moved: number;
+    moved_r: number | null;
+    best: number | null;
+    best_pct: number | null;
+    locked_in_pct: number | null;
+    rule: string;
+  };
+  exit_prices?: { target: number; stop: number }; // one option: its premium at the take profit and the stop
   mark_pnl: number | null;
   opened_at: number;
   closed_at: number | null;

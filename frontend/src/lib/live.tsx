@@ -24,6 +24,7 @@ const LiveContext = createContext<Live>({ connected: false, prices: {}, events: 
 // Which cached reads each event makes stale.
 const REFRESH: Record<string, string[]> = {
   StructureOpened: ["/trading", "/portfolio", "/auto", "/notifications"],
+  StopTrailed: ["/trading"],
   StructureClosed: ["/trading", "/portfolio", "/auto", "/notifications"],
   StructureFailed: ["/trading", "/portfolio", "/notifications"],
   StructureError: ["/trading", "/portfolio", "/notifications"],

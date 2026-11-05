@@ -73,7 +73,10 @@ class Guard:
             elif await self.trading.stop_filled(st):
                 reason = "the exchange stop filled"  # the close books that fill; it sends nothing
             else:
-                reason = self.exit_reason(st, [leg for leg in legs if leg.structure_id == st.id], s, now)
+                mine = [leg for leg in legs if leg.structure_id == st.id]
+                if is_directional(st):
+                    await self.trading.trail(st, mine)
+                reason = self.exit_reason(st, mine, s, now)
             if reason is None:
                 continue
             acted += 1
@@ -165,6 +168,8 @@ class Guard:
         mark, long = quote[2], legs[0].side == "buy"
         stop, target = st.stop_price or 0.0, st.target_price or 0.0
         if (mark <= stop) if long else (mark >= stop):
+            if st.initial_stop and stop != st.initial_stop:
+                return f"trailing stop: mark {mark:,.2f} reached the stop trailed to {stop:,.2f} (from {st.initial_stop:,.2f})"
             return f"stop loss: mark {mark:,.2f} reached the strategy's stop {stop:,.2f}"
         if target and ((mark >= target) if long else (mark <= target)):
             return f"target: mark {mark:,.2f} reached {target:,.2f}"

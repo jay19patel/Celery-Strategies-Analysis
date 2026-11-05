@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Layers } from "lucide-react";
 import { toast } from "sonner";
 
+import { CapitalSplit } from "@/components/positions/capital-split";
 import { sumCosts } from "@/components/positions/derive";
 import { StructureCard } from "@/components/positions/structure-card";
 import { BrokerTabs, type BrokerFilter } from "@/components/shared/broker-tabs";
@@ -155,16 +156,18 @@ export default function PositionsPage() {
         {Object.entries(accounts?.accounts ?? {})
           .filter(([name]) => !broker || name === broker)
           .map(([name, account]) => (
-            <AccountRow
-              key={name}
-              name={name as Broker}
-              account={account}
-              today={accounts?.today?.[name as Broker]}
-              open={(data ?? []).filter((s) => s.broker === name)}
-              status={accounts?.brokers.find((b) => b.name === name)}
-              limitPct={limitPct}
-              onResumed={() => mutate()}
-            />
+            <div key={name} className="space-y-3">
+              <AccountRow
+                name={name as Broker}
+                account={account}
+                today={accounts?.today?.[name as Broker]}
+                open={(data ?? []).filter((s) => s.broker === name)}
+                status={accounts?.brokers.find((b) => b.name === name)}
+                limitPct={limitPct}
+                onResumed={() => mutate()}
+              />
+              {"equity" in account && <CapitalSplit account={account} open={(data ?? []).filter((s) => s.broker === name)} />}
+            </div>
           ))}
       </div>
       <LoadError error={error} />

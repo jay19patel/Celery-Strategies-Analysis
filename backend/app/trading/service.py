@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import math
 import time
 from datetime import UTC, datetime
@@ -37,6 +38,7 @@ from app.strategies import REGISTRY
 from app.trading.desk import Desk
 from app.trading.risk import halt_reason, trading_day
 
+log = logging.getLogger(__name__)
 ENTRY_SLACK = 0.05  # an entry fills at most 5% worse than the quote it was priced at, or not at all
 CLOSE_SLACK = 0.15  # a close accepts more: a position left open is the worse outcome
 UNWIND_SLACK = 0.25
@@ -46,6 +48,10 @@ MIN_MANUAL_HOURS = 0.5
 SETTLE_LIVE_SECONDS = 300  # settled within this of expiry, the live index is the settlement price
 # A perpetual's book is deep: an entry at most 0.2% through the touch, a close at most 1%.
 PERP_ENTRY_SLACK = 0.002
+# The trailing stop, in units of the trade's own risk R (entry to the strategy's stop): from 1R in
+# profit the stop is at least break-even, and it follows the best mark 1R behind it, in steps of
+# 0.25R so an exchange-held stop is not re-placed on every tick. It only ever tightens.
+TRAIL_START_R, TRAIL_DISTANCE_R, TRAIL_STEP_R = 1.0, 1.0, 0.25
 PERP_CLOSE_SLACK = 0.01
 
 
@@ -89,8 +95,9 @@ def structure_id(broker: str, request_id: str) -> str:
 
 
 def stop_cid(st: Structure) -> str:
-    """The client order id of the stop a position leaves with the exchange."""
-    return f"{st.id}0k"
+    """The client order id of the stop a position leaves with the exchange. Each trailing move places a
+    new one, so the id carries the move count: an exchange will not take one id twice."""
+    return f"{st.id}{st.stop_moves}k"
 
 
 def leg_sign(side: str) -> int:
@@ -264,17 +271,50 @@ class TradingService:
         for leg in legs:
             q = self.book(leg.symbol) if st.status in HELD else None
             out_legs.append(leg.model_dump() | {"bid": q[0] if q else None, "ask": q[1] if q else None, "mark": q[2] if q else None})
-        return st.model_dump() | {
+        held = held_to_settlement(st)
+        return st.model_dump() | self._exits(st, legs, held) | {
             "label": label_of(st, legs),
             "instrument": "perp" if is_directional(st) else "options",
             "kind": ("long" if legs and legs[0].side == "buy" else "short") if is_directional(st) else ("credit" if st.entry_cash > 0 else "debit"),
             "legs": out_legs,
             "live": live,
-            "take_profit_usd": None if tp is None else round(tp, 6),
-            "stop_loss_usd": None if sl is None else round(sl, 6),
+            # A capped credit is held to settlement: it has no take profit or stop to show.
+            "take_profit_usd": None if tp is None or held else round(tp, 6),
+            "stop_loss_usd": None if sl is None or held else round(sl, 6),
+            "held_to_settlement": held,
             "hours_left": round(max(0.0, (st.expiry - time.time()) / 3600), 2),
             "expiry_label": datetime.fromtimestamp(st.expiry, UTC).strftime("%d %b %H:%M UTC"),
         }
+
+    def _exits(self, st: Structure, legs: list[Leg], held: bool) -> dict[str, Any]:
+        """The exits as prices and percentages, for the page: a perpetual's stop and target as % from
+        entry and how far the stop has trailed; a single option's premium at its take profit and stop."""
+        entry = legs[0].entry_price if legs else None
+        if not entry:
+            return {}
+        if is_directional(st):
+            long = legs[0].side == "buy"
+            pct = lambda p: None if p is None else round(100 * (p / entry - 1) * (1 if long else -1), 3)  # noqa: E731
+            initial = st.initial_stop or st.stop_price
+            risk = abs(entry - initial) if initial else 0.0
+            moved = 0.0 if initial is None or st.stop_price is None else (st.stop_price - initial) * (1 if long else -1)
+            return {
+                "stop_pct": pct(st.stop_price), "target_pct": pct(st.target_price), "initial_stop_pct": pct(initial),
+                "trail": {
+                    "active": moved > 0, "initial_stop": initial, "moved": round(moved, 6),
+                    "moved_r": round(moved / risk, 2) if risk else None, "best": st.peak_price,
+                    "best_pct": pct(st.peak_price), "locked_in_pct": pct(st.stop_price) if moved > 0 else None,
+                    "rule": f"from +{TRAIL_START_R:g}R the stop is at least break-even and follows the best price {TRAIL_DISTANCE_R:g}R behind",
+                },
+            }
+        if held or len(legs) != 1:
+            return {}
+        # One option: where its premium has to go for the take profit or the stop to fire (before fees).
+        sign = 1 if legs[0].side == "buy" else -1
+        return {"exit_prices": {
+            "target": round(entry * (1 + sign * st.take_profit_pct / 100), 6),
+            "stop": round(max(0.0, entry * (1 - sign * st.stop_loss_pct / 100)), 6),
+        }}
 
     # -- gates ---------------------------------------------------------------------------------
 
@@ -491,6 +531,7 @@ class TradingService:
                 id=sid, broker=broker, underlying=underlying, strategy=strategy, source=source, status="opening",
                 expiry=now + (hold_hours or cfg.perp_max_hold_hours) * 3600, qty=qty, entry_spot=price, opened_at=now, request_id=request_id,
                 stop_price=stop, target_price=target, reason=reason[:500], take_profit_pct=0.0, stop_loss_pct=0.0,
+                initial_stop=stop, peak_price=price,
                 margin=round(price * qty * cv / cfg.paper_leverage, 6),
             )
             leg = Leg(structure_id=sid, idx=0, symbol=symbol, kind="perp", strike=0.0, side=side, size=qty, contract_value=cv)
@@ -551,6 +592,53 @@ class TradingService:
         if st.stop_order_id:
             self._record(order, st, "stop")
             self._save(st)
+
+    async def trail(self, st: Structure, legs: list[Leg]) -> None:
+        """Move a perpetual position's stop up behind the best mark (`TRAIL_*`). On a broker that holds
+        the stop on the exchange, the tighter stop is placed BEFORE the old one is cancelled, so the
+        position is never without one; if the new one is refused the old, wider one stays."""
+        leg = legs[0] if legs else None
+        quote = self.book(leg.symbol) if leg else None
+        if leg is None or quote is None or leg.entry_price is None or st.status != "open":
+            return
+        long, mark, entry = leg.side == "buy", quote[2], leg.entry_price
+        initial = st.initial_stop or st.stop_price
+        risk = abs(entry - (initial or entry))
+        if not initial or risk <= 0 or st.stop_price is None:
+            return
+        peak = max(st.peak_price or entry, mark) if long else min(st.peak_price or entry, mark)
+        if peak != st.peak_price or st.initial_stop is None:
+            st.peak_price, st.initial_stop = peak, initial
+            self._save(st)
+        if (peak - entry if long else entry - peak) < TRAIL_START_R * risk:
+            return
+        wanted = max(peak - TRAIL_DISTANCE_R * risk, entry) if long else min(peak + TRAIL_DISTANCE_R * risk, entry)
+        if (wanted - st.stop_price if long else st.stop_price - wanted) < TRAIL_STEP_R * risk:
+            return
+        async with self.lock:
+            b = self.brokers[st.broker]
+            if st.stop_order_id:
+                if await b.lookup(stop_cid(st)) is not None:
+                    return  # the old stop just filled: the guard books it, nothing moves now
+                old_id, old_cid = st.stop_order_id, stop_cid(st)
+                st.stop_moves += 1
+                order = LegOrder(stop_cid(st), leg.symbol, "sell" if long else "buy", leg.size, wanted, leg.contract_value, reduce_only=True)
+                try:
+                    st.stop_order_id = await b.protect(order.symbol, order.side, order.size, wanted, order.client_order_id)
+                except (BrokerError, BrokerTimeout) as exc:
+                    st.stop_moves -= 1
+                    log.warning("trail_not_placed structure=%s stop=%.2f error=%s", st.id, wanted, exc)
+                    return  # the old, wider stop is still with the exchange
+                self._record(order, st, "stop")
+                try:
+                    await b.unprotect(leg.symbol, old_id)
+                    self._mark_order(old_cid, status="cancelled")
+                except (BrokerError, BrokerTimeout) as exc:
+                    log.warning("trail_old_stop_not_cancelled structure=%s order=%s error=%s", st.id, old_id, exc)
+            moved_from, st.stop_price = st.stop_price, round(wanted, 6)
+            self._save(st)
+        self.hub.publish("StopTrailed", f"{self._title(st)} on {st.broker}: stop {moved_from:,.2f} -> {st.stop_price:,.2f} (best {peak:,.2f})",
+                         structure_id=st.id, broker=st.broker)
 
     async def stop_filled(self, st: Structure) -> bool:
         """Has the stop the exchange holds for `st` filled? False when there is none or it cannot be read."""

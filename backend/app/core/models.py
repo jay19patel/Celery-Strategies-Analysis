@@ -62,6 +62,11 @@ class Structure(SQLModel, table=True):
     target_price: float | None = None
     reason: str = ""  # why it was opened: the strategy's own sentence
     stop_order_id: str = ""  # the exchange's id for the stop it holds for this position, if any
+    # The trailing stop (`TradingService.trail`): the strategy's own stop, the best mark since entry,
+    # and how many times the stop has moved — which also names each re-placed exchange stop.
+    initial_stop: float | None = None
+    peak_price: float | None = None
+    stop_moves: int = 0
 
 
 class Leg(SQLModel, table=True):
