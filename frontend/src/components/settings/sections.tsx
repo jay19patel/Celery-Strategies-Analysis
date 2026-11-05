@@ -321,11 +321,11 @@ export function RiskTab() {
       </Section>
       <Section title="Exits" description="The guard checks every open structure every few seconds, reading what closing would actually book.">
         <FieldGrid>
-          <NumberField name="credit_take_profit_pct" label="Credit: take profit (% of max profit)" />
-          <NumberField name="credit_stop_loss_pct" label="Credit: stop loss (% of credit)" />
+          <NumberField name="credit_take_profit_pct" label="Credit: take profit (% of max profit)" hint="Unlimited-risk credits only (strangles, straddles, naked calls and puts). Spreads and condors are held to settlement." />
+          <NumberField name="credit_stop_loss_pct" label="Credit: stop loss (% of credit)" hint="Unlimited-risk credits only: a spread's worst case is its wings, so it is not stopped on noise." />
           <NumberField name="debit_take_profit_pct" label="Debit: take profit (% of debit)" />
           <NumberField name="debit_stop_loss_pct" label="Debit: stop loss (% of debit)" />
-          <NumberField name="exit_before_expiry_minutes" label="Close before expiry (minutes)" integer hint="0 holds to settlement." />
+          <NumberField name="exit_before_expiry_minutes" label="Close before expiry (minutes)" integer hint="Debits and unlimited-risk credits. 0 holds them to settlement too; spreads and condors always are." />
           <NumberField
             name="stop_confirm_checks"
             label="Stop loss holds for (checks)"

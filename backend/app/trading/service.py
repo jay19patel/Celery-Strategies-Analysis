@@ -62,6 +62,11 @@ def is_zerohero(st: Structure) -> bool:
     return st.strategy == ZERO_HERO
 
 
+def held_to_settlement(st: Structure) -> bool:
+    """A credit whose loss is capped (spreads, condors, butterflies): the guard leaves it to expiry."""
+    return st.entry_cash > 0 and st.max_loss is not None and not is_directional(st) and not is_zerohero(st)
+
+
 def is_zerohero_plan(plan: Plan) -> bool:
     return plan.strategy == ZERO_HERO
 

@@ -89,8 +89,9 @@ Enforced by tests (`backend/tests`). Breaking one should fail the build.
 7. **Exits read what closing would book** — bids for longs, asks for shorts, every fee
    (`TradingService.valuation`). Without a fresh quote on every leg, the guard decides nothing but
    the expiry rules. A stop holds `stop_confirm_checks` checks in a row unless the spot is past a
-   breakeven. On Delta a perpetual's stop is also left with the exchange at entry; if it cannot be
-   placed the position is closed.
+   breakeven. A defined-risk credit (spread, condor, butterfly, decay spread) is held to settlement —
+   no stop, take profit or time exit: its worst case is its wings and it was sized on that. On Delta a
+   perpetual's stop is also left with the exchange at entry; if it cannot be placed the position is closed.
 8. **Absence over staleness.** A perpetual price older than 30s or an option quote older than 120s
    is no price.
 9. **Secrets stay in the process.** No endpoint returns a key, secret or token; `Settings.public()`

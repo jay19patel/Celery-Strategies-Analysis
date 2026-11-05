@@ -67,6 +67,6 @@ def test_the_guard_holds_a_decay_spread_to_settlement(env: Any) -> None:
 
     now = time.time()
     st = Structure(id="d2", broker="paper", underlying="BTC", strategy=EXPIRY_DECAY, source="zerohero", status="open",
-                   expiry=now + 30 * 60, qty=1, entry_cash=1.0, take_profit_pct=50, stop_loss_pct=100, opened_at=now)
+                   expiry=now + 30 * 60, qty=1, entry_cash=1.0, max_loss=4.0, take_profit_pct=50, stop_loss_pct=100, opened_at=now)
     reason = Guard(env.trading, env.settings, env.hub).exit_reason(st, [], env.settings(), now)
     assert not (reason or "").startswith("time exit")  # 30 minutes out, an ordinary credit would be closed

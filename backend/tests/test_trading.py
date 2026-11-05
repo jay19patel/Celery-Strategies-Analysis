@@ -56,6 +56,12 @@ def condor(env: Any) -> Any:
     return env.desk.plan("BTC", "iron_condor")
 
 
+def strangle(env: Any) -> Any:
+    """A credit with no cap on its loss: the guard's stops and time exit apply to it."""
+    env.configure(max_spread_pct=100)
+    return env.desk.plan("BTC", "short_strangle")
+
+
 async def cash(env: Any) -> float:
     return (await env.paper.account()).cash
 
@@ -150,14 +156,14 @@ async def test_auto_entries_respect_the_minimum_time_to_expiry(env: Any) -> None
 
 async def test_guard_takes_profit_and_stops_out(env: Any) -> None:
     guard = Guard(env.trading, env.settings, env.hub)
-    win = await env.trading.open("paper", condor(env), QTY, "manual", "req-tp-1")
+    win = await env.trading.open("paper", strangle(env), QTY, "manual", "req-tp-1")
     env.feed.scale_marks(0.2)  # the options decayed: most of the credit is kept
     await guard.check_structures()
     closed = env.trading.structure(win["id"])
     assert closed["status"] == "closed" and closed["close_reason"].startswith("take profit") and closed["pnl"] > 0
 
     env.feed.load()
-    lose = await env.trading.open("paper", condor(env), QTY, "manual", "req-sl-1")
+    lose = await env.trading.open("paper", strangle(env), QTY, "manual", "req-sl-1")
     env.feed.scale_marks(4.0)  # the book blew out with the spot standing still
     for _ in range(env.settings().stop_confirm_checks - 1):
         await guard.check_structures()
@@ -168,12 +174,29 @@ async def test_guard_takes_profit_and_stops_out(env: Any) -> None:
     assert stopped["status"] == "closed" and stopped["close_reason"].startswith("stop loss") and stopped["pnl"] < 0
 
 
+async def test_a_defined_risk_credit_is_held_to_settlement_through_noise(env: Any) -> None:
+    """The chain replay: early exits on a capped credit paid the wide ask to buy back on noise. A
+    condor's worst case is its wings and it was sized on that, so the guard leaves it to expiry."""
+    guard = Guard(env.trading, env.settings, env.hub)
+    view = await env.trading.open("paper", condor(env), QTY, "manual", "req-hold-1")
+    env.feed.scale_marks(4.0)  # the book blows out: under the old stop this was closed after 3 checks
+    for _ in range(env.settings().stop_confirm_checks + 2):
+        await guard.check_structures()
+    held = env.trading.structure(view["id"])
+    assert held["status"] == "open" and held["mark_pnl"] is not None and held["mark_pnl"] < 0  # still valued
+    env.feed.scale_marks(0.05)  # nearly all the credit is in: still no early take profit
+    await guard.check_structures()
+    assert env.trading.structure(view["id"])["status"] == "open"
+
+
 async def test_guard_exits_before_expiry_and_settles_after_it(env: Any) -> None:
     guard = Guard(env.trading, env.settings, env.hub)
     env.feed.load(hours=0.6)
-    near = await env.trading.open("paper", condor(env), QTY, "manual", "req-time-1")
+    near = await env.trading.open("paper", strangle(env), QTY, "manual", "req-time-1")
+    capped = await env.trading.open("paper", condor(env), QTY, "manual", "req-time-2")
     await guard.check_structures()
     assert env.trading.structure(near["id"])["close_reason"].startswith("time exit")
+    assert env.trading.structure(capped["id"])["status"] == "open"  # capped by its wings: held to settlement
 
     env.feed.load()
     held = await env.trading.open("paper", condor(env), QTY, "manual", "req-exp-1")
@@ -335,7 +358,7 @@ async def test_a_stop_that_clears_starts_its_count_again(env: Any) -> None:
 
 async def test_a_stop_with_the_spot_past_a_breakeven_closes_at_once(env: Any) -> None:
     guard = Guard(env.trading, env.settings, env.hub)
-    view = await env.trading.open("paper", condor(env), QTY, "manual", "req-sl-move")
+    view = await env.trading.open("paper", strangle(env), QTY, "manual", "req-sl-move")
     upper = max(view["breakevens"]) if view.get("breakevens") else max(leg["strike"] for leg in view["legs"])
     env.feed.set_perp(upper * 1.01)
     env.feed.scale_marks(4.0)

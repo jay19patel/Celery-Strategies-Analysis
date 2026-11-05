@@ -40,10 +40,9 @@ from app.core.events import EventHub
 from app.core.models import Leg, Structure
 from app.errors import BrokerError
 from app.options.pricing import LegSpec, payoff
-from app.options.strategies import EXPIRY_DECAY
 from app.settings import Settings
 from app.trading.risk import set_halt, start_day
-from app.trading.service import TradingService, exit_thresholds, is_directional, is_zerohero
+from app.trading.service import TradingService, exit_thresholds, held_to_settlement, is_directional, is_zerohero
 
 log = logging.getLogger(__name__)
 RETRY_FIRST, RETRY_MAX = 30.0, 600.0  # seconds between retries of a structure in error: doubling, capped
@@ -106,12 +105,16 @@ class Guard:
         if now >= st.expiry:
             return "expired"
         minutes_left = (st.expiry - now) / 60
+        # A defined-risk credit — a spread, condor or butterfly, the expiry-decay spread — is HELD TO
+        # SETTLEMENT: no stop, no take profit, no time exit. Its worst case is capped by its wings and
+        # it was sized on that worst case. Replayed on the recorded chains, every early exit paid the
+        # wide ask to buy back on noise: a 1x-credit stop cut win rates from about 80% to 14-50% and
+        # turned bull puts and condors that settled +2.5% to +5.5% into losses. A manual close still works.
+        settle = held_to_settlement(st)
         # A zero-hero buy leaves at whichever time stop comes FIRST. In the last hour theta goes
         # vertical on a contract that is all time value, so holding one to find out is not a
         # decision, it is a donation with a countdown.
-        # An expiry-decay spread is held to settlement: the last hour is the decay it was sold for, and
-        # its loss is capped by the wing whatever happens in it.
-        floor = s.zh_exit_minutes if is_zerohero(st) else 0 if st.strategy == EXPIRY_DECAY else s.exit_before_expiry_minutes
+        floor = 0 if settle else s.zh_exit_minutes if is_zerohero(st) else s.exit_before_expiry_minutes
         if floor and minutes_left <= floor:
             return f"time exit: {minutes_left:.0f} min to expiry"
         # The premise, re-read. This is checked BEFORE the P&L rules on purpose: a position whose
@@ -125,6 +128,8 @@ class Guard:
         if pnl is None:
             return None
         self._mark(st, pnl)
+        if settle:
+            return None
         tp, sl = exit_thresholds(st)
         if tp is not None and pnl >= tp:
             return f"take profit: {pnl:+,.2f} reached {st.take_profit_pct:g}% target {tp:+,.2f}"
