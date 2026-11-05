@@ -94,7 +94,7 @@ class Engine:
         self.guard = Guard(self.trading, self.settings, self.hub, self.zerohero)
         self.llm = LLM(self.settings)
         self.analyst = Analyst(self.llm, self.settings, self.hub)
-        self.auto = AutoTrader(self.desk, self.trading, self.analyst, self.settings, self.hub)
+        self.auto = AutoTrader(self.desk, self.trading, self.settings, self.hub)
         self.market = MarketDesk(self.feed, self.settings, self.hub)
         self.runner = StrategyRunner(self.trading, self.market, self.settings, self.hub)
         self.notifier = Notifier(self.settings)

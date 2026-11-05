@@ -1,14 +1,10 @@
-"""The zero-hero cycle: scan the expiring chain, size against a daily budget, and either open or
-record what it would have opened.
+"""The zero-hero cycle: scan the expiring chain, size against a daily budget, and open — the
+momentum buy, and on the other side of the window the decay sell (`options.decay`).
 
-SHADOW MODE IS THE DEFAULT AND THAT IS THE POINT
-------------------------------------------------
-Whether this strategy makes money depends on one number nobody has yet: how often a candidate that
-passes all five dimensions actually reaches its target. The sizing arithmetic is only as good as
-that hit rate — at 10% and a 10x payoff the edge is exactly zero, and every cost below that makes
-it negative. So `zh_shadow` starts on: the scan runs, the candidate is chosen, the size is
-computed and the whole thing is written to a `Decision` row, and no order is sent. After a few
-weeks of those rows the hit rate is a measurement rather than a hope.
+Whether the buy makes money depends on how often a candidate that passes all five dimensions
+reaches its target: at 10% and a 10x payoff the edge is exactly zero. That rate is measured from the
+trades themselves (`record`), on brokers with auto-trading on — paper by default, Delta only when
+switched on there.
 
 Every cycle is a `Decision` with `strategy="zero_hero"` — the same row the options auto-trader
 writes, so the journal, the event log and the retention job already handle it, and a scan that
@@ -19,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sqlmodel import col, select
@@ -34,8 +30,10 @@ from app.errors import AppError, BrokerError, Refused
 from app.market import options as chain
 from app.market.delta import Candle
 from app.market.indicators import fold
+from app.options import decay as decay_mod
 from app.options import zerohero as scanner
-from app.options.strategies import ZERO_HERO, single
+from app.options.assess import leg_fee
+from app.options.strategies import EXPIRY_DECAY, ZERO_HERO, single
 from app.settings import Settings
 from app.trading.desk import Desk
 from app.trading.risk import day_start, trading_day
@@ -191,6 +189,7 @@ class ZeroHero:
         dec = Decision(ts=time.time(), underlying=underlying, action="skip", strategy=ZERO_HERO)
         try:
             await self._decide(dec, underlying)
+            await self._decay(dec, underlying)
         except AppError as exc:
             dec.reason = str(exc)
         except Exception as exc:  # a bug must not stop the scheduler; it is recorded and shown
@@ -211,6 +210,64 @@ class ZeroHero:
         )
         return dec.model_dump()
 
+    def decay(self, underlying: str, expiry: float | None = None) -> list[dict[str, Any]]:
+        """Decay spreads worth selling on the expiring chain now (`options.decay`). Read-only."""
+        s: Settings = self.settings()
+        expiry = expiry or self.expiry(underlying)
+        quotes = self.desk.feed.quotes(underlying, expiry) if expiry else []
+        if not quotes:
+            return []
+        spot = self.desk.spot(underlying)
+        rate = self.desk.cached_fee(quotes[0].symbol)
+        # The seller is judged on the highest realised measure, the one least kind to selling.
+        return decay_mod.candidates(quotes, spot, time.time(), self.desk.realised(underlying)["reference"],
+                                    lambda price: leg_fee(price, 1.0, spot, rate), s.max_spread_pct)
+
+    async def _decay(self, dec: Decision, underlying: str) -> None:
+        """Inside the window, sell the best decay spread on each broker that holds none on this
+        underlying."""
+        s: Settings = self.settings()
+        if not (dec.regime or {}).get("window_open") or not dec.expiry:
+            return
+        found = self.decay(underlying, dec.expiry)
+        dec.regime = (dec.regime or {}) | {"decay": found}
+        brokers = [b for b in self.brokers() if not self._decay_held(b, underlying)]
+        if not found or not brokers:
+            return
+        best = found[0]
+        plan = replace(self.desk.plan(underlying, "custom", legs=[
+            {"symbol": best["sell"], "side": "sell", "ratio": 1}, {"symbol": best["buy"], "side": "buy", "ratio": 1},
+        ]), strategy=EXPIRY_DECAY)
+        if dec.id is None:
+            with session() as db:  # the id makes the request: a re-run of this decision opens nothing twice
+                db.add(dec)
+                db.commit()
+                db.refresh(dec)
+        orders: dict[str, Any] = {}
+        for broker in brokers:
+            try:
+                account = await self.trading.brokers[broker].account()
+                qty = min(s.max_lots, int(account.equity * s.risk_per_trade_pct / 100 // best["max_loss_per_lot"]))
+                if qty < 1:
+                    raise Refused(f"{s.risk_per_trade_pct:g}% of equity does not cover one spread's worst case {best['max_loss_per_lot']:,.4f}")
+                view = await self.trading.open(broker, plan, qty, "zerohero", f"zhd-{dec.id}", dec.id)
+                orders[broker] = {"structure_id": view["id"], "status": view["status"], "qty": qty, "error": view["error"]}
+            except (Refused, BrokerError) as exc:
+                orders[broker] = {"refused": str(exc)}
+        dec.orders = (dec.orders or {}) | {"decay": orders}
+        opened = [b for b, o in orders.items() if o.get("status") == "open"]
+        if opened:
+            dec.action = "open"
+        refusals = "; ".join(f"{b}: {o['refused']}" for b, o in orders.items() if o.get("refused"))
+        dec.reason = f"{dec.reason} | decay: {'sold on ' + ', '.join(opened) if opened else 'not sold'} — {best['why']}" + (f" — {refusals}" if refusals else "")
+
+    def _decay_held(self, broker: str, underlying: str) -> bool:
+        with session() as db:
+            return db.exec(select(Structure).where(
+                Structure.broker == broker, Structure.strategy == EXPIRY_DECAY,
+                Structure.underlying == underlying, col(Structure.status).in_(HELD),
+            )).first() is not None
+
     async def _decide(self, dec: Decision, underlying: str) -> None:
         s: Settings = self.settings()
         result = self.scan(underlying)
@@ -219,7 +276,6 @@ class ZeroHero:
             "hours_left": result.hours_left, "hold_minutes": result.hold_minutes,
             "realised_vol": result.realised_vol, "window_open": result.window_open,
             "trigger": result.trigger, "positioning": result.positioning, "gates": result.gates,
-            "shadow": s.zh_shadow,
         }
         dec.candidates = result.candidates[:5]
         if not result.ok or result.best is None:
@@ -286,13 +342,6 @@ class ZeroHero:
                 )
                 if qty < 1:
                     raise Refused(sizing)
-                if s.zh_shadow:
-                    orders[broker] = {
-                        "shadow": True, "qty": qty, "sizing": sizing,
-                        "premium": round(qty * best["paid"] * best["contract_value"], 4),
-                        "equity": round(account.equity, 2),
-                    }
-                    continue
                 view = await self.trading.open(broker, plan, qty, "zerohero", f"zh-{dec.id}", dec.id)
                 orders[broker] = {"structure_id": view["id"], "status": view["status"], "qty": qty,
                                   "sizing": sizing, "error": view["error"]}
@@ -300,17 +349,10 @@ class ZeroHero:
                 orders[broker] = {"refused": str(exc)}
         dec.orders = orders
         opened = [b for b, o in orders.items() if o.get("status") == "open"]
-        shadowed = [b for b, o in orders.items() if o.get("shadow")]
         refusals = "; ".join(f"{b}: {o['refused']}" for b, o in orders.items() if o.get("refused"))
         if opened:
             dec.action = "open"
-        elif shadowed:
-            dec.action = "shadow"
-        dec.reason = why + (
-            f" — opened on {', '.join(opened)}" if opened
-            else f" — SHADOW: would have bought {orders[shadowed[0]]['qty']:,} lots on {', '.join(shadowed)}" if shadowed
-            else ""
-        ) + (f" — {refusals}" if refusals else "")
+        dec.reason = why + (f" — opened on {', '.join(opened)}" if opened else "") + (f" — {refusals}" if refusals else "")
 
     # -- read side -------------------------------------------------------------------------
 
@@ -326,7 +368,6 @@ class ZeroHero:
         seconds_to_window = max(0.0, w_start - now_ts) if now_ts < w_start else 0.0
         return {
             "enabled": s.zh_enabled,
-            "shadow": s.zh_shadow,
             "underlying": underlying,
             "budget": budget,
             "window_schedule": {
@@ -358,13 +399,9 @@ class ZeroHero:
 
     @staticmethod
     def record(days: float = 30) -> dict[str, Any]:
-        """The measurement shadow mode exists to produce: how many attempts the scan proposed, and
-        of the ones that were really opened, how many reached their target.
-
-        Shadow rows are counted separately and never mixed in. A candidate that was never bought
-        has no outcome — guessing one from where price went afterwards would be marking our own
-        homework with hindsight, and it is exactly the number this strategy must not fake.
-        """
+        """How many attempts the scan made and, of the buys really opened, how many reached their
+        target. A candidate that was never bought has no outcome — guessing one from where price
+        went afterwards would be marking our own homework with hindsight."""
         since = time.time() - days * 86_400
         with session() as db:
             decisions = db.exec(
@@ -379,13 +416,12 @@ class ZeroHero:
         return {
             "days": days,
             "scans": len(decisions),
-            "proposed": sum(1 for d in decisions if d.action in ("open", "shadow")),
-            "shadowed": sum(1 for d in decisions if d.action == "shadow"),
+            "proposed": sum(1 for d in decisions if d.action == "open"),
             "opened": len(trades),
             "closed": len(closed),
             "wins": len(wins),
             "hit_rate_pct": round(100 * len(wins) / len(closed), 1) if closed else None,
             "premium_paid": round(paid, 4),
             "pnl": round(sum(st.pnl or 0 for st in closed), 4) if closed else None,
-            "note": "hit rate is over CLOSED trades only; shadow proposals have no outcome and are not counted",
+            "note": "hit rate is over CLOSED trades only",
         }

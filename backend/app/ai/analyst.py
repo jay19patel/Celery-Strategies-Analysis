@@ -1,11 +1,7 @@
 """What the language model is asked, what it is shown, and what of its answer is kept.
 
-Two jobs:
-  - the **market brief**: the measured numbers read back as a few plain sentences;
-  - the **trade review**: the auto-trader's candidates (already built, priced and checked by the
-    rules) put in front of a model that may approve one of them or skip. It cannot invent a strike,
-    a size or a price: an answer naming anything but a listed candidate is a skip, and the hard risk
-    gates run after it whatever it said.
+One job: the **market brief**, the measured numbers read back as a few plain sentences. The model
+never decides a trade; the rules do.
 
 What leaves the machine is market data only. `digest()` builds the payload from an allowlist
 (`ALLOWED`), enforced in code: no balance, position, order, P&L or key is ever in it.
@@ -82,34 +78,12 @@ Answer with JSON only:
  "watch": ["<up to 3 things that would change this read>"],
  "confidence": "high|medium|low"}"""
 
-REVIEW_SYSTEM = """You are the risk reviewer on TradeBuddy's automated crypto options desk.
-
-The rules engine has measured the market and built up to three candidate structures. Every candidate
-already passed the hard checks (liquidity, probability of profit, edge at realised volatility). You
-see the market digest and the candidates with their numbers. Decide whether to trade ONE of them now
-or to skip this cycle.
-
-Rules:
-- You may only choose a candidate by its exact "id", or skip. You cannot change strikes, size or price.
-- Prefer SKIP when the numbers conflict, the volatility premium is thin, or a trend is building
-  against a neutral structure. Skipping costs nothing; a bad trade does.
-- Prefer defined risk. Weigh: edge at realised vol, probability of profit, worst case vs credit,
-  how the regime fits the structure.
-- Use only numbers in the input. Do not invent levels or predict a direction.
-
-Answer with JSON only:
-{"decision": "trade|skip",
- "candidate": "<id of the chosen candidate, or empty when skipping>",
- "confidence": "high|medium|low",
- "reasons": ["<up to 4 short reasons citing numbers>"],
- "risks": ["<up to 3 risks to watch on this trade>"]}"""
-
 # The only top-level keys a digest may contain — the gate on what leaves this machine.
 ALLOWED = frozenset({
     "underlying", "spot", "hours_to_expiry", "regime", "direction", "direction_parts", "atm_iv_pct",
     "realised_vol_24h_pct", "realised_vol_7d_pct", "vol_premium_pts", "change_24h_pct", "rsi_1h",
     "range_position_24h", "implied_move_pct", "max_pain", "pcr_oi", "skew_25d", "call_wall", "put_wall",
-    "strategy_scores", "candidates", "market",
+    "strategy_scores", "market",
 })
 
 MARKET_ALLOWED = frozenset({
@@ -127,10 +101,7 @@ def _pct(v: float | None) -> float | None:
     return None if v is None else round(100 * v, 2)
 
 
-def digest(
-    underlying: str, regime: dict[str, Any], candidates: list[dict[str, Any]] | None = None,
-    market: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+def digest(underlying: str, regime: dict[str, Any], market: dict[str, Any] | None = None) -> dict[str, Any]:
     m = regime.get("metrics") or {}
     out: dict[str, Any] = {
         "underlying": underlying,
@@ -154,26 +125,9 @@ def digest(
         "put_wall": m.get("put_wall"),
         "strategy_scores": {k: v.get("score") for k, v in (regime.get("scores") or {}).items()},
     }
-    if candidates is not None:
-        out["candidates"] = [candidate_digest(c) for c in candidates]
     if market:
         out["market"] = {k: v for k, v in market.items() if k in MARKET_ALLOWED and v is not None}
     return {k: v for k, v in out.items() if k in ALLOWED}
-
-
-def candidate_digest(c: dict[str, Any]) -> dict[str, Any]:
-    """Per lot: a candidate's shape and numbers, nothing about the account it would be sized against."""
-    a = c["analysis"]
-    return {
-        "id": c["strategy"],
-        "structure": c["label"],
-        "legs": [f"{leg['side']} {leg['kind']} {leg['strike']:g}" for leg in c["plan"]["legs"]],
-        "premium": a["net_premium"], "kind": a["kind"],
-        "max_profit": a["max_profit"], "max_loss": a["max_loss"], "breakevens": a["breakevens"],
-        "pop_at_iv_pct": a["pop"], "pop_at_realised_pct": a.get("pop_realised"),
-        "edge_at_realised_vol": a.get("expected_value_realised"), "fees_round_trip": a.get("round_trip_fees"),
-        "rule_score": c.get("score"), "score_reasons": c.get("reasons"),
-    }
 
 
 def _lines(value: Any, n: int, width: int = 280) -> list[str]:
@@ -213,20 +167,6 @@ BRIEFS: dict[str, tuple[str, Any]] = {
 }
 
 
-def clean_review(answer: dict[str, Any], ids: list[str]) -> dict[str, Any]:
-    """An answer naming anything but a listed candidate is a skip: the model chooses, it never invents."""
-    choice = str(answer.get("candidate") or "")
-    trade = answer.get("decision") == "trade" and choice in ids
-    return {
-        "decision": "trade" if trade else "skip",
-        "candidate": choice if trade else "",
-        "confidence": answer.get("confidence") if answer.get("confidence") in CONFIDENCE else "low",
-        "reasons": _lines(answer.get("reasons"), 4),
-        "risks": _lines(answer.get("risks"), 3),
-        "invalid_choice": answer.get("decision") == "trade" and choice not in ids,
-    }
-
-
 class Analyst:
     def __init__(self, llm: LLM, settings: Any, hub: EventHub) -> None:
         self.llm = llm
@@ -241,7 +181,7 @@ class Analyst:
         system, clean = BRIEFS[kind]
         row = AiBrief(ts=time.time(), underlying=underlying, kind=kind)
         try:
-            answer, meta = await self.llm.json(system, digest(underlying, regime, market=market))
+            answer, meta = await self.llm.json(system, digest(underlying, regime, market))
             row.content, row.model, row.latency_ms = clean(answer), meta["model"], meta["ms"]
         except LLMError as exc:
             row.error = str(exc)[:1000]
@@ -253,11 +193,6 @@ class Analyst:
                          "info" if row.content else "warning", persist=not row.content,
                          underlying=underlying, kind=kind, id=row.id)
         return row.model_dump()
-
-    async def review(self, underlying: str, regime: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any]:
-        """Raises LLMError when no model answered."""
-        answer, meta = await self.llm.json(REVIEW_SYSTEM, digest(underlying, regime, candidates), max_tokens=700)
-        return clean_review(answer, [c["strategy"] for c in candidates]) | {"model": meta["model"], "ms": meta["ms"], "fallback": meta["fallback"]}
 
     @staticmethod
     def latest(underlying: str, limit: int = 1, kind: str = "options") -> list[dict[str, Any]]:

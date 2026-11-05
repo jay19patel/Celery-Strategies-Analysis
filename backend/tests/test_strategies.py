@@ -115,3 +115,29 @@ def test_gold_is_an_underlying_and_its_options_settle_at_its_own_hour() -> None:
     assert (underlying, strike) == ("XAUT", 4120.0)
     assert datetime.fromtimestamp(expiry, UTC) == datetime(2026, 11, 5, 16, tzinfo=UTC)
     assert datetime.fromtimestamp(parse_symbol("C-BTC-80000-051126")[3], UTC).hour == 12
+
+
+def test_a_falling_market_scores_the_sold_call_and_the_rising_one_the_sold_put() -> None:
+    """Sell the side the market is moving away from: one OTM leg at the target delta, scored on the
+    trend, and like any seller it still has to be paid for the volatility it carries."""
+    from app.options import regime
+    from app.settings import UNDEFINED_RISK
+
+    plan = build("short_call", load_quotes(), SPOT, 0.18, 2.0)
+    assert plan is not None and [(leg.kind, leg.side) for leg in plan.legs] == [("call", "sell")]
+    assert plan.legs[0].strike > SPOT
+    put = build("short_put", load_quotes(), SPOT, 0.18, 2.0)
+    assert put is not None and put.legs[0].kind == "put" and put.legs[0].strike < SPOT
+
+    m = {"atm_iv": 0.45, "vol_premium": 0.04, "rv_ratio": 1.0, "max_pain_distance_pct": 5.0, "implied_move_pct": 2.0}
+    falling = regime.score(m | {}, -0.6, "trending down")
+    rising = regime.score(m | {}, 0.6, "trending up")
+    assert falling["short_call"]["score"] > falling["short_put"]["score"]
+    assert rising["short_put"]["score"] > rising["short_call"]["score"]
+    assert {"short_call", "short_put"} <= set(UNDEFINED_RISK)  # off by default, never on real money
+
+    s = Settings(max_spread_pct=100)
+    paid = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.10)
+    underpaid = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.60)
+    assert paid["ok"] and not underpaid["ok"]  # selling calls the market moves through is refused
+    assert not any(c["name"] == "credit / width" for c in paid["checks"])  # no wing, no width

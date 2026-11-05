@@ -94,15 +94,8 @@ export default function ZeroHeroPage() {
 
       {status && !status.enabled && (
         <Notice tone="warn">
-          Zero-hero is switched off. Turn it on in <Link href="/settings#zerohero" className="underline">Settings</Link>. It starts in{" "}
-          <strong>shadow mode</strong>: it scans, chooses and sizes, and sends no orders — which is how the hit rate this strategy
-          needs gets measured before anything is bet on it.
-        </Notice>
-      )}
-      {status?.enabled && status.shadow && (
-        <Notice tone="info">
-          <strong>Shadow mode.</strong> Every scan below is recorded with the size it would have bought, and nothing is sent to a
-          broker. {record?.closed ? null : "No closed trade has happened yet, so there is no hit rate to report."}
+          Zero-hero is switched off. Turn it on in <Link href="/settings#zerohero" className="underline">Settings</Link>. When on,
+          it trades on every broker whose auto-trading is on.
         </Notice>
       )}
 
@@ -258,6 +251,54 @@ export default function ZeroHeroPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Decay sells</CardTitle>
+          <span className="text-[11.5px] text-muted-foreground">
+            premium still bid far out of the money: sold with the next strike bought, held to settlement
+          </span>
+        </CardHeader>
+        <CardContent className="px-0">
+          {!scan?.decay?.length ? (
+            <Empty title="Nothing worth selling">
+              No option at least 1.5 sigma away (at realised volatility) bids enough to pay its risk and fees right now.
+            </Empty>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-[12px]">
+                <thead className="bg-slate-50 text-[11px] text-muted-foreground">
+                  <tr className="text-left">
+                    <th className="px-4 py-2 font-medium">Spread</th>
+                    <th className="px-2 py-2 text-right font-medium">Away</th>
+                    <th className="px-2 py-2 text-right font-medium">Credit</th>
+                    <th className="px-2 py-2 text-right font-medium">Win chance</th>
+                    <th className="px-2 py-2 text-right font-medium">Edge / lot</th>
+                    <th className="px-2 py-2 text-right font-medium">Max loss / lot</th>
+                    <th className="px-4 py-2 text-right font-medium">Left</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-separator">
+                  {scan.decay.map((d) => (
+                    <tr key={d.sell} title={d.why}>
+                      <td className="px-4 py-2">
+                        <span className="font-semibold text-loss">SELL</span> <span className="num">{price(d.strike)}</span> {d.kind}{" "}
+                        <span className="text-muted-foreground">/ buy {price(d.wing)}</span>
+                      </td>
+                      <td className="num px-2 py-2 text-right">{d.sigmas.toFixed(1)}σ</td>
+                      <td className="num px-2 py-2 text-right">{price(d.credit)}</td>
+                      <td className="num px-2 py-2 text-right">{(100 * d.pop).toFixed(0)}%</td>
+                      <td className="num px-2 py-2 text-right text-profit">+{d.ev_per_lot.toFixed(4)}</td>
+                      <td className="num px-2 py-2 text-right">{d.max_loss_per_lot.toFixed(4)}</td>
+                      <td className="num px-4 py-2 text-right">{d.hours_left.toFixed(1)}h</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -293,7 +334,6 @@ export default function ZeroHeroPage() {
               <>
                 <KV label="Scans (30d)" value={num(record.scans, 0)} />
                 <KV label="Proposed a trade" value={num(record.proposed, 0)} />
-                <KV label="Shadow only" value={num(record.shadowed, 0)} />
                 <KV label="Actually opened" value={num(record.opened, 0)} />
                 <KV label="Closed" value={num(record.closed, 0)} />
                 <KV label="Hit rate" value={record.hit_rate_pct === null ? "no closed trades yet" : pct(record.hit_rate_pct, 1)} />
@@ -319,13 +359,12 @@ export default function ZeroHeroPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={d.action === "open" ? "profit" : d.action === "error" ? "loss" : "outline"}>{d.action}</Badge>
                   <span className="text-muted-foreground">{ago(d.ts)}</span>
-                  {d.regime?.shadow && <Badge variant="outline">shadow</Badge>}
                 </div>
                 <div className="mt-1 text-slate-700">{d.reason}</div>
               </div>
             ))
           ) : (
-            <Empty title="No scans recorded yet">A row is written only when a scan reaches a broker (open, shadow or refusal); scans that skip are not stored.</Empty>
+            <Empty title="No scans recorded yet">A row is written only when a scan reaches a broker (opened or refused); scans that skip are not stored.</Empty>
           )}
         </CardContent>
       </Card>

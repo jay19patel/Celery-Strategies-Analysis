@@ -176,6 +176,18 @@ def score(m: dict[str, Any], d: float, regime: str, gamma: str | None = None) ->
         ("downtrend", -d * 40 if d < 0 else 0),
         ("uptrend against a bearish spread", -d * 45 if d > 0 else 0),
     ])
+    add("short_call", [
+        *premium(True, 1.5),
+        ("downtrend: the market is moving away from the strike", -d * 40 if d < 0 else 0),
+        ("uptrend into a sold call", -d * 50 if d > 0 else 0),
+        ("unbounded risk while volatility expands", -12 if expanding else 0),
+    ])
+    add("short_put", [
+        *premium(True, 1.5),
+        ("uptrend: the market is moving away from the strike", d * 40 if d > 0 else 0),
+        ("downtrend into a sold put", d * 50 if d < 0 else 0),
+        ("unbounded risk while volatility expands", -12 if expanding else 0),
+    ])
     add("long_straddle", [
         *released,
         *premium(False),

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Bot, ListTree, Loader2, Play, Settings2 } from "lucide-react";
+import { ListTree, Loader2, Play, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 
@@ -117,7 +117,7 @@ export default function AutoPage() {
                 <BrokerSwitch key={b.name} b={b} onToggle={toggle} />
               ))}
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Card className="px-4 py-3">
                 <div className="text-[11.5px] text-muted-foreground">Next cycle</div>
                 <div className="num mt-1 text-[15px] font-semibold">{until(status.job?.next_run)}</div>
@@ -128,13 +128,6 @@ export default function AutoPage() {
                 <div className="mt-1 flex flex-wrap gap-1">
                   {cfg?.auto_strategies.map((s) => <Badge key={s} variant="outline">{titleCase(s)}</Badge>)}
                 </div>
-              </Card>
-              <Card className="px-4 py-3">
-                <div className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground"><Bot className="size-3.5" /> AI review</div>
-                <div className="mt-1 text-[13px] font-semibold">
-                  {!cfg?.ai_enabled ? "off — rules decide" : !cfg.ai_review_trades ? "brief only" : status.ai_ready ? "configured, not ready" : cfg.ai_required ? "required" : "on, rules as fallback"}
-                </div>
-                {status.ai_ready && cfg?.ai_enabled ? <div className="text-[11px] text-warn">{status.ai_ready}</div> : null}
               </Card>
             </div>
             {status.job?.last_error && <Notice tone="loss">Last cycle failed: {status.job.last_error}</Notice>}
@@ -155,6 +148,16 @@ export default function AutoPage() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {status && status.now.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Right now</CardTitle>
+            <span className="text-[11.5px] text-muted-foreground">the latest cycle per underlying, skips included: why it did or did not trade (shown live, not stored)</span>
+          </CardHeader>
+          <div>{status.now.map((d) => <DecisionRow key={`${d.underlying}-${d.ts}`} d={d} />)}</div>
+        </Card>
       )}
 
       <Card>

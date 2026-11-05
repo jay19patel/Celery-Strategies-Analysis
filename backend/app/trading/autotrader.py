@@ -6,14 +6,14 @@
               `min_score`, eased towards `min_score_floor` as a day with no entry on this
               underlying runs out — the one number pacing towards about a trade a day
 
-  4. filter   only those passing every required check (liquidity, POP, edge at realised vol, ...)
-  5. review   with AI on, a model approves one of the top three or skips; it cannot invent one
-  6. size     lots whose worst case is `risk_per_trade_pct` of that broker's equity
-  7. open     through `TradingService.open` — the same gate a dashboard click goes through
+  4. filter   only those passing every required check (liquidity, POP, edge at realised vol, ...);
+              the best by score, then edge, is the one — the rules decide, no model reviews it
+  5. size     lots whose worst case is `risk_per_trade_pct` of that broker's equity
+  6. open     through `TradingService.open` — the same gate a dashboard click goes through
 
-Every cycle is a `Decision` row: what it saw, every strategy it considered and why each was
-dropped, what the model said, and what each broker did — including every skip, so "why did it not
-trade?" always has an answer.
+A cycle that reached a broker is a `Decision` row: what it saw, every strategy it considered and why
+each was dropped, and what each broker did. The latest cycle per underlying, skips included, is kept
+live in `latest`, so "why did it not trade?" always has an answer without a row per skip.
 """
 
 from __future__ import annotations
@@ -25,8 +25,6 @@ from typing import Any
 
 from sqlmodel import col, select
 
-from app.ai.analyst import Analyst
-from app.ai.llm import LLMError
 from app.core.db import session
 from app.core.events import EventHub
 from app.core.models import Decision, Structure
@@ -73,12 +71,14 @@ def _compact(assessment: dict[str, Any]) -> dict[str, Any]:
 
 
 class AutoTrader:
-    def __init__(self, desk: Desk, trading: TradingService, analyst: Analyst, settings: Any, hub: EventHub) -> None:
+    def __init__(self, desk: Desk, trading: TradingService, settings: Any, hub: EventHub) -> None:
         self.desk = desk
         self.trading = trading
-        self.analyst = analyst
         self.settings: Any = settings
         self.hub = hub
+        # The latest decision per underlying, skips included: shown live and never stored, so "why is
+        # it not trading?" has an answer on the page without a row per cycle in the database.
+        self.latest: dict[str, dict[str, Any]] = {}
 
     def brokers(self) -> list[str]:
         s: Settings = self.settings()
@@ -154,8 +154,9 @@ class AutoTrader:
             dec.action, dec.reason = "error", f"{type(exc).__name__}: {exc}"
         # A skip that never reached a broker (no room, no expiry, no strategy passed) is not written
         # down: `_open` saves its row first, so every attempt on a broker still is.
+        self.latest[underlying] = dec.model_dump()
         if dec.action == "skip" and dec.id is None:
-            return dec.model_dump()
+            return self.latest[underlying]
         with session() as db:
             db.add(dec)
             db.commit()
@@ -224,38 +225,8 @@ class AutoTrader:
 
         choice = top[0]
         why = f"rules chose {choice['label']} (score {choice['score']}{f', bar eased to {bar}' if pacing else ''})"
-        if s.ai_enabled and s.ai_review_trades:
-            choice, why = await self._review(dec, underlying, regime, top, choice, why, s)
-            if choice is None:
-                return
         dec.strategy = choice["strategy"]
         await self._open(dec, plans[choice["strategy"]], choice, brokers, open_to, why, s)
-
-    async def _review(
-        self, dec: Decision, underlying: str, regime: dict[str, Any], top: list[dict[str, Any]],
-        choice: dict[str, Any], why: str, s: Settings,
-    ) -> tuple[dict[str, Any] | None, str]:
-        """The model's verdict on the candidates. Returns (choice or None to skip, the reason)."""
-        if not_ready := self.analyst.ready():
-            dec.ai = {"used": False, "note": not_ready}
-            if s.ai_required:
-                dec.reason = f"AI review is required but {not_ready}"
-                return None, dec.reason
-            return choice, why + f" (AI not asked: {not_ready})"
-        try:
-            review = await self.analyst.review(underlying, regime, top)
-        except LLMError as exc:
-            dec.ai = {"used": False, "error": str(exc)[:600]}
-            if s.ai_required:
-                dec.reason = "AI review is required and no model answered"
-                return None, dec.reason
-            return choice, why + " (no model answered: the rules decided)"
-        dec.ai = {"used": True} | review
-        if review["decision"] == "skip":
-            dec.reason = "AI reviewer skipped" + (f": {review['reasons'][0]}" if review["reasons"] else "")
-            return None, dec.reason
-        picked = next(c for c in top if c["strategy"] == review["candidate"])
-        return picked, f"AI ({review['model']}, {review['confidence']} confidence) chose {picked['label']}"
 
     async def _open(
         self, dec: Decision, plan: Plan, choice: dict[str, Any], brokers: list[str], no_room: dict[str, str], why: str, s: Settings,

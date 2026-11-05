@@ -40,6 +40,7 @@ from app.core.events import EventHub
 from app.core.models import Leg, Structure
 from app.errors import BrokerError
 from app.options.pricing import LegSpec, payoff
+from app.options.strategies import EXPIRY_DECAY
 from app.settings import Settings
 from app.trading.risk import set_halt, start_day
 from app.trading.service import TradingService, exit_thresholds, is_directional, is_zerohero
@@ -108,7 +109,9 @@ class Guard:
         # A zero-hero buy leaves at whichever time stop comes FIRST. In the last hour theta goes
         # vertical on a contract that is all time value, so holding one to find out is not a
         # decision, it is a donation with a countdown.
-        floor = s.zh_exit_minutes if is_zerohero(st) else s.exit_before_expiry_minutes
+        # An expiry-decay spread is held to settlement: the last hour is the decay it was sold for, and
+        # its loss is capped by the wing whatever happens in it.
+        floor = s.zh_exit_minutes if is_zerohero(st) else 0 if st.strategy == EXPIRY_DECAY else s.exit_before_expiry_minutes
         if floor and minutes_left <= floor:
             return f"time exit: {minutes_left:.0f} min to expiry"
         # The premise, re-read. This is checked BEFORE the P&L rules on purpose: a position whose

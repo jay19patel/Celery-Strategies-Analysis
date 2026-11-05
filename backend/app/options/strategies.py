@@ -22,8 +22,9 @@ from app.options.pricing import LegSpec
 # constant. A spec that does not say otherwise is gated as a seller.
 SELLER_CHECKS = ("liquidity", "credit / width", "probability of profit", "edge at realised vol")
 
-# The one strategy outside CATALOG that other modules name directly.
+# The strategies outside CATALOG that other modules name directly.
 ZERO_HERO = "zero_hero"
+EXPIRY_DECAY = "expiry_decay"
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,14 @@ CATALOG: dict[str, StrategySpec] = {s.key: s for s in (
                  "Sell an OTM put, buy a lower put. Profits if price holds above the short strike."),
     StrategySpec("bear_call_spread", "Bear Call Spread", "bearish", "credit", "defined",
                  "Sell an OTM call, buy a higher call. Profits if price stays below the short strike."),
+    # One side of the strangle, for a market already moving: sell the calls it is falling away from,
+    # or the puts it is rising away from. No wing, so no credit / width; the edge still has to be there.
+    StrategySpec("short_call", "Short Call", "bearish", "credit", "undefined",
+                 "Sell an OTM call. Keeps the premium if price stays below the strike; unlimited risk above it.",
+                 required_checks=("liquidity", "probability of profit", "edge at realised vol")),
+    StrategySpec("short_put", "Short Put", "bullish", "credit", "undefined",
+                 "Sell an OTM put. Keeps the premium if price stays above the strike; large risk below it.",
+                 required_checks=("liquidity", "probability of profit", "edge at realised vol")),
     StrategySpec("short_strangle", "Short Strangle", "neutral", "credit", "undefined",
                  "Sell an OTM call and put with no wings. Wide profit zone, unlimited risk beyond it."),
     StrategySpec("short_straddle", "Short Straddle", "neutral", "credit", "undefined",
@@ -76,6 +85,15 @@ EXTRA: dict[str, StrategySpec] = {s.key: s for s in (
         # construction and its expected value at realised vol is negative on a fairly priced chain.
         # What it must still pass is a two-sided book — an 8/10 quote is a 20% loss on contact.
         required_checks=("liquidity",),
+    ),
+    # The zero-hero window's other side (`options/decay.py`): sell what is still bid far out of the
+    # money, buy the next strike for next to nothing, hold to settlement. The scanner has already
+    # demanded a bid on the sold leg and the edge; the bought wing near expiry often has no bid at
+    # all, so a two-sided-quote rule would refuse the very contract that caps the loss.
+    StrategySpec(
+        EXPIRY_DECAY, "Expiry Decay Spread", "neutral", "credit", "defined",
+        "Sell an option still bid far out of the money in the last hours, buy the next strike beyond it, hold to settlement.",
+        required_checks=("edge at realised vol",),
     ),
 )}
 
@@ -223,7 +241,17 @@ def _bear_call_spread(qs: list[OptionQuote], spot: float, delta: float, width: f
     return [(sc, "sell"), (_wing(qs, "call", sc.strike, width), "buy")] if sc else [(None, "")]
 
 
+def _short_call(qs: list[OptionQuote], spot: float, delta: float, _width: float) -> Picked:
+    return [(_otm_by_delta(qs, "call", spot, delta), "sell")]
+
+
+def _short_put(qs: list[OptionQuote], spot: float, delta: float, _width: float) -> Picked:
+    return [(_otm_by_delta(qs, "put", spot, delta), "sell")]
+
+
 BUILDERS: dict[str, Callable[[list[OptionQuote], float, float, float], Picked]] = {
+    "short_call": _short_call,
+    "short_put": _short_put,
     "iron_condor": _iron_condor,
     "iron_butterfly": _iron_butterfly,
     "short_strangle": _short_strangle,

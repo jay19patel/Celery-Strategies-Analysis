@@ -1,4 +1,4 @@
-"""Zero-hero: the expiry-day scan, its decisions, and the record shadow mode is there to build."""
+"""Zero-hero: the expiry-day scan, its decisions, and the record of what it traded."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def status(engine: EngineDep, underlying: str = "BTC") -> dict[str, Any]:
 @router.get("/scan")
 def scan(engine: EngineDep, underlying: str = "BTC") -> dict[str, Any]:
     """The live scan. Read-only: it opens nothing and writes no row, so the page may poll it."""
-    return engine.zerohero.scan(underlying).to_dict()
+    return engine.zerohero.scan(underlying).to_dict() | {"decay": engine.zerohero.decay(underlying)}
 
 
 @router.get("/decisions")

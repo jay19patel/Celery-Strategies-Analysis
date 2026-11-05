@@ -134,7 +134,6 @@ def test_the_zero_hero_surface_is_reachable_and_off_by_default(client: TestClien
     login(client)
     status = client.get("/api/zerohero/status").json()
     assert status["enabled"] is False  # fail closed: it does not run until switched on
-    assert status["shadow"] is True  # and when it does, it trades nothing until that is switched off
     assert status["record"]["hit_rate_pct"] is None
     assert client.get("/api/zerohero/decisions").json() == []
     assert client.post("/api/zerohero/run").json()["note"].startswith("zero-hero is off")

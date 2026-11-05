@@ -29,7 +29,7 @@ Delta REST (chain every 30s, bars 5m) ─┴─► MarketFeed ─► Desk (chain
    dashboard click ─► routes/trading ─┐                    │
    AutoTrader (every N min) ──────────┴─► TradingService.gate/open/close ─► Broker (paper | delta)
    Guard (5s: TP/SL/expiry, 30s: daily loss) ─► TradingService.close / settle_expired
-   Analyst (LiteLLM) ◄─ market digest only ─ AutoTrader review, AI brief job
+   Analyst (LiteLLM) ◄─ market digest only ─ AI brief job (it never decides a trade)
    EventHub ─► event log (SQLite), /ws dashboards, Notifier (Telegram, email)
 ```
 
@@ -67,7 +67,7 @@ Delta REST (chain every 30s, bars 5m) ─┴─► MarketFeed ─► Desk (chain
 - `app/brokers/` — a broker executes one leg (IOC limit) and reports its account; structures are the
   trading service's, recorded the same way for both brokers.
 - `app/ai/llm.py` — LiteLLM: any provider by model id, primary then fallbacks in order.
-  `analyst.py` — prompts, the allowlisted digest, answer shaping.
+  `analyst.py` — the market brief: prompts, the allowlisted digest, answer shaping.
 - `app/notify/` — Telegram and email, fed by events; the daily report.
 
 ## Invariants
@@ -98,12 +98,12 @@ Enforced by tests (`backend/tests`). Breaking one should fail the build.
 10. **Private by default.** Every `/api` route and `/ws` needs the PIN session unless listed in
     `PUBLIC_PATHS`; `/ws` is checked before `accept()`, on the session cookie or a one-time,
     60-second ticket from `/api/auth/ws` (a dashboard on another host sends no cookie to it).
-11. **The model chooses, it never invents.** The AI reviewer may approve one listed candidate or
-    skip; anything else is a skip, and every hard gate runs after it. What it is sent is
-    `analyst.ALLOWED` — market numbers only, never a balance, position, order or P&L.
+11. **The model writes, it never trades.** The AI writes the market brief and nothing else: every
+    trade is decided by the rules and their hard gates. What it is sent is `analyst.ALLOWED` —
+    market numbers only, never a balance, position, order or P&L.
 12. **Every attempt is written down.** Each auto or zero-hero cycle that reaches a broker is a
-    `Decision` row with what it saw, every strategy it considered and why each was dropped, the
-    model's answer, and what each broker did. A skip before any broker is not stored.
+    `Decision` row with what it saw, every strategy it considered and why each was dropped,
+    and what each broker did. A skip before any broker is not stored.
 13. **Bounded, for years of uptime.** Ticks are never stored: the tape is kept as one footprint
     minute per symbol (`FlowBar`, 30 days). Bars (15m a year, 1m 30 days), option-chain snapshots
     (`data/chains/`, 90 days) and the options minute (30 days) are kept for backtests; the day's bias

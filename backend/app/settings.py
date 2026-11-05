@@ -28,9 +28,9 @@ SECRET_FIELDS = ("delta_api_key", "delta_api_secret", "telegram_bot_token", "ema
 DELTA_ROUTING_FIELDS = ("delta_active", "delta_env", "delta_api_key", "delta_api_secret")
 STRATEGY_KEYS = (
     "iron_condor", "iron_butterfly", "short_strangle", "short_straddle",
-    "long_straddle", "bull_put_spread", "bear_call_spread",
+    "long_straddle", "bull_put_spread", "bear_call_spread", "short_call", "short_put",
 )
-UNDEFINED_RISK = ("short_strangle", "short_straddle")
+UNDEFINED_RISK = ("short_strangle", "short_straddle", "short_call", "short_put")
 EVENT_FORMAT = "%Y-%m-%d %H:%M"
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@+\-]{2,120}$")
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
@@ -42,7 +42,7 @@ Directional = Literal[
 ]
 Strategy = Literal[
     "iron_condor", "iron_butterfly", "short_strangle", "short_straddle",
-    "long_straddle", "bull_put_spread", "bear_call_spread",
+    "long_straddle", "bull_put_spread", "bear_call_spread", "short_call", "short_put",
 ]
 
 
@@ -94,7 +94,10 @@ class Settings(BaseModel):
     # is the bar all day. The hard checks never ease: a thin premium is refused at any hour.
     min_score_floor: int = Field(0, ge=0, le=100)
     min_pop_pct: float = Field(55.0, ge=0, le=95)  # probability of profit at expiry, from the ATM IV
-    min_credit_width_pct: float = Field(10.0, ge=0, le=60)  # credit / widest spread on defined-risk credits
+    # Credit / widest spread on defined-risk credits. At 0.18 delta and 2% wings a FAIR credit is about
+    # 6-10% of the width, so a 10% floor demanded selling above fair value and refused nearly every
+    # spread; whether the credit pays is what "edge at realised vol" measures. This keeps the scraps out.
+    min_credit_width_pct: float = Field(5.0, ge=0, le=60)
     max_spread_pct: float = Field(12.0, ge=1, le=100)  # each leg's bid/ask spread as % of its mark
     # Scheduled events (UTC, "YYYY-MM-DD HH:MM") a premium seller stands aside for: no credit
     # structure is opened whose life, from `event_buffer_hours` before now to its expiry, holds one.
@@ -106,11 +109,8 @@ class Settings(BaseModel):
     # above and is gated separately for that reason: its probability of profit is low by design
     # and its expected value at the chain's own IV is negative, so a seller's filters would (quite
     # correctly) refuse it every time. What stands in their place is the five-dimension scan in
-    # `options/zerohero.py`, a hard daily budget and a shadow mode that is on until switched off.
+    # `options/zerohero.py` and a hard daily budget.
     zh_enabled: bool = False
-    # Scan and record, never send an order. The hit rate this strategy needs in order not to lose
-    # money is a number nobody has yet; this is how it gets measured before it is bet on.
-    zh_shadow: bool = True
     zh_window_start_hours: float = Field(4.0, ge=0.5, le=12)  # start looking this long before expiry
     zh_window_end_hours: float = Field(2.0, ge=0.25, le=11)  # stop opening this long before expiry
     # A break is a one- or two-bar event, so a slow scan does not find a cheaper entry, it finds
@@ -167,8 +167,6 @@ class Settings(BaseModel):
     ai_enabled: bool = False
     ai_model: str = "mistral/mistral-small-latest"
     ai_fallback_models: list[str] = Field(default_factory=list, max_length=5)
-    ai_review_trades: bool = True  # the auto-trader asks the model to approve or pick a candidate
-    ai_required: bool = False  # True: no answer from any model means no trade; False: the rules decide
     ai_brief_minutes: int = Field(30, ge=5, le=720)
 
     # -- notifications ---------------------------------------------------------------------

@@ -73,9 +73,7 @@ function announce(e: LiveEvent) {
       if (d.action === "error") toast.error("Auto-trader error", { description: e.message });
       break;
     case "ZeroHeroDecision":
-      // A shadow proposal is information, not a trade; it says so rather than looking like one.
-      if (d.action === "open") toast.info("Zero-hero bought", { description: e.message });
-      if (d.action === "shadow") toast.message("Zero-hero (shadow)", { description: e.message });
+      if (d.action === "open") toast.info("Zero-hero traded", { description: e.message });
       if (d.action === "error") toast.error("Zero-hero error", { description: e.message });
       break;
   }

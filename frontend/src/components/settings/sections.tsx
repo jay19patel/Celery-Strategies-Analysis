@@ -342,24 +342,14 @@ export function RiskTab() {
 
 export function ZeroHeroTab() {
   const { draft } = useForm();
-  const shadow = draft.zh_shadow !== false;
   const budget = Number(draft.zh_daily_budget_pct ?? 20);
   const attempts = Number(draft.zh_max_attempts_day ?? 3);
   return (
     <div className="space-y-6">
-      <Notice tone={shadow ? "info" : "warn"}>
-        {shadow ? (
-          <>
-            <strong>Shadow mode is on.</strong> Every scan is recorded with the contract it chose and the size it would have
-            bought, and no order is sent. Leave it on until the Zero-Hero page shows enough closed scans to tell you what the
-            hit rate actually is — the sizing arithmetic below is only as good as that number.
-          </>
-        ) : (
-          <>
-            <strong>Shadow mode is off: this will send real orders</strong> on any broker whose auto-trading is on. A long OTM
-            buy in the last hours before expiry loses its whole premium most of the time. That is the design, not a fault.
-          </>
-        )}
+      <Notice tone="warn">
+        <strong>When on, this sends real orders</strong> on every broker whose auto-trading is on: the momentum buy, and the
+        expiry-decay spread sold on the other side of the window. A long OTM buy in the last hours before expiry loses its
+        whole premium most of the time. That is the design, not a fault; the daily budget below is what bounds it.
       </Notice>
       <Section
         title="Zero-hero"
@@ -367,7 +357,6 @@ export function ZeroHeroTab() {
       >
         <FieldGrid>
           <SwitchField name="zh_enabled" label="Run the expiry-day scan" />
-          <SwitchField name="zh_shadow" label="Shadow mode (scan and record, never trade)" />
           <NumberField name="zh_window_start_hours" label="Window opens (hours before expiry)" />
           <NumberField name="zh_window_end_hours" label="Window closes (hours before expiry)" hint="Must leave room before the time stop." />
           <NumberField name="zh_scan_seconds" label="Scan every (seconds)" integer hint="A break is a one-bar event; a slow scan finds the same entry after it has run." />
@@ -463,11 +452,9 @@ export function AiTab() {
     <div className="space-y-6">
       <Section title="Language model" description="Any LiteLLM model id. Switching model is a setting: nothing restarts.">
         <FieldGrid>
-          <SwitchField name="ai_enabled" label="Use AI" hint="The market brief and, if enabled below, the trade review." />
+          <SwitchField name="ai_enabled" label="Use AI" hint="The market brief. Trades are decided by the rules alone." />
           <TextField name="ai_model" label="Primary model" placeholder="mistral/mistral-small-latest" />
           <FallbackModels key={generation} />
-          <SwitchField name="ai_review_trades" label="AI reviews auto trades" hint="The model may approve one of the rules' candidates or skip; it cannot invent one." />
-          <SwitchField name="ai_required" label="AI review required" hint="On: no answer from any model means no trade. Off: the rules decide." />
           <NumberField name="ai_brief_minutes" label="Market brief every (minutes)" integer />
         </FieldGrid>
         <Notice>

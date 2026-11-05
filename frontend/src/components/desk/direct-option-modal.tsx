@@ -65,19 +65,23 @@ export function DirectOptionModal({
     : (activeBrokers[0]?.name as Broker) ?? "paper";
   const side = userSide ?? initialSide;
 
-  // The leg priced and sized by the backend, exactly as the strategy builder and the auto-trader
-  // size a trade: the worst case is `risk_per_trade_pct` of the broker's equity, at most `max_lots`.
-  const [sizingQty, setSizingQty] = useState(1);
-  const body = target ? { underlying, strategy: "custom", legs: [{ symbol: target.symbol, side, ratio: 1 }], qty: userQty ?? sizingQty } : null;
-  const preview = useSWR<Preview>(open && body ? ["/strategies/preview", JSON.stringify(body)] : null, ([path, b]: [string, string]) => api<Preview>(path, "POST", JSON.parse(b)), {
+  // Sized as the strategy builder and the auto-trader size a trade: the worst case is
+  // `risk_per_trade_pct` of the broker's equity, at most `max_lots`. The suggestion does not depend
+  // on the quantity, so it is asked for at one lot under a key the quantity never changes; the
+  // quantity is then derived, never set. (Asking at the quantity itself made a loop: quantity ->
+  // request -> suggestion -> quantity, which re-rendered without end whenever two answers disagreed.)
+  const leg = target ? { underlying, strategy: "custom", legs: [{ symbol: target.symbol, side, ratio: 1 }] } : null;
+  const fetchPreview = ([path, b]: [string, string]) => api<Preview>(path, "POST", JSON.parse(b));
+  const unit = useSWR<Preview>(open && leg ? ["/strategies/preview", JSON.stringify({ ...leg, qty: 1 })] : null, fetchPreview, { shouldRetryOnError: false });
+  const sizing = unit.data?.sizing.find((s) => s.broker === broker);
+  const suggested = sizing?.suggested_qty != null ? Math.max(1, sizing.suggested_qty) : null;
+  const qty = userQty ?? suggested ?? 1;
+  const priced = useSWR<Preview>(open && leg ? ["/strategies/preview", JSON.stringify({ ...leg, qty })] : null, fetchPreview, {
     keepPreviousData: true,
     shouldRetryOnError: false,
   });
-  const sizing = preview.data?.sizing.find((s) => s.broker === broker);
-  const suggested = sizing?.suggested_qty !== undefined ? Math.max(1, sizing.suggested_qty) : null;
-  if (userQty === null && suggested !== null && suggested !== sizingQty) setSizingQty(suggested);
-  const qty = userQty ?? sizingQty;
-  const analysis = preview.data?.qty === qty ? preview.data.analysis : null;
+  const analysis = priced.data?.qty === qty ? priced.data.analysis : null;
+  const atQty = priced.data?.qty === qty ? priced.data.sizing.find((s) => s.broker === broker) : undefined;
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
@@ -254,9 +258,9 @@ export function DirectOptionModal({
           {sizing && !sizing.error && (
             <p className="text-[11px] text-muted-foreground">
               {userQty === null ? "Sized to your capital" : "Your quantity"}: equity ${num(sizing.equity, 2)}, worst case{" "}
-              {sizing.worst_case_pct != null && analysis ? pct(sizing.worst_case_pct, 2) : "unlimited"} of it
+              {atQty?.worst_case_pct != null ? pct(atQty.worst_case_pct, 2) : analysis ? "unlimited" : "…"} of it
               {suggested !== null && userQty !== null && ` (capital fits ${suggested})`}
-              {sizing.margin_ok === false && <span className="text-loss"> · not enough margin for {qty}</span>}
+              {atQty?.margin_ok === false && <span className="text-loss"> · not enough margin for {qty}</span>}
             </p>
           )}
           {sizing?.error && <p className="text-[11px] text-loss">{sizing.error}</p>}

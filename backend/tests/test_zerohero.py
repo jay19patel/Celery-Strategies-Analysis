@@ -424,21 +424,16 @@ async def test_zero_hero_decisions_do_not_appear_on_the_auto_traders_page(env) -
     from app.trading.autotrader import AutoTrader
 
     with session() as db:
-        db.add(Decision(ts=time.time(), underlying="BTC", action="shadow", strategy=ZERO_HERO))
+        db.add(Decision(ts=time.time(), underlying="BTC", action="open", strategy=ZERO_HERO))
         db.commit()
     assert zero_hero(env).decisions()  # on its own page
     assert not AutoTrader.decisions()  # and not on the condor desk's
 
 
 @pytest.mark.asyncio
-async def test_shadow_mode_records_the_size_it_would_have_bought_and_sends_no_order(env, monkeypatch) -> None:
-    env.configure(zh_enabled=True, zh_shadow=True)
+async def test_a_chosen_candidate_is_bought_sized_by_the_days_budget(env) -> None:
+    env.configure(zh_enabled=True)
     zhx = zero_hero(env)
-
-    async def never(*args, **kwargs):
-        raise AssertionError("shadow mode must not open anything")
-
-    monkeypatch.setattr(env.trading, "open", never)
     # Force a decision past the scan by handing it a candidate directly.
     quotes = env.feed.quotes("BTC")
     spot = env.desk.spot("BTC")
@@ -454,13 +449,12 @@ async def test_shadow_mode_records_the_size_it_would_have_bought_and_sends_no_or
     dec = Decision(ts=time.time(), underlying="BTC", action="skip", strategy=ZERO_HERO)
     plan = single(call, "buy", spot, ZERO_HERO)
     await zhx._open(dec, plan, best, ["paper"], "test", env.settings())
-    assert dec.action == "shadow"
-    assert dec.orders["paper"]["shadow"] is True
-    assert dec.orders["paper"]["qty"] > 0
-    assert "SHADOW" in dec.reason
+    assert dec.action == "open", dec.reason
+    assert dec.orders["paper"]["status"] == "open" and dec.orders["paper"]["qty"] > 0
+    assert "opened on paper" in dec.reason
 
 
-def test_the_record_counts_only_closed_trades_and_never_guesses_a_shadow_outcome(env) -> None:
+def test_the_record_counts_only_closed_trades(env) -> None:
     out = zero_hero(env).record()
     assert out["opened"] == 0 and out["hit_rate_pct"] is None
-    assert "shadow proposals have no outcome" in out["note"]
+    assert "CLOSED trades only" in out["note"]

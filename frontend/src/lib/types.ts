@@ -436,8 +436,7 @@ export interface AutoStatus {
   brokers: BrokerStatus[];
   job: JobStatus | null;
   config: Record<string, unknown> & { auto_strategies: string[]; auto_interval_minutes: number };
-  ai_ready: string;
-  latest: Decision[];
+  now: Decision[]; // the latest decision per underlying, skips included: live, not stored
 }
 
 export interface AiModelStatus {
@@ -942,13 +941,34 @@ export interface ZhScan {
   rejected: { symbol: string; strike: number; paid: number; why: string; detail: string }[];
   best: ZhCandidate | null;
   ok: boolean;
+  decay: DecaySpread[]; // the other side of the window: premium still bid far out of the money
+}
+
+/** An expiry-decay spread worth selling now (`options/decay.py`). */
+export interface DecaySpread {
+  sell: string;
+  buy: string;
+  kind: "call" | "put";
+  strike: number;
+  wing: number;
+  expiry: number;
+  hours_left: number;
+  sigmas: number;
+  credit: number;
+  width: number;
+  pop: number;
+  ev: number;
+  max_loss: number;
+  ev_per_lot: number;
+  max_loss_per_lot: number;
+  ev_on_risk_pct: number | null;
+  why: string;
 }
 
 export interface ZhRecord {
   days: number;
   scans: number;
   proposed: number;
-  shadowed: number;
   opened: number;
   closed: number;
   wins: number;
@@ -969,7 +989,6 @@ export interface ZhWindowSchedule {
 
 export interface ZhStatus {
   enabled: boolean;
-  shadow: boolean;
   underlying: string;
   budget: { broker: string; spent: number; attempts: number; max_attempts: number; auto: boolean }[];
   config: Record<string, number> & { exit_minutes: number };
@@ -980,13 +999,12 @@ export interface ZhStatus {
 
 /** A zero-hero decision reuses the Decision row; `regime` carries the scan instead of a regime. */
 export interface ZhDecision extends Omit<Decision, "action" | "regime" | "candidates"> {
-  action: "open" | "shadow" | "skip" | "error";
+  action: "open" | "skip" | "error";
   regime: {
     hours_left: number | null;
     hold_minutes: number | null;
     realised_vol: number | null;
     window_open: boolean;
-    shadow: boolean;
     trigger: ZhTrigger | null;
     positioning: ZhPositioning | null;
     gates: ZhCheck[];

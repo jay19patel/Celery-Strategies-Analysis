@@ -1,4 +1,4 @@
-"""The auto-trader's decisions: rules alone, the model's review, and what happens when it fails."""
+"""The auto-trader's decisions — the rules alone decide — and the market brief the model writes."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from sqlmodel import select
 
-from app.ai.analyst import ALLOWED, Analyst, clean_review, digest
-from app.ai.llm import LLM, LLMError
+from app.ai.analyst import ALLOWED, Analyst, digest
+from app.ai.llm import LLM
 from app.core.db import session
 from app.core.models import Structure
 from app.errors import SettingsError
@@ -34,12 +34,9 @@ class StubLLM(LLM):
         return answer, {"model": "stub/model", "ms": 1, "fallback": False}
 
 
-def make(env: Any, answer: Any = None, **settings: Any) -> tuple[AutoTrader, StubLLM]:
+def make(env: Any, **settings: Any) -> AutoTrader:
     env.configure(max_spread_pct=100, min_credit_width_pct=0, min_score=0, min_pop_pct=0, **settings)
-    llm = StubLLM(env.settings, answer)
-    analyst = Analyst(llm, env.settings, env.hub)
-    analyst.ready = lambda: ""  # type: ignore[method-assign]
-    return AutoTrader(env.desk, env.trading, analyst, env.settings, env.hub), llm
+    return AutoTrader(env.desk, env.trading, env.settings, env.hub)
 
 
 def opened() -> list[Structure]:
@@ -48,10 +45,10 @@ def opened() -> list[Structure]:
 
 
 async def test_rules_alone_open_the_best_candidate_sized_by_risk(env: Any) -> None:
-    auto, llm = make(env, ai_enabled=False)
+    auto = make(env)
     d = await auto.decide("BTC", ["paper"])
     assert d["action"] == "open", d["reason"]
-    assert llm.calls == 0
+    assert "rules chose" in d["reason"]
     [st] = opened()
     assert st.source == "auto" and st.strategy == d["strategy"] and st.decision_id == d["id"]
     risk_budget = 1000 * env.settings().risk_per_trade_pct / 100
@@ -59,44 +56,19 @@ async def test_rules_alone_open_the_best_candidate_sized_by_risk(env: Any) -> No
     assert d["orders"]["paper"]["qty"] == st.qty
 
 
-async def test_the_model_can_only_choose_a_listed_candidate(env: Any) -> None:
-    auto, _ = make(env, {"decision": "trade", "candidate": "naked_call", "confidence": "high"}, ai_enabled=True)
+
+
+
+async def test_a_broker_with_no_room_is_skipped_before_anything_is_built(env: Any) -> None:
+    auto = make(env)
+    await auto.decide("BTC", ["paper"])
     d = await auto.decide("BTC", ["paper"])
-    assert d["action"] == "skip" and d["ai"]["invalid_choice"]
-    assert not opened()
-
-
-async def test_the_model_picks_which_candidate_trades(env: Any) -> None:
-    def pick_last(payload: dict[str, Any]) -> dict[str, Any]:
-        return {"decision": "trade", "candidate": payload["candidates"][-1]["id"], "confidence": "medium", "reasons": ["r"]}
-
-    auto, llm = make(env, pick_last, ai_enabled=True)
-    d = await auto.decide("BTC", ["paper"])
-    assert d["action"] == "open"
-    assert d["strategy"] == llm.payload["candidates"][-1]["id"]
-
-
-async def test_no_model_answering_falls_back_to_the_rules_unless_required(env: Any) -> None:
-    auto, _ = make(env, LLMError("every model failed"), ai_enabled=True, ai_required=False)
-    d = await auto.decide("BTC", ["paper"])
-    assert d["action"] == "open" and "rules decided" in d["reason"]
-
-    auto, _ = make(env, LLMError("every model failed"), ai_enabled=True, ai_required=True, max_per_underlying=2)
-    d = await auto.decide("BTC", ["paper"])
-    assert d["action"] == "skip" and "required" in d["reason"]
-
-
-async def test_a_broker_with_no_room_is_skipped_before_anything_is_asked(env: Any) -> None:
-    auto, llm = make(env, {"decision": "skip"}, ai_enabled=True)
-    await make(env, ai_enabled=False)[0].decide("BTC", ["paper"])
-    d = await auto.decide("BTC", ["paper"])
-    assert d["action"] == "skip" and "no room" in d["reason"]
-    assert llm.calls == 0
+    assert d["action"] == "skip" and "no room" in d["reason"] and not d["candidates"]
 
 
 async def test_a_position_on_the_perpetual_does_not_take_the_options_slot(env: Any) -> None:
     """Each instrument holds its own slot: BTC futures never block a BTC option structure."""
-    auto, _ = make(env, ai_enabled=False, max_per_underlying=1)
+    auto = make(env, max_per_underlying=1)
     await env.trading.open_directional("paper", "BTC", "buy", 1, 79_500, 81_000, "supertrend", "auto", "req-perp-room", "")
     d = await auto.decide("BTC", ["paper"])
     assert d["action"] == "open", d["reason"]
@@ -105,11 +77,12 @@ async def test_a_position_on_the_perpetual_does_not_take_the_options_slot(env: A
     again = await auto.decide("BTC", ["paper"])
     assert again["action"] == "skip" and "no room" in again["reason"] and "options" in again["reason"]
     assert again["id"] is None and len(AutoTrader.decisions()) == 1  # a skip before any broker is not stored
+    assert "no room" in auto.latest["BTC"]["reason"]  # ...but its reason is still shown live
 
 
 def test_what_goes_to_the_model_is_market_data_only(env: Any) -> None:
     regime = env.desk.regime("BTC")
-    payload = digest("BTC", regime, [])
+    payload = digest("BTC", regime)
     assert set(payload) <= ALLOWED
     text = str(payload).lower()
     for word in ("balance", "equity", "cash", "api_key", "secret", "pnl"):
@@ -119,7 +92,7 @@ def test_what_goes_to_the_model_is_market_data_only(env: Any) -> None:
 async def test_the_bar_eases_through_a_day_with_no_entry_and_resets_on_one(env: Any) -> None:
     """Pacing towards about a trade a day: the score bar falls as an empty day runs out, the first
     entry puts it back, and a floor at or above min_score is simply off."""
-    auto, _ = make(env, ai_enabled=False, day_timezone="UTC")  # the engine's own bar stays at 0
+    auto = make(env, day_timezone="UTC")  # the engine's own bar stays at 0
     paced = env.settings().model_copy(update={"min_score": 60, "min_score_floor": 40})
     day = day_start("UTC", trading_day("UTC"))
 
@@ -140,7 +113,7 @@ async def test_the_bar_eases_through_a_day_with_no_entry_and_resets_on_one(env: 
 
 
 async def test_a_position_on_the_perpetual_is_not_the_options_desks_entry_for_the_day(env: Any) -> None:
-    auto, _ = make(env, ai_enabled=False, day_timezone="UTC")
+    auto = make(env, day_timezone="UTC")
     paced = env.settings().model_copy(update={"min_score": 60, "min_score_floor": 40})
     day = day_start("UTC", trading_day("UTC"))
     await env.trading.open_directional("paper", "BTC", "buy", 1, 79_500, 81_000, "supertrend", "auto", "req-pace", "")
@@ -179,11 +152,6 @@ async def test_each_desk_gets_its_own_brief(env: Any) -> None:
     assert "volatility" in options["content"] and "levels" not in options["content"]
 
 
-def test_review_answers_are_shaped_and_capped() -> None:
-    out = clean_review({"decision": "trade", "candidate": "iron_condor", "confidence": "certain", "reasons": ["x" * 999] * 9}, ["iron_condor"])
-    assert out["decision"] == "trade" and out["confidence"] == "low"
-    assert len(out["reasons"]) == 4 and all(len(r) <= 280 for r in out["reasons"])
-
 
 def test_lots_are_sized_on_the_worst_case() -> None:
     from app.settings import Settings
@@ -201,7 +169,7 @@ async def test_a_scheduled_event_before_expiry_keeps_every_seller_out(env: Any) 
 
     soon = datetime.fromtimestamp(time.time() + 3600, UTC).strftime("%Y-%m-%d %H:%M")
     sellers_only = [k for k in env.settings().auto_strategies if CATALOG[k].premium == "credit"]
-    auto, _ = make(env, ai_enabled=False, event_times=[soon], auto_strategies=sellers_only)
+    auto = make(env, event_times=[soon], auto_strategies=sellers_only)
     d = await auto.decide("BTC", ["paper"])
     assert d["action"] == "skip"
     statuses = {c["strategy"]: c.get("status", "") for c in d["candidates"]}
@@ -209,12 +177,12 @@ async def test_a_scheduled_event_before_expiry_keeps_every_seller_out(env: Any) 
     assert sellers and all("scheduled event" in statuses[k] for k in sellers)
     assert not opened()
 
-    auto, _ = make(env, ai_enabled=False, event_times=[], auto_strategies=sellers_only)
+    auto = make(env, event_times=[], auto_strategies=sellers_only)
     assert (await auto.decide("BTC", ["paper"]))["action"] == "open"  # no event, the same desk trades
 
 
 async def test_an_auto_trade_is_reported_under_the_score_it_was_opened_on(env: Any) -> None:
-    auto, _ = make(env, ai_enabled=False)
+    auto = make(env)
     d = await auto.decide("BTC", ["paper"])
     [st] = opened()
     await env.trading.close(st.id, "test")
