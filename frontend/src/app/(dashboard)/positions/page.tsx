@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { CapitalSplit } from "@/components/positions/capital-split";
 import { sumCosts } from "@/components/positions/derive";
+import { NeedsAction } from "@/components/positions/needs-action";
 import { StructureCard } from "@/components/positions/structure-card";
 import { BrokerTabs, type BrokerFilter } from "@/components/shared/broker-tabs";
 import { Confirm } from "@/components/shared/confirm";
@@ -17,7 +18,7 @@ import { Stat } from "@/components/shared/stat";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import { num, pnlClass, signed, usd } from "@/lib/format";
+import { arrowSigned, num, pnlClass, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
 import type { Account, Accounts, Broker, BrokerStatus, SettingsResponse, Structure } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -79,11 +80,11 @@ function AccountRow({
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
         <Stat
           label="Unrealised P&L"
-          value={open.length ? signed(c.net, 4) : "—"}
+          value={open.length ? arrowSigned(c.net, 4) : "—"}
           valueClass={pnlClass(c.net)}
           hint={open.length ? "net, if closed now" : "no open position"}
         />
-        <Stat label="Gross move" value={open.length ? signed(c.gross, 4) : "—"} valueClass={pnlClass(c.gross)} hint="at the marks, before any fee" />
+        <Stat label="Gross move" value={open.length ? arrowSigned(c.gross, 4) : "—"} valueClass={pnlClass(c.gross)} hint="at the marks, before any fee" />
         <Stat label="Charges paid" value={usd(c.paid, 4)} valueClass={c.paid ? "text-warn" : undefined} hint="entry fees on open positions" />
         <Stat label="Exit charges" value={open.length ? usd(c.exit, 4) : "—"} valueClass={c.exit ? "text-warn" : undefined} hint="fees to close now (est.)" />
         <Stat label="Spread cost" value={open.length ? usd(c.spread, 4) : "—"} valueClass={c.spread ? "text-warn" : undefined} hint="bid/ask against the marks" />
@@ -94,7 +95,7 @@ function AccountRow({
           <span>
             <span className="text-muted-foreground">Equity </span>
             <span className="num font-semibold">{usd(account.equity)}</span>
-            {start !== null && <span className="num text-muted-foreground"> · {signed(account.equity - start)} since start</span>}
+            {start !== null && <span className="num text-muted-foreground"> · {arrowSigned(account.equity - start)} since start</span>}
           </span>
           <span>
             <span className="text-muted-foreground">Today (incl. open) </span>
@@ -152,6 +153,7 @@ export default function PositionsPage() {
         description="Everything still open: unrealised P&L, the charges paid and still to pay, and the daily loss limit. Booked results are on Performance."
         actions={<BrokerTabs value={broker} onChange={setBroker} />}
       />
+      {data && <NeedsAction open={data} />}
       <div className="space-y-5">
         {Object.entries(accounts?.accounts ?? {})
           .filter(([name]) => !broker || name === broker)

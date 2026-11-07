@@ -1,43 +1,43 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* The iOS system palette: grouped gray behind white cards in light, black behind graphite cards in dark.
-   Blue for actions; green and red only for money; orange for caution. Follows the system appearance. */
+/* An editorial palette: warm paper and near-black ink, hairline rules instead of shadows. Indigo for
+   actions; green and red only for money; orange for caution. Follows the system appearance. */
 :root {
   color-scheme: light dark;
   --radius: 0.75rem;
   /* The live tape across the very top, above the sidebar and the bar; it carries the notch inset. */
   --ticker-h: calc(2rem + env(safe-area-inset-top, 0px));
-  --background: #f2f2f7;
-  --foreground: #000000;
+  --background: #fafaf9;
+  --foreground: #0f0f10;
   --card: #ffffff;
-  --card-foreground: #000000;
+  --card-foreground: #0f0f10;
   --popover: #ffffff;
-  --popover-foreground: #000000;
-  --primary: #0071e3;
+  --popover-foreground: #0f0f10;
+  --primary: #3b5bdb;
   --primary-foreground: #ffffff;
   --secondary: rgb(118 118 128 / 0.12);
-  --secondary-foreground: #000000;
+  --secondary-foreground: #0f0f10;
   --muted: rgb(118 118 128 / 0.12);
-  --muted-foreground: #6e6e73;
-  --accent: rgb(0 113 227 / 0.1);
-  --accent-foreground: #0062c4;
-  --destructive: #ff3b30;
-  --border: #e3e3e8;
-  --separator: rgb(60 60 67 / 0.14);
+  --muted-foreground: #6b6b73;
+  --accent: rgb(59 91 219 / 0.1);
+  --accent-foreground: #3b5bdb;
+  --destructive: #c62a2f;
+  --border: #e9e9e7;
+  --separator: #e9e9e7;
   --input: rgb(118 118 128 / 0.12);
-  --ring: rgb(0 113 227 / 0.45);
-  --profit: #248a3d;
-  --profit-soft: rgb(52 199 89 / 0.14);
-  --loss: #d70015;
-  --loss-soft: rgb(255 59 48 / 0.11);
+  --ring: rgb(59 91 219 / 0.45);
+  --profit: #18794e;
+  --profit-soft: rgb(24 121 78 / 0.1);
+  --loss: #c62a2f;
+  --loss-soft: rgb(198 42 47 / 0.09);
   --warn: #c93400;
   --warn-soft: rgb(255 149 0 / 0.14);
   --sidebar: rgb(246 246 248 / 0.8);
   --material: rgb(249 249 251 / 0.78);
   --chart-grid: rgb(60 60 67 / 0.08);
   --chart-ref: #aeaeb2;
-  --chart-text: #6e6e73;
+  --chart-text: #6b6b73;
   --shimmer-a: rgb(118 118 128 / 0.08);
   --shimmer-b: rgb(118 118 128 / 0.16);
 
@@ -57,35 +57,35 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #000000;
-    --foreground: #ffffff;
-    --card: #1c1c1e;
-    --card-foreground: #ffffff;
-    --popover: #2c2c2e;
-    --popover-foreground: #ffffff;
-    --primary: #0a84ff;
+    --background: #0b0b0c;
+    --foreground: #f4f4f5;
+    --card: #111113;
+    --card-foreground: #f4f4f5;
+    --popover: #161618;
+    --popover-foreground: #f4f4f5;
+    --primary: #6b8cff;
     --secondary: rgb(118 118 128 / 0.24);
-    --secondary-foreground: #ffffff;
+    --secondary-foreground: #f4f4f5;
     --muted: rgb(118 118 128 / 0.24);
-    --muted-foreground: #98989f;
-    --accent: rgb(10 132 255 / 0.18);
-    --accent-foreground: #4aa3ff;
-    --destructive: #ff453a;
-    --border: #38383a;
-    --separator: rgb(84 84 88 / 0.6);
+    --muted-foreground: #8b8b93;
+    --accent: rgb(107 140 255 / 0.16);
+    --accent-foreground: #6b8cff;
+    --destructive: #f0565b;
+    --border: #232326;
+    --separator: #232326;
     --input: rgb(118 118 128 / 0.24);
-    --ring: rgb(10 132 255 / 0.55);
-    --profit: #30d158;
-    --profit-soft: rgb(48 209 88 / 0.16);
-    --loss: #ff453a;
-    --loss-soft: rgb(255 69 58 / 0.16);
+    --ring: rgb(107 140 255 / 0.55);
+    --profit: #2fbf71;
+    --profit-soft: rgb(47 191 113 / 0.14);
+    --loss: #f0565b;
+    --loss-soft: rgb(240 86 91 / 0.14);
     --warn: #ff9f0a;
     --warn-soft: rgb(255 159 10 / 0.16);
     --sidebar: rgb(22 22 24 / 0.82);
     --material: rgb(28 28 30 / 0.74);
     --chart-grid: rgb(235 235 245 / 0.07);
     --chart-ref: #636366;
-    --chart-text: #98989f;
+    --chart-text: #8b8b93;
     --shimmer-a: rgb(118 118 128 / 0.14);
     --shimmer-b: rgb(118 118 128 / 0.26);
 
@@ -197,8 +197,8 @@
 }
 
 @theme inline {
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", var(--font-mono-face), Menlo, monospace;
+  --font-sans: var(--font-geist), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -264,9 +264,9 @@
     -webkit-user-select: none;
     user-select: none;
   }
-  /* Figures in the system face with tabular digits, the way iOS sets prices, so columns align and live
-     numbers never shift sideways. */
+  /* Figures in Geist Mono with tabular digits, so columns align and live numbers never shift sideways. */
   .num {
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0;
   }

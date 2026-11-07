@@ -175,7 +175,7 @@ export function DirectOptionModal({
               onClick={() => { setUserSide("buy"); setUserQty(null); }}
               className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 font-bold transition-colors ${
                 isBuy
-                  ? "border-profit bg-profit-soft text-profit shadow-sm"
+                  ? "border-profit bg-profit-soft text-profit"
                   : "border-input bg-card text-muted-foreground hover:bg-muted"
               }`}
             >
@@ -186,7 +186,7 @@ export function DirectOptionModal({
               onClick={() => { setUserSide("sell"); setUserQty(null); }}
               className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 font-bold transition-colors ${
                 !isBuy
-                  ? "border-loss bg-loss-soft text-loss shadow-sm"
+                  ? "border-loss bg-loss-soft text-loss"
                   : "border-input bg-card text-muted-foreground hover:bg-muted"
               }`}
             >

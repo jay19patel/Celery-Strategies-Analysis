@@ -8,7 +8,7 @@ import { useSWRConfig } from "swr";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import { ago, dateTime, pnlClass, signed, titleCase, usd } from "@/lib/format";
+import { ago, arrowSigned, dateTime, pnlClass, titleCase, usd } from "@/lib/format";
 import type { AppNotification } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -27,8 +27,8 @@ function kind(n: AppNotification) {
   const pnl = typeof n.data?.pnl === "number" ? n.data.pnl : null;
   if (n.type === "StructureClosed" && pnl !== null) {
     return pnl < 0
-      ? { title: `Position closed ${signed(pnl)}`, icon: TrendingDown, tone: "bg-loss-soft text-loss" }
-      : { ...k, title: `Position closed ${signed(pnl)}` };
+      ? { title: `Position closed ${arrowSigned(pnl)}`, icon: TrendingDown, tone: "bg-loss-soft text-loss" }
+      : { ...k, title: `Position closed ${arrowSigned(pnl)}` };
   }
   return k;
 }
@@ -48,7 +48,7 @@ export function useMarkRead() {
 
 // The event's own fields, labelled and formatted; anything else is shown as it came.
 const FIELDS: Record<string, { label: string; show: (v: unknown) => string; money?: boolean }> = {
-  pnl: { label: "P&L", show: (v) => signed(v as number), money: true },
+  pnl: { label: "P&L", show: (v) => arrowSigned(v as number), money: true },
   broker: { label: "Broker", show: String },
   underlying: { label: "Underlying", show: String },
   strategy: { label: "Strategy", show: (v) => titleCase(String(v)) },

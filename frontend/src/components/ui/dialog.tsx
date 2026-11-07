@@ -28,7 +28,7 @@ function DialogContent({ className, children, ...props }: React.ComponentProps<t
         data-slot="dialog-content"
         className={cn(
           // An iOS sheet rising from the bottom on a phone, with its grabber; a centred card from sm up.
-          "fixed inset-x-0 bottom-0 z-50 mx-auto grid max-h-[92dvh] w-full max-w-lg gap-4 overflow-y-auto overscroll-contain rounded-t-[20px] bg-card p-5 pt-7 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl outline-none max-sm:max-w-none",
+          "fixed inset-x-0 bottom-0 z-50 mx-auto grid max-h-[92dvh] w-full max-w-lg gap-4 overflow-y-auto overscroll-contain rounded-t-[20px] border border-border bg-card p-5 pt-7 pb-[calc(1.25rem+env(safe-area-inset-bottom))] outline-none max-sm:max-w-none",
           "before:absolute before:top-2 before:left-1/2 before:h-[5px] before:w-9 before:-translate-x-1/2 before:rounded-full before:bg-slate-300 sm:before:hidden",
           "sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:mx-0 sm:max-h-[90vh] sm:w-[calc(100%-2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:pt-5 sm:pb-5",
           "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:duration-300 data-[state=closed]:duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]",

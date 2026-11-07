@@ -7,7 +7,7 @@ import { ChevronRight, ChevronUp, Layers } from "lucide-react";
 import { Rolling } from "@/components/shared/rolling";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { hours, pnlClass, signed, usd } from "@/lib/format";
+import { arrowSigned, hours, pnlClass, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
 import type { Account, Accounts, Structure } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -33,7 +33,7 @@ function useBook() {
 }
 
 const Money = ({ v, className }: { v: number | null; className?: string }) => (
-  <span className={cn("num font-semibold", pnlClass(v), className)}>{v === null ? "—" : <Rolling text={signed(v)} />}</span>
+  <span className={cn("num font-semibold", pnlClass(v), className)}>{v === null ? "—" : <Rolling text={arrowSigned(v)} />}</span>
 );
 
 function TradeRow({ s, onNavigate }: { s: Structure; onNavigate?: () => void }) {
@@ -114,7 +114,7 @@ function PhoneBar() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="material fixed inset-x-2 bottom-[calc(50px+env(safe-area-inset-bottom)+8px)] z-40 flex h-14 items-center gap-3 rounded-2xl border border-separator px-3.5 text-left shadow-[0_8px_30px_rgb(0_0_0/0.14)] active:scale-[0.98] lg:hidden"
+        className="material fixed inset-x-2 bottom-[calc(50px+env(safe-area-inset-bottom)+8px)] z-40 flex h-14 items-center gap-3 rounded-2xl border border-separator px-3.5 text-left active:scale-[0.98] lg:hidden"
         style={{ transition: "transform 160ms cubic-bezier(0.23, 1, 0.32, 1)" }}
         aria-label={`${b.list.length} open trades`}
       >

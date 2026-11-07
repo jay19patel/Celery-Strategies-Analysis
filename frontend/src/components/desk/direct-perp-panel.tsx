@@ -192,7 +192,7 @@ export function DirectPerpPanel({
   const isBuy = side === "buy";
 
   return (
-    <Card className="border-border/80 shadow-sm">
+    <Card className="border-border/80">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <div className="space-y-0.5">
           <CardTitle className="text-sm font-bold flex items-center gap-2">
@@ -226,7 +226,7 @@ export function DirectPerpPanel({
             }}
             className={`flex items-center justify-center gap-2 rounded-lg border py-2.5 font-bold transition-colors ${
               isBuy
-                ? "border-profit bg-profit-soft text-profit shadow-sm"
+                ? "border-profit bg-profit-soft text-profit"
                 : "border-input bg-card text-muted-foreground hover:bg-muted"
             }`}
           >
@@ -242,7 +242,7 @@ export function DirectPerpPanel({
             }}
             className={`flex items-center justify-center gap-2 rounded-lg border py-2.5 font-bold transition-colors ${
               !isBuy
-                ? "border-loss bg-loss-soft text-loss shadow-sm"
+                ? "border-loss bg-loss-soft text-loss"
                 : "border-input bg-card text-muted-foreground hover:bg-muted"
             }`}
           >

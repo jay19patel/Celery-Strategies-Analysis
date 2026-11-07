@@ -2,13 +2,16 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Gauge, LineChart, PieChart, RotateCcw, Trophy, Users } from "lucide-react";
+import { Filter, Gauge, LineChart, PieChart, RotateCcw, Trophy, Users, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 import { AccountSection } from "@/components/performance/account-section";
-import { duration } from "@/components/performance/derive";
+import { buildInsights, duration } from "@/components/performance/derive";
+import { EquityByDay } from "@/components/performance/equity-by-day";
 import { EquityCurve } from "@/components/performance/equity-curve";
 import { ExitReasons } from "@/components/performance/exit-reasons";
+import { Insights } from "@/components/performance/insights";
+import { SignalFlow } from "@/components/performance/signal-flow";
 import { StrategySection } from "@/components/performance/strategy-section";
 import { SummaryTable } from "@/components/performance/summary-table";
 import { TradesTable } from "@/components/performance/trades-table";
@@ -20,9 +23,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { num, pct, pnlClass, signed, usd } from "@/lib/format";
+import { arrowSigned, num, pct, pnlClass, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
-import type { Accounts, Broker, SettingsResponse, Stats, Structure } from "@/lib/types";
+import type { Accounts, Broker, EquityPoint, SettingsResponse, Stats, Structure } from "@/lib/types";
 
 export default function PerformancePage() {
   const [broker, setBroker] = useState<Broker>("paper");
@@ -31,6 +34,7 @@ export default function PerformancePage() {
   const accounts = useApi<Accounts>("/portfolio/accounts", { refreshInterval: 15_000 });
   const settings = useApi<SettingsResponse>("/settings");
   const stats = useApi<Stats>(`/portfolio/stats?broker=${broker}`, { refreshInterval: 15_000 });
+  const equity = useApi<EquityPoint[]>(`/portfolio/equity?broker=${broker}`, { refreshInterval: 60_000 });
   const closed = useApi<Structure[]>(`/trading/structures?status=closed&broker=${broker}&limit=1000`, { refreshInterval: 15_000 });
 
   const account = accounts.data?.accounts[broker];
@@ -114,7 +118,7 @@ export default function PerformancePage() {
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
           <Stat
             label="Gross P&L"
-            value={o.gross_pnl !== undefined ? signed(o.gross_pnl, 4) : signed(o.pnl + o.fees, 4)}
+            value={o.gross_pnl !== undefined ? arrowSigned(o.gross_pnl, 4) : arrowSigned(o.pnl + o.fees, 4)}
             valueClass={pnlClass(o.gross_pnl !== undefined ? o.gross_pnl : o.pnl + o.fees)}
             hint="before fees"
           />
@@ -124,13 +128,13 @@ export default function PerformancePage() {
             valueClass={o.fees ? "text-warn" : undefined}
             hint="broker & exchange, closed trades"
           />
-          <Stat label="Net realised" value={signed(o.pnl, 4)} valueClass={pnlClass(o.pnl)} hint="after all fees" />
+          <Stat label="Net realised" value={arrowSigned(o.pnl, 4)} valueClass={pnlClass(o.pnl)} hint="after all fees" />
           <Stat label="Trades" value={num(o.trades, 0)} hint={`${o.wins} won · ${o.losses} lost`} />
           <Stat label="Win rate" value={pct(o.win_rate)} />
           <Stat label="Profit factor" value={num(o.profit_factor)} valueClass={o.profit_factor !== null && o.profit_factor < 1 ? "text-loss" : undefined} />
-          <Stat label="Expectancy" value={signed(o.expectancy, 4)} valueClass={pnlClass(o.expectancy)} hint="per trade" />
-          <Stat label="Avg win" value={signed(o.avg_win, 4)} valueClass="text-profit" hint={o.avg_loss === null ? undefined : `avg loss ${signed(o.avg_loss, 4)}`} />
-          <Stat label="Best trade" value={signed(o.best, 4)} valueClass="text-profit" hint={`worst ${signed(o.worst, 4)}`} />
+          <Stat label="Expectancy" value={arrowSigned(o.expectancy, 4)} valueClass={pnlClass(o.expectancy)} hint="per trade" />
+          <Stat label="Avg win" value={arrowSigned(o.avg_win, 4)} valueClass="text-profit" hint={o.avg_loss === null ? undefined : `avg loss ${arrowSigned(o.avg_loss, 4)}`} />
+          <Stat label="Best trade" value={arrowSigned(o.best, 4)} valueClass="text-profit" hint={`worst ${arrowSigned(o.worst, 4)}`} />
           <Stat
             label="Max drawdown"
             value={start ? pct((100 * o.max_drawdown) / start, 2) : usd(o.max_drawdown, 4)}
@@ -141,6 +145,7 @@ export default function PerformancePage() {
           <Stat label="Sortino" value={num(o.sortino ?? null)} valueClass={o.sortino != null && o.sortino < 0 ? "text-loss" : undefined} hint="downside days only" />
         </div>
       )}
+      {stats.data && <Insights items={buildInsights(stats.data)} />}
 
       <div className="grid gap-5 xl:grid-cols-3">
         <Card className="xl:col-span-2">
@@ -156,6 +161,23 @@ export default function PerformancePage() {
             <CardTitle><PieChart className="size-4 text-slate-400" /> Exit reasons</CardTitle>
           </CardHeader>
           <CardContent><ExitReasons rows={rows} /></CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <Wallet className="size-4 text-slate-400" /> Equity by day <span className="text-xs font-normal text-muted-foreground">at each day&apos;s start, open positions included</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>{equity.data && equity.data.length > 1 ? <EquityByDay rows={equity.data} /> : <Empty title="Fewer than two trading days recorded yet" />}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle><Filter className="size-4 text-slate-400" /> Signal flow <span className="text-xs font-normal text-muted-foreground">from a signal to a profit</span></CardTitle>
+          </CardHeader>
+          <CardContent><SignalFlow broker={broker} /></CardContent>
         </Card>
       </div>
 

@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { dateTime, num, pct, pnlClass, price, signed, titleCase, usd } from "@/lib/format";
+import { arrowSigned, dateTime, num, pct, pnlClass, price, signed, titleCase, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
 import type { Structure } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -45,9 +45,9 @@ function Detail({ s }: { s: Structure }) {
         <Field label="Max loss (margin)">{s.max_loss === null ? "unlimited" : usd(s.max_loss, 4)} ({usd(s.margin, 4)})</Field>
         <Field label="Spot in → out">{`${price(s.entry_spot)} → ${price(s.exit_spot)}`}</Field>
         <Field label="Exit reason">{reasonKind(s.close_reason)}</Field>
-        <Field label="Gross P&L" className={pnlClass(grossPnl(s))}>{signed(grossPnl(s), 4)}</Field>
+        <Field label="Gross P&L" className={pnlClass(grossPnl(s))}>{arrowSigned(grossPnl(s), 4)}</Field>
         <Field label="Fees">{usd(s.fees, 4)}</Field>
-        <Field label="Net P&L" className={pnlClass(s.pnl)}>{signed(s.pnl, 4)}</Field>
+        <Field label="Net P&L" className={pnlClass(s.pnl)}>{arrowSigned(s.pnl, 4)}</Field>
         <Field label="Return on margin" className={pnlClass(s.pnl)}>{returnPct(s) === null ? "—" : pct(returnPct(s), 2)}</Field>
         <Field label="Take profit · stop">{`${s.take_profit_pct}% · ${s.stop_loss_pct}%`}</Field>
         <Field label="Source">{s.source}{s.decision_id ? ` · decision #${s.decision_id}` : ""}</Field>
@@ -119,7 +119,7 @@ function TradeCard({ s, expanded, onToggle }: { s: Structure; expanded: boolean;
         </div>
         <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
           <div className="min-w-0"><div className="text-muted-foreground">Entry</div><Premium value={s.entry_cash} className="text-[11.5px]" /></div>
-          <div className="min-w-0"><div className="text-muted-foreground">Gross</div><span className={cn("num font-medium", pnlClass(grossPnl(s)))}>{signed(grossPnl(s), 4)}</span></div>
+          <div className="min-w-0"><div className="text-muted-foreground">Gross</div><span className={cn("num font-medium", pnlClass(grossPnl(s)))}>{arrowSigned(grossPnl(s), 4)}</span></div>
           <div className="min-w-0"><div className="text-muted-foreground">Fees</div><span className="num">{usd(s.fees, 4)}</span></div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
@@ -213,7 +213,7 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
         </div>
       </CardHeader>
       <div className="flex flex-wrap gap-x-5 gap-y-1 border-b border-slate-100 bg-slate-50/50 px-4 py-2 text-[12px]">
-        <span>Net <b className={cn("num", pnlClass(sum.pnl))}>{signed(sum.pnl, 4)}</b></span>
+        <span>Net <b className={cn("num", pnlClass(sum.pnl))}>{arrowSigned(sum.pnl, 4)}</b></span>
         <span>Win rate <b className="num">{pct(sum.winRate)}</b> <span className="text-muted-foreground">({sum.wins} of {sum.trades})</span></span>
         <span>Fees <b className="num">{usd(sum.fees, 4)}</b></span>
         {filtering && (
@@ -274,7 +274,7 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
                     </TableCell>
                     <TableCell className="num text-right">{s.qty}</TableCell>
                     <TableCell className="text-right"><Premium value={s.entry_cash} /></TableCell>
-                    <TableCell className={cn("num text-right", pnlClass(grossPnl(s)))}>{signed(grossPnl(s), 4)}</TableCell>
+                    <TableCell className={cn("num text-right", pnlClass(grossPnl(s)))}>{arrowSigned(grossPnl(s), 4)}</TableCell>
                     <TableCell className="num text-right text-muted-foreground">{usd(s.fees, 4)}</TableCell>
                     <TableCell className="text-right"><Pnl value={s.pnl} digits={4} /></TableCell>
                     <TableCell className={cn("num text-right", pnlClass(s.pnl))}>{ret === null ? "—" : `${num(ret, 2)}%`}</TableCell>

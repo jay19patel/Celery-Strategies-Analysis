@@ -73,3 +73,10 @@ export function hours(h: number | null | undefined): string {
 export function titleCase(s: string): string {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+/** A P&L with its sign said twice, so colour is never the only cue: "▲ +12.30", "▼ −4.10". */
+export function arrowSigned(v: number | null | undefined, digits = 2): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  if (v === 0) return usd(0, digits);
+  return `${v > 0 ? "▲ +" : "▼ −"}${usd(Math.abs(v), digits)}`;
+}

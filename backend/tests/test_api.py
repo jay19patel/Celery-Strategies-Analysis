@@ -248,3 +248,30 @@ def test_reset_data_needs_the_pin_keeps_settings_and_spares_open_positions(clien
         assert not s.exec(select(Structure)).all() and not s.exec(select(Decision)).all()
     assert client.get("/api/settings").json()["values"]["min_score"] == 70
     assert client.get("/api/portfolio/stats").json()["overall"]["trades"] == 0
+
+
+def test_the_overview_reads_equity_funnel_and_a_per_broker_journal(client: TestClient) -> None:
+    from datetime import datetime
+
+    from app.core.db import session
+    from app.core.models import DayRisk, Decision, SignalLog, Structure
+
+    today = datetime.now().strftime("%Y-%m-%d")  # noqa: DTZ005
+    now = time.time()
+    with session() as s:
+        s.add(DayRisk(broker="paper", day=today, start_equity=1000.0))
+        s.add(DayRisk(broker="delta", day=today, start_equity=50.0))
+        s.add(SignalLog(ts=now, strategy="x", symbol="BTCUSD", interval="15m", bar_time=0, action="open"))
+        s.add(SignalLog(ts=now, strategy="x", symbol="BTCUSD", interval="15m", bar_time=1, action="skip"))
+        s.add(Decision(ts=now, underlying="BTC", action="error"))  # an error is not a signal
+        for i, (broker, status, pnl) in enumerate([("paper", "closed", 5.0), ("paper", "closed", -2.0), ("paper", "failed", None), ("paper", "error", None), ("delta", "closed", 1.0)]):
+            s.add(Structure(id=f"f{i}", broker=broker, underlying="BTC", strategy="iron_condor", source="auto", status=status, expiry=0.0,
+                            qty=1, pnl=pnl, take_profit_pct=50.0, stop_loss_pct=100.0, opened_at=now, closed_at=now if pnl is not None else None))
+        s.commit()
+    login(client)
+    assert client.get("/api/portfolio/equity?broker=paper").json() == [{"broker": "paper", "day": today, "equity": 1000.0}]
+    f = client.get(f"/api/portfolio/funnel?since={now - 60}&broker=paper").json()
+    assert (f["signals"], f["passed"], f["orders"], f["filled"], f["profitable"]) == (2, 1, 4, 2, 1)  # one in error is not filled
+    assert client.get(f"/api/portfolio/funnel?since={now + 60}").json()["orders"] == 0
+    j = client.get("/api/portfolio/journal?broker=delta").json()
+    assert (j["trades"], j["pnl"]) == (1, 1.0)

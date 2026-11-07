@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import { dateTime, hours, price, signed, usd } from "@/lib/format";
+import { arrowSigned, dateTime, hours, num, price, signed, usd } from "@/lib/format";
 import type { Leg, Structure } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -89,7 +89,7 @@ function Progress({ pnl, stop, target }: { pnl: number | null; stop: number | nu
   );
 }
 
-function ExitsDialog({ s, open, onOpenChange }: { s: Structure; open: boolean; onOpenChange: (o: boolean) => void }) {
+export function ExitsDialog({ s, open, onOpenChange }: { s: Structure; open: boolean; onOpenChange: (o: boolean) => void }) {
   const { mutate } = useSWRConfig();
   const [tp, setTp] = useState(String(s.take_profit_pct));
   const [sl, setSl] = useState(String(s.stop_loss_pct));
@@ -134,6 +134,16 @@ function ExitsDialog({ s, open, onOpenChange }: { s: Structure; open: boolean; o
   );
 }
 
+/** Close every held leg now; says how it went. Throws when the backend refuses, so a dialog stays open. */
+export async function closeStructure(s: Structure): Promise<void> {
+  const r = await api<Structure>(`/trading/structures/${s.id}/close`, "POST").catch((e: Error) => {
+    toast.error("Close refused", { description: e.message });
+    throw e;
+  });
+  if (r.status === "closed") toast.success(`Closed ${arrowSigned(r.pnl)}`);
+  else toast.error(`Close did not finish (${r.status})`, { description: r.error });
+}
+
 export function StructureCard({ s }: { s: Structure }) {
   const [editing, setEditing] = useState(false);
   const pnl = s.live?.pnl ?? null;
@@ -141,17 +151,9 @@ export function StructureCard({ s }: { s: Structure }) {
   // A position on the perpetual exits at its strategy's prices, not at a share of a premium: it has
   // no expiry to run out and its take-profit/stop percentages are ignored by the guard.
   const perp = s.instrument === "perp";
-  const close = async () => {
-    const r = await api<Structure>(`/trading/structures/${s.id}/close`, "POST").catch((e: Error) => {
-      toast.error("Close refused", { description: e.message });
-      throw e;
-    });
-    if (r.status === "closed") toast.success(`Closed ${signed(r.pnl)}`);
-    else toast.error(`Close did not finish (${r.status})`, { description: r.error });
-  };
 
   return (
-    <Card className={cn("transition-shadow hover:shadow-sm", s.status === "error" && "border-red-300")}>
+    <Card className={cn(s.status === "error" && "border-red-300")}>
       <CardHeader>
         <CardTitle className="flex-wrap">
           {s.label}{" "}
@@ -177,6 +179,14 @@ export function StructureCard({ s }: { s: Structure }) {
               {s.live?.missing.length ? <div className="text-[11px] text-warn">no quote: {s.live.missing.join(", ")}</div> : null}
             </div>
             <Progress pnl={pnl} stop={s.stop_loss_usd} target={s.take_profit_usd} />
+            {s.greeks && (
+              <div className="num flex flex-wrap gap-x-3 text-[11.5px] text-muted-foreground" title="Of the legs still held, in the underlying's units, from the exchange's greeks">
+                <span>Δ {num(s.greeks.delta, 4)}</span>
+                <span>Γ {num(s.greeks.gamma, 6)}</span>
+                <span>Θ {num(s.greeks.theta, 4)}/day</span>
+                <span>V {num(s.greeks.vega, 4)}</span>
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
             <Tile label="Gross move" hint="at the marks"><Pnl value={costs.gross} digits={4} /></Tile>
@@ -252,13 +262,13 @@ export function StructureCard({ s }: { s: Structure }) {
           {!perp && !s.held_to_settlement && s.take_profit_usd !== null && (
             <KV
               label={`Take profit · ${s.take_profit_pct}% of ${s.kind === "credit" ? "max profit" : "debit"}`}
-              value={<span className="text-profit">{signed(s.take_profit_usd, 4)}{s.exit_prices && <span className="text-muted-foreground"> · option at {price(s.exit_prices.target)}</span>}</span>}
+              value={<span className="text-profit">{arrowSigned(s.take_profit_usd, 4)}{s.exit_prices && <span className="text-muted-foreground"> · option at {price(s.exit_prices.target)}</span>}</span>}
             />
           )}
           {!perp && !s.held_to_settlement && s.stop_loss_usd !== null && (
             <KV
               label={`Stop loss · ${s.stop_loss_pct}% of ${s.kind === "credit" ? "credit" : "debit"}`}
-              value={<span className="text-loss">{signed(s.stop_loss_usd, 4)}{s.exit_prices && <span className="text-muted-foreground"> · option at {price(s.exit_prices.stop)}</span>}</span>}
+              value={<span className="text-loss">{arrowSigned(s.stop_loss_usd, 4)}{s.exit_prices && <span className="text-muted-foreground"> · option at {price(s.exit_prices.stop)}</span>}</span>}
             />
           )}
           <KV label={perp ? "Closes after" : "Expires in"} value={hours(s.hours_left)} />
@@ -290,10 +300,10 @@ export function StructureCard({ s }: { s: Structure }) {
           )}
           <Confirm
             title={`Close ${s.label}?`}
-            description={`Every leg is closed at the live book on ${s.broker} — shorts bought back first. Expected ${signed(pnl)}.`}
+            description={`Every leg is closed at the live book on ${s.broker} — shorts bought back first. Expected ${arrowSigned(pnl)}.`}
             confirmLabel="Close structure"
             destructive
-            onConfirm={close}
+            onConfirm={() => closeStructure(s)}
             trigger={(open) => (
               <Button variant="destructive-outline" size="sm" onClick={open} className="h-10 flex-1 sm:h-8 sm:flex-none">
                 <X /> Close

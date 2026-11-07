@@ -345,7 +345,7 @@ export function TrendlineStructureChart({
                   onClick={() => onIntervalChange(tf)}
                   className={`rounded-md px-2.5 py-0.5 font-mono text-xs font-semibold transition-colors ${
                     interval === tf
-                      ? "bg-background text-foreground shadow-sm"
+                      ? "bg-background text-foreground ring-1 ring-border"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >

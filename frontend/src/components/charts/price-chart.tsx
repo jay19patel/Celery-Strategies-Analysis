@@ -753,7 +753,7 @@ export function PriceChart({
         {/* ====================================================================== */}
         {activeBar && (
           <div
-            className={`absolute top-2.5 left-2.5 z-20 rounded-lg border border-slate-200/90 bg-card/90 backdrop-blur-md shadow-md transition-colors duration-150 select-none text-xs font-mono ${
+            className={`absolute top-2.5 left-2.5 z-20 rounded-lg border border-slate-200/90 bg-card/90 backdrop-blur-md transition-colors duration-150 select-none text-xs font-mono ${
               isLegendCollapsed ? "w-auto px-2.5 py-1.5" : "w-[310px] sm:w-[350px] p-2.5"
             }`}
           >

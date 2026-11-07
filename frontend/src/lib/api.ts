@@ -59,3 +59,9 @@ export function requestId(): string {
     ? crypto.randomUUID().replace(/-/g, "")
     : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
 }
+
+/** The wait before reconnect attempt `n` (0-based): doubling from 1s to 30s, then scaled by
+ *  50-100% so a restarted backend is not hit by every dashboard in the same instant. */
+export function backoff(n: number, random = Math.random): number {
+  return Math.min(1000 * 2 ** n, 30_000) * (0.5 + random() / 2);
+}

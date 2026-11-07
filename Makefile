@@ -15,8 +15,9 @@ install:  ## Install backend and frontend dependencies
 	uv pip install -p .venv/bin/python -e "backend[dev]"
 	cd frontend && npm install
 
-test:  ## Backend tests
+test:  ## Backend and dashboard tests
 	cd backend && ../.venv/bin/pytest
+	cd frontend && npx vitest run
 
 lint:  ## Lint backend and frontend
 	.venv/bin/ruff check backend

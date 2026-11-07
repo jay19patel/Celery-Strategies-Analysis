@@ -264,6 +264,24 @@ class TradingService:
             "fees_paid": round(entry_fees, 6), "exit_fees": None if missing else round(exit_fees, 6),
         }
 
+    def greeks(self, legs: list[Leg]) -> dict[str, float] | None:
+        """Delta, gamma, theta and vega of the legs still held, in the underlying's units: None when
+        any held option has no fresh quote, so a part is never shown as the whole."""
+        out = {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+        for leg in legs:
+            if leg.entry_price is None or leg.exit_price is not None:
+                continue
+            units = leg_sign(leg.side) * leg.size * leg.contract_value
+            if is_perp(leg.symbol):
+                out["delta"] += units
+                continue
+            q = self.feed.quote(leg.symbol)
+            if q is None or None in (q.delta, q.gamma, q.theta, q.vega):
+                return None
+            for k in out:
+                out[k] += units * getattr(q, k)
+        return {k: round(v, 6) for k, v in out.items()}
+
     def view(self, st: Structure, legs: list[Leg]) -> dict[str, Any]:
         tp, sl = exit_thresholds(st)
         live = self.valuation(st, legs) if st.status in HELD else None
@@ -278,6 +296,7 @@ class TradingService:
             "kind": ("long" if legs and legs[0].side == "buy" else "short") if is_directional(st) else ("credit" if st.entry_cash > 0 else "debit"),
             "legs": out_legs,
             "live": live,
+            "greeks": self.greeks(legs) if st.status in HELD else None,
             # A capped credit is held to settlement: it has no take profit or stop to show.
             "take_profit_usd": None if tp is None or held else round(tp, 6),
             "stop_loss_usd": None if sl is None or held else round(sl, 6),
@@ -1004,6 +1023,14 @@ class TradingService:
             fees = [t.fees for t in trades]
             wins, losses = [p for p in pnls if p > 0], [p for p in pnls if p <= 0]
             n = len(pnls)
+            run = peak = drawdown = 0.0
+            days: dict[str, float] = {}
+            for t in trades:  # in close order, as `rows` is
+                run += t.pnl or 0.0
+                peak = max(peak, run)
+                drawdown = max(drawdown, peak - run)
+                day = trading_day(tz, t.closed_at)
+                days[day] = days.get(day, 0.0) + (t.pnl or 0.0)
             return {
                 "trades": n, "wins": len(wins), "losses": len(losses),
                 "win_rate": round(100 * len(wins) / n, 1) if n else None,
@@ -1016,14 +1043,13 @@ class TradingService:
                 "expectancy": round(sum(pnls) / n, 4) if n else None,
                 "best": round(max(pnls), 4) if pnls else None, "worst": round(min(pnls), 4) if pnls else None,
                 "avg_hold_hours": round(sum((t.closed_at or 0) - t.opened_at for t in trades) / n / 3600, 2) if n else None,
-            }
+                "max_drawdown": round(drawdown, 4),
+            } | ratios(list(days.values()))
 
-        curve, total, peak, drawdown = [], 0.0, 0.0, 0.0
+        curve, total = [], 0.0
         daily: dict[str, float] = {}
         for t in rows:
             total += t.pnl or 0.0
-            peak = max(peak, total)
-            drawdown = max(drawdown, peak - total)
             curve.append({"ts": t.closed_at, "pnl": round(total, 4), "trade": round(t.pnl or 0.0, 4), "strategy": t.strategy, "id": t.id})
             day = trading_day(tz, t.closed_at)
             daily[day] = round(daily.get(day, 0.0) + (t.pnl or 0.0), 4)
@@ -1035,7 +1061,7 @@ class TradingService:
             return sorted(({key: k} | summary(v) for k, v in groups.items()), key=lambda g: -g["pnl"])
 
         return {
-            "overall": summary(rows) | {"max_drawdown": round(drawdown, 4)} | ratios(list(daily.values())),
+            "overall": summary(rows),
             "by_score": sorted(grouped("score", score_of), key=lambda g: g["score"]),
             "by_strategy": grouped("strategy"),
             "by_source": grouped("source"),

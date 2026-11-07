@@ -4,7 +4,7 @@ import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 
 
 import { Pnl } from "@/components/shared/money";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ago, hours, num, pct, signed, titleCase, usd } from "@/lib/format";
+import { ago, arrowSigned, hours, num, pct, signed, titleCase, usd } from "@/lib/format";
 import type { Stats, Structure } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -34,7 +34,7 @@ export function StrategySection({ rows, closed, selected, onSelect }: { rows: Ro
               <Tooltip
                 cursor={{ fill: "var(--muted)" }}
                 contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                formatter={(v, _n, item) => [`${signed(Number(v), 4)} net`, (item.payload as { hint: string }).hint]}
+                formatter={(v, _n, item) => [`${arrowSigned(Number(v), 4)} net`, (item.payload as { hint: string }).hint]}
               />
               <Bar dataKey="pnl" radius={3} maxBarSize={24} animationDuration={450} animationEasing="ease-out">
                 {chart.map((c) => (
@@ -55,6 +55,8 @@ export function StrategySection({ rows, closed, selected, onSelect }: { rows: Ro
             <TableHead className="text-right">Avg win · avg loss</TableHead>
             <TableHead className="text-right">Expectancy</TableHead>
             <TableHead className="text-right">Profit factor</TableHead>
+            <TableHead className="text-right">Sharpe</TableHead>
+            <TableHead className="text-right">Max DD</TableHead>
             <TableHead className="text-right">Best · worst</TableHead>
             <TableHead className="text-right">Avg hold</TableHead>
             <TableHead className="text-right">Fees</TableHead>
@@ -79,17 +81,19 @@ export function StrategySection({ rows, closed, selected, onSelect }: { rows: Ro
                 <TableCell className="num text-right">{pct(r.win_rate)}</TableCell>
                 <TableCell className="text-right"><Pnl value={r.pnl} digits={4} /></TableCell>
                 <TableCell className="num text-right">
-                  <div className="text-profit">{r.avg_win === null ? "—" : signed(r.avg_win, 4)}</div>
-                  <div className="text-loss">{r.avg_loss === null ? "—" : signed(r.avg_loss, 4)}</div>
+                  <div className="text-profit">{r.avg_win === null ? "—" : arrowSigned(r.avg_win, 4)}</div>
+                  <div className="text-loss">{r.avg_loss === null ? "—" : arrowSigned(r.avg_loss, 4)}</div>
                 </TableCell>
                 <TableCell className="text-right">
                   <Pnl value={r.expectancy} digits={4} />
                   <div className="text-[10.5px] text-muted-foreground">per trade</div>
                 </TableCell>
                 <TableCell className="num text-right">{num(r.profit_factor)}</TableCell>
+                <TableCell className={cn("num text-right", r.sharpe != null && r.sharpe < 0 && "text-loss")}>{num(r.sharpe ?? null)}</TableCell>
+                <TableCell className={cn("num text-right", r.max_drawdown ? "text-loss" : "text-muted-foreground")}>{r.max_drawdown ? `−${usd(r.max_drawdown, 4)}` : "—"}</TableCell>
                 <TableCell className="num text-right">
-                  <div className="text-profit">{signed(r.best, 4)}</div>
-                  <div className="text-loss">{signed(r.worst, 4)}</div>
+                  <div className="text-profit">{arrowSigned(r.best, 4)}</div>
+                  <div className="text-loss">{arrowSigned(r.worst, 4)}</div>
                 </TableCell>
                 <TableCell className="num text-right text-muted-foreground">{hours(r.avg_hold_hours)}</TableCell>
                 <TableCell className="num text-right text-muted-foreground">{usd(r.fees, 4)}</TableCell>

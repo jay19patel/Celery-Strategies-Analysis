@@ -19,7 +19,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CandidateTable } from "@/components/zerohero/candidates";
 import { CheckList } from "@/components/zerohero/checks";
 import { api } from "@/lib/api";
-import { ago, dateTime, num, pct, price, signed, signedPct, until, usd } from "@/lib/format";
+import { ago, arrowSigned, dateTime, num, pct, price, signedPct, until, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
 import type { ZhDecision, ZhScan, ZhStatus } from "@/lib/types";
 
@@ -338,7 +338,7 @@ export default function ZeroHeroPage() {
                 <KV label="Closed" value={num(record.closed, 0)} />
                 <KV label="Hit rate" value={record.hit_rate_pct === null ? "no closed trades yet" : pct(record.hit_rate_pct, 1)} />
                 <KV label="Premium paid" value={usd(record.premium_paid, 2)} />
-                <KV label="P&L" value={record.pnl === null ? "—" : signed(record.pnl, 2)} />
+                <KV label="P&L" value={record.pnl === null ? "—" : arrowSigned(record.pnl, 2)} />
                 <p className="mt-2 text-[11.5px] leading-relaxed text-muted-foreground">{record.note}</p>
               </>
             ) : (

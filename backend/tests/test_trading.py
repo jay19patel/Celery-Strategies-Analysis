@@ -383,6 +383,19 @@ async def test_results_are_split_by_the_score_they_were_opened_on(env: Any) -> N
     stats = env.trading.stats()
     assert [g["score"] for g in stats["by_score"]] == ["manual"]
     assert {"sharpe", "sortino", "max_drawdown", "profit_factor"} <= set(stats["overall"])
+    assert {"sharpe", "max_drawdown"} <= set(stats["by_strategy"][0])  # the leaderboard ranks on them per strategy
+
+
+async def test_an_open_structure_carries_its_greeks(env: Any) -> None:
+    view = await env.trading.open("paper", strangle(env), QTY, "manual", "req-greeks-1")
+    g = view["greeks"]
+    assert g is not None and set(g) == {"delta", "gamma", "theta", "vega"}
+    assert g["gamma"] < 0 and g["theta"] > 0  # a short strangle: short gamma, collecting decay
+    env.feed.book = {k: replace(q, at=0.0) for k, q in env.feed.book.items()}  # every quote stale
+    assert env.trading.structure(view["id"])["greeks"] is None  # a part is never shown as the whole
+    env.feed.load()
+    closed = await env.trading.close(view["id"], "test")
+    assert closed["greeks"] is None  # nothing held, nothing to show
 
 
 async def test_an_unbounded_sale_is_sized_on_a_stress_move_not_its_stop(env: Any) -> None:

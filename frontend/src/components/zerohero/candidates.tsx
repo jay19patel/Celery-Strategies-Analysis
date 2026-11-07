@@ -10,7 +10,7 @@ import { ChevronDown } from "lucide-react";
 import { CheckList } from "@/components/zerohero/checks";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { num, pct, price, signed, signedPct, usd } from "@/lib/format";
+import { arrowSigned, num, pct, price, signedPct, usd } from "@/lib/format";
 import type { ZhCandidate } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +32,7 @@ function Row({ c, best }: { c: ZhCandidate; best: boolean }) {
         <TableCell className="num text-right font-semibold text-profit">{c.multiple === null ? "—" : `${num(c.multiple, 1)}x`}</TableCell>
         <TableCell className="num text-right text-loss">{c.decay_if_flat === null ? "—" : `${num(c.decay_if_flat, 2)}x`}</TableCell>
         <TableCell className="num text-right">{c.p_touch === null ? "—" : pct(c.p_touch, 0, true)}</TableCell>
-        <TableCell className={cn("num text-right font-semibold", (c.ev ?? 0) > 0 ? "text-profit" : "text-loss")}>{signed(c.ev, 2)}</TableCell>
+        <TableCell className={cn("num text-right font-semibold", (c.ev ?? 0) > 0 ? "text-profit" : "text-loss")}>{arrowSigned(c.ev, 2)}</TableCell>
         <TableCell className="num text-right">{pct(c.spread_pct, 0)}</TableCell>
         <TableCell className="num text-right">{num(c.capacity_lots, 0)}</TableCell>
       </TableRow>
@@ -53,7 +53,7 @@ function Row({ c, best }: { c: ZhCandidate; best: boolean }) {
                 </p>
                 <p>
                   Realised volatility puts that move at <span className="num font-medium text-foreground">{pct(c.p_touch, 1, true)}</span>. Against a{" "}
-                  stop at a share of the debit, that is <span className="num font-medium text-foreground">{signed(c.ev, 2)}</span> expected per unit paid.
+                  stop at a share of the debit, that is <span className="num font-medium text-foreground">{arrowSigned(c.ev, 2)}</span> expected per unit paid.
                 </p>
                 <p className="text-[11.5px]">
                   IV {pct(c.iv, 1, true)} · Δ {num(c.delta, 3)} · Γ {num(c.gamma, 6)} · Θ {num(c.theta, 1)} · OI {num(c.oi, 1)} · vol {num(c.volume, 1)}

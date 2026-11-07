@@ -17,7 +17,7 @@ function SidebarBody() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-14 items-center gap-2.5 px-5">
-        <div className="grid size-8 place-items-center rounded-[9px] bg-gradient-to-b from-[#3395ff] to-[#0071e3] text-white shadow-[0_1px_2px_rgb(0_0_0/0.15)]">
+        <div className="grid size-8 place-items-center rounded-[9px] bg-primary text-white">
           <CandlestickChart className="size-[18px]" />
         </div>
         <div className="leading-tight">

@@ -21,7 +21,7 @@ function SheetContent({ className, children, side = "left", ...props }: React.Co
       <SheetPrimitive.Overlay className="fixed inset-0 z-50 bg-black/35 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
       <SheetPrimitive.Content
         className={cn(
-          "fixed z-50 flex flex-col bg-background shadow-2xl outline-none duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-200",
+          "fixed z-50 flex flex-col border-border bg-background outline-none duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-200",
           SIDES[side],
           className,
         )}

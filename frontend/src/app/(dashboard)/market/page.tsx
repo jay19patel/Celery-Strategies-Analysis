@@ -120,7 +120,7 @@ function SymbolPriceCard({
         </div>
         <div className="relative h-1.5 w-full rounded-full bg-muted">
           <span
-            className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card bg-slate-900 shadow-sm"
+            className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card bg-slate-900"
             style={{ left: `${inRange}%` }}
           />
         </div>
@@ -444,7 +444,7 @@ export default function MarketDeskPage() {
                   onClick={() => setTimezone(tz)}
                   className={`rounded-md px-2 py-0.5 font-mono text-[11px] font-semibold transition-colors ${
                     timezone === tz
-                      ? "bg-background text-foreground shadow-sm"
+                      ? "bg-background text-foreground ring-1 ring-border"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -462,7 +462,7 @@ export default function MarketDeskPage() {
                   onClick={() => setUnderlying(u)}
                   className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
                     underlying === u
-                      ? "bg-background text-foreground shadow-sm"
+                      ? "bg-background text-foreground ring-1 ring-border"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -574,7 +574,7 @@ export default function MarketDeskPage() {
                   onClick={() => setChartInterval(tf)}
                   className={`rounded-md px-2.5 py-0.5 font-mono text-xs font-semibold transition-colors ${
                     chartInterval === tf
-                      ? "bg-background text-foreground shadow-sm"
+                      ? "bg-background text-foreground ring-1 ring-border"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >

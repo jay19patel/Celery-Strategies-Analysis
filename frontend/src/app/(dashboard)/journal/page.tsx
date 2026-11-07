@@ -4,11 +4,12 @@ import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { DayAudit } from "@/components/journal/day-audit";
+import { BrokerTabs, type BrokerFilter } from "@/components/shared/broker-tabs";
 import { PageHeader } from "@/components/shared/page";
 import { LoadError, Loading } from "@/components/shared/states";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { pct, pnlClass, signed, signedPct, usd } from "@/lib/format";
+import { arrowSigned, pct, pnlClass, signedPct, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
 import type { Accounts, JournalMonth } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -43,14 +44,14 @@ function MonthSummary({ m, accounts, label }: { m: JournalMonth; accounts: Accou
   return (
     <div>
       <Card className="grid grid-cols-2 divide-x divide-slate-100 overflow-hidden md:grid-cols-3 xl:grid-cols-6 [&>*]:border-b [&>*]:border-slate-100">
-        <Tile label={`${label} P&L`} value={signed(m.pnl)} className={pnlClass(m.pnl)} hint={`${m.trades} closed · realised only`} />
+        <Tile label={`${label} P&L`} value={arrowSigned(m.pnl)} className={pnlClass(m.pnl)} hint={`${m.trades} closed · realised only`} />
         <Tile label="Win rate" value={m.trades ? pct((100 * m.wins) / m.trades, 0) : "—"} hint={`${m.wins} won · ${m.trades - m.wins} lost`} />
         <Tile label="Days" value={`${active.length} active`} hint={`${green} green · ${red} red`} />
         <Tile
           label="Best · worst day"
-          value={sorted.length ? signed(sorted[0].pnl) : "—"}
+          value={sorted.length ? arrowSigned(sorted[0].pnl) : "—"}
           className={sorted.length ? pnlClass(sorted[0].pnl) : undefined}
-          hint={sorted.length > 1 ? `worst ${signed(sorted[sorted.length - 1].pnl)}` : "one day or none"}
+          hint={sorted.length > 1 ? `worst ${arrowSigned(sorted[sorted.length - 1].pnl)}` : "one day or none"}
         />
         <Tile label="Auto-trader" value={`${opened} opened`} hint={`${decisions} decisions this month`} />
         <Tile
@@ -73,7 +74,8 @@ export default function JournalPage() {
   const todayStr = iso(now.getFullYear(), now.getMonth() + 1, now.getDate());
   const [ym, setYm] = useState({ year: now.getFullYear(), month: now.getMonth() + 1 });
   const [selected, setSelected] = useState<string | null>(null);
-  const { data, error, isLoading } = useApi<JournalMonth>(`/portfolio/journal?year=${ym.year}&month=${ym.month}`, { refreshInterval: 30_000 });
+  const [broker, setBroker] = useState<BrokerFilter>("");
+  const { data, error, isLoading } = useApi<JournalMonth>(`/portfolio/journal?year=${ym.year}&month=${ym.month}&broker=${broker}`, { refreshInterval: 30_000 });
   const { data: accounts } = useApi<Accounts>("/portfolio/accounts");
 
   const shift = (delta: number) => {
@@ -93,18 +95,21 @@ export default function JournalPage() {
         title="Journal"
         description="Tap any day for its full audit: what opened and closed, every order, why the auto-trader stood aside, and what went wrong."
         actions={
-          <div className="flex w-full items-center gap-1 rounded-full bg-card p-1 sm:w-auto">
-            <Button variant="ghost" size="icon-sm" className="rounded-full" onClick={() => shift(-1)} aria-label="Previous month">
-              <ChevronLeft />
-            </Button>
-            <span className="flex-1 text-center text-[15px] font-semibold sm:w-36 sm:flex-none">{label}</span>
-            <Button variant="ghost" size="icon-sm" className="rounded-full" onClick={() => shift(1)} aria-label="Next month">
-              <ChevronRight />
-            </Button>
-            <Button variant="secondary" size="xs" className="ml-1 rounded-full" onClick={() => setYm({ year: now.getFullYear(), month: now.getMonth() + 1 })}>
-              Today
-            </Button>
-          </div>
+          <>
+            <BrokerTabs value={broker} onChange={setBroker} />
+            <div className="flex w-full items-center gap-1 rounded-full bg-card p-1 sm:w-auto">
+              <Button variant="ghost" size="icon-sm" className="rounded-full" onClick={() => shift(-1)} aria-label="Previous month">
+                <ChevronLeft />
+              </Button>
+              <span className="flex-1 text-center text-[15px] font-semibold sm:w-36 sm:flex-none">{label}</span>
+              <Button variant="ghost" size="icon-sm" className="rounded-full" onClick={() => shift(1)} aria-label="Next month">
+                <ChevronRight />
+              </Button>
+              <Button variant="secondary" size="xs" className="ml-1 rounded-full" onClick={() => setYm({ year: now.getFullYear(), month: now.getMonth() + 1 })}>
+                Today
+              </Button>
+            </div>
+          </>
         }
       />
 
@@ -135,7 +140,7 @@ export default function JournalPage() {
                   className={cn("flex min-h-[72px] min-w-0 flex-col overflow-hidden bg-card p-1 text-left transition-colors hover:bg-slate-50 active:bg-slate-100 sm:min-h-[110px] sm:p-2.5", isToday && "bg-blue-50/40")}
                 >
                   <div className="flex items-start justify-between">
-                    <span className={cn("text-xs font-bold text-slate-700", isToday && "grid size-6 place-items-center sm:size-7 rounded-full bg-primary text-white shadow-sm ring-2 ring-blue-200")}>{day}</span>
+                    <span className={cn("text-xs font-bold text-slate-700", isToday && "grid size-6 place-items-center sm:size-7 rounded-full bg-primary text-white ring-2 ring-blue-200")}>{day}</span>
                     {active && <span className="size-1.5 rounded-full bg-primary" />}
                   </div>
                   <div className="flex-1" />
@@ -148,7 +153,7 @@ export default function JournalPage() {
                             d.pnl > 0 ? "bg-profit-soft text-profit" : d.pnl < 0 ? "bg-loss-soft text-loss" : "bg-slate-100 text-slate-500",
                           )}
                         >
-                          {signed(d.pnl)}
+                          {arrowSigned(d.pnl)}
                         </span>
                         <div className="mt-0.5 text-[9.5px] font-medium text-slate-400 sm:text-[10px]">{d.trades}<span className="hidden sm:inline"> {d.trades === 1 ? "trade" : "trades"}</span></div>
                       </>

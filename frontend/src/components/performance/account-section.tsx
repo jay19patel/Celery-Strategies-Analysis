@@ -11,7 +11,7 @@ import { LoadError } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { dateTime, num, pnlClass, signed, signedPct, usd } from "@/lib/format";
+import { arrowSigned, dateTime, num, pnlClass, signedPct, usd } from "@/lib/format";
 import type { Account, Broker, BrokerStatus, SettingsValues, Stats } from "@/lib/types";
 
 function Rule({ icon, title, children }: { icon: ReactNode; title: ReactNode; children: ReactNode }) {
@@ -63,7 +63,7 @@ export function AccountSection({
       <SectionLabel title="Realised" hint="closed trades only, after every fee · open positions are on the Positions page" />
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 2xl:grid-cols-6">
         {start !== null && <Stat label="Starting balance" value={usd(start)} hint={account.currency} />}
-        <Stat label="Net realised P&L" value={signed(realised, 4)} valueClass={pnlClass(realised)} hint="after all fees" />
+        <Stat label="Net realised P&L" value={arrowSigned(realised, 4)} valueClass={pnlClass(realised)} hint="after all fees" />
         {start !== null && (
           <Stat
             label="Realised balance"
@@ -71,8 +71,8 @@ export function AccountSection({
             hint={realised !== null && start ? `${signedPct((100 * realised) / start)} on the start` : undefined}
           />
         )}
-        <Stat label="Realised today" value={signed(today, 4)} valueClass={pnlClass(today)} hint={tz} />
-        <Stat label="Gross realised" value={signed(grossPnl, 4)} valueClass={pnlClass(grossPnl)} hint="before fees" />
+        <Stat label="Realised today" value={arrowSigned(today, 4)} valueClass={pnlClass(today)} hint={tz} />
+        <Stat label="Gross realised" value={arrowSigned(grossPnl, 4)} valueClass={pnlClass(grossPnl)} hint="before fees" />
         <Stat label="Charges paid" value={usd(closedFees, 4)} valueClass={closedFees ? "text-warn" : undefined} hint="on closed trades" />
       </div>
 
@@ -86,9 +86,9 @@ export function AccountSection({
               ["Broker", broker === "paper" ? "Paper (simulated)" : `Delta Exchange (${status?.env ?? "—"})`],
               ["Currency", account.currency],
               ...(start !== null ? [["Starting balance", usd(start)]] : []),
-              ...(grossPnl !== null ? [["Gross realised P&L", signed(grossPnl, 4)]] : []),
+              ...(grossPnl !== null ? [["Gross realised P&L", arrowSigned(grossPnl, 4)]] : []),
               ["Charges on closed trades", usd(closedFees, 4)],
-              ...(realised !== null ? [["Net realised P&L", signed(realised, 4)]] : []),
+              ...(realised !== null ? [["Net realised P&L", arrowSigned(realised, 4)]] : []),
               ...(typeof x.created_at === "number" ? [["Account opened", dateTime(x.created_at)]] : []),
               ["Auto-trading", status?.auto ? "on" : "off"],
             ].map(([k, v]) => (

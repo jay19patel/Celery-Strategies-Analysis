@@ -7,8 +7,8 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import useSWR, { useSWRConfig, type SWRConfiguration } from "swr";
 import { toast } from "sonner";
 
-import { api, fetcher } from "@/lib/api";
-import { signed } from "@/lib/format";
+import { api, backoff, fetcher } from "@/lib/api";
+import { arrowSigned } from "@/lib/format";
 import type { LiveEvent, LivePrice } from "@/lib/types";
 
 type Prices = Record<string, LivePrice>;
@@ -20,6 +20,9 @@ interface Live {
 }
 
 const LiveContext = createContext<Live>({ connected: false, prices: {}, events: [] });
+
+// Prices arrive every 2s: a socket silent this long is dead even if the browser has not noticed.
+const SILENT_MS = 15_000;
 
 // Which cached reads each event makes stale.
 const REFRESH: Record<string, string[]> = {
@@ -58,7 +61,7 @@ function announce(e: LiveEvent) {
       break;
     case "StructureClosed": {
       const pnl = typeof d.pnl === "number" ? d.pnl : null;
-      (pnl !== null && pnl < 0 ? toast.warning : toast.success)(`Closed ${signed(pnl)}`, { description: e.message });
+      (pnl !== null && pnl < 0 ? toast.warning : toast.success)(`Closed ${arrowSigned(pnl)}`, { description: e.message });
       break;
     }
     case "StructureFailed":
@@ -85,12 +88,21 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
   const [prices, setPrices] = useState<Prices>({});
   const [events, setEvents] = useState<LiveEvent[]>([]);
-  const retry = useRef(1000);
+  const attempt = useRef(0);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
+    let heard = 0;
+    let opened = false;
+    const retry = () => {
+      timer = setTimeout(connect, backoff(attempt.current));
+      attempt.current += 1;
+    };
+    const watchdog = setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN && Date.now() - heard > SILENT_MS) ws.close();
+    }, 5_000);
 
     const connect = async () => {
       try {
@@ -99,15 +111,16 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         ws = new WebSocket(url);
       } catch {
         setConnected(false);
-        if (!stopped) {
-          timer = setTimeout(connect, retry.current);
-          retry.current = Math.min(retry.current * 2, 30_000);
-        }
+        if (!stopped) retry();
         return;
       }
       ws.onopen = () => {
         setConnected(true);
-        retry.current = 1000;
+        heard = Date.now();
+        attempt.current = 0;
+        // Events sent while the socket was down are gone: every cached read is refetched once.
+        if (opened) void mutate(() => true);
+        opened = true;
       };
       ws.onmessage = (msg) => {
         let e: LiveEvent;
@@ -116,6 +129,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         } catch {
           return;
         }
+        heard = Date.now();
         if (e.type === "Prices") {
           setPrices((e.data.prices ?? {}) as Prices);
           return;
@@ -128,9 +142,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       };
       ws.onclose = () => {
         setConnected(false);
-        if (stopped) return;
-        timer = setTimeout(connect, retry.current);
-        retry.current = Math.min(retry.current * 2, 30_000);
+        if (!stopped) retry();
       };
       ws.onerror = () => ws?.close();
     };
@@ -138,6 +150,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     return () => {
       stopped = true;
       clearTimeout(timer);
+      clearInterval(watchdog);
       ws?.close();
     };
   }, [mutate]);

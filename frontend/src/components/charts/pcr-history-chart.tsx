@@ -117,7 +117,7 @@ export function PcrHistoryChart({
             onClick={() => setMetric("pcr")}
             className={`rounded-md px-2.5 py-0.5 text-xs font-semibold transition-colors ${
               metric === "pcr"
-                ? "bg-background text-foreground shadow-sm"
+                ? "bg-background text-foreground ring-1 ring-border"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -128,7 +128,7 @@ export function PcrHistoryChart({
             onClick={() => setMetric("iv")}
             className={`rounded-md px-2.5 py-0.5 text-xs font-semibold transition-colors ${
               metric === "iv"
-                ? "bg-background text-foreground shadow-sm"
+                ? "bg-background text-foreground ring-1 ring-border"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -139,7 +139,7 @@ export function PcrHistoryChart({
             onClick={() => setMetric("oi")}
             className={`rounded-md px-2.5 py-0.5 text-xs font-semibold transition-colors ${
               metric === "oi"
-                ? "bg-background text-foreground shadow-sm"
+                ? "bg-background text-foreground ring-1 ring-border"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >

@@ -2,7 +2,7 @@
 
 import { Area, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { dateTime, signed, titleCase, usd } from "@/lib/format";
+import { arrowSigned, dateTime, signed, titleCase, usd } from "@/lib/format";
 import type { Stats } from "@/lib/types";
 
 type Point = Stats["curve"][number];
@@ -20,12 +20,12 @@ function CurveTooltip({ active, payload, asEquity }: { active?: boolean; payload
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
   return (
-    <div className="rounded-xl bg-popover px-3 py-2 text-xs shadow-[0_8px_30px_rgb(0_0_0/0.16)]">
+    <div className="rounded-xl border border-border bg-popover px-3 py-2 text-xs">
       <div className="text-muted-foreground">{dateTime(p.ts)}</div>
-      <div className="num mt-1 font-semibold">{asEquity ? `Equity ${usd(p.value)}` : `Total ${signed(p.value)}`}</div>
+      <div className="num mt-1 font-semibold">{asEquity ? `Equity ${usd(p.value)}` : `Total ${arrowSigned(p.value)}`}</div>
       {p.trade ? (
         <div className="num">
-          {titleCase(p.trade.strategy)}: <span className={p.trade.trade >= 0 ? "text-profit" : "text-loss"}>{signed(p.trade.trade, 4)}</span>
+          {titleCase(p.trade.strategy)}: <span className={p.trade.trade >= 0 ? "text-profit" : "text-loss"}>{arrowSigned(p.trade.trade, 4)}</span>
         </div>
       ) : (
         <div className="text-muted-foreground">{asEquity ? "Account opened" : "Start"}</div>

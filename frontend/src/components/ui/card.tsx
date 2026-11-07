@@ -2,9 +2,9 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-// An inset grouped section: a plain surface on the grouped background, no border and no shadow.
+// A section of the page: a plain surface ruled off by a hairline, no shadow.
 function Card({ className, ...props }: React.ComponentProps<"div">) {
-  return <div data-slot="card" className={cn("min-w-0 rounded-2xl bg-card text-card-foreground", className)} {...props} />;
+  return <div data-slot="card" className={cn("min-w-0 rounded-xl border border-border bg-card text-card-foreground", className)} {...props} />;
 }
 
 function CardHeader({ className, ...props }: React.ComponentProps<"div">) {

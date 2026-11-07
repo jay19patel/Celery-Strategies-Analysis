@@ -2,7 +2,7 @@
 
 import { Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { price, signed } from "@/lib/format";
+import { arrowSigned, price, signed } from "@/lib/format";
 
 /** P&L at expiry across settlement prices: green where it pays, red where it loses. */
 export function PayoffChart({ curve, spot, breakevens, height = 220 }: { curve: { price: number; pnl: number }[]; spot: number; breakevens: number[]; height?: number }) {
@@ -32,7 +32,7 @@ export function PayoffChart({ curve, spot, breakevens, height = 220 }: { curve: 
         <XAxis dataKey="price" type="number" domain={["dataMin", "dataMax"]} tickFormatter={(v) => price(v)} tick={{ fontSize: 11, fill: "var(--chart-text)" }} tickLine={false} axisLine={{ stroke: "var(--border)" }} minTickGap={40} />
         <YAxis tickFormatter={(v) => signed(v, Math.abs(max - min) < 5 ? 2 : 0)} tick={{ fontSize: 11, fill: "var(--chart-text)" }} tickLine={false} axisLine={false} width={56} />
         <Tooltip
-          formatter={(v) => [signed(Number(v), 4), "P&L at expiry"]}
+          formatter={(v) => [arrowSigned(Number(v), 4), "P&L at expiry"]}
           labelFormatter={(v) => `Settles at ${price(Number(v))}`}
           contentStyle={{ backgroundColor: "var(--popover)", color: "var(--popover-foreground)", borderRadius: 12, border: "none", boxShadow: "0 8px 30px rgb(0 0 0 / 0.16)", fontSize: 12 }}
         />

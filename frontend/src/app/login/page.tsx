@@ -31,7 +31,7 @@ function LoginForm() {
   };
 
   return (
-    <form onSubmit={submit} className="w-full max-w-sm space-y-5 rounded-2xl border bg-card p-7 shadow-sm">
+    <form onSubmit={submit} className="w-full max-w-sm space-y-5 rounded-2xl border bg-card p-7">
       <div className="flex items-center gap-3">
         <div className="grid size-10 place-items-center rounded-xl bg-primary text-white">
           <CandlestickChart className="size-5" />

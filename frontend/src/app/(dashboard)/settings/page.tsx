@@ -179,7 +179,7 @@ export default function SettingsPage() {
       )}
 
       {dirty && (
-        <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 material rounded-2xl border border-separator px-4 py-3 shadow-[0_10px_30px_rgb(0_0_0/0.12)]">
+        <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 material rounded-2xl border border-separator px-4 py-3">
           <div className="min-w-0 text-[13px]">
             <span className="font-medium">Unsaved changes: </span>
             <span className="text-muted-foreground">{Object.keys(changes).join(", ")}</span>

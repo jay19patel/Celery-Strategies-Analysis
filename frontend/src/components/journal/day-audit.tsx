@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { pct, price, signed, time, titleCase, usd } from "@/lib/format";
+import { arrowSigned, pct, price, signed, time, titleCase, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
 import type { Decision, EventRow, JournalDay, OrderRecord, Structure } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -66,7 +66,7 @@ function brief(closed: Structure[], orders: OrderRecord[], decisions: Decision[]
   const headline = !closed.length && !decisions.length && !orders.length
     ? "A quiet day: nothing was opened, closed or decided."
     : closed.length
-      ? `${net >= 0 ? "A green" : "A red"} day: ${signed(net)} realised over ${closed.length} closed structure${closed.length === 1 ? "" : "s"} (${wins} won, ${closed.length - wins} lost).`
+      ? `${net >= 0 ? "A green" : "A red"} day: ${arrowSigned(net)} realised over ${closed.length} closed structure${closed.length === 1 ? "" : "s"} (${wins} won, ${closed.length - wins} lost).`
       : `No structure closed; ${orders.length} leg order${orders.length === 1 ? " was" : "s were"} sent and the auto-trader decided ${decisions.length} time${decisions.length === 1 ? "" : "s"}.`;
   const exitText = Object.entries(kinds).map(([k, n]) => `${n} ${k.toLowerCase()}`).join(", ");
   let next = "Nothing needs fixing.";
@@ -176,7 +176,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
                   <Kpi
                     label="Net realised P&L"
                     value={<Pnl value={data.pnl} />}
-                    hint={<span className="flex justify-between gap-2"><span>Gross profit <b className="text-profit">{signed(grossProfit)}</b></span><span>loss <b className="text-loss">{signed(grossLoss)}</b></span></span>}
+                    hint={<span className="flex justify-between gap-2"><span>Gross profit <b className="text-profit">{arrowSigned(grossProfit)}</b></span><span>loss <b className="text-loss">{arrowSigned(grossLoss)}</b></span></span>}
                   />
                   <Kpi label="Win rate" value={closed.length ? pct((100 * wins) / closed.length, 0) : "—"} hint={`${wins} wins / ${closed.length - wins} losses (${closed.length} closed)`} />
                   <Kpi

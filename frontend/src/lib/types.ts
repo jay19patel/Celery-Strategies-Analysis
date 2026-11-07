@@ -306,6 +306,8 @@ export interface Structure {
     exit_fees?: number | null;
   } | null;
   orders?: OrderRecord[];
+  /** of the legs still held, in the underlying's units; null when a held option has no fresh quote */
+  greeks?: { delta: number; gamma: number; theta: number; vega: number } | null;
 }
 
 export interface AppNotification {
@@ -378,6 +380,27 @@ export interface Summary {
   best: number | null;
   worst: number | null;
   avg_hold_hours: number | null;
+  max_drawdown?: number;
+  sharpe?: number | null;
+  sortino?: number | null;
+}
+
+/** a broker's equity at the start of a trading day */
+export interface EquityPoint {
+  broker: Broker;
+  day: string;
+  equity: number;
+}
+
+/** from what the rules said to what paid, in [since, until) */
+export interface Funnel {
+  since: number;
+  until: number;
+  signals: number;
+  passed: number;
+  orders: number;
+  filled: number;
+  profitable: number;
 }
 
 export interface Stats {

@@ -116,7 +116,7 @@ export function OrderPanel({ preview, brokers, onQty }: { preview: Preview; brok
         }
         trigger={(open) => (
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
-            <Button onClick={open} disabled={!!blocked || preview.plan.legs.length === 0} className="w-full sm:w-auto h-10 text-[13.5px] font-semibold active:scale-95 shadow-sm">
+            <Button onClick={open} disabled={!!blocked || preview.plan.legs.length === 0} className="w-full sm:w-auto h-10 text-[13.5px] font-semibold active:scale-95">
               <Send className="size-4" /> Place {preview.qty} lot{preview.qty > 1 ? "s" : ""}
             </Button>
             {blocked && <Badge variant="warn" className="w-fit">{blocked}</Badge>}

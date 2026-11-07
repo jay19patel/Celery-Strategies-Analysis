@@ -1,11 +1,11 @@
 import { Rolling } from "@/components/shared/rolling";
-import { pnlClass, signed, usd } from "@/lib/format";
+import { arrowSigned, pnlClass, usd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /** A P&L figure: signed and coloured. */
 export function Pnl({ value, digits = 2, className }: { value: number | null | undefined; digits?: number; className?: string }) {
   return <span className={cn("num font-semibold", pnlClass(value), className)}>
-      <Rolling text={signed(value, digits)} />
+      <Rolling text={arrowSigned(value, digits)} />
     </span>;
 }
 
