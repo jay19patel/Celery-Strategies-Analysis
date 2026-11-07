@@ -93,7 +93,9 @@ Enforced by tests (`backend/tests`). Breaking one should fail the build.
    no stop, take profit or time exit: its worst case is its wings and it was sized on that. On Delta a
    perpetual's stop is also left with the exchange at entry; if it cannot be placed the position is closed.
 8. **Absence over staleness.** A perpetual price older than 30s or an option quote older than 120s
-   is no price.
+   is no price; nor is a pulled book — an option side further from its mark than 60% of it and 0.05%
+   of spot (`options.fair_side`), a perpetual side 2% from its mark. A strategy stopped out on an
+   underlying is not re-entered there the same trading day, options and perpetuals alike.
 9. **Secrets stay in the process.** No endpoint returns a key, secret or token; `Settings.public()`
    masks them; `SettingsChanged` carries field names only; LLM keys never enter the database.
 10. **Private by default.** Every `/api` route and `/ws` needs the PIN session unless listed in

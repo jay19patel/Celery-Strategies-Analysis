@@ -357,3 +357,26 @@ async def test_a_stop_that_just_filled_is_not_moved(perp: Any, exchange: Exchang
     perp.feed.set_perp(up, bid=up - 0.5, ask=up + 0.5)
     await perp.trading.trail(st, legs)
     assert len(exchange.stops) == 1 and exchange.cancelled == []
+
+
+def test_a_pulled_perpetual_book_is_no_price() -> None:
+    """The ETH perpetual has traded at 0.05: a close priced off an emptied book would sell there."""
+    from app.market.feed import parse_perp
+
+    msg = {"symbol": "ETHUSD", "mark_price": "2240", "quotes": {"best_bid": "0.05", "best_ask": "2240.5"}}
+    q = parse_perp(msg, time.time())
+    assert q is not None and q.stats["bid"] is None and q.stats["ask"] == 2240.5
+
+
+async def test_a_strategy_stopped_out_today_is_not_re_entered_on_that_symbol(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """4 Nov: the 9/15 cross on BTC was stopped at 21:40 and bought back fifteen minutes later."""
+    import app.trading.runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "REGISTRY", {"again": Always("again", 3.0)})
+    s = perp.settings().model_copy(update={"directional_strategies": ["again"]})
+    first = await perp.trading.open_directional("paper", "BTC", "buy", 1, 79_500, 82_000, "again", "auto", "req-again-1", "")
+    await perp.trading.close(first["id"], "stop loss: mark 79,500.00 reached the strategy's stop 79,500.00")
+    runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)
+    assert await runner._symbol("BTC", s) == "BTCUSD: no signal"
+    assert not perp.trading.structures("open")
+    assert "stopped out on BTCUSD earlier today" in runner.latest[("again", "BTCUSD")]["reason"]

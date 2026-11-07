@@ -46,6 +46,7 @@ SERIES = {"15m": 365, "1m": 30}  # interval -> days kept
 SERIES_SECONDS = {"15m": 900, "1m": 60}
 MAX_JUMP = 0.25  # a bar whose body is 25% from the last good close is a bad print, not a market
 MAX_WICK = {"1m": 0.05, "15m": 0.10}  # a wick this far beyond its own body is trimmed to it
+PERP_PULLED = 0.02  # a perpetual bid or ask this far from the mark is no price (`parse_perp`)
 BOOK_EVERY = 5.0  # seconds between reads of one symbol's order book
 
 
@@ -98,6 +99,9 @@ def parse_perp(msg: dict[str, Any], now: float) -> PerpQuote | None:
     if not msg.get("symbol") or not mark:
         return None
     quotes = msg.get("quotes") or {}
+    # A perpetual's real touch sits hundredths of a percent from the mark; one `PERP_PULLED` away is
+    # an emptied book (ETH's has traded at 0.05), and a close priced off it would sell at that.
+    near = lambda v: v if v is not None and abs(v / mark - 1) <= PERP_PULLED else None  # noqa: E731
     return PerpQuote(
         symbol=msg["symbol"], mark=mark, index=_f(msg.get("spot_price")), at=now,
         stats={
@@ -105,7 +109,7 @@ def parse_perp(msg: dict[str, Any], now: float) -> PerpQuote | None:
             "change_24h_pct": _f(msg.get("mark_change_24h")) or _f(msg.get("ltp_change_24h")),
             "volume_24h": _f(msg.get("volume")), "turnover_24h_usd": _f(msg.get("turnover_usd")),
             "oi_usd": _f(msg.get("oi_value_usd")), "funding_rate_pct": _f(msg.get("funding_rate")),
-            "bid": _f(quotes.get("best_bid")), "ask": _f(quotes.get("best_ask")),
+            "bid": near(_f(quotes.get("best_bid"))), "ask": near(_f(quotes.get("best_ask"))),
         },
     )
 

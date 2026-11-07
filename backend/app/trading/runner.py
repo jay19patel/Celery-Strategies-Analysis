@@ -27,12 +27,13 @@ from app.analysis import resample
 from app.analysis.service import MarketDesk, candles
 from app.core.db import session
 from app.core.events import EventHub
-from app.core.models import SignalLog
+from app.core.models import SignalLog, Structure
 from app.errors import BrokerError, Refused
 from app.market.options import PERPETUALS
 from app.settings import Settings
 from app.strategies import REGISTRY
 from app.strategies.base import Context, Decision, net_rr
+from app.trading.risk import day_start, trading_day
 from app.trading.service import TradingService
 
 log = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ class StrategyRunner:
         now = time.time()
         frames: dict[str, list[dict[str, Any]]] = {}
         fired: list[tuple[str, Decision, int]] = []
+        stopped = self._stopped_today(underlying, day_start(s.day_timezone, trading_day(s.day_timezone)))
         for name in s.directional_strategies:
             if not s.strategy_on(name, underlying):
                 continue  # enabled, but not for this underlying
@@ -92,6 +94,9 @@ class StrategyRunner:
                 log.exception("strategy_failed strategy=%s symbol=%s", name, symbol)
                 self._readout(name, symbol, bar_time, None, f"error: {type(exc).__name__}: {exc}")
                 self._log(name, symbol, strategy.interval, bar_time, Decision(None, str(exc)[:500]), "error")
+                continue
+            if decision.side and name in stopped:
+                self._readout(name, symbol, bar_time, decision, f"{decision.reason} — not taken: stopped out on {symbol} earlier today")
                 continue
             if decision.side and (against := await self._against_bias(underlying, decision.side)):
                 self._readout(name, symbol, bar_time, decision, f"{decision.reason} — {against}")
@@ -132,6 +137,18 @@ class StrategyRunner:
             bias=await self.market.bias(underlying) if strategy.wants_bias else {},
             cost_pct=2 * rate.taker * 100 + spread + self._funding_pct(underlying),
         )
+
+    @staticmethod
+    def _stopped_today(underlying: str, since: float) -> set[str]:
+        """The strategies stopped out on this underlying's perpetual since the day began. The same
+        signal a bar later buys the same idea back into the same market: the 9/15 cross on BTC was
+        stopped at 21:40 on 4 Nov and re-entered fifteen minutes later, into a second stop."""
+        with session() as db:
+            rows = db.exec(select(Structure.strategy, Structure.close_reason).where(
+                Structure.underlying == underlying, Structure.source == "auto", col(Structure.stop_price).is_not(None),
+                col(Structure.closed_at) >= since,
+            )).all()
+        return {strategy for strategy, reason in rows if reason.startswith("stop loss")}
 
     async def _against_bias(self, underlying: str, side: str) -> str:
         """Why a signal is refused for fighting a strong day bias, or "". Every strategy passes this,
