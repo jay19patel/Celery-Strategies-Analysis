@@ -190,3 +190,15 @@ async def test_an_auto_trade_is_reported_under_the_score_it_was_opened_on(env: A
     lo = min(score // 10 * 10, 90)
     [bucket] = env.trading.stats()["by_score"]
     assert bucket["score"] == f"{lo}-{lo + 9}" and bucket["trades"] == 1
+
+
+async def test_a_strategy_stopped_out_today_is_not_bought_again_on_that_underlying(env: Any) -> None:
+    """7 Nov: the ETH long straddle was stopped and re-bought nine times in one morning."""
+    auto = make(env, max_per_underlying=5)
+    first = await auto.decide("BTC", ["paper"])
+    assert first["action"] == "open", first["reason"]
+    await env.trading.close(first["orders"]["paper"]["structure_id"], "stop loss: -9.9 reached 50% stop (held 3 checks)")
+    again = await auto.decide("BTC", ["paper"])
+    refused = next(c for c in again["candidates"] if c["strategy"] == first["strategy"])
+    assert "stopped out" in refused["status"]
+    assert again["strategy"] != first["strategy"]  # another idea may still trade

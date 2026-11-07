@@ -142,6 +142,17 @@ class AutoTrader:
             ).all()
         return any(not is_directional(st) for st in rows)
 
+    @staticmethod
+    def _stopped_today(underlying: str, since: float) -> set[str]:
+        """The strategies an auto structure on this underlying was stopped out of since the day began.
+        Re-entering at once buys the same idea into the same market: on 7 Nov the ETH long straddle
+        was stopped and re-bought nine times in a morning, each one a fresh loss."""
+        with session() as db:
+            rows = db.exec(select(Structure.strategy, Structure.close_reason).where(
+                Structure.underlying == underlying, Structure.source == "auto", col(Structure.closed_at) >= since,
+            )).all()
+        return {strategy for strategy, reason in rows if reason.startswith("stop loss")}
+
     async def decide(self, underlying: str, brokers: list[str]) -> dict[str, Any]:
         s: Settings = self.settings()
         dec = Decision(ts=time.time(), underlying=underlying, action="skip")
@@ -190,10 +201,14 @@ class AutoTrader:
 
         event = s.event_between(time.time(), expiry)  # a seller is not paid enough to hold through one
         considered, passing, plans = [], [], {}
+        stopped = self._stopped_today(underlying, day_start(s.day_timezone, trading_day(s.day_timezone)))
         for key in s.auto_strategies:
             score = regime["scores"][key]
             entry: dict[str, Any] = {"strategy": key, "label": CATALOG[key].label, "score": score["score"], "reasons": score["reasons"]}
             considered.append(entry)
+            if key in stopped:
+                entry["status"] = "stopped out on this underlying earlier today: not re-entered until tomorrow"
+                continue
             if event and CATALOG[key].premium == "credit":
                 entry["status"] = f"scheduled event at {event} UTC before expiry"
                 continue

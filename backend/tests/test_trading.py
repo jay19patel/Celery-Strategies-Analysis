@@ -444,3 +444,34 @@ async def test_each_side_is_judged_on_the_realised_volatility_least_kind_to_it(e
     monkeypatch.setattr(env.desk, "realised", lambda u: {"reference": 0.05, "floor": 0.90})  # the numbers each would pick
     assert edge(await env.desk.assess(env.desk.plan("BTC", "long_straddle"), 1))
     assert edge(await env.desk.assess(env.desk.plan("BTC", "iron_condor"), 1))
+
+
+def test_a_pulled_market_is_no_price_but_a_far_out_contracts_ticks_are() -> None:
+    """The 7 Nov ETH book: a token 0.01 bid against a 52.5 ask on an option marked at 15."""
+    from app.market.options import fair_side, parse_ticker
+
+    assert fair_side(0.01, 14.97, 2_246.0) is None and fair_side(52.5, 14.97, 2_246.0) is None
+    assert fair_side(11.8, 12.7, 2_241.0) == 11.8  # an ordinary bid near its mark
+    assert fair_side(0.01, 0.03, 2_241.0) == 0.01  # a far out-of-the-money contract's honest few ticks
+    q = parse_ticker({"symbol": "C-ETH-2240-081126", "mark_price": "14.97", "spot_price": "2246",
+                      "quotes": {"best_bid": "0.01", "best_ask": "52.5"}, "contract_value": 0.01})
+    assert q is not None and q.bid is None and q.ask is None and q.mark == 14.97
+
+
+async def test_a_long_straddle_is_not_sold_into_a_pulled_book(env: Any) -> None:
+    """Valued at a 0.01 bid it looked like a 99% loss, breached its stop and was sold for 0.01. A pulled
+    book is no price: the guard waits, and values it again when the quotes come back."""
+    guard = Guard(env.trading, env.settings, env.hub)
+    env.configure(max_spread_pct=100)
+    view = await env.trading.open("paper", env.desk.plan("BTC", "long_straddle"), QTY, "manual", "req-pulled-1")
+    spot = env.feed.spot("BTC")
+    for leg in view["legs"]:
+        q = env.feed.quote(leg["symbol"])
+        env.feed.handle({"type": "v2/ticker", "symbol": leg["symbol"], "mark_price": str(q.mark), "spot_price": str(spot),
+                         "quotes": {"best_bid": "0.01", "best_ask": str(q.mark * 4)}, "contract_value": q.contract_value})
+    for _ in range(env.settings().stop_confirm_checks + 2):
+        await guard.check_structures()
+    held = env.trading.structure(view["id"])
+    debit = -view["entry_cash"]
+    assert held["status"] == "open"  # not stopped out on a quote nobody would trade at
+    assert held["live"]["pnl"] > -0.2 * debit  # valued near its marks, not at a 99% "loss"

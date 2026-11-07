@@ -15,6 +15,7 @@ YEAR_HOURS = 365 * 24
 PERPETUALS = {"BTC": "BTCUSD", "ETH": "ETHUSD", "XAUT": "XAUTUSD"}
 UNDERLYING_OF = {perp: u for u, perp in PERPETUALS.items()}
 PERP_SLIPPAGE = 0.0005  # applied to a perpetual's mark when a side of its book is empty
+PULLED, PULLED_SPOT = 0.6, 0.0005  # a book side this far from the mark is a pulled market (`fair_side`)
 CHAIN_WIDTH = 0.15  # strikes within ±15% of spot are sent to the dashboard
 CHAIN_EXPIRIES = 4  # nearest expiries sent with their chain in a summary
 
@@ -76,6 +77,19 @@ def parse_symbol(symbol: str) -> tuple[str, str, float, float] | None:
     return ("call" if parts[0] == "C" else "put"), parts[1], strike, day.timestamp()
 
 
+def fair_side(price: float | None, mark: float | None, spot: float | None) -> float | None:
+    """A side of the book, or None when it is a pulled market rather than a price.
+
+    Delta's ETH market maker steps away for minutes at a time, leaving a token 0.01 bid against a
+    52.5 ask on an option marked at 15. Read as a bid, that is a 99% loss: the guard stopped out
+    straddles worth 23 on it and sold them for 0.01, nine times in a morning. A side further from
+    the mark than `PULLED` of the mark AND `PULLED_SPOT` of spot is no price — the second floor keeps
+    the honest 0.01 / 0.05 of a far out-of-the-money contract, whose whole value is a few ticks."""
+    if price is None or not mark or mark <= 0:
+        return price
+    return price if abs(price - mark) <= max(PULLED * mark, PULLED_SPOT * (spot or 0.0)) else None
+
+
 def parse_ticker(msg: dict[str, Any], now: float | None = None) -> OptionQuote | None:
     """One option ticker, from the WebSocket or REST /v2/tickers (the same shape)."""
     parsed = parse_symbol(msg.get("symbol", ""))
@@ -83,16 +97,17 @@ def parse_ticker(msg: dict[str, Any], now: float | None = None) -> OptionQuote |
         return None
     kind, underlying, strike, expiry = parsed
     quotes, greeks = msg.get("quotes") or {}, msg.get("greeks") or {}
-    bid, ask = _f(quotes.get("best_bid")), _f(quotes.get("best_ask"))
+    mark, spot = _f(msg.get("mark_price")), _f(msg.get("spot_price")) or _f(greeks.get("spot"))
+    bid, ask = fair_side(_f(quotes.get("best_bid")), mark, spot), fair_side(_f(quotes.get("best_ask")), mark, spot)
     return OptionQuote(
         symbol=msg["symbol"], underlying=underlying, kind=kind, strike=strike, expiry=expiry,
-        mark=_f(msg.get("mark_price")), bid=bid if bid else None, ask=ask if ask else None,
+        mark=mark, bid=bid if bid else None, ask=ask if ask else None,
         bid_size=_f(quotes.get("bid_size")), ask_size=_f(quotes.get("ask_size")),
         iv=_f(quotes.get("mark_iv")) or _f(msg.get("mark_vol")),
         delta=_f(greeks.get("delta")), gamma=_f(greeks.get("gamma")), theta=_f(greeks.get("theta")), vega=_f(greeks.get("vega")),
         oi=_f(msg.get("oi")) or 0.0, oi_usd=_f(msg.get("oi_value_usd")) or 0.0,
         volume=_f(msg.get("volume")) or 0.0, turnover_usd=_f(msg.get("turnover_usd")) or 0.0,
-        spot=_f(msg.get("spot_price")) or _f(greeks.get("spot")),
+        spot=spot,
         contract_value=_f(msg.get("contract_value")) or (0.01 if underlying == "ETH" else 0.001),
         at=time.time() if now is None else now,
     )
