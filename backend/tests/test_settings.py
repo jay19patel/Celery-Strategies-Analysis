@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.errors import SettingsError
-from app.settings import LIVE_CONFIRM_PHRASE, STRATEGY_KEYS, UNDEFINED_RISK, Settings, apply_changes, from_stored
+from app.settings import LIVE_CONFIRM_PHRASE, STRATEGY_KEYS, Settings, apply_changes, from_stored
 from app.strategies import REGISTRY
 
 
@@ -13,9 +13,7 @@ def test_defaults_are_paper_only_and_delta_on_demo() -> None:
     s = Settings()
     assert s.active_brokers == ["paper"]
     assert s.delta_env == "demo" and not s.auto_delta and not s.is_real_money
-    # Every defined-risk structure is enabled; the two whose loss is not bounded are opt-in.
-    assert sorted(s.auto_strategies) == sorted(k for k in STRATEGY_KEYS if k not in UNDEFINED_RISK)
-    assert not set(UNDEFINED_RISK) & set(s.auto_strategies)
+    assert sorted(s.auto_strategies) == sorted(STRATEGY_KEYS)  # every structure on, by the owner's choice
     assert s.max_spread_pct <= 15  # a wing quoted wider than this gives the credit back to the book
     assert set(s.directional_strategies) == set(REGISTRY)  # every strategy on
 

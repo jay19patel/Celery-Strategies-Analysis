@@ -15,7 +15,7 @@ from app.core import logstore
 from app.core.db import session
 from app.core.models import Bar, EventLog
 from app.market.delta import Candle
-from app.market.feed import MarketFeed, clean_candles
+from app.market.feed import MarketFeed, clean_candles, fit_to_mark
 
 
 def bar(t: int, o: float, h: float, lo: float, c: float) -> Candle:
@@ -58,6 +58,31 @@ async def test_the_collector_judges_new_bars_against_the_store_and_start_up_clea
     assert await feed._store("ETHUSD", "15m", now - 3_600, now) == 1  # judged against 2,084: the 99 never lands
     assert [b["close"] for b in feed.bars("ETHUSD", 100)][-2:] == [2_084, 2_085]
     assert MarketFeed.clean_stored() == {"dropped": 0, "trimmed": 0}  # idempotent
+
+
+def test_a_traded_bar_is_held_to_its_mark_range() -> None:
+    """Stored 7 Nov: ETH 15m highs of exactly 2,400 in a 2,245 market, and one close at 2,331.7, all
+    revised out of Delta's history hours later. Its mark bars never left 2,239-2,248. A real bar a
+    little outside its mark range is kept; a bar with no mark bar is left alone."""
+    junk = [bar(0, 2_243.0, 2_331.7, 2_243.0, 2_331.7), bar(900, 2_331.7, 2_400.0, 2_244.55, 2_249.55), bar(1800, 2_245, 2_252, 2_240, 2_250), bar(2700, 2_250, 2_400, 2_250, 2_251)]
+    marks = [bar(0, 2_242.3, 2_245.7, 2_242.0, 2_243.9), bar(900, 2_243.9, 2_245.9, 2_243.8, 2_245.7), bar(1800, 2_245, 2_249, 2_241, 2_249)]
+    out = fit_to_mark(junk, marks)
+    assert max(c.high for c in out[:2]) < 2_245.9 * 1.016 and out[0].close < 2_281
+    assert out[2] == junk[2] and out[3] == junk[3]
+
+
+async def test_the_collector_fits_new_bars_to_the_mark() -> None:
+    class Rest:
+        async def candles(self, symbol: str, interval: str, start: int, end: int) -> list[Candle]:
+            if symbol.startswith("MARK:"):
+                return [bar(start, 2_242.0, 2_246.0, 2_240.0, 2_244.0)]
+            return [bar(start, 2_243.0, 2_400.0, 2_243.0, 2_245.0)]
+
+    feed = MarketFeed("http://stub", "ws://stub", ["ETH"])
+    feed.rest = Rest()  # type: ignore[assignment]
+    now = int(time.time()) // 900 * 900
+    assert await feed._store("ETHUSD", "15m", now - 900, now) == 1
+    assert feed.bars("ETHUSD", 10)[-1]["high"] < 2_246.0 * 1.016
 
 
 def _logged() -> list[EventLog]:

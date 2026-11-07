@@ -121,7 +121,6 @@ def test_a_falling_market_scores_the_sold_call_and_the_rising_one_the_sold_put()
     """Sell the side the market is moving away from: one OTM leg at the target delta, scored on the
     trend, and like any seller it still has to be paid for the volatility it carries."""
     from app.options import regime
-    from app.settings import UNDEFINED_RISK
 
     plan = build("short_call", load_quotes(), SPOT, 0.18, 2.0)
     assert plan is not None and [(leg.kind, leg.side) for leg in plan.legs] == [("call", "sell")]
@@ -129,15 +128,50 @@ def test_a_falling_market_scores_the_sold_call_and_the_rising_one_the_sold_put()
     put = build("short_put", load_quotes(), SPOT, 0.18, 2.0)
     assert put is not None and put.legs[0].kind == "put" and put.legs[0].strike < SPOT
 
-    m = {"atm_iv": 0.45, "vol_premium": 0.04, "rv_ratio": 1.0, "max_pain_distance_pct": 5.0, "implied_move_pct": 2.0}
+    m = {"atm_iv": 0.45, "vol_premium": 0.04, "vol_premium_floor": 0.10, "rv_ratio": 1.0, "max_pain_distance_pct": 5.0, "implied_move_pct": 2.0}
     falling = regime.score(m | {}, -0.6, "trending down")
     rising = regime.score(m | {}, 0.6, "trending up")
     assert falling["short_call"]["score"] > falling["short_put"]["score"]
     assert rising["short_put"]["score"] > rising["short_call"]["score"]
-    assert {"short_call", "short_put"} <= set(UNDEFINED_RISK)  # off by default, never on real money
 
     s = Settings(max_spread_pct=100)
     paid = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.10)
     underpaid = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.60)
     assert paid["ok"] and not underpaid["ok"]  # selling calls the market moves through is refused
     assert not any(c["name"] == "credit / width" for c in paid["checks"])  # no wing, no width
+
+
+def test_a_straddle_buyer_is_scored_on_the_lowest_realised_reading_not_the_highest() -> None:
+    """IV 29.5% against realised 25% (7d) and 250% (one day's range): the seller is judged on the 250,
+    the buyer on the 25. Read the other way, one wild day made the straddle look 220 vol points cheap
+    and it topped every ETH decision."""
+    from app.options import regime
+
+    bars = [{"time": i * 900, "open": 2_000.0, "high": 2_001.0, "low": 1_999.0, "close": 2_000.0 * (1.0008 if i % 2 else 1.0)} for i in range(700)]
+    bars[-40]["high"] = 2_400.0  # one junk wick in the last day
+    m = regime.measure(bars, 2_000.0, {"atm_iv": 0.295})
+    assert m["rv_range_24h"] > 1.0 > m["rv_7d"]
+    scores = regime.score(m, 0.0, "range")
+    assert scores["long_straddle"]["score"] < 50  # IV above the quiet reading: no discount to buy
+    assert any("premium" in r for r in scores["long_straddle"]["reasons"])
+
+
+def test_the_har_forecast_leans_a_quiet_day_back_towards_the_month() -> None:
+    """Volatility clusters and mean-reverts: after a month at ~60% and one quiet day, tomorrow is
+    forecast well above the quiet day — which is why a seller is judged against it too."""
+    import math
+    import random
+
+    from app.market.indicators import har_forecast, realised_vol
+
+    rng = random.Random(7)
+    bars, price = [], 2_000.0
+    for i in range(96 * 120):
+        quiet = i >= 96 * 119
+        price *= math.exp(rng.gauss(0, (0.10 if quiet else 0.60) / math.sqrt(365 * 96)))
+        bars.append({"time": i * 900, "close": price})
+    last_day = realised_vol([b["close"] for b in bars[-97:]], 0.25)
+    forecast = har_forecast(bars, 0.25)
+    assert last_day is not None and forecast is not None
+    assert last_day < 0.2 < forecast < 0.8
+    assert har_forecast(bars[: 96 * 30], 0.25) is None  # a month is too little to fit on

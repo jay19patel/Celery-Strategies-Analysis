@@ -13,6 +13,7 @@ from app.settings import Settings
 # Delta India's option fee: a rate on the underlying notional, capped at a share of the premium.
 # The product spec carries the real figures; these are used only when it could not be read.
 DEFAULT_FEE = (0.0005, 0.10)
+GST = 0.18  # India's GST, charged on every exchange fee on top of it
 # The move an unbounded structure is sized for: this many of the expected moves to expiry. A stop
 # is a hope on a gap, so the worst case is read here instead of at the stop.
 STRESS_MOVES = 3.0
@@ -20,8 +21,15 @@ STRESS_MOVES = 3.0
 
 @dataclass(frozen=True)
 class FeeRate:
+    """What a trade is actually charged, GST included."""
+
     taker: float  # on the underlying notional
     premium_cap: float  # never more than this share of the premium
+
+    @classmethod
+    def with_gst(cls, taker: float, premium_cap: float) -> FeeRate:
+        """The exchange's rates, which the product spec states before GST, as charged."""
+        return cls(taker * (1 + GST), premium_cap * (1 + GST))
 
 
 def leg_fee(price: float, units: float, spot: float, rate: FeeRate) -> float:
@@ -55,7 +63,7 @@ def assess(
     probes = [plan.spot - move, plan.spot + move, *(k for k in {leg.strike for leg in plan.legs} if abs(k - plan.spot) <= move)]
     analysis["stress_loss"] = round(max(0.0, -min(payoff(specs, max(p, 0.0)) for p in probes)), 4)
     rates = rates or {}
-    fees = sum(leg_fee(sp.price, sp.units, plan.spot, rates.get(leg.symbol, FeeRate(*DEFAULT_FEE))) for leg, sp in zip(plan.legs, specs, strict=True))
+    fees = sum(leg_fee(sp.price, sp.units, plan.spot, rates.get(leg.symbol, FeeRate.with_gst(*DEFAULT_FEE))) for leg, sp in zip(plan.legs, specs, strict=True))
     analysis["entry_fees"] = round(fees, 4)
     analysis["round_trip_fees"] = round(2 * fees, 4)
 

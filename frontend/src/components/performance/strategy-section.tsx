@@ -5,10 +5,19 @@ import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 
 import { Pnl } from "@/components/shared/money";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ago, arrowSigned, hours, num, pct, signed, titleCase, usd } from "@/lib/format";
-import type { Stats, Structure } from "@/lib/types";
+import type { EdgeVerdict, Stats, Structure } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Row = Stats["by_strategy"][number];
+
+const VERDICT: Record<EdgeVerdict, string> = {
+  positive: "proven edge",
+  negative: "proven losing",
+  unclear: "not proven",
+  unproven: "too few trades",
+};
+
+const rr = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}`;
 
 /** One bar per strategy, green above water and red below, then the numbers behind each. A row
  * click filters the trade history to that strategy. */
@@ -54,6 +63,7 @@ export function StrategySection({ rows, closed, selected, onSelect }: { rows: Ro
             <TableHead className="text-right">Net P&L</TableHead>
             <TableHead className="text-right">Avg win · avg loss</TableHead>
             <TableHead className="text-right">Expectancy</TableHead>
+            <TableHead className="text-right" title="Mean P&L per trade in R (what it risked at entry), with its 95% range. Under 30 trades it is not a measurement yet. Automatic sizing follows it.">Measured edge</TableHead>
             <TableHead className="text-right">Profit factor</TableHead>
             <TableHead className="text-right">Sharpe</TableHead>
             <TableHead className="text-right">Max DD</TableHead>
@@ -87,6 +97,13 @@ export function StrategySection({ rows, closed, selected, onSelect }: { rows: Ro
                 <TableCell className="text-right">
                   <Pnl value={r.expectancy} digits={4} />
                   <div className="text-[10.5px] text-muted-foreground">per trade</div>
+                </TableCell>
+                <TableCell className="num text-right">
+                  <div className={cn(r.expectancy_r != null && (r.expectancy_r >= 0 ? "text-profit" : "text-loss"))}>{r.expectancy_r == null ? "—" : `${rr(r.expectancy_r)}R`}</div>
+                  <div className="text-[10.5px] text-muted-foreground">
+                    {r.ci_low_r == null || r.ci_high_r == null ? "" : `${rr(r.ci_low_r)}..${rr(r.ci_high_r)} · `}
+                    <span className={cn(r.verdict === "positive" && "text-profit", r.verdict === "negative" && "text-loss")}>{VERDICT[r.verdict ?? "unproven"]}</span>
+                  </div>
                 </TableCell>
                 <TableCell className="num text-right">{num(r.profit_factor)}</TableCell>
                 <TableCell className={cn("num text-right", r.sharpe != null && r.sharpe < 0 && "text-loss")}>{num(r.sharpe ?? null)}</TableCell>

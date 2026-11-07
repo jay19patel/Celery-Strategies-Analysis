@@ -186,16 +186,19 @@ class StrategyRunner:
         for broker in brokers:
             try:
                 account = await self.trading.brokers[broker].account()
+                x, sized = self.trading.risk_scale(broker, best_name, account.equity)
+                if x <= 0:
+                    raise Refused(sized)
                 cv = await self.trading.desk.contract_value(symbol)
                 rate = self.trading.desk.cached_fee(symbol).taker
-                qty = self.trading.perp_size(account.equity, account.available, best.entry or 0.0, best.stop or 0.0, cv, rate)
+                qty = self.trading.perp_size(account.equity * x, account.available, best.entry or 0.0, best.stop or 0.0, cv, rate)
                 if qty < 1:
-                    raise Refused(f"{s.risk_per_trade_pct:g}% of equity {account.equity:,.2f} does not cover one contract's loss at the stop")
+                    raise Refused(f"{x * s.risk_per_trade_pct:g}% of equity {account.equity:,.2f} does not cover one contract's loss at the stop")
                 view = await self.trading.open_directional(
                     broker, underlying, best.side or "", qty, best.stop or 0.0, best.target or 0.0,
                     best_name, "auto", f"{best_name}:{symbol}:{bar_time}", best.reason, REGISTRY[best_name].max_hold_hours,
                 )
-                orders[broker] = {"structure_id": view["id"], "status": view["status"], "qty": qty, "error": view["error"]}
+                orders[broker] = {"structure_id": view["id"], "status": view["status"], "qty": qty, "error": view["error"], "sized": sized}
             except (Refused, BrokerError) as exc:
                 orders[broker] = {"refused": str(exc)}
         if not brokers:

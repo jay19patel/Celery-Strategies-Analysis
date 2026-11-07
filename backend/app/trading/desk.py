@@ -10,7 +10,7 @@ from typing import Any
 from app.errors import NotFound, Refused
 from app.market import options as chain
 from app.market.feed import MarketFeed
-from app.market.indicators import parkinson_vol, realised_vol
+from app.market.indicators import har_forecast, parkinson_vol, realised_vol
 from app.options import gex
 from app.options import ideas as ideas_mod
 from app.options import regime as regime_mod
@@ -19,6 +19,7 @@ from app.options.strategies import BUILDERS, CATALOG, Plan, build, custom, spec_
 from app.settings import Settings
 
 RV_BARS = {"24h": 97, "7d": 673}
+HAR_BARS = 180 * 96  # half a year of 15m bars fits the volatility forecast
 
 
 class Desk:
@@ -60,8 +61,9 @@ class Desk:
 
     def realised(self, underlying: str) -> dict[str, float | None]:
         """Realised volatility over 24h and 7d from the stored 15m bars (close-to-close), over 24h from
-        their ranges; the highest of them is the reference a seller's premium is measured against,
-        the lowest (`floor`) the one a buyer's is — each side judged on the number least kind to it."""
+        their ranges, and the next day's as the HAR model forecasts it; the highest of them is the
+        reference a seller's premium is measured against, the lowest (`floor`) the one a buyer's
+        is — each side judged on the number least kind to it."""
         bars = self.feed.bars(chain.PERPETUALS[underlying], RV_BARS["7d"])
         last = bars[-1]["time"] if bars else 0
         cached = self._rv.get(underlying)
@@ -72,6 +74,7 @@ class Desk:
             span: realised_vol(closes[-n:], 0.25) if len(closes) >= min(n, 200) else None for span, n in RV_BARS.items()
         }
         out["range_24h"] = parkinson_vol(bars[-96:], 0.25) if len(bars) >= 96 else None
+        out["forecast_24h"] = har_forecast(self.feed.bars(chain.PERPETUALS[underlying], HAR_BARS), 0.25)
         known = [v for v in out.values() if v]
         out["reference"] = max(known) if known else None
         out["floor"] = min(known) if known else None
@@ -83,7 +86,8 @@ class Desk:
         bars = self.feed.bars(chain.PERPETUALS[underlying], 3000)
         spot = self.spot(underlying)
         exposure = gex.exposure(self.feed.quotes(underlying), spot, time.time())
-        result = regime_mod.analyze(bars, spot, self.summary(underlying, expiry), exposure.get("regime"))
+        forecast = self.realised(underlying)["forecast_24h"]
+        result = regime_mod.analyze(bars, spot, self.summary(underlying, expiry), exposure.get("regime"), forecast)
         return result | {"underlying": underlying, "expiry": expiry}
 
     async def ideas(self, underlying: str, expiry: float) -> dict[str, Any]:
@@ -139,12 +143,12 @@ class Desk:
             try:
                 product = await self.feed.rest.product(symbol)
                 specs = product.get("product_specs") or {}
-                self._fees[key] = FeeRate(
-                    taker=float(product.get("taker_commission_rate") or DEFAULT_FEE[0]),
-                    premium_cap=float(specs.get("premium_commission_rate") or DEFAULT_FEE[1]),
+                self._fees[key] = FeeRate.with_gst(
+                    float(product.get("taker_commission_rate") or DEFAULT_FEE[0]),
+                    float(specs.get("premium_commission_rate") or DEFAULT_FEE[1]),
                 )
             except Exception:
-                return FeeRate(*DEFAULT_FEE)  # not cached: the next call tries the spec again
+                return FeeRate.with_gst(*DEFAULT_FEE)  # not cached: the next call tries the spec again
         return self._fees[key]
 
     async def contract_value(self, symbol: str) -> float:
@@ -156,7 +160,7 @@ class Desk:
 
     def cached_fee(self, symbol: str) -> FeeRate:
         """The fee rate without a network call: what `fee_rate` read before, else the conservative default."""
-        return self._fees.get(self._fee_key(symbol), FeeRate(*DEFAULT_FEE))
+        return self._fees.get(self._fee_key(symbol), FeeRate.with_gst(*DEFAULT_FEE))
 
     def plan(
         self, underlying: str, strategy: str, expiry: float | None = None, legs: list[dict[str, Any]] | None = None,

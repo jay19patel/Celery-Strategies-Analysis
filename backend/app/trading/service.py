@@ -35,6 +35,7 @@ from app.options.pricing import LegSpec, analyze, intrinsic, margin_required, ne
 from app.options.strategies import ZERO_HERO, Plan, describe, single, spec_for
 from app.settings import Settings
 from app.strategies import REGISTRY
+from app.trading import edge
 from app.trading.desk import Desk
 from app.trading.risk import halt_reason, trading_day
 
@@ -500,6 +501,21 @@ class TradingService:
         by_risk = math.floor(equity * s.risk_per_trade_pct / 100 / per_contract)
         by_margin = math.floor(available * s.trade_margin_pct / 100 * s.paper_leverage / (entry * contract_value))
         return max(0, min(by_risk, by_margin, s.max_lots))
+
+    def risk_scale(self, broker: str, strategy: str, equity: float) -> tuple[float, str]:
+        """The multiple of `risk_per_trade_pct` an automatic entry gets (`trading.edge`): what the
+        strategy's automatic trades on every broker have measured, times the broker's drawdown from
+        its equity peak. Returns the multiple and why it is not 1."""
+        s: Settings = self.settings()
+        with session() as db:
+            mine = db.exec(select(Structure.pnl, Structure.max_loss, Structure.margin).where(
+                Structure.strategy == strategy, Structure.source != "manual", Structure.status == "closed")).all()
+            pnls = db.exec(select(Structure.pnl).where(Structure.broker == broker, Structure.status == "closed")
+                           .order_by(col(Structure.closed_at))).all()
+        rs = [r for pnl, loss, margin in mine if (r := edge.r_multiple(pnl, loss or margin)) is not None]
+        e, why_edge = edge.scale(edge.measure(rs), s.risk_per_trade_pct, broker == "delta" and s.is_real_money)
+        d, why_dd = edge.drawdown_scale(edge.drawdown(equity, [p or 0.0 for p in pnls]))
+        return e * d, "; ".join(w for w in (why_edge, why_dd) if w)
 
     async def gate_directional(self, broker: str, symbol: str, side: str, qty: int, stop: float, target: float) -> tuple[Broker, float, float]:
         """The rules a position on the perpetual passes. Returns the broker, the price and the contract value."""
@@ -1019,6 +1035,7 @@ class TradingService:
 
         def summary(trades: list[Structure]) -> dict[str, Any]:
             pnls = [t.pnl or 0.0 for t in trades]
+            rs = [r for t in trades if (r := edge.r_multiple(t.pnl, t.max_loss or t.margin)) is not None]
             gross = [t.entry_cash + t.exit_cash for t in trades]
             fees = [t.fees for t in trades]
             wins, losses = [p for p in pnls if p > 0], [p for p in pnls if p <= 0]
@@ -1044,7 +1061,7 @@ class TradingService:
                 "best": round(max(pnls), 4) if pnls else None, "worst": round(min(pnls), 4) if pnls else None,
                 "avg_hold_hours": round(sum((t.closed_at or 0) - t.opened_at for t in trades) / n / 3600, 2) if n else None,
                 "max_drawdown": round(drawdown, 4),
-            } | ratios(list(days.values()))
+            } | ratios(list(days.values())) | edge.measure(rs)
 
         curve, total = [], 0.0
         daily: dict[str, float] = {}

@@ -247,11 +247,14 @@ class ZeroHero:
         for broker in brokers:
             try:
                 account = await self.trading.brokers[broker].account()
-                qty = min(s.max_lots, int(account.equity * s.risk_per_trade_pct / 100 // best["max_loss_per_lot"]))
+                x, sized = self.trading.risk_scale(broker, EXPIRY_DECAY, account.equity)
+                if x <= 0:
+                    raise Refused(sized)
+                qty = min(s.max_lots, int(account.equity * x * s.risk_per_trade_pct / 100 // best["max_loss_per_lot"]))
                 if qty < 1:
-                    raise Refused(f"{s.risk_per_trade_pct:g}% of equity does not cover one spread's worst case {best['max_loss_per_lot']:,.4f}")
+                    raise Refused(f"{x * s.risk_per_trade_pct:g}% of equity does not cover one spread's worst case {best['max_loss_per_lot']:,.4f}")
                 view = await self.trading.open(broker, plan, qty, "zerohero", f"zhd-{dec.id}", dec.id)
-                orders[broker] = {"structure_id": view["id"], "status": view["status"], "qty": qty, "error": view["error"]}
+                orders[broker] = {"structure_id": view["id"], "status": view["status"], "qty": qty, "error": view["error"], "sized": sized}
             except (Refused, BrokerError) as exc:
                 orders[broker] = {"refused": str(exc)}
         dec.orders = (dec.orders or {}) | {"decay": orders}

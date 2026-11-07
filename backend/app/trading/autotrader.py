@@ -257,11 +257,14 @@ class AutoTrader:
                 continue
             try:
                 account = await self.trading.brokers[broker].account()
-                qty = lots_for_risk(account.equity, choice, s)
+                x, sized = self.trading.risk_scale(broker, plan.strategy, account.equity)
+                if x <= 0:
+                    raise Refused(sized)
+                qty = lots_for_risk(account.equity * x, choice, s)
                 if qty < 1:
-                    raise Refused(f"{s.risk_per_trade_pct:g}% of equity {account.equity:,.2f} does not cover one lot's worst case {unit_risk(choice, s):,.2f}")
+                    raise Refused(f"{x * s.risk_per_trade_pct:g}% of equity {account.equity:,.2f} does not cover one lot's worst case {unit_risk(choice, s):,.2f}")
                 view = await self.trading.open(broker, plan, qty, "auto", f"auto-{dec.id}", dec.id)
-                orders[broker] = {"structure_id": view["id"], "status": view["status"], "qty": qty, "error": view["error"]}
+                orders[broker] = {"structure_id": view["id"], "status": view["status"], "qty": qty, "error": view["error"], "sized": sized}
             except (Refused, BrokerError) as exc:
                 orders[broker] = {"refused": str(exc)}
         dec.orders = orders

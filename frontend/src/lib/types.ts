@@ -383,7 +383,16 @@ export interface Summary {
   max_drawdown?: number;
   sharpe?: number | null;
   sortino?: number | null;
+  /** P&L over what each trade risked at entry (`trading/edge.py`), with its 95% bootstrap range */
+  trades_r?: number;
+  expectancy_r?: number | null;
+  ci_low_r?: number | null;
+  ci_high_r?: number | null;
+  verdict?: EdgeVerdict;
 }
+
+/** positive / negative: the whole 95% range on one side of zero; unclear: it spans zero; unproven: under 30 trades */
+export type EdgeVerdict = "unproven" | "positive" | "negative" | "unclear";
 
 /** a broker's equity at the start of a trading day */
 export interface EquityPoint {

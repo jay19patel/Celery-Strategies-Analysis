@@ -63,7 +63,7 @@ Delta REST (chain every 30s, bars 5m) ─┴─► MarketFeed ─► Desk (chain
   on entry and sold legs are bought back first on exit, so a short is never naked mid-way; a failed
   leg unwinds what filled. `desk.py` — the read side shared by the page and the auto-trader.
   `guard.py` — exits and the daily loss limit. `autotrader.py` — the decision cycle. `risk.py` —
-  the trading day and halts.
+  the trading day and halts. `edge.py` — each strategy's measured edge in R and the size it earns.
 - `app/brokers/` — a broker executes one leg (IOC limit) and reports its account; structures are the
   trading service's, recorded the same way for both brokers.
 - `app/ai/llm.py` — LiteLLM: any provider by model id, primary then fallbacks in order.
@@ -115,6 +115,13 @@ Enforced by tests (`backend/tests`). Breaking one should fail the build.
     live and never stored.
 14. **No unbounded loss on real money.** A structure without a bounded max loss is refused on Delta
     live; elsewhere it is sized on a move of three expected moves, not on its stop.
+15. **Size follows a measured edge.** Every fee is charged with India's 18% GST. Automatic entries
+    risk `risk_per_trade_pct` times `TradingService.risk_scale`: a strategy proven losing over 30+
+    trades (its whole 95% range in R below zero) gets nothing, one proven winning a quarter Kelly on
+    the low end of the range (1-2x), and on Delta live anything not yet proven on paper gets nothing.
+    A drawdown of 10% from the broker's equity peak halves the risk, 20% quarters it.
+16. **Bars are fitted to the mark.** A stored traded bar never leaves its mark-price bar's range by
+    more than `MARK_BAND`: Delta prints junk on the ETH perpetual and revises it out later.
 
 ## Extension Points
 

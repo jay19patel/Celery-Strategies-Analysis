@@ -174,8 +174,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("strategy", choices=sorted(REGISTRY))
     parser.add_argument("--underlying", default="BTC", choices=sorted(PERPETUALS))
-    # Delta India perpetual taker fee ~0.05% each way plus about a tick of spread; check the product spec.
-    parser.add_argument("--cost-pct", type=float, default=0.11, help="round trip: fees both ways and the spread, %% of notional")
+    # Delta India perpetual taker fee 0.05% each way, 18% GST on it, plus about a tick of spread.
+    parser.add_argument("--cost-pct", type=float, default=0.13, help="round trip: fees both ways and the spread, %% of notional")
     parser.add_argument("--funding-pct", type=float, default=0.01, help="paid per 8h held, %% of notional")
     parser.add_argument("--max-hold-hours", type=float, default=None, help="default: the strategy's own, else 24")
     args = parser.parse_args()

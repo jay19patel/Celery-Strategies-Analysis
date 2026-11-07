@@ -29,16 +29,19 @@ def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
 
-def measure(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any]) -> dict[str, Any]:
-    """The numbers the scores are made of. Anything without enough history is None."""
+def measure(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any], forecast: float | None = None) -> dict[str, Any]:
+    """The numbers the scores are made of. Anything without enough history is None. `forecast` is
+    the next day's realised volatility as the HAR model reads it (`indicators.har_forecast`)."""
     closes = [b["close"] for b in bars]
     rv_24h = realised_vol(closes[-97:], BAR_HOURS) if len(closes) >= 97 else None
     rv_7d = realised_vol(closes[-673:], BAR_HOURS) if len(closes) >= 200 else None
     rv_range_24h = parkinson_vol(bars[-96:], BAR_HOURS) if len(bars) >= 96 else None
-    known = [v for v in (rv_24h, rv_7d, rv_range_24h) if v]
-    # The highest of the three: a seller's premium is measured against the worst realised reading,
-    # so one quiet day's close-to-close cannot make thin premium look rich.
+    known = [v for v in (rv_24h, rv_7d, rv_range_24h, forecast) if v]
+    # Each side is judged on the reading least kind to it: a seller's premium against the highest,
+    # so one quiet day's close-to-close cannot make thin premium look rich; a buyer's discount
+    # against the lowest, so one wild day cannot make an expensive straddle look cheap.
     rv_ref = max(known) if known else None
+    rv_floor = min(known) if known else None
     iv = summary.get("atm_iv")
 
     change_24h = closes[-1] / closes[-97] - 1 if len(closes) >= 97 and closes[-97] else None
@@ -59,7 +62,9 @@ def measure(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any]) ->
         "rv_24h": rv_24h,
         "rv_7d": rv_7d,
         "rv_range_24h": rv_range_24h,
+        "rv_forecast_24h": forecast,
         "vol_premium": (iv - rv_ref) if iv and rv_ref else None,
+        "vol_premium_floor": (iv - rv_floor) if iv and rv_floor else None,
         "rv_ratio": (rv_24h / rv_7d) if rv_24h and rv_7d else None,
         "change_24h_pct": None if change_24h is None else 100 * change_24h,
         "z_24h": z_24h,
@@ -110,7 +115,6 @@ def label(m: dict[str, Any], d: float) -> str:
 
 
 def score(m: dict[str, Any], d: float, regime: str, gamma: str | None = None) -> dict[str, dict[str, Any]]:
-    vp_pts = 100 * m["vol_premium"] if m["vol_premium"] is not None else None
     expanding = bool(m["rv_ratio"] and m["rv_ratio"] > 1.3)
     compressed = bool(m["rv_ratio"] and m["rv_ratio"] < 0.75)
     near_pain = (
@@ -127,11 +131,13 @@ def score(m: dict[str, Any], d: float, regime: str, gamma: str | None = None) ->
         }
 
     def premium(sell: bool, weight: float = 2.5) -> list[tuple[str, float]]:
-        if vp_pts is None:
+        vp = m["vol_premium" if sell else "vol_premium_floor"]
+        if vp is None:
             return [("no realised volatility yet to compare IV with", -10 if sell else -5)]
+        vp_pts = 100 * vp
         pts = _clamp(vp_pts * weight * (1 if sell else -1), -25, 25)
         word = "premium" if vp_pts >= 0 else "discount"
-        return [(f"IV {100 * m['atm_iv']:.1f}% vs realised {100 * (m['atm_iv'] - m['vol_premium']):.1f}%: {abs(vp_pts):.1f} vol pts {word}", pts)]
+        return [(f"IV {100 * m['atm_iv']:.1f}% vs realised {100 * (m['atm_iv'] - vp):.1f}%: {abs(vp_pts):.1f} vol pts {word}", pts)]
 
     trend = abs(d)
     # The option book's own hedging (`options.gex`): positive gamma damps moves, negative chases them.
@@ -197,8 +203,8 @@ def score(m: dict[str, Any], d: float, regime: str, gamma: str | None = None) ->
     return out
 
 
-def analyze(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any], gamma: str | None = None) -> dict[str, Any]:
-    m = measure(bars, spot, summary)
+def analyze(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any], gamma: str | None = None, forecast: float | None = None) -> dict[str, Any]:
+    m = measure(bars, spot, summary, forecast)
     d, parts = direction(m)
     regime = label(m, d)
     notes = []

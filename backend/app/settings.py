@@ -30,7 +30,6 @@ STRATEGY_KEYS = (
     "iron_condor", "iron_butterfly", "short_strangle", "short_straddle",
     "long_straddle", "bull_put_spread", "bear_call_spread", "short_call", "short_put",
 )
-UNDEFINED_RISK = ("short_strangle", "short_straddle", "short_call", "short_put")
 EVENT_FORMAT = "%Y-%m-%d %H:%M"
 MODEL_ID = re.compile(r"^[A-Za-z0-9._:/@+\-]{2,120}$")
 EMAIL = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
@@ -78,11 +77,11 @@ class Settings(BaseModel):
     # A strategy absent from this map, or mapped to an empty list, runs on every enabled underlying.
     strategy_symbols: dict[Directional, list[Underlying]] = Field(default_factory=dict)
     auto_interval_minutes: int = Field(15, ge=5, le=240)
-    # Every structure in the catalog is on. Note that short_strangle and short_straddle are the two
-    # whose loss is NOT bounded before entry — the regime score and the hard checks are all that
-    # stands between them and an open-ended position. Drop them here to go back to defined risk only.
-    # Unlimited-risk sales are left off the auto menu by default: their only stop is the guard's.
-    auto_strategies: list[Strategy] = Field(default_factory=lambda: [k for k in STRATEGY_KEYS if k not in UNDEFINED_RISK])
+    # Every structure in the catalog is on, by the owner's choice. Note that the short strangle,
+    # straddle, call and put are those whose loss is NOT bounded before entry — the regime score, the hard checks and the
+    # guard's stop are all that stands between them and an open-ended position, and Delta live
+    # refuses them outright. Drop them here to go back to defined risk only.
+    auto_strategies: list[Strategy] = Field(default_factory=lambda: list(STRATEGY_KEYS))
     expiry_min_hours: float = Field(12.0, ge=1, le=720)
     expiry_max_hours: float = Field(60.0, ge=2, le=2000)
     short_delta: float = Field(0.18, ge=0.05, le=0.45)  # |delta| of sold strikes on OTM structures

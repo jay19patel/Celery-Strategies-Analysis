@@ -46,6 +46,10 @@ SERIES = {"15m": 365, "1m": 30}  # interval -> days kept
 SERIES_SECONDS = {"15m": 900, "1m": 60}
 MAX_JUMP = 0.25  # a bar whose body is 25% from the last good close is a bad print, not a market
 MAX_WICK = {"1m": 0.05, "15m": 0.10}  # a wick this far beyond its own body is trimmed to it
+# A traded price this far outside the same bar's mark-price range is a print on an empty book: real
+# BTC and ETH bars stay within 1% of their mark range (0.95% at worst over 120 days), the ETH bad
+# prints Delta later revises out of its history sit 2-7% beyond it.
+MARK_BAND = 0.015
 PERP_PULLED = 0.02  # a perpetual bid or ask this far from the mark is no price (`parse_perp`)
 BOOK_EVERY = 5.0  # seconds between reads of one symbol's order book
 
@@ -82,6 +86,25 @@ def clean_candles(candles: list[Candle], reference: float | None = None, max_wic
         low = c.low if c.low >= bottom * (1 - max_wick) else bottom
         out.append(Candle(c.time, c.open, max(high, top), min(low, bottom), c.close, c.volume))
         good = c.close
+    return out
+
+
+def fit_to_mark(candles: list[Candle], marks: list[Candle], band: float = MARK_BAND) -> list[Candle]:
+    """Each traded bar held within `band` of the same bar's mark-price range.
+
+    The mark is Delta's index plus basis, so no single print moves it. Delta's ETH perpetual prints
+    2,400 in a 2,245 market for a trade or two and revises the bar later; stored before that, one
+    such high reads as 250% realised volatility. A bar with no mark bar is left as it is."""
+    by_time = {m.time: m for m in marks}
+    out = []
+    for c in candles:
+        m = by_time.get(c.time)
+        if m is None:
+            out.append(c)
+            continue
+        lo, hi = m.low * (1 - band), m.high * (1 + band)
+        o, h, low, close = (min(max(v, lo), hi) for v in (c.open, c.high, c.low, c.close))
+        out.append(Candle(c.time, o, h, low, close, c.volume))
     return out
 
 
@@ -251,6 +274,8 @@ class MarketFeed:
 
     async def _store(self, symbol: str, interval: str, start: int, end: int) -> int:
         candles = await self.rest.candles(symbol, interval, start, end)
+        if candles:
+            candles = fit_to_mark(candles, await self.rest.candles(f"MARK:{symbol}", interval, start, end))
         rows = [
             {"symbol": symbol, "interval": interval, "time": c.time, "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume}
             for c in clean_candles([c for c in candles if start <= c.time <= end], self._close_before(symbol, interval, start), MAX_WICK[interval])
