@@ -9,6 +9,8 @@ from pydantic import BaseModel
 
 from app.api.deps import EngineDep
 from app.errors import NotFound
+from app.strategies import registry
+from app.trading.autotrader import INTERVAL_MINUTES, MIN_SCORE
 
 router = APIRouter(prefix="/auto", tags=["auto"])
 
@@ -25,12 +27,12 @@ def status(engine: EngineDep) -> dict[str, Any]:
     return {
         "brokers": engine.broker_status(),
         "job": job,
-        "config": {k: getattr(s, k) for k in (
-            "auto_interval_minutes", "auto_strategies", "underlyings", "expiry_min_hours", "expiry_max_hours", "short_delta",
-            "wing_width_pct", "min_score", "min_pop_pct", "min_credit_width_pct", "max_spread_pct", "risk_per_trade_pct",
-            "max_open_structures", "max_per_underlying", "credit_take_profit_pct", "credit_stop_loss_pct",
-            "debit_take_profit_pct", "debit_stop_loss_pct", "exit_before_expiry_minutes",
-        )},
+        "config": {
+            "interval_minutes": INTERVAL_MINUTES, "min_score": MIN_SCORE, "underlyings": s.underlyings,
+            "strategies": list(registry.enabled(s, "options")),
+            "risk_per_trade_pct": s.risk_per_trade_pct, "max_spread_pct": s.max_spread_pct,
+            "exit_before_expiry_minutes": s.exit_before_expiry_minutes,
+        },
         "now": [engine.auto.latest[u] for u in s.underlyings if u in engine.auto.latest],
     }
 
@@ -42,10 +44,11 @@ def decisions(engine: EngineDep, underlying: str = "", action: str = "", limit: 
 
 @router.post("/run")
 async def run_now(engine: EngineDep) -> dict[str, Any]:
-    brokers = engine.auto.brokers()
-    if not brokers:
+    """One cycle now — through the scheduler, so it never runs beside a scheduled one."""
+    if not engine.auto.brokers():
         return {"decisions": [], "note": "auto-trading is off on every active broker: switch it on for one first"}
-    return {"decisions": [await engine.auto.decide(u, brokers) for u in engine.settings().underlyings]}
+    await engine.scheduler.run_now("auto.cycle")
+    return {"decisions": [engine.auto.latest[u] for u in engine.settings().underlyings if u in engine.auto.latest]}
 
 
 @router.post("/toggle")

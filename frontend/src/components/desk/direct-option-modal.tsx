@@ -2,8 +2,7 @@
 
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import Link from "next/link";
-import { ArrowDownRight, ArrowUpRight, Calculator, Check, Loader2, Play, ShieldAlert, Sparkles } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Calculator, Loader2, Play } from "lucide-react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 
@@ -47,22 +46,23 @@ export function DirectOptionModal({
   const { mutate } = useSWRConfig();
   const { data: sysStatus } = useApi<{ brokers: BrokerStatus[] }>("/system/status");
 
-  const brokers = useMemo<BrokerStatus[]>(() => {
-    return sysStatus?.brokers ?? [
-      { name: "paper", active: true, ready: true, not_ready: "", auto: true, halted: "", real_money: false, env: "paper" },
-      { name: "delta", active: false, ready: false, not_ready: "keys not set", auto: false, halted: "", real_money: false, env: "demo" },
-    ];
-  }, [sysStatus]);
+  // Never a made-up broker list: until the engine says which are active, nothing can be sent.
+  const brokers = useMemo<BrokerStatus[]>(() => sysStatus?.brokers ?? [], [sysStatus]);
 
   const activeBrokers = brokers.filter((b) => b.active);
   const [userBroker, setUserBroker] = useState<Broker | null>(null);
   const [userSide, setUserSide] = useState<Side | null>(null);
   const [userQty, setUserQty] = useState<number | null>(null); // null: sized to the capital
   const [executing, setExecuting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  // One id per ticket: a second click on the same ticket is the same order, which the engine opens once.
+  const reqId = useMemo(() => requestId(), [open, target?.symbol]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const broker = userBroker && activeBrokers.some((b) => b.name === userBroker)
     ? userBroker
-    : (activeBrokers[0]?.name as Broker) ?? "paper";
+    : (activeBrokers[0]?.name as Broker | undefined);
+  const status = brokers.find((b) => b.name === broker);
+  const blocked = !status ? "loading the brokers" : status.not_ready || (status.halted ? `halted today: ${status.halted}` : "");
   const side = userSide ?? initialSide;
 
   // Sized as the strategy builder and the auto-trader size a trade: the worst case is
@@ -88,6 +88,7 @@ export function DirectOptionModal({
       setUserSide(null);
       setUserBroker(null);
       setUserQty(null);
+      setConfirming(false);
     }
     onOpenChange(nextOpen);
   };
@@ -116,7 +117,7 @@ export function DirectOptionModal({
     : `Keeps full premium if ${underlying} stays ≥ $${num(strike, 0)}`;
 
   async function handleExecute() {
-    if (!target) return;
+    if (!target || !broker) return;
     setExecuting(true);
     try {
       const res = await api<Structure>("/trading/open", "POST", {
@@ -125,7 +126,7 @@ export function DirectOptionModal({
         strategy: "custom",
         legs: [{ symbol: target.symbol, side, ratio: 1 }],
         qty,
-        request_id: requestId(),
+        request_id: `${reqId}${side[0]}${qty}`,
       });
 
       if (res.status === "open") {
@@ -134,7 +135,7 @@ export function DirectOptionModal({
         });
         mutate("/trading/structures?status=open");
         mutate("/portfolio/accounts");
-        onOpenChange(false);
+        handleOpenChange(false);
       } else {
         toast.error(`Order not opened (${res.status})`, {
           description: res.error || res.close_reason,
@@ -284,24 +285,39 @@ export function DirectOptionModal({
               <span className="font-mono font-semibold text-loss">{maxLossText}</span>
             </div>
             <div className="rounded bg-muted/40 p-1.5 text-[11px] text-muted-foreground">
-              💡 {ruleText}
+              {ruleText}
             </div>
           </div>
         </div>
 
+        {confirming && (
+          <div className={`rounded-lg border p-3 text-[12.5px] ${status?.real_money ? "border-loss bg-loss-soft text-loss" : "bg-muted/40"}`}>
+            {status?.real_money && <b>Real money. </b>}
+            {isBuy ? "Buy" : "Sell"} {qty} × {target?.symbol} on {broker}, at the live book. {!isBuy && "A sold option has no cap on its loss. "}Confirm to send.
+          </div>
+        )}
+        {blocked && <p className="text-[12px] text-loss">Not available: {blocked}</p>}
+
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="text-xs">
-            Cancel
+          <Button variant="outline" size="sm" onClick={() => (confirming ? setConfirming(false) : handleOpenChange(false))} className="text-xs">
+            {confirming ? "Back" : "Cancel"}
           </Button>
-          <Button
-            size="sm"
-            onClick={handleExecute}
-            disabled={executing || mark <= 0}
-            className={`gap-1.5 text-xs ${!isBuy ? "bg-loss hover:bg-loss/90" : ""}`}
-          >
-            {executing ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-            {isBuy ? `Buy ${qty}x Option` : `Sell (Short) ${qty}x Option`}
-          </Button>
+          {confirming ? (
+            <Button
+              size="sm"
+              variant={status?.real_money ? "destructive" : "default"}
+              onClick={handleExecute}
+              disabled={executing || mark <= 0 || !!blocked}
+              className="gap-1.5 text-xs"
+            >
+              {executing ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+              {status?.real_money ? "Place real order" : "Place order"}
+            </Button>
+          ) : (
+            <Button size="sm" onClick={() => setConfirming(true)} disabled={mark <= 0 || !!blocked} className="gap-1.5 text-xs">
+              {isBuy ? `Review buy of ${qty}` : `Review sale of ${qty}`}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

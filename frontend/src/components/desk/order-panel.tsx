@@ -109,7 +109,7 @@ export function OrderPanel({ preview, brokers, onQty }: { preview: Preview; brok
             <p className="text-muted-foreground">Each leg is sent as an immediate-or-cancel limit at most 5% from its quote; bought legs first, and anything filled is unwound if a leg fails.</p>
             {failed.length > 0 && (
               <Notice tone="warn">
-                Fails {failed.map((c) => c.name).join(", ")} — the auto-trader would not take this. You can still place it.
+                Fails {failed.map((c) => c.name).join(", ")} — an automatic entry would not take this. You can still place it.
               </Notice>
             )}
           </div>

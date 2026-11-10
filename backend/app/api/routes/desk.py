@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.api.deps import EngineDep
 
@@ -38,12 +38,12 @@ async def structure(engine: EngineDep, underlying: str = "BTC") -> dict[str, Any
 
 
 @router.get("/trendlines")
-async def trendlines(engine: EngineDep, underlying: str = "BTC", interval: str = "15m", limit: int = 500) -> dict[str, Any]:
+async def trendlines(engine: EngineDep, underlying: str = "BTC", interval: str = "15m", limit: int = Query(500, ge=50, le=1500)) -> dict[str, Any]:
     return await engine.market.trendlines(underlying, interval, limit)
 
 
 @router.get("/fibonacci")
-async def fib(engine: EngineDep, underlying: str = "BTC", interval: str = "15m", limit: int = 500) -> dict[str, Any]:
+async def fib(engine: EngineDep, underlying: str = "BTC", interval: str = "15m", limit: int = Query(500, ge=50, le=1500)) -> dict[str, Any]:
     return await engine.market.fibonacci(underlying, interval, limit)
 
 

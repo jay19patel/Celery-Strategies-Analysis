@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight, Layers, LayoutGrid, LineChart, Radar, Sparkles } from "lucide-react";
+import { ChevronRight, Gauge, Layers, LayoutGrid, LineChart, Sparkles } from "lucide-react";
 
 import { isActive, NAV } from "@/components/layout/nav";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -12,8 +12,8 @@ import type { Structure } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const PRIMARY_TABS = [
-  { href: "/", label: "Desk", icon: Sparkles },
-  { href: "/market", label: "Market", icon: Radar },
+  { href: "/", label: "Overview", icon: Gauge },
+  { href: "/desk", label: "Desk", icon: Sparkles },
   { href: "/positions", label: "Positions", icon: Layers, badge: true },
   { href: "/performance", label: "P&L", icon: LineChart },
 ];

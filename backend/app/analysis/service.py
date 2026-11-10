@@ -155,9 +155,19 @@ class MarketDesk:
         return await self._cached("outlook", symbol, rows, lambda: outlook.build(symbol, candles(rows), summary, VERDICT_STOP_PCT, VERDICT_TARGET_PCT))
 
     async def flow(self, underlying: str, minutes: int = 5) -> dict[str, Any]:
-        """Order flow from the recorded tape (`analysis.flow`), over the last day of its minutes."""
+        """Order flow from the recorded tape (`analysis.flow`), over the last day of its minutes.
+
+        Only finished bars: the one still forming is left out, so a strategy deciding on a closed
+        candle reads the tape of that same candle and no later. A tape whose newest minute is two
+        bars old is no tape — the socket has gone quiet — and is not ready."""
         symbol = self.perpetual(underlying)
-        rows = await asyncio.to_thread(flow_rows, symbol, time.time() - 86_400)
+        now = time.time()
+        span = minutes * 60
+        forming = int(now // span * span)
+        rows = [r for r in await asyncio.to_thread(flow_rows, symbol, now - 86_400) if r["time"] < forming]
+        if rows and now - (rows[-1]["time"] + 60) > 2 * span:
+            return {"ready": False, "note": f"the tape is stale: its newest minute is {int((now - rows[-1]['time']) // 60)} min old",
+                    "symbol": symbol, "underlying": underlying}
         last = int(rows[-1]["time"]) if rows else 0
         hit = self._cache.get((f"flow{minutes}", symbol))
         if hit and hit[0] == last and last:
@@ -305,7 +315,9 @@ class MarketDesk:
             rows = bars_res.get("bars", [])
         if not rows:
             return {"ready": False, "symbol": symbol, "trendlines": [], "horizontal_clusters": []}
-        return trendlines.analyze_trendlines(candles(rows)) | {"symbol": symbol, "interval": interval}
+        # O(swings^2 x bars): off the event loop the guard runs on.
+        found = await asyncio.to_thread(trendlines.analyze_trendlines, candles(rows))
+        return found | {"symbol": symbol, "interval": interval}
 
     async def fibonacci(self, underlying: str, interval: str = "15m", limit: int = 500) -> dict[str, Any]:
         """The last impulse and its levels, on one timeframe. Same source as the Market page's
@@ -318,7 +330,7 @@ class MarketDesk:
             rows = (await self.bars(underlying, interval, days, limit)).get("bars", [])
         if not rows:
             return {"ready": False, "note": "no stored bars yet", "symbol": symbol, "interval": interval}
-        return fibonacci.read(candles(rows)).to_dict() | {"symbol": symbol, "interval": interval}
+        return (await asyncio.to_thread(fibonacci.read, candles(rows))).to_dict() | {"symbol": symbol, "interval": interval}
 
     def analysis(self, underlying: str) -> dict[str, Any]:
         """The price, the options book and the analyst's latest findings, for one underlying."""
@@ -356,6 +368,8 @@ class MarketDesk:
 
     async def record_options(self) -> str:
         """One row per underlying per minute: the ATM IV and put/call history the exchange does not keep."""
+        if not self.feed.record:
+            return "not recorded: the feed is on the demo exchange"
         rows = []
         now = time.time()
         for underlying in self.settings().underlyings:

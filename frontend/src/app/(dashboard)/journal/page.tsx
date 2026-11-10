@@ -71,12 +71,13 @@ function MonthSummary({ m, accounts, label }: { m: JournalMonth; accounts: Accou
 
 export default function JournalPage() {
   const [now] = useState(() => new Date());
-  const todayStr = iso(now.getFullYear(), now.getMonth() + 1, now.getDate());
   const [ym, setYm] = useState({ year: now.getFullYear(), month: now.getMonth() + 1 });
   const [selected, setSelected] = useState<string | null>(null);
   const [broker, setBroker] = useState<BrokerFilter>("");
   const { data, error, isLoading } = useApi<JournalMonth>(`/portfolio/journal?year=${ym.year}&month=${ym.month}&broker=${broker}`, { refreshInterval: 30_000 });
   const { data: accounts } = useApi<Accounts>("/portfolio/accounts");
+  // "Today" is the engine's trading day, in its timezone, not the browser's.
+  const todayStr = data ? now.toLocaleDateString("en-CA", { timeZone: data.timezone }) : iso(now.getFullYear(), now.getMonth() + 1, now.getDate());
 
   const shift = (delta: number) => {
     const m = ym.month + delta;
@@ -93,7 +94,7 @@ export default function JournalPage() {
     <>
       <PageHeader
         title="Journal"
-        description="Tap any day for its full audit: what opened and closed, every order, why the auto-trader stood aside, and what went wrong."
+        description="Tap any day for its full audit: what opened and closed, every order, why the strategies stood aside, and what went wrong."
         actions={
           <>
             <BrokerTabs value={broker} onChange={setBroker} />

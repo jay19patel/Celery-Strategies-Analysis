@@ -4,12 +4,15 @@ It is the only writer of trading state, settings and toggles, inside one process
 a cross-process lock. Run the backend as a single worker (`uvicorn app.main:app`, no `--workers`):
 a second process would be a second engine trading the same accounts.
 
-Fail closed at start: auto-trading on Delta is switched off every time the engine starts.
+Fail closed at start: auto-trading on Delta is switched off every time the engine starts, a
+structure the last process left half-opened or half-closed goes to `error` to be looked up and
+closed, and a second engine on the same database refuses to start.
 """
 
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import logging
 import time
 from pathlib import Path
@@ -24,7 +27,7 @@ from app.brokers.base import Broker
 from app.brokers.delta import DeltaBroker
 from app.brokers.paper import PaperBroker
 from app.config import Config
-from app.core import logstore
+from app.core import logstore, security
 from app.core.db import kv_get, kv_set, maintain, session
 from app.core.events import EventHub
 from app.core.models import (
@@ -41,7 +44,7 @@ from app.core.models import (
     Structure,
 )
 from app.core.scheduler import Scheduler
-from app.errors import AppError, BrokerError, Refused
+from app.errors import AppError, BrokerError, Refused, SettingsError
 from app.market import recorder
 from app.market.delta import DeltaClient
 from app.market.feed import OPTIONS_REFRESH, MarketFeed
@@ -56,20 +59,26 @@ from app.settings import (
     clear_delta_credentials,
     from_stored,
 )
-from app.trading.autotrader import AutoTrader
+from app.trading.autotrader import INTERVAL_MINUTES, AutoTrader
 from app.trading.desk import Desk
 from app.trading.guard import Guard
-from app.trading.risk import halt_reason, set_halt
+from app.trading.reconcile import Reconciler
+from app.trading.risk import halt_reason, kill_state, reconcile_reason, set_halt, set_kill
 from app.trading.runner import StrategyRunner
 from app.trading.service import HELD, TradingService
-from app.trading.zerohero import ZeroHero
 
 log = logging.getLogger(__name__)
 
 EVENT_RETENTION_DAYS = 30
 DECISION_RETENTION_DAYS = 90
 CHAIN_RECORD_SECONDS = 300
-SCHEDULE_FIELDS = ("auto_interval_minutes", "ai_brief_minutes", "daily_report_hour", "day_timezone", "zh_scan_seconds")
+AI_BRIEF_MINUTES = 30
+RECONCILE_SECONDS = 300
+SCHEDULE_FIELDS = ("daily_report_hour", "day_timezone")
+
+
+class AlreadyRunning(RuntimeError):
+    """Another engine holds this database: two would trade the same accounts twice."""
 
 
 class Engine:
@@ -84,14 +93,14 @@ class Engine:
         kv_set("settings", self._settings.model_dump())
 
         s = self._settings
-        self.feed = MarketFeed(*ENVIRONMENTS[s.data_env], s.underlyings)
+        self.feed = MarketFeed(*ENVIRONMENTS[s.data_env], s.underlyings, record=s.data_env == "live")
         self.desk = Desk(self.feed, self.settings)
         self.delta = DeltaBroker(DeltaClient(ENVIRONMENTS[s.delta_env][0], s.delta_api_key, s.delta_api_secret))
         self.paper = PaperBroker(self.feed, self.settings, self.desk.fee_rate)
         self.brokers: dict[str, Broker] = {"paper": self.paper, "delta": self.delta}
         self.trading = TradingService(self.feed, self.desk, self.brokers, self.settings, self.hub)
-        self.zerohero = ZeroHero(self.desk, self.trading, self.settings, self.hub)
-        self.guard = Guard(self.trading, self.settings, self.hub, self.zerohero)
+        self.guard = Guard(self.trading, self.settings, self.hub)
+        self.reconciler = Reconciler(self.brokers, self.settings, self.hub)
         self.llm = LLM(self.settings)
         self.analyst = Analyst(self.llm, self.settings, self.hub)
         self.auto = AutoTrader(self.desk, self.trading, self.settings, self.hub)
@@ -99,15 +108,30 @@ class Engine:
         self.runner = StrategyRunner(self.trading, self.market, self.settings, self.hub)
         self.notifier = Notifier(self.settings)
         self.hub.subscribe("notifier", self.notifier.on_event)
+        self._lock_file: Any = None
 
     def settings(self) -> Settings:
         return self._settings
 
     # -- lifecycle -----------------------------------------------------------------------------
 
+    def _take_lock(self) -> None:
+        """One engine per database, enforced: an exclusive lock on a file beside it, held for life."""
+        path = Path(self.cfg.db_path).with_suffix(".engine.lock")
+        handle = path.open("w")
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            handle.close()
+            raise AlreadyRunning(f"another engine is running on {self.cfg.db_path}: run the backend as a single worker") from None
+        self._lock_file = handle
+
     async def start(self) -> None:
         await self.hub.start()
         if self.cfg.engine_enabled:
+            self._take_lock()
+            if recovered := self.trading.recover():
+                log.warning("structures_recovered ids=%s", ",".join(recovered))
             cleaned = await asyncio.to_thread(self.feed.clean_stored)
             if any(cleaned.values()):
                 log.warning("bad_bars_cleaned dropped=%s trimmed=%s", cleaned["dropped"], cleaned["trimmed"])
@@ -118,6 +142,9 @@ class Engine:
 
     async def stop(self) -> None:
         self.scheduler.shutdown()
+        if self._lock_file is not None:
+            self._lock_file.close()  # closing releases the lock
+            self._lock_file = None
         await self.feed.stop()
         await self.delta.client.aclose()
         await self.notifier.aclose()
@@ -136,16 +163,9 @@ class Engine:
         sch.every("strategies.run", "Directional strategies on closed bars", 20, self.runner.run)
         sch.every("guard.structures", "Exits: take profit, stop loss, expiry", 5, self.guard.check_structures)
         sch.every("guard.daily", "Daily loss limit", 30, self.guard.check_daily_loss, run_now=True)
-        sch.every("auto.cycle", "Auto options decision", s.auto_interval_minutes * 60, self.auto.cycle)
-        sch.windowed(
-            "zerohero.scan",
-            "Zero-hero expiry-day scan",
-            self.zerohero.get_window,
-            s.zh_scan_seconds,
-            self.zerohero.cycle,
-            idle_heartbeat=1800.0,
-        )
-        sch.every("ai.brief", "AI market brief", s.ai_brief_minutes * 60, self.brief_job)
+        sch.every("auto.cycle", "Option strategies decision", INTERVAL_MINUTES * 60, self.auto.cycle)
+        sch.every("reconcile", "Delta positions against the desk", RECONCILE_SECONDS, self.reconciler.run, run_now=True)
+        sch.every("ai.brief", "AI market brief", AI_BRIEF_MINUTES * 60, self.brief_job)
         sch.daily("report.daily", "Daily report", s.daily_report_hour, 0, s.day_timezone, self.scheduled_report)
         sch.every("live.prices", "Live prices to dashboards", 2, self.push_prices)
         sch.every("housekeeping", "Prune old events and decisions", 3600, self.housekeeping)
@@ -153,7 +173,10 @@ class Engine:
     # -- settings ------------------------------------------------------------------------------
 
     async def update_settings(self, changes: dict[str, Any], confirm: str = "") -> Settings:
-        return await self._apply(apply_changes(self._settings, changes, confirm))
+        new = apply_changes(self._settings, changes, confirm)
+        if new.is_real_money and not self._settings.is_real_money and security.using_default_pin():
+            raise SettingsError("change the dashboard PIN from the published default before trading real money")
+        return await self._apply(new)
 
     async def clear_delta_credentials(self) -> Settings:
         return await self._apply(clear_delta_credentials(self._settings))
@@ -168,7 +191,7 @@ class Engine:
             await self.delta.client.aclose()
             self.delta.client = DeltaClient(ENVIRONMENTS[new.delta_env][0], new.delta_api_key, new.delta_api_secret)
         if new.data_env != old.data_env or new.underlyings != old.underlyings:
-            await self.feed.reconfigure(*ENVIRONMENTS[new.data_env], new.underlyings)
+            await self.feed.reconfigure(*ENVIRONMENTS[new.data_env], new.underlyings, record=new.data_env == "live")
         if self.scheduler.jobs and any(f in changed for f in SCHEDULE_FIELDS):
             self._schedule()
         # Field names only: a value may be a secret.
@@ -186,6 +209,26 @@ class Engine:
             return {"ok": False, "env": env, "error": str(exc)}
         finally:
             await client.aclose()
+
+    async def stop_all(self) -> dict[str, Any]:
+        """The kill switch: every entry on every broker refused, manual included, until resumed — then
+        every open position closed. The order matters: nothing can open while the closes run."""
+        self.trading.engage_kill("stopped from the dashboard")
+        closed: list[str] = []
+        errors: list[str] = []
+        for name in self.brokers:
+            result = await self.trading.close_all("stop all from the dashboard", name)
+            closed += result["closed"]
+            errors += result["errors"]
+        self.hub.publish("KillSwitch", f"stop all: {len(closed)} closed, {len(errors)} not closed", "warning", closed=closed, errors=errors)
+        return {"closed": closed, "errors": errors, "stopped": kill_state()}
+
+    def resume_all(self) -> dict[str, Any]:
+        was = kill_state()
+        set_kill("")
+        if was:
+            self.hub.publish("KillSwitchCleared", f"entries resumed (were stopped: {was['reason']})", "warning")
+        return {"stopped": None}
 
     def resume_broker(self, broker: str, equity: float) -> None:
         set_halt(broker, self._settings.day_timezone, "", equity)
@@ -257,6 +300,8 @@ class Engine:
         self.hub.publish("Prices", persist=False, prices=prices, at=time.time())
 
     async def record_chains(self) -> str:
+        if not self.feed.record:
+            return "not recorded: the feed is on the demo exchange"
         rows = 0
         for u in self._settings.underlyings:
             rows += await asyncio.to_thread(recorder.record, self.chain_dir, u, self.feed.quotes(u), self.feed.spot(u))
@@ -264,6 +309,8 @@ class Engine:
 
     async def store_flow(self) -> str:
         rows = self.feed.tape.closed(time.time())
+        if not self.feed.record:
+            return "not stored: the feed is on the demo exchange"
         if rows:
             await asyncio.to_thread(store_flow_bars, rows)
         return f"{len(rows)} minutes stored; {self.feed.tape.rejected} bad prints left out since start"
@@ -315,7 +362,7 @@ class Engine:
         return [
             {
                 "name": name, "active": name in s.active_brokers, "ready": not b.not_ready(), "not_ready": b.not_ready(),
-                "auto": s.auto_on(name), "halted": halt_reason(name, s.day_timezone),
+                "auto": s.auto_on(name), "halted": halt_reason(name, s.day_timezone), "reconcile": reconcile_reason(name),
                 "real_money": name == "delta" and s.is_real_money, "env": s.delta_env if name == "delta" else "paper",
             }
             for name, b in self.brokers.items()
@@ -324,6 +371,7 @@ class Engine:
     def status(self) -> dict[str, Any]:
         return {
             "started_at": self.started_at,
+            "stopped": kill_state(),
             "uptime_seconds": round(time.time() - self.started_at),
             "feed": self.feed.status(),
             "jobs": self.scheduler.status(),

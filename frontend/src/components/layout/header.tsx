@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Lock, OctagonX } from "lucide-react";
+import { Lock, OctagonX, Play } from "lucide-react";
 import { toast } from "sonner";
+import { useSWRConfig } from "swr";
 
 import { ALL_NAV, isActive } from "@/components/layout/nav";
 import { NotificationsBell } from "@/components/layout/notifications-bell";
@@ -39,6 +40,7 @@ function useLargeTitleInView(pathname: string): boolean {
 }
 
 export function Header() {
+  const { mutate } = useSWRConfig();
   const pathname = usePathname();
   const router = useRouter();
   const { connected } = useLive();
@@ -47,11 +49,20 @@ export function Header() {
   const { data: accounts } = useApi<Accounts>("/portfolio/accounts", { refreshInterval: 20_000 });
   const title = ALL_NAV.find((n) => isActive(pathname, n.href))?.label ?? "TradeBuddy";
   const realMoney = accounts?.brokers.some((b) => b.real_money && b.active);
+  const delta = accounts?.brokers.find((b) => b.name === "delta" && b.active);
+  const mode = realMoney ? "LIVE" : delta ? "DEMO" : "PAPER";
+  const stopped = accounts?.stopped;
 
-  const closeAll = async () => {
-    const r = await api<{ closed: string[]; errors: string[] }>("/trading/close-all", "POST", {});
-    if (r.errors.length) toast.error(`${r.closed.length} closed, ${r.errors.length} failed`, { description: r.errors.join("\n") });
-    else toast.success(r.closed.length ? `${r.closed.length} structure(s) closed` : "Nothing was open");
+  const stopAll = async () => {
+    const r = await api<{ closed: string[]; errors: string[] }>("/trading/stop-all", "POST");
+    if (r.errors.length) toast.error(`Stopped. ${r.closed.length} closed, ${r.errors.length} not closed`, { description: r.errors.join("\n") });
+    else toast.success(`Stopped. ${r.closed.length ? `${r.closed.length} position(s) closed` : "Nothing was open"}`);
+    await mutate((k) => typeof k === "string" && (k.startsWith("/portfolio") || k.startsWith("/trading")));
+  };
+  const resume = async () => {
+    await api("/trading/resume", "POST");
+    toast.success("Entries resumed");
+    await mutate((k) => typeof k === "string" && k.startsWith("/portfolio"));
   };
 
   const lock = async () => {
@@ -72,24 +83,38 @@ export function Header() {
 
         <div className="flex-1" />
 
-        {realMoney && (
-          <Badge variant="solid" className="px-2 text-[11px] tracking-wide">
-            LIVE
+        {accounts && (
+          <Badge variant={mode === "LIVE" ? "solid" : "outline"} className="px-2 text-[11px] tracking-wide" title="Where automatic and manual orders can go">
+            {mode}
           </Badge>
         )}
 
-        <Confirm
-          title="Close every open structure?"
-          description="Every open structure on every broker is closed now at the live book. Auto-trading stays as it is."
-          confirmLabel="Close all"
-          destructive
-          onConfirm={() => closeAll().catch((e) => toast.error(e.message))}
-          trigger={(open) => (
-            <Button variant="destructive-outline" size="sm" onClick={open} className="h-8 rounded-full px-3" aria-label="Close all">
-              <OctagonX className="size-4" /> <span className="hidden sm:inline">Close all</span>
-            </Button>
-          )}
-        />
+        {stopped ? (
+          <Confirm
+            title="Resume entries?"
+            description={`Stopped: ${stopped.reason}. Resuming lets every switched-on strategy open positions again.`}
+            confirmLabel="Resume"
+            onConfirm={() => resume().catch((e) => toast.error(e.message))}
+            trigger={(open) => (
+              <Button variant="outline" size="sm" onClick={open} className="h-8 rounded-full border-loss px-3 text-loss" aria-label="Resume entries">
+                <Play className="size-4" /> <span className="hidden sm:inline">Stopped · Resume</span>
+              </Button>
+            )}
+          />
+        ) : (
+          <Confirm
+            title="Stop everything?"
+            description="Every new entry is refused on every broker, automatic and manual, until you resume. Then every open position is closed at the live book."
+            confirmLabel="Stop all"
+            destructive
+            onConfirm={() => stopAll().catch((e) => toast.error(e.message))}
+            trigger={(open) => (
+              <Button variant="destructive-outline" size="sm" onClick={open} className="h-8 rounded-full px-3" aria-label="Stop all">
+                <OctagonX className="size-4" /> <span className="hidden sm:inline">Stop all</span>
+              </Button>
+            )}
+          />
+        )}
 
         <NotificationsBell />
 

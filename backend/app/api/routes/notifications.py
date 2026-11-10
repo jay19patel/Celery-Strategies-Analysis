@@ -18,7 +18,10 @@ from app.core.models import EventLog
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
-TYPES = ("StructureOpened", "StructureClosed", "StructureFailed", "StructureError", "RiskHalt", "RiskResumed", "KillSwitch")
+TYPES = (
+    "StructureOpened", "StructureClosed", "StructureFailed", "StructureError", "RiskHalt", "RiskResumed",
+    "KillSwitch", "KillSwitchCleared", "ReconcileMismatch", "ReconcileMatched",
+)
 NOTIFIABLE = col(EventLog.type).in_(TYPES)
 UNREAD = col(EventLog.read_at).is_(None)
 

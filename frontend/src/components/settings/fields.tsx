@@ -56,6 +56,18 @@ export function Section({ title, description, children }: { title: string; descr
   );
 }
 
+/** Settings most owners never need: closed until opened. */
+export function Advanced({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="group rounded-lg border px-3 py-2.5">
+      <summary className="cursor-pointer select-none text-[13px] font-semibold marker:text-muted-foreground">
+        Advanced: {title}
+      </summary>
+      <div className="mt-3">{children}</div>
+    </details>
+  );
+}
+
 interface NumberProps {
   name: string;
   label: ReactNode;

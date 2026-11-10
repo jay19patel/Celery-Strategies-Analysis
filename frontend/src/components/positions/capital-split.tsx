@@ -10,7 +10,6 @@ import type { Account, Structure } from "@/lib/types";
 const GROUPS = [
   { key: "perp", label: "Perpetuals", color: "#6366f1" },
   { key: "strategy", label: "Option strategies", color: "#0ea5e9" },
-  { key: "zerohero", label: "Zero-hero", color: "#f59e0b" },
   { key: "single", label: "Single options", color: "#a855f7" },
 ] as const;
 
@@ -18,7 +17,6 @@ type Group = (typeof GROUPS)[number]["key"];
 
 function groupOf(s: Structure): Group {
   if (s.instrument === "perp") return "perp";
-  if (s.strategy === "zero_hero" || s.strategy === "expiry_decay") return "zerohero";
   return s.legs.length === 1 ? "single" : "strategy";
 }
 

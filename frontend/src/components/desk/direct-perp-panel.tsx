@@ -1,23 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  ArrowDownRight,
-  ArrowUpRight,
-  Calculator,
-  CheckCircle2,
-  HelpCircle,
-  Loader2,
-  Play,
-  RotateCcw,
-  ShieldAlert,
-  Sparkles,
-  Zap,
-} from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Calculator, Loader2, Play, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 
+import { Confirm } from "@/components/shared/confirm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -57,12 +46,10 @@ export function DirectPerpPanel({
   const { mutate } = useSWRConfig();
   const { data: sysStatus } = useApi<{ brokers: BrokerStatus[] }>("/system/status");
 
-  const brokers = useMemo<BrokerStatus[]>(() => {
-    return sysStatus?.brokers ?? [
-      { name: "paper", active: true, ready: true, not_ready: "", auto: true, halted: "", real_money: false, env: "paper" },
-      { name: "delta", active: false, ready: false, not_ready: "keys not set", auto: false, halted: "", real_money: false, env: "demo" },
-    ];
-  }, [sysStatus]);
+  // Never a made-up broker list: until the engine says which are active, nothing can be sent.
+  const brokers = useMemo<BrokerStatus[]>(() => sysStatus?.brokers ?? [], [sysStatus]);
+  // One id per ticket: a second click is the same order, which the engine opens once.
+  const [reqId, setReqId] = useState(requestId);
 
   const activeBrokers = brokers.filter((b) => b.active);
   const [userBroker, setUserBroker] = useState<Broker | null>(null);
@@ -75,6 +62,8 @@ export function DirectPerpPanel({
   const broker = userBroker && activeBrokers.some((b) => b.name === userBroker)
     ? userBroker
     : (activeBrokers[0]?.name as Broker) ?? "paper";
+  const chosen = brokers.find((b) => b.name === broker);
+  const blocked = !chosen ? "loading the brokers" : chosen.not_ready || (chosen.halted ? `halted today: ${chosen.halted}` : "");
 
   const atr = structure?.atr || (currentPrice > 0 ? currentPrice * 0.015 : 100);
   const defaultStop = currentPrice > 0
@@ -163,8 +152,9 @@ export function DirectPerpPanel({
         qty,
         stop,
         target,
-        request_id: requestId(),
+        request_id: reqId,
       });
+      setReqId(requestId()); // the next ticket is a new order
 
       toast.success(`${underlying} ${side.toUpperCase()} opened!`, {
         description: (
@@ -370,18 +360,25 @@ export function DirectPerpPanel({
           </div>
         </div>
 
-        {/* Execute Button */}
-        <Button
-          type="button"
-          onClick={handleOpenPosition}
-          disabled={executing || currentPrice <= 0 || stop <= 0 || target <= 0}
-          className={`w-full gap-2 font-bold text-xs ${
-            !isBuy ? "bg-loss hover:bg-loss/90" : "bg-profit hover:bg-profit/90"
-          }`}
-        >
-          {executing ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-          {isBuy ? `Open ${underlying} Long Position` : `Open ${underlying} Short Position`}
-        </Button>
+        {blocked && <p className="text-[12px] text-loss">Not available: {blocked}</p>}
+        <Confirm
+          title={`${isBuy ? "Buy" : "Sell"} ${qty} ${underlying} contracts on ${broker}?`}
+          description={`${chosen?.real_money ? "Real money. " : ""}At the live book, with the stop at ${num(stop, 1)} and the target at ${num(target, 1)}.`}
+          confirmLabel={chosen?.real_money ? "Place real order" : "Place order"}
+          destructive={!!chosen?.real_money}
+          onConfirm={handleOpenPosition}
+          trigger={(open) => (
+            <Button
+              type="button"
+              onClick={open}
+              disabled={executing || !!blocked || currentPrice <= 0 || stop <= 0 || target <= 0}
+              className={`w-full gap-2 font-bold text-xs ${!isBuy ? "bg-loss hover:bg-loss/90" : "bg-profit hover:bg-profit/90"}`}
+            >
+              {executing ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+              {isBuy ? `Open ${underlying} long` : `Open ${underlying} short`}
+            </Button>
+          )}
+        />
       </CardContent>
     </Card>
   );

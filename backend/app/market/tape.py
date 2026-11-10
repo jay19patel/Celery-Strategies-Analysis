@@ -75,10 +75,12 @@ class Tape:
         self._options: dict[str, OptionFlow] = {}
         self.rejected = 0  # bad prints left out, for the System page
 
-    def trade(self, symbol: str, price: float, size: float, taker_buy: bool, ts: float) -> None:
+    def trade(self, symbol: str, price: float, size: float, taker_buy: bool, ts: float, mark: float | None = None) -> None:
+        """One print. Judged against the perpetual's `mark` when it is known — no single print moves
+        the mark, so a junk print can never become the yardstick — else against the last good print."""
         if not (math.isfinite(price) and price > 0 and size > 0):
             return
-        last = self._last.get(symbol)
+        last = mark or self._last.get(symbol)
         if last and abs(price / last - 1) > MAX_JUMP:
             self.rejected += 1
             return

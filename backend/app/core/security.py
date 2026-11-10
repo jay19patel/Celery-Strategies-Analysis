@@ -56,6 +56,7 @@ def change_pin(current: str, new: str) -> None:
     if len(new) != 6 or not new.isdigit():
         raise Refused("the new PIN must be exactly 6 digits")
     kv_set("auth:pin_hash", _hasher.hash(new))
+    kv_set("auth:secret", secrets.token_hex(32))  # every session issued under the old PIN ends here
 
 
 def using_default_pin() -> bool:

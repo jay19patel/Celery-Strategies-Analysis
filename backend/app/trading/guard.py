@@ -1,13 +1,11 @@
 """The guard: an engine job over every open structure, and one over every broker's day.
 
 A position on the perpetual leaves when the mark reaches its strategy's stop or target, or after
-`perp_max_hold_hours`. On an exchange that holds stops, the stop is also left there at entry; when
+its strategy's hold time. On an exchange that holds stops, the stop is also left there at entry; when
 that one fills first, the close books its fill. Per options structure, strongest reason first:
   1. past expiry and still open  -> settle at intrinsic on the index
-  2. inside `exit_before_expiry_minutes` -> close (settlement and pin risk are not worth the last hour),
-     or `zh_exit_minutes` on a zero-hero buy, whichever of the two comes first
-  3. a zero-hero buy whose break has been undone -> close on the premise, not on the P&L
-  4. P&L at the take-profit or the stop-loss -> close. A stop must hold `stop_confirm_checks` checks
+  2. inside `exit_before_expiry_minutes` -> close (settlement and pin risk are not worth the last hour)
+  3. P&L at the take-profit or the stop-loss -> close. A stop must hold `STOP_CONFIRM_CHECKS` checks
      in a row: a thin wing's ask can jump for a few seconds with the underlying standing still, and
      that is the book's spread, not the trade's loss. On a credit structure whose expiry payoff at
      the current spot is already a loss — the spot is past a breakeven — the move is real and the
@@ -24,7 +22,8 @@ structure failing never stops the others from being checked.
 
 Per broker: equity down `daily_loss_limit_pct` from the start of the trading day closes that
 broker's structures and blocks its entries until the next day. Brokers are independent: one
-halting never touches another.
+halting never touches another. Equity `max_drawdown_pct` below its peak on any broker stops every
+entry everywhere (the kill switch) and closes every position, until it is resumed by hand.
 """
 
 from __future__ import annotations
@@ -41,19 +40,21 @@ from app.core.models import Leg, Structure
 from app.errors import BrokerError
 from app.options.pricing import LegSpec, payoff
 from app.settings import Settings
-from app.trading.risk import set_halt, start_day
-from app.trading.service import TradingService, exit_thresholds, held_to_settlement, is_directional, is_zerohero
+from app.trading.risk import kill_state, set_halt, start_day
+from app.trading.service import TradingService, exit_thresholds, held_to_settlement, is_directional
 
 log = logging.getLogger(__name__)
 RETRY_FIRST, RETRY_MAX = 30.0, 600.0  # seconds between retries of a structure in error: doubling, capped
+# A stop read on the book must hold this many checks in a row (5s apart) before it closes: one wide
+# ask on a thin wing is not a loss. With the spot through a breakeven it closes at once.
+STOP_CONFIRM_CHECKS = 3
 
 
 class Guard:
-    def __init__(self, trading: TradingService, settings: Any, hub: EventHub, zerohero: Any = None) -> None:
+    def __init__(self, trading: TradingService, settings: Any, hub: EventHub) -> None:
         self.trading = trading
         self.settings: Any = settings
         self.hub = hub
-        self.zerohero = zerohero  # reads the break a zero-hero buy was opened on; None in tests
         self._retry: dict[str, tuple[float, float]] = {}  # structure id -> (next attempt, current wait)
         self._breached: dict[str, int] = {}  # structure id -> guard checks in a row at or past its stop
 
@@ -114,18 +115,9 @@ class Guard:
         # wide ask to buy back on noise: a 1x-credit stop cut win rates from about 80% to 14-50% and
         # turned bull puts and condors that settled +2.5% to +5.5% into losses. A manual close still works.
         settle = held_to_settlement(st)
-        # A zero-hero buy leaves at whichever time stop comes FIRST. In the last hour theta goes
-        # vertical on a contract that is all time value, so holding one to find out is not a
-        # decision, it is a donation with a countdown.
-        floor = 0 if settle else s.zh_exit_minutes if is_zerohero(st) else s.exit_before_expiry_minutes
+        floor = 0 if settle else s.exit_before_expiry_minutes
         if floor and minutes_left <= floor:
             return f"time exit: {minutes_left:.0f} min to expiry"
-        # The premise, re-read. This is checked BEFORE the P&L rules on purpose: a position whose
-        # reason for existing has gone is closed on that fact, not on whether it is green yet.
-        if is_zerohero(st) and self.zerohero is not None and legs and (
-            why := self.zerohero.invalidated(st.underlying, legs[0].kind)
-        ):
-            return why
         value = self.trading.valuation(st, legs)
         pnl = value["pnl"]
         if pnl is None:
@@ -141,7 +133,7 @@ class Guard:
             return None
         n = self._breached[st.id] = self._breached.get(st.id, 0) + 1
         past = st.entry_cash > 0 and self._past_breakeven(st, legs)
-        if not past and n < s.stop_confirm_checks:
+        if not past and n < STOP_CONFIRM_CHECKS:
             return None
         why = "the spot is past a breakeven" if past else f"held {n} checks"
         return f"stop loss: {pnl:+,.2f} reached {st.stop_loss_pct:g}% stop {sl:+,.2f} ({why})"
@@ -185,9 +177,8 @@ class Guard:
                 db.commit()
 
     async def check_daily_loss(self) -> str:
+        """The daily loss limit per broker, and the drawdown limit across all of them."""
         s: Settings = self.settings()
-        if s.daily_loss_limit_pct <= 0:
-            return "off"
         out = []
         for name in s.active_brokers:
             b = self.trading.brokers[name]
@@ -197,6 +188,14 @@ class Guard:
                 account = await b.account()
             except BrokerError:
                 continue  # an unreadable account is not a loss; the trade gate refuses entries on it
+            if (why := self.trading.drawdown_breach(name, account.equity)) and kill_state() is None:
+                self.trading.engage_kill(why)
+                for broker in s.active_brokers:
+                    await self.trading.close_all(f"drawdown limit: {why}", broker=broker)
+                out.append(f"{name}: {why}")
+                continue
+            if s.daily_loss_limit_pct <= 0:
+                continue
             day = start_day(name, s.day_timezone, account.equity)
             if day.halted or day.start_equity <= 0:
                 out.append(f"{name}: halted" if day.halted else f"{name}: no equity")
@@ -208,4 +207,4 @@ class Guard:
                 set_halt(name, s.day_timezone, reason)
                 self.hub.publish("RiskHalt", f"{name} halted: {reason}; closing its structures", "warning", broker=name, down_pct=round(down, 3))
                 await self.trading.close_all(f"daily loss limit: {reason}", broker=name)
-        return ", ".join(out) or "no broker to check"
+        return ", ".join(out) or ("daily limit off" if s.daily_loss_limit_pct <= 0 else "no broker to check")

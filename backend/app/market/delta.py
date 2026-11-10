@@ -12,6 +12,7 @@ import hmac
 import json
 import logging
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -61,6 +62,9 @@ def round_to_tick(price: float, tick: float) -> str:
     return str((Decimal(str(price)) / step).quantize(Decimal(1)) * step)
 
 
+PRODUCT_CACHE = 500  # product specs kept, least recently used dropped first
+
+
 class DeltaClient:
     GET_RETRY_DELAYS = (0.5, 1.0)
 
@@ -69,7 +73,7 @@ class DeltaClient:
         self.api_key = api_key
         self.api_secret = api_secret
         self.http = http or httpx.AsyncClient(timeout=10)
-        self._products: dict[str, dict[str, Any]] = {}
+        self._products: OrderedDict[str, dict[str, Any]] = OrderedDict()  # bounded: option listings never stop coming
         self.calls: dict[str, dict[str, Any]] = {}  # "GET /v2/tickers" -> counters, for the System page
 
     @property
@@ -148,8 +152,12 @@ class DeltaClient:
         return await self.request("GET", "/v2/tickers", params=params) or []
 
     async def product(self, symbol: str) -> dict[str, Any]:
-        if symbol not in self._products:
+        if symbol in self._products:
+            self._products.move_to_end(symbol)
+        else:
             self._products[symbol] = await self.request("GET", f"/v2/products/{symbol}")
+            while len(self._products) > PRODUCT_CACHE:
+                self._products.popitem(last=False)
         return self._products[symbol]
 
     # -- account -------------------------------------------------------------------------
@@ -160,6 +168,11 @@ class DeltaClient:
     async def positions(self) -> list[dict[str, Any]]:
         rows = await self.request("GET", "/v2/positions/margined", auth=True) or []
         return [p for p in rows if float(p.get("size") or 0)]
+
+    async def order_leverage(self, symbol: str) -> Any:
+        product = await self.product(symbol)
+        result = await self.request("GET", f"/v2/products/{product['id']}/orders/leverage", auth=True) or {}
+        return result.get("leverage")
 
     # -- orders --------------------------------------------------------------------------
 

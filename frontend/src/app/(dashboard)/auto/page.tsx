@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 
 import { DecisionRow } from "@/components/auto/decision-row";
+import { Confirm } from "@/components/shared/confirm";
 import { PageHeader } from "@/components/shared/page";
 import { Empty, LoadError, Loading, Notice } from "@/components/shared/states";
 import { KV } from "@/components/shared/stat";
@@ -17,23 +18,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { ago, titleCase, until } from "@/lib/format";
+import { ago, until } from "@/lib/format";
 import { useApi } from "@/lib/live";
 import type { AutoStatus, BrokerStatus, Decision } from "@/lib/types";
-
-const CONFIG_ROWS: [string, string, (v: unknown) => string][] = [
-  ["expiry_min_hours", "Expiry window", () => ""],
-  ["short_delta", "Short strikes at |Δ|", (v) => String(v)],
-  ["wing_width_pct", "Wings", (v) => `${v}% of spot`],
-  ["min_score", "Minimum regime score", (v) => String(v)],
-  ["min_pop_pct", "Minimum POP", (v) => `${v}%`],
-  ["max_spread_pct", "Max bid/ask spread", (v) => `${v}%`],
-  ["risk_per_trade_pct", "Risk per trade", (v) => `${v}% of equity`],
-  ["max_open_structures", "Max open per broker", (v) => String(v)],
-  ["credit_take_profit_pct", "Credit take profit", (v) => `${v}% of max profit`],
-  ["credit_stop_loss_pct", "Credit stop loss", (v) => `${v}% of credit`],
-  ["exit_before_expiry_minutes", "Exit before expiry", (v) => `${v} min`],
-];
 
 function BrokerSwitch({ b, onToggle }: { b: BrokerStatus; onToggle: (b: BrokerStatus, on: boolean) => void }) {
   return (
@@ -45,10 +32,10 @@ function BrokerSwitch({ b, onToggle }: { b: BrokerStatus; onToggle: (b: BrokerSt
           {b.halted && <Badge variant="loss">halted</Badge>}
         </div>
         <div className="truncate text-[11.5px] text-muted-foreground">
-          {!b.active ? "broker not active (Settings)" : b.not_ready || b.halted || (b.auto ? "trading automatically" : "manual only")}
+          {!b.active ? "broker not active (Settings)" : b.not_ready || b.halted || b.reconcile || (b.auto ? "automatic entries on" : "manual only")}
         </div>
       </div>
-      <Switch checked={b.auto} disabled={!b.active} onCheckedChange={(on) => onToggle(b, on)} aria-label={`Auto-trade on ${b.name}`} />
+      <Switch checked={b.auto} disabled={!b.active} onCheckedChange={(on) => onToggle(b, on)} aria-label={`Automatic entries on ${b.name}`} />
     </div>
   );
 }
@@ -69,7 +56,7 @@ export default function AutoPage() {
     try {
       await api("/auto/toggle", "POST", { broker: b.name, enabled: on });
       await mutate((k) => typeof k === "string" && (k.startsWith("/auto") || k.startsWith("/portfolio")));
-      toast.success(`Auto-trading ${on ? "on" : "off"} for ${b.name}`);
+      toast.success(`Automatic entries ${on ? "on" : "off"} for ${b.name}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -95,16 +82,25 @@ export default function AutoPage() {
   return (
     <>
       <PageHeader
-        title="Auto Trader"
-        description="Every cycle reads the regime, builds every enabled structure, keeps those that pass every check, optionally asks the AI reviewer, and sizes by risk."
+        title="Option Decisions"
+        description="Every cycle, each option strategy switched on reads the regime at its own expiry, builds its structure, and must pass every check; the rules decide and size by risk. Every cycle that reached a broker is kept here, with why."
         actions={
           <>
             <Button variant="outline" size="sm" asChild>
-              <Link href="/settings"><Settings2 /> Configure</Link>
+              <Link href="/strategies"><Settings2 /> Strategies</Link>
             </Button>
-            <Button size="sm" onClick={runNow} disabled={running}>
-              {running ? <Loader2 className="animate-spin" /> : <Play />} Run a cycle now
-            </Button>
+            <Confirm
+              title="Run a cycle now?"
+              description={`It decides and trades now on every broker with automatic entries on: ${status?.brokers.filter((b) => b.active && b.auto).map((b) => (b.real_money ? `${b.name} (real money)` : b.name)).join(", ") || "none"}.`}
+              confirmLabel="Run it"
+              destructive={status?.brokers.some((b) => b.active && b.auto && b.real_money)}
+              onConfirm={runNow}
+              trigger={(open) => (
+                <Button size="sm" onClick={open} disabled={running}>
+                  {running ? <Loader2 className="animate-spin" /> : <Play />} Run a cycle now
+                </Button>
+              )}
+            />
           </>
         }
       />
@@ -121,12 +117,12 @@ export default function AutoPage() {
               <Card className="px-4 py-3">
                 <div className="text-[11.5px] text-muted-foreground">Next cycle</div>
                 <div className="num mt-1 text-[15px] font-semibold">{until(status.job?.next_run)}</div>
-                <div className="text-[11px] text-muted-foreground">every {cfg?.auto_interval_minutes} min · last {ago(status.job?.last_run)}</div>
+                <div className="text-[11px] text-muted-foreground">every {cfg?.interval_minutes} min · last {ago(status.job?.last_run)}</div>
               </Card>
               <Card className="px-4 py-3">
-                <div className="text-[11.5px] text-muted-foreground">Strategies</div>
+                <div className="text-[11.5px] text-muted-foreground">Option strategies on</div>
                 <div className="mt-1 flex flex-wrap gap-1">
-                  {cfg?.auto_strategies.map((s) => <Badge key={s} variant="outline">{titleCase(s)}</Badge>)}
+                  {cfg?.strategies.length ? cfg.strategies.map((s) => <Badge key={s} variant="outline">{s.replace(/_/g, " ")}</Badge>) : <span className="text-[12px] text-muted-foreground">none</span>}
                 </div>
               </Card>
             </div>
@@ -139,10 +135,11 @@ export default function AutoPage() {
             <CardContent className="py-2">
               {cfg && (
                 <>
-                  <KV label="Expiry window" value={`${cfg.expiry_min_hours}–${cfg.expiry_max_hours}h`} />
-                  {CONFIG_ROWS.slice(1).map(([key, label, fmt]) => (
-                    <KV key={key} label={label} value={fmt(cfg[key])} />
-                  ))}
+                  <KV label="Score a strategy must reach" value={String(cfg.min_score)} />
+                  <KV label="Risk per entry" value={`${cfg.risk_per_trade_pct}% of equity`} />
+                  <KV label="Widest leg spread" value={`${cfg.max_spread_pct}%`} />
+                  <KV label="Exit before expiry" value={`${cfg.exit_before_expiry_minutes} min`} />
+                  <KV label="Each strategy's own numbers" value={<Link href="/strategies" className="text-primary hover:underline">Strategies</Link>} />
                 </>
               )}
             </CardContent>
@@ -180,10 +177,10 @@ export default function AutoPage() {
       <Dialog open={!!confirmDelta} onOpenChange={(o) => !o && setConfirmDelta(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Auto-trade on Delta?</DialogTitle>
+            <DialogTitle>Automatic entries on Delta?</DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-2">
-                <p>The engine will open and close option structures on your Delta {confirmDelta?.real_money ? "LIVE account with real money" : "demo account"} without asking.</p>
+                <p>Every strategy switched to live will open and close positions on your Delta {confirmDelta?.real_money ? "LIVE account with real money" : "demo account"} without asking.</p>
                 <p>It switches itself off again whenever the engine restarts or the Delta account or keys change.</p>
               </div>
             </DialogDescription>

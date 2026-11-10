@@ -8,14 +8,16 @@ An EMA weights by time, VWAP by size — the price the money actually paid since
     SIDE      it agrees with the engine's 15m read — a cross against it is the one that gets faded.
     DISTANCE  price is not already more than an ATR past VWAP: entering at the level, not chasing.
     STOP      the other side of VWAP plus a quarter ATR. Back through it, the cross was noise.
-    TARGET    the next level `nearby` names, at least MIN_NET_RR times the stop after costs.
+    TARGET    the next level `nearby` names, at least `min_net_rr` times the stop after costs.
 """
 
 from __future__ import annotations
 
+from pydantic import Field
+
 from app.market.delta import Candle
 from app.market.indicators import atr, ema
-from app.strategies.base import Context, Decision, Strategy, min_stop_pct, net_rr, next_level, none, way
+from app.strategies.base import Context, Decision, Params, Strategy, min_stop_pct, net_rr, next_level, none, way
 
 DAY = 86_400
 EMA_PERIOD = 9
@@ -24,7 +26,6 @@ STOP_BUFFER_ATR = 0.25
 MIN_STOP_PCT = 0.10
 MAX_STOP_PCT = 0.80
 MIN_ROOM_ATR = 1.0  # the target at least this many ATRs away
-MIN_NET_RR = 1.5
 MIN_SESSION_BARS = 6  # before this the session VWAP is two prints and a rounding error
 
 
@@ -42,16 +43,22 @@ def session_vwap(candles: list[Candle]) -> list[float | None]:
     return out
 
 
+class EmaVwapParams(Params):
+    min_net_rr: float = Field(1.5, ge=1.0, le=5.0, description="Least reward:risk after costs the target must offer")
+
+
 class EmaVwap(Strategy):
     name = "ema_vwap"
     label = "EMA × VWAP"
     summary = "A fresh 9 EMA cross of session VWAP on 5m, with the 15m trend, entered at the level."
     stop_rule = "the other side of VWAP, plus a quarter ATR"
-    target_rule = f"the next support/resistance level, at least {MIN_NET_RR:g}:1 after costs"
+    target_rule = "the next support/resistance level, at least min_net_rr:1 after costs"
     interval = "5m"
     lookback = 300  # 25 hours, so the session VWAP always has its whole day
+    default_on = True
     wants_outlook = True
     wants_structure = True
+    Params = EmaVwapParams
 
     def decide(self, ctx: Context) -> Decision:
         candles = ctx.candles
@@ -96,8 +103,8 @@ class EmaVwap(Strategy):
         if target_pct < MIN_ROOM_ATR * atr_pct:
             return none(f"the next level is {target_pct:.2f}% away, inside {MIN_ROOM_ATR:g} ATR ({atr_pct:.2f}%)")
         rr = net_rr(target_pct, stop_pct, ctx.cost_pct)
-        if rr < MIN_NET_RR:
-            return none(f"{what} is only {rr:.2f}:1 after costs against a {stop_pct:.2f}% stop (needs {MIN_NET_RR:g}:1)")
+        if rr < self.p.min_net_rr:
+            return none(f"{what} is only {rr:.2f}:1 after costs against a {stop_pct:.2f}% stop (needs {self.p.min_net_rr:g}:1)")
         return Decision(
             "buy" if up else "sell",
             f"9 EMA crossed {'above' if up else 'below'} session VWAP {now_vwap:,.0f}; stop the other side of VWAP "

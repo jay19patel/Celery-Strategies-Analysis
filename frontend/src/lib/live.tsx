@@ -26,22 +26,25 @@ const SILENT_MS = 15_000;
 
 // Which cached reads each event makes stale.
 const REFRESH: Record<string, string[]> = {
-  StructureOpened: ["/trading", "/portfolio", "/auto", "/notifications"],
+  StructureOpened: ["/trading", "/portfolio", "/auto", "/strategies", "/notifications"],
   StopTrailed: ["/trading"],
-  StructureClosed: ["/trading", "/portfolio", "/auto", "/notifications"],
+  StructureClosed: ["/trading", "/portfolio", "/auto", "/strategies", "/notifications"],
   StructureFailed: ["/trading", "/portfolio", "/notifications"],
   StructureError: ["/trading", "/portfolio", "/notifications"],
   RiskHalt: ["/trading", "/portfolio", "/auto", "/notifications"],
   RiskResumed: ["/portfolio", "/auto", "/notifications"],
-  KillSwitch: ["/trading", "/portfolio", "/notifications"],
-  AutoDecision: ["/auto", "/portfolio/journal"],
-  ZeroHeroDecision: ["/zerohero", "/portfolio/journal"],
+  KillSwitch: ["/trading", "/portfolio", "/auto", "/system", "/notifications"],
+  KillSwitchCleared: ["/trading", "/portfolio", "/auto", "/system"],
+  ReconcileMismatch: ["/portfolio", "/system", "/notifications"],
+  ReconcileMatched: ["/portfolio", "/system"],
+  EngineStarted: ["/system", "/portfolio", "/trading"],
+  AutoDecision: ["/auto", "/portfolio/journal", "/strategies"],
   AiBrief: ["/ai"],
-  SettingsChanged: ["/settings", "/auto", "/zerohero", "/portfolio", "/ai", "/market", "/strategies"],
+  SettingsChanged: ["/settings", "/auto", "/portfolio", "/ai", "/market", "/strategies", "/desk", "/system"],
   Signal: ["/strategies", "/trading", "/portfolio"],
   MarketAnalysis: ["/desk"],
   PaperReset: ["/portfolio", "/trading"],
-  DataReset: ["/portfolio", "/trading", "/auto", "/zerohero", "/strategies", "/system", "/ai", "/market", "/desk", "/notifications"],
+  DataReset: ["/portfolio", "/trading", "/auto", "/strategies", "/system", "/ai", "/market", "/desk", "/notifications"],
 };
 
 async function wsUrl(): Promise<string> {
@@ -67,18 +70,20 @@ function announce(e: LiveEvent) {
     case "StructureFailed":
     case "RiskHalt":
     case "KillSwitch":
-      toast.warning(e.type === "RiskHalt" ? "Daily loss limit" : e.type === "KillSwitch" ? "Close all" : "Not opened", { description: e.message });
+      toast.warning(e.type === "RiskHalt" ? "Daily loss limit" : e.type === "KillSwitch" ? "Every entry stopped" : "Not opened", { description: e.message });
+      break;
+    case "KillSwitchCleared":
+      toast.info("Entries resumed", { description: e.message });
+      break;
+    case "ReconcileMismatch":
+      toast.error("Delta does not match the desk", { description: e.message, duration: 30_000 });
       break;
     case "StructureError":
       toast.error("Needs attention", { description: e.message, duration: 15_000 });
       break;
     case "AutoDecision":
-      if (d.action === "open") toast.info("Auto-trader opened a structure", { description: e.message });
-      if (d.action === "error") toast.error("Auto-trader error", { description: e.message });
-      break;
-    case "ZeroHeroDecision":
-      if (d.action === "open") toast.info("Zero-hero traded", { description: e.message });
-      if (d.action === "error") toast.error("Zero-hero error", { description: e.message });
+      if (d.action === "open") toast.info("Option strategy opened a structure", { description: e.message });
+      if (d.action === "error") toast.error("Option strategy error", { description: e.message });
       break;
   }
 }

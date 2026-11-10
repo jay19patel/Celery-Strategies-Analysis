@@ -44,3 +44,6 @@ data/
 *.sqlite
 *.sqlite3
 celerybeat-schedule*
+
+# The engine's one-process lock, beside its database
+*.engine.lock

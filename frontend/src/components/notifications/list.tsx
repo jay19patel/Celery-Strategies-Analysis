@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CircleCheck, CircleX, OctagonX, Play, ShieldAlert, TrendingDown, TrendingUp, type LucideIcon } from "lucide-react";
+import { AlertTriangle, CircleCheck, CircleX, OctagonX, Play, Scale, ShieldAlert, TrendingDown, TrendingUp, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
@@ -19,7 +19,10 @@ const KIND: Record<string, { title: string; icon: LucideIcon; tone: string }> = 
   StructureError: { title: "Needs attention", icon: AlertTriangle, tone: "bg-loss-soft text-loss" },
   RiskHalt: { title: "Daily loss limit hit", icon: ShieldAlert, tone: "bg-loss-soft text-loss" },
   RiskResumed: { title: "Trading resumed", icon: Play, tone: "bg-profit-soft text-profit" },
-  KillSwitch: { title: "Close all", icon: OctagonX, tone: "bg-warn-soft text-warn" },
+  KillSwitch: { title: "Every entry stopped", icon: OctagonX, tone: "bg-loss-soft text-loss" },
+  KillSwitchCleared: { title: "Entries resumed", icon: Play, tone: "bg-profit-soft text-profit" },
+  ReconcileMismatch: { title: "Delta does not match the desk", icon: Scale, tone: "bg-loss-soft text-loss" },
+  ReconcileMatched: { title: "Delta matches the desk again", icon: Scale, tone: "bg-profit-soft text-profit" },
 };
 
 function kind(n: AppNotification) {

@@ -5,22 +5,35 @@ from __future__ import annotations
 import pytest
 
 from app.options.assess import assess
-from app.options.strategies import CATALOG, build, custom
+from app.options.strategies import Plan, build_plan, custom
 from app.settings import Settings
+from app.strategies import registry
+from app.strategies.iron_condor import IronCondor
 from tests.conftest import load_quotes
 
 SPOT = 80_331.1
+STRIKE_RULES = [n for n in registry.names("options") if n != "expiry_decay"]  # the decay spread scans, see test_decay
 
 
-@pytest.mark.parametrize("key", list(CATALOG))
+def build(key: str, quotes: list, spot: float = SPOT) -> Plan | None:
+    strategy = registry.make(key)
+    return build_plan(key, strategy.pick(quotes, spot), spot)
+
+
+def check(a: dict, name: str) -> dict:
+    return next(c for c in a["checks"] if c["name"] == name)
+
+
+@pytest.mark.parametrize("key", STRIKE_RULES)
 def test_every_strategy_builds_from_the_chain(key: str) -> None:
-    quotes = load_quotes()
-    plan = build(key, quotes, SPOT, 0.18, 2.0)
-    assert plan is not None
+    plan = build(key, load_quotes())
+    assert plan is not None and plan.strategy == key
     sides = [leg.side for leg in plan.legs]
-    if CATALOG[key].premium == "credit":
+    cls = registry.option(key)
+    assert cls is not None
+    if cls.premium == "credit":
         assert "sell" in sides
-    if CATALOG[key].risk == "defined" and CATALOG[key].premium == "credit":
+    if cls.risk == "defined" and cls.premium == "credit":
         # every sold option has a bought one of the same kind further out
         for s in [leg for leg in plan.legs if leg.side == "sell"]:
             wing = [b for b in plan.legs if b.side == "buy" and b.kind == s.kind]
@@ -29,7 +42,7 @@ def test_every_strategy_builds_from_the_chain(key: str) -> None:
 
 
 def test_condor_shorts_sit_at_the_target_delta_and_out_of_the_money() -> None:
-    plan = build("iron_condor", load_quotes(), SPOT, 0.18, 2.0)
+    plan = build("iron_condor", load_quotes())
     assert plan is not None
     shorts = [leg for leg in plan.legs if leg.side == "sell"]
     for s in shorts:
@@ -54,14 +67,32 @@ def test_custom_refuses_mixed_expiries_and_duplicates() -> None:
 
 def test_selling_premium_needs_edge_at_realised_volatility() -> None:
     """IV here is 22.9%. Realised below it, a condor has edge; realised above it, the check refuses."""
-    plan = build("iron_condor", load_quotes(), SPOT, 0.18, 2.0)
+    plan = build("iron_condor", load_quotes())
     assert plan is not None
-    s = Settings(max_spread_pct=100, min_credit_width_pct=0)
-    calm = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.12)
-    wild = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.45)
-    edge = lambda a: next(c for c in a["checks"] if c["name"] == "edge at realised vol")  # noqa: E731
-    assert edge(calm)["ok"] and calm["ok"]
-    assert not edge(wild)["ok"] and not wild["ok"]
+    calm = assess(plan, 1, 0.229, 17.6, 100, realised_vol=0.12, min_credit_width_pct=0)
+    wild = assess(plan, 1, 0.229, 17.6, 100, realised_vol=0.45, min_credit_width_pct=0)
+    assert check(calm, "edge at realised vol")["ok"] and calm["ok"]
+    assert not check(wild, "edge at realised vol")["ok"] and not wild["ok"]
+
+
+def test_no_realised_volatility_fails_the_edge_check_instead_of_skipping_it() -> None:
+    """A fresh install has no stored bars: the seller's one real edge test must refuse, not vanish."""
+    plan = build("iron_condor", load_quotes())
+    assert plan is not None
+    blind = assess(plan, 1, 0.229, 17.6, 100, realised_vol=None, min_credit_width_pct=0, min_pop_pct=0)
+    edge = check(blind, "edge at realised vol")
+    assert edge["required"] and not edge["ok"] and not blind["ok"]
+
+
+def test_a_strategys_params_move_its_strikes() -> None:
+    quotes = load_quotes()
+    near = build_plan("iron_condor", IronCondor({"short_delta": 0.30}).pick(quotes, SPOT), SPOT)
+    far = build_plan("iron_condor", IronCondor({"short_delta": 0.10}).pick(quotes, SPOT), SPOT)
+    assert near is not None and far is not None
+    sold = lambda p: next(leg.strike for leg in p.legs if leg.side == "sell" and leg.kind == "call")  # noqa: E731
+    assert sold(near) < sold(far)  # a higher |delta| sells closer to the money
+    with pytest.raises(ValueError, match="short_delta"):
+        IronCondor({"short_delta": 0.9})
 
 
 def test_range_volatility_reads_the_same_market_as_closes_and_the_reference_is_the_highest() -> None:
@@ -89,17 +120,14 @@ def test_range_volatility_reads_the_same_market_as_closes_and_the_reference_is_t
     assert m["vol_premium"] == pytest.approx(0.70 - max(readings))
 
 
-def test_a_long_straddle_is_gated_on_its_edge_not_on_a_sellers_probability_of_profit() -> None:
-    """Its POP is under 50% by construction: a 55% floor refused it on every cycle, whatever the edge."""
-    plan = build("long_straddle", load_quotes(), SPOT, 0.18, 2.0)
+def test_an_iron_butterfly_is_gated_on_its_edge_not_on_a_sellers_probability_of_profit() -> None:
+    """Its breakevens hug the strike, so its POP is under 50% by construction: still reported, not binding."""
+    plan = build("iron_butterfly", load_quotes())
     assert plan is not None
-    s = Settings(max_spread_pct=100, min_pop_pct=55)
-    moving = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.60)
-    pop = next(c for c in moving["checks"] if c["name"] == "probability of profit")
-    assert not pop["ok"] and not pop["required"]  # still reported, no longer binding
-    assert moving["ok"]
-    still = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.10)
-    assert not still["ok"]  # a buyer the market does not pay for is still refused, on its edge
+    fly = registry.make("iron_butterfly")
+    a = assess(plan, 1, 0.229, 17.6, 100, realised_vol=0.10, required=fly.required_checks, min_pop_pct=95, min_credit_width_pct=0)
+    pop = check(a, "probability of profit")
+    assert not pop["ok"] and not pop["required"]
 
 
 def test_gold_is_an_underlying_and_its_options_settle_at_its_own_hour() -> None:
@@ -117,43 +145,30 @@ def test_gold_is_an_underlying_and_its_options_settle_at_its_own_hour() -> None:
     assert datetime.fromtimestamp(parse_symbol("C-BTC-80000-051126")[3], UTC).hour == 12
 
 
-def test_a_falling_market_scores_the_sold_call_and_the_rising_one_the_sold_put() -> None:
-    """Sell the side the market is moving away from: one OTM leg at the target delta, scored on the
-    trend, and like any seller it still has to be paid for the volatility it carries."""
-    from app.options import regime
-
-    plan = build("short_call", load_quotes(), SPOT, 0.18, 2.0)
-    assert plan is not None and [(leg.kind, leg.side) for leg in plan.legs] == [("call", "sell")]
-    assert plan.legs[0].strike > SPOT
-    put = build("short_put", load_quotes(), SPOT, 0.18, 2.0)
-    assert put is not None and put.legs[0].kind == "put" and put.legs[0].strike < SPOT
-
+def test_a_falling_market_scores_the_bear_call_spread_and_a_rising_one_the_bull_put() -> None:
     m = {"atm_iv": 0.45, "vol_premium": 0.04, "vol_premium_floor": 0.10, "rv_ratio": 1.0, "max_pain_distance_pct": 5.0, "implied_move_pct": 2.0}
-    falling = regime.score(m | {}, -0.6, "trending down")
-    rising = regime.score(m | {}, 0.6, "trending up")
-    assert falling["short_call"]["score"] > falling["short_put"]["score"]
-    assert rising["short_put"]["score"] > rising["short_call"]["score"]
-
-    s = Settings(max_spread_pct=100)
-    paid = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.10)
-    underpaid = assess(plan, 1, 0.229, 17.6, s, realised_vol=0.60)
-    assert paid["ok"] and not underpaid["ok"]  # selling calls the market moves through is refused
-    assert not any(c["name"] == "credit / width" for c in paid["checks"])  # no wing, no width
+    falling = {"metrics": m, "direction": -0.6, "label": "trending down", "gamma": None}
+    rising = {"metrics": m, "direction": 0.6, "label": "trending up", "gamma": None}
+    bear, bull = registry.make("bear_call_spread"), registry.make("bull_put_spread")
+    assert bear.score(falling)[0] > bull.score(falling)[0]
+    assert bull.score(rising)[0] > bear.score(rising)[0]
+    condor = registry.make("iron_condor")
+    assert condor.score(falling)[0] < condor.score(falling | {"direction": 0.0, "label": "range"})[0]  # a trend hurts a neutral structure
 
 
-def test_a_straddle_buyer_is_scored_on_the_lowest_realised_reading_not_the_highest() -> None:
-    """IV 29.5% against realised 25% (7d) and 250% (one day's range): the seller is judged on the 250,
-    the buyer on the 25. Read the other way, one wild day made the straddle look 220 vol points cheap
-    and it topped every ETH decision."""
+def test_a_buyer_is_judged_on_the_lowest_realised_reading_and_a_seller_on_the_highest() -> None:
+    """IV 29.5% against realised 25% (7d) and 250% (one day's range): read the wrong way, one wild day
+    made a straddle look 220 vol points cheap."""
     from app.options import regime
 
     bars = [{"time": i * 900, "open": 2_000.0, "high": 2_001.0, "low": 1_999.0, "close": 2_000.0 * (1.0008 if i % 2 else 1.0)} for i in range(700)]
     bars[-40]["high"] = 2_400.0  # one junk wick in the last day
     m = regime.measure(bars, 2_000.0, {"atm_iv": 0.295})
     assert m["rv_range_24h"] > 1.0 > m["rv_7d"]
-    scores = regime.score(m, 0.0, "range")
-    assert scores["long_straddle"]["score"] < 50  # IV above the quiet reading: no discount to buy
-    assert any("premium" in r for r in scores["long_straddle"]["reasons"])
+    [(buyer, buy_pts)] = regime.premium(m, sell=False)
+    [(_seller, sell_pts)] = regime.premium(m, sell=True)
+    assert "premium" in buyer and buy_pts < 0  # IV above the quiet reading: no discount to buy
+    assert sell_pts < 0  # and far below the wild one: nothing to sell either
 
 
 def test_the_har_forecast_leans_a_quiet_day_back_towards_the_month() -> None:

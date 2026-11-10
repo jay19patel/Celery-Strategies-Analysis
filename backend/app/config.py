@@ -27,6 +27,9 @@ class Config(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     log_level: str = "INFO"
+    # One JSON object per log line (the production launcher sets it), so a trade's every line can be
+    # found by its structure or decision id; plain text for development.
+    log_json: bool = False
     # The dashboard PIN until it is changed from the Settings page (then it is an Argon2 hash in the
     # database and this value stops mattering).
     auth_pin: str = DEFAULT_AUTH_PIN

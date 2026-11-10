@@ -44,19 +44,17 @@ function addSnooze(current: Record<string, number>, id: string): Record<string, 
   return next;
 }
 
-/** The errors the auto-trader, zero-hero and the directional strategies wrote in the last day. */
+/** The errors the option and perpetual strategies wrote in the last day. */
 function useStrategyErrors(now: number): { errors: StrategyError[]; error: unknown } {
   const opts = { refreshInterval: 10_000 };
   const auto = useApi<Decision[]>("/auto/decisions?action=error&limit=10", opts);
-  const zh = useApi<Decision[]>("/zerohero/decisions?action=error&limit=10", opts);
   const sig = useApi<SignalRow[]>("/strategies/signals?action=error&limit=10", opts);
   const cutoff = now / 1000 - ERROR_HOURS * 3600;
   const errors = [
-    ...(auto.data ?? []).map((d) => ({ id: `auto-${d.id}`, ts: d.ts, source: `Auto options · ${d.underlying}`, text: d.reason })),
-    ...(zh.data ?? []).map((d) => ({ id: `zh-${d.id}`, ts: d.ts, source: `Zero-hero · ${d.underlying}`, text: d.reason })),
+    ...(auto.data ?? []).map((d) => ({ id: `auto-${d.id}`, ts: d.ts, source: `Option strategies · ${d.underlying}`, text: d.reason })),
     ...(sig.data ?? []).map((s) => ({ id: `sig-${s.id}`, ts: s.ts, source: `${s.strategy} · ${s.symbol}`, text: s.reason })),
   ].filter((e) => e.ts >= cutoff);
-  return { errors, error: auto.error ?? zh.error ?? sig.error };
+  return { errors, error: auto.error ?? sig.error };
 }
 
 /** What on the book wants a decision now, with the decision one tap away. */

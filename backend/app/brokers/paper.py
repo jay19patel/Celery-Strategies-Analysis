@@ -16,7 +16,7 @@ from app.core.db import session
 from app.core.models import Leg, OrderRecord, PaperAccount, Structure
 from app.errors import BrokerError, Refused
 from app.market.feed import MarketFeed
-from app.market.options import PERP_SLIPPAGE, UNDERLYING_OF
+from app.market.options import OPTION_SLIPPAGE, PERP_SLIPPAGE, UNDERLYING_OF
 from app.options.assess import FeeRate, leg_fee
 from app.settings import Settings
 
@@ -73,6 +73,9 @@ class PaperBroker:
             extra={"starting_balance": acct.starting_balance, "fees_paid": round(acct.fees_paid, 6), "created_at": acct.created_at, "unpriced_legs": stale},
         )
 
+    async def leverage(self, symbol: str) -> float:
+        return self.settings().paper_leverage
+
     def _touch(self, symbol: str) -> tuple[float | None, float | None, float, float, float] | None:
         """(bid, ask, mark, the spot fees are charged on, slippage) for an option or a perpetual."""
         if symbol in UNDERLYING_OF:
@@ -83,7 +86,7 @@ class PaperBroker:
         q = self.feed.quote(symbol)
         if q is None or not q.mark:
             return None
-        return q.bid, q.ask, q.mark, q.spot or self.feed.spot(q.underlying) or 0.0, self.settings().paper_slippage_pct / 100
+        return q.bid, q.ask, q.mark, q.spot or self.feed.spot(q.underlying) or 0.0, OPTION_SLIPPAGE
 
     async def execute(self, order: LegOrder) -> Fill:
         touch = self._touch(order.symbol)

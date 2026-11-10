@@ -1,179 +1,165 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import useSWR from "swr";
-import { CandlestickChart, Grid3x3, Loader2, Ticket } from "lucide-react";
+// The first screen, built to answer five questions at a glance: is it running, what did today
+// make, how far is each account from its peak, does anything need me, and what is open and why.
 
-import { PriceChart, type Level } from "@/components/charts/price-chart";
-import { AiBriefCard } from "@/components/desk/ai-brief-card";
-import { ChainTable, type PickedLeg } from "@/components/desk/chain-table";
-import { ExpiryPicker, MarketStats } from "@/components/desk/market-bar";
-import { OptionIdeasCard } from "@/components/desk/option-ideas";
-import { OrderPanel } from "@/components/desk/order-panel";
-import { PreviewPanel } from "@/components/desk/preview-panel";
-import { RegimeCard } from "@/components/desk/regime-card";
-import { StrategyCatalog } from "@/components/desk/strategy-catalog";
-import { StrategyPicker, type TicketParams } from "@/components/desk/strategy-picker";
-import { PageHeader } from "@/components/shared/page";
+import Link from "next/link";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
+
+import { Pnl } from "@/components/shared/money";
+import { PageHeader, SectionLabel } from "@/components/shared/page";
+import { Stat } from "@/components/shared/stat";
 import { Empty, LoadError, Loading } from "@/components/shared/states";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { ago, pnlClass, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
-import type { Accounts, Bar, Overview, Preview, SettingsResponse, Side, StrategySpec } from "@/lib/types";
+import type { Account, Accounts, Broker, StrategiesResponse, Structure, SystemStatus } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
-type Draft = Omit<TicketParams, "shortDelta" | "wingWidth"> & { shortDelta: number | null; wingWidth: number | null };
+const isAccount = (a: Account | { error: string } | undefined): a is Account => !!a && "equity" in a;
 
-export default function DeskPage() {
-  const { data: settings } = useApi<SettingsResponse>("/settings");
-  const underlyings = settings?.values.underlyings ?? ["BTC"];
-  const [underlying, setUnderlying] = useState("BTC");
-  const [chosenExpiry, setExpiry] = useState<number | null>(null);
-  // Delta and wing width stay null until typed: until then they follow Settings.
-  const [draft, setParams] = useState<Draft>({ strategy: "iron_condor", qty: 1, shortDelta: null, wingWidth: null, legs: [] });
+/** Drawdown from the highest equity a broker has stood at: the start of every recorded day, and now. */
+function drawdown(equity: number, history: { broker: Broker; equity: number }[], broker: Broker): number | null {
+  const peak = Math.max(equity, ...history.filter((h) => h.broker === broker).map((h) => h.equity));
+  return peak > 0 ? (100 * (peak - equity)) / peak : null;
+}
 
-  const { data: overview, error: overviewError } = useApi<Overview>(`/market/overview?underlying=${underlying}`, { refreshInterval: 15_000 });
-  const { data: strategies } = useApi<StrategySpec[]>("/strategies");
-  const { data: accounts } = useApi<Accounts>("/portfolio/accounts");
-  const { data: bars } = useApi<{ bars: Bar[] }>(`/market/bars?underlying=${underlying}&limit=384`, { refreshInterval: 60_000 });
+export default function OverviewPage() {
+  const status = useApi<SystemStatus>("/system/status", { refreshInterval: 10_000 });
+  const accounts = useApi<Accounts>("/portfolio/accounts", { refreshInterval: 10_000 });
+  const equity = useApi<{ broker: Broker; day: string; equity: number }[]>("/portfolio/equity?days=365");
+  const open = useApi<Structure[]>("/trading/structures?status=open", { refreshInterval: 10_000 });
+  const strategies = useApi<StrategiesResponse>("/strategies");
 
-  const params: TicketParams = {
-    ...draft,
-    shortDelta: draft.shortDelta ?? Number(settings?.values.short_delta ?? 0.18),
-    wingWidth: draft.wingWidth ?? Number(settings?.values.wing_width_pct ?? 2),
-  };
-
-  // The chosen expiry while it is still listed; once it settles (or before one is chosen), the default.
-  const expiry = overview ? (overview.expiries.some((e) => e.expiry === chosenExpiry) ? chosenExpiry : overview.default_expiry) : null;
-
-  const body = useMemo(() => {
-    if (!expiry) return null;
-    if (params.strategy === "custom") {
-      if (!params.legs.length) return null;
-      return { underlying, strategy: "custom", legs: params.legs, qty: params.qty };
-    }
-    return { underlying, strategy: params.strategy, expiry, qty: params.qty, short_delta: params.shortDelta, wing_width_pct: params.wingWidth };
-  }, [underlying, expiry, params.strategy, params.legs, params.qty, params.shortDelta, params.wingWidth]);
-
-  const preview = useSWR<Preview>(body ? ["/strategies/preview", JSON.stringify(body)] : null, ([path, b]: [string, string]) => api<Preview>(path, "POST", JSON.parse(b)), {
-    refreshInterval: 15_000,
-    keepPreviousData: true,
-    shouldRetryOnError: false,
-  });
-
-  const picked = useMemo(() => {
-    const legs = params.strategy === "custom" ? params.legs : (preview.data?.plan.legs ?? []);
-    return new Map<string, Side>(legs.map((l) => [l.symbol, l.side]));
-  }, [params.strategy, params.legs, preview.data]);
-
-  const pick = (symbol: string, side: Side) => {
-    setParams((p) => {
-      const base: PickedLeg[] = p.strategy === "custom" ? p.legs : (preview.data?.plan.legs.map((l) => ({ symbol: l.symbol, side: l.side, ratio: l.ratio })) ?? []);
-      const existing = base.find((l) => l.symbol === symbol);
-      const legs = existing
-        ? existing.side === side
-          ? base.filter((l) => l.symbol !== symbol)
-          : base.map((l) => (l.symbol === symbol ? { ...l, side } : l))
-        : [...base, { symbol, side, ratio: 1 }].slice(0, 6);
-      return { ...p, strategy: "custom", legs };
-    });
-  };
-
-  const levels: Level[] = useMemo(() => {
-    const out: Level[] = [];
-    const p = preview.data;
-    if (!p) return out;
-    for (const l of p.plan.legs) out.push({ price: l.strike, label: `${l.side === "sell" ? "S" : "B"} ${l.kind[0].toUpperCase()}`, color: l.side === "sell" ? "#cf1f2e" : "#0e8a3e", dashed: true });
-    for (const b of p.analysis.breakevens) out.push({ price: b, label: "BE", color: "#64748b" });
-    return out;
-  }, [preview.data]);
+  const s = status.data;
+  const failing = (s?.jobs ?? []).filter((j) => j.last_error);
+  const attention: { key: string; text: string; href: string }[] = [
+    ...(s?.stopped ? [{ key: "stopped", text: `Every entry is stopped: ${s.stopped.reason}`, href: "/" }] : []),
+    ...(s && !s.feed.websocket.connected ? [{ key: "feed", text: `Live market feed is down: ${s.feed.websocket.error || "reconnecting"}`, href: "/system" }] : []),
+    ...(s?.brokers ?? []).filter((b) => b.active && b.halted).map((b) => ({ key: `halt-${b.name}`, text: `${b.name} is halted for the day: ${b.halted}`, href: "/positions" })),
+    ...(s?.brokers ?? []).filter((b) => b.active && b.reconcile).map((b) => ({ key: `rec-${b.name}`, text: `${b.name} does not match the exchange: ${b.reconcile}`, href: "/positions" })),
+    ...(s?.brokers ?? []).filter((b) => b.active && !b.ready).map((b) => ({ key: `ready-${b.name}`, text: `${b.name} cannot trade: ${b.not_ready}`, href: "/settings" })),
+    ...(open.data ?? []).filter((st) => st.status === "error").map((st) => ({ key: st.id, text: `${st.label} on ${st.broker}: ${st.error}`, href: "/positions" })),
+    ...failing.map((j) => ({ key: j.id, text: `${j.label} failed ${ago(j.last_run)}: ${j.last_error}`, href: "/system" })),
+  ];
+  const running = s && !s.stopped && s.feed.websocket.connected && failing.length === 0;
+  const on = (strategies.data?.strategies ?? []).filter((x) => x.config.enabled);
 
   return (
-    <>
-      <PageHeader title="Options Desk" description="Build a structure from the live chain, check it, and place it on paper or Delta." />
-      <div className="flex flex-wrap items-center gap-3">
-        {underlyings.length > 1 && (
-          <Tabs value={underlying} onValueChange={(v) => { setUnderlying(v); setExpiry(null); setParams((p) => ({ ...p, legs: [] })); }}>
-            <TabsList>
-              {underlyings.map((u) => (
-                <TabsTrigger key={u} value={u}>{u}</TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        )}
-        {overview && expiry && <ExpiryPicker overview={overview} expiry={expiry} onChange={(e) => { setExpiry(e); setParams((p) => ({ ...p, legs: [] })); }} />}
+    <div className="space-y-6">
+      <PageHeader title="Overview" description="Is it running, what did today make, and does anything need you." />
+      <LoadError error={status.error ?? accounts.error} />
+      {!s && status.isLoading && <Loading rows={4} />}
+
+      {s && (
+        <Card className={cn(!running && "border-loss")}>
+          <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-[13px]">
+            <span className={cn("size-2.5 shrink-0 rounded-full", running ? "bg-profit" : "bg-loss")} />
+            <span className="font-semibold">{s.stopped ? "Stopped" : running ? "Running" : "Running, with problems"}</span>
+            <span className="text-muted-foreground">up {Math.round(s.uptime_seconds / 3600)}h</span>
+            <span className="text-muted-foreground">{on.length} strategies on</span>
+            <span className="text-muted-foreground">
+              automatic on {s.brokers.filter((b) => b.active && b.auto).map((b) => b.name).join(" and ") || "no broker"}
+            </span>
+          </CardContent>
+        </Card>
+      )}
+
+      <SectionLabel title="Accounts" hint="each broker on its own, never added together" />
+      <div className="grid gap-4 md:grid-cols-2">
+        {(accounts.data?.brokers ?? []).filter((b) => b.active).map((b) => {
+          const acct = accounts.data?.accounts[b.name];
+          const today = accounts.data?.today[b.name];
+          if (!isAccount(acct)) {
+            return (
+              <Card key={b.name}>
+                <CardContent className="py-4 text-[13px] text-loss">{b.name}: {acct?.error ?? "no account"}</CardContent>
+              </Card>
+            );
+          }
+          const day = today?.start_equity ? acct.equity - today.start_equity : null;
+          const dd = drawdown(acct.equity, equity.data ?? [], b.name);
+          return (
+            <Card key={b.name}>
+              <CardContent className="space-y-3 py-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-[15px] font-semibold capitalize">{b.name}</span>
+                  <Badge variant={b.real_money ? "solid" : "outline"}>{b.real_money ? "real money" : b.name === "delta" ? "demo" : "paper"}</Badge>
+                  {b.halted && <Badge variant="loss">halted</Badge>}
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <Stat label="Equity" value={usd(acct.equity)} className="bg-secondary/60" />
+                  <Stat label="Today" value={<Pnl value={day} />} hint={today?.start_equity ? `from ${usd(today.start_equity)}` : undefined} className="bg-secondary/60" />
+                  <Stat
+                    label="From peak"
+                    value={dd === null ? "—" : `${dd <= 0.005 ? "0.0" : `−${dd.toFixed(1)}`}%`}
+                    valueClass={pnlClass(dd ? -dd : 0)}
+                    className="bg-secondary/60"
+                  />
+                  <Stat label="Free margin" value={usd(acct.available)} className="bg-secondary/60" />
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
-      <LoadError error={overviewError} />
-      {!overview && !overviewError && <Loading rows={2} />}
-      {overview && expiry && <MarketStats overview={overview} expiry={expiry} />}
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="min-w-0">
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                <Ticket className="size-4 text-primary" /> Strategy builder
-              </CardTitle>
-              {preview.isValidating && <Loader2 className="size-4 animate-spin text-slate-400" />}
-            </CardHeader>
-            <CardContent className="space-y-5">
-              {strategies && <StrategyPicker strategies={strategies} params={params} onChange={(c) => setParams((p) => ({ ...p, ...c }))} />}
-              <LoadError error={preview.error} />
-              {!body && params.strategy === "custom" && <Empty title="No legs yet">Pick contracts from the option chain below.</Empty>}
-              {preview.data && body && (
-                <>
-                  <PreviewPanel preview={preview.data} />
-                  <div className="border-t pt-4">
-                    <OrderPanel preview={preview.data} brokers={accounts?.brokers ?? []} onQty={(qty) => setParams((p) => ({ ...p, qty }))} />
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="space-y-5">
-          {expiry && strategies && (
-            <RegimeCard
-              underlying={underlying}
-              expiry={expiry}
-              strategies={strategies}
-              minScore={Number(settings?.values.min_score ?? 60)}
-              selected={params.strategy}
-              onPick={(strategy) => setParams((p) => ({ ...p, strategy }))}
-            />
-          )}
-          <AiBriefCard underlying={underlying} />
-        </div>
-      </div>
-
-      {/* The wide reads: each wants the whole page, not a column beside the rail. */}
+      <SectionLabel title="Needs attention" hint={attention.length ? `${attention.length}` : undefined} />
       <Card>
-        <CardHeader>
-          <CardTitle>
-            <CandlestickChart className="size-4 text-primary" /> {overview?.perpetual ?? underlying} · 15m
-          </CardTitle>
-          <span className="text-[11.5px] text-muted-foreground">strikes and breakevens of the structure above</span>
-        </CardHeader>
-        <CardContent className="p-2">
-          {bars?.bars.length ? <PriceChart bars={bars.bars} levels={levels} height={460} /> : <Loading rows={4} className="p-2" />}
+        <CardContent className="space-y-1.5 py-3">
+          {attention.length === 0 ? (
+            <div className="flex items-center gap-2 text-[13px] text-profit">
+              <CheckCircle2 className="size-4" /> Nothing needs you.
+            </div>
+          ) : (
+            attention.map((a) => (
+              <Link key={a.key} href={a.href} className="flex items-start gap-2 rounded-md px-1 py-1 text-[13px] hover:bg-muted/50">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-loss" />
+                <span>{a.text}</span>
+              </Link>
+            ))
+          )}
         </CardContent>
       </Card>
 
-      {expiry && <OptionIdeasCard underlying={underlying} expiry={expiry} />}
-
+      <SectionLabel title="Open positions" hint={open.data ? `${open.data.length}` : undefined} live={(open.data?.length ?? 0) > 0} />
       <Card>
-        <CardHeader>
-          <CardTitle>
-            <Grid3x3 className="size-4 text-primary" /> Option chain
-          </CardTitle>
-          <span className="text-[11.5px] text-muted-foreground">click a bid to sell, an ask to buy</span>
-        </CardHeader>
-        {expiry && <ChainTable underlying={underlying} expiry={expiry} picked={picked} onPick={pick} />}
+        <CardContent className="p-0">
+          <LoadError error={open.error} />
+          {open.data && open.data.length === 0 && <Empty title="Nothing open">Strategies switched on open positions here when their rules fire.</Empty>}
+          {(open.data ?? []).map((st) => (
+            <Link key={st.id} href="/positions" className="flex flex-col gap-1 border-b border-separator px-4 py-3 last:border-0 hover:bg-muted/40 sm:flex-row sm:items-start sm:gap-4">
+              <div className="flex shrink-0 items-center gap-2 sm:w-64">
+                <span className="text-[13px] font-semibold">{st.label}</span>
+                <span className="num text-[12px] text-muted-foreground">{st.underlying}</span>
+                <Badge variant="outline" className="capitalize">{st.broker}</Badge>
+              </div>
+              <span className="min-w-0 flex-1 text-[12.5px] text-muted-foreground">{st.reason || (st.source === "manual" ? "opened from the dashboard" : "")}</span>
+              <span className="shrink-0 text-right">
+                <Pnl value={st.live?.pnl ?? st.mark_pnl} />
+              </span>
+            </Link>
+          ))}
+        </CardContent>
       </Card>
 
-      {strategies && <StrategyCatalog strategies={strategies} selected={params.strategy} onPick={(strategy) => setParams((p) => ({ ...p, strategy, legs: [] }))} />}
-    </>
+      <SectionLabel title="Strategies on" />
+      <Card>
+        <CardContent className="space-y-1 py-3 text-[13px]">
+          {on.length === 0 && <span className="text-muted-foreground">None. Switch one on in <Link href="/strategies" className="text-primary hover:underline">Strategies</Link>.</span>}
+          {on.map((x) => (
+            <div key={x.name} className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{x.label}</span>
+              <Badge variant={x.config.live ? "solid" : "outline"}>{x.config.live ? "paper + live" : "paper"}</Badge>
+              <span className="text-muted-foreground">
+                {x.record.trades_r} trades
+                {x.record.expectancy_r != null && `, ${x.record.expectancy_r.toFixed(2)}R average`}
+              </span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

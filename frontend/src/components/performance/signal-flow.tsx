@@ -7,7 +7,7 @@ import { useApi } from "@/lib/live";
 import type { Broker, Funnel } from "@/lib/types";
 
 const STEPS: { key: keyof Funnel; label: string; hint: string }[] = [
-  { key: "signals", label: "Signals", hint: "directional signals and auto/zero-hero cycles that reached a broker" },
+  { key: "signals", label: "Signals", hint: "perpetual signals and option cycles that reached a broker" },
   { key: "passed", label: "Filtered", hint: "passed every rule and gate" },
   { key: "orders", label: "Orders", hint: "structures sent to this broker" },
   { key: "filled", label: "Filled", hint: "opened in full" },

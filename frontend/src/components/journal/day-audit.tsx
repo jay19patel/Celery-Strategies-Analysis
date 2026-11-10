@@ -108,10 +108,10 @@ function Count({ n }: { n: number }) {
 export function DayAudit({ date, onClose }: { date: string | null; onClose: () => void }) {
   const [tab, setTab] = useState("overview");
   const { data, error, isLoading } = useApi<JournalDay>(date ? `/portfolio/journal/day?date=${date}` : null);
-  const { data: allOrders } = useApi<OrderRecord[]>(date ? "/trading/orders?limit=2000" : null);
-
   const start = data && date ? dayStart(date, data.timezone) : 0;
-  const orders = (allOrders ?? []).filter((o) => o.created_at >= start && o.created_at < start + 86_400).sort((a, b) => a.created_at - b.created_at);
+  // That day's orders only, asked of the server: any day, however long ago, however busy.
+  const { data: dayOrders } = useApi<OrderRecord[]>(start ? `/trading/orders?limit=2000&since=${start}&until=${start + 86_400}` : null);
+  const orders = [...(dayOrders ?? [])].sort((a, b) => a.created_at - b.created_at);
   const closed = (data?.structures ?? []).filter((s) => s.status === "closed" && s.closed_at && s.closed_at >= start && s.closed_at < start + 86_400);
   const decisions = data?.decisions ?? [];
   const events = data ? [...data.events].sort((a, b) => a.ts - b.ts) : [];

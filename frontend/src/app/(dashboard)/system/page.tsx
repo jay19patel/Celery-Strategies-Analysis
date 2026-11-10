@@ -6,6 +6,7 @@ import { Bell, Bot, Check, Cpu, Landmark, Loader2, Play, Radio, Server, X } from
 import { toast } from "sonner";
 
 import { EventLog } from "@/components/system/event-log";
+import { Confirm } from "@/components/shared/confirm";
 import { PageHeader } from "@/components/shared/page";
 import { KV } from "@/components/shared/stat";
 import { Empty, LoadError, Loading } from "@/components/shared/states";
@@ -18,6 +19,9 @@ import { ago, dateTime, hours, num, price, titleCase, until } from "@/lib/format
 import { useApi } from "@/lib/live";
 import type { JobStatus, SystemStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+// Jobs that open positions: running one by hand trades, so it is confirmed.
+const TRADING_JOBS = new Set(["auto.cycle", "strategies.run", "guard.structures", "guard.daily"]);
 
 function Dot({ on }: { on: boolean }) {
   return <span className={cn("inline-block size-2 shrink-0 rounded-full", on ? "bg-profit" : "bg-loss")} />;
@@ -142,13 +146,22 @@ export default function SystemPage() {
                       {b.real_money && <Badge variant="solid">REAL MONEY</Badge>}
                     </div>
                     <KV label="Ready" value={b.ready ? <Yes ok /> : <span className="text-xs text-loss">{b.not_ready}</span>} />
-                    <KV label="Auto-trading" value={b.auto ? "on" : "off"} />
+                    <KV label="Automatic entries" value={b.auto ? "on" : "off"} />
+                    {b.reconcile && <div className="mt-1 rounded-md bg-loss-soft px-2 py-1.5 text-xs text-loss">Does not match the exchange: {b.reconcile}</div>}
                     {b.halted && (
                       <div className="mt-1 flex items-start justify-between gap-2 rounded-md bg-warn-soft px-2 py-1.5 text-xs text-amber-900">
                         <span>Halted: {b.halted}</span>
-                        <Button size="xs" variant="outline" onClick={() => resume(b.name)}>
-                          Resume
-                        </Button>
+                        <Confirm
+                          title={`Resume ${b.name} for the rest of the day?`}
+                          description="Its day restarts from the current equity, so the daily loss limit counts again from here."
+                          confirmLabel="Resume"
+                          onConfirm={() => resume(b.name)}
+                          trigger={(open) => (
+                            <Button size="xs" variant="outline" onClick={open}>
+                              Resume
+                            </Button>
+                          )}
+                        />
                       </div>
                     )}
                   </div>
@@ -243,9 +256,23 @@ export default function SystemPage() {
                         </TableCell>
                         <TableCell className="text-muted-foreground">{until(j.next_run)}</TableCell>
                         <TableCell className="text-right">
-                          <Button size="xs" variant="outline" onClick={() => runJob(j)} disabled={running === j.id}>
-                            {running === j.id ? <Loader2 className="animate-spin" /> : <Play />} Run
-                          </Button>
+                          {TRADING_JOBS.has(j.id) ? (
+                            <Confirm
+                              title={`Run "${j.label}" now?`}
+                              description="This job opens or closes positions on every broker with automatic entries on."
+                              confirmLabel="Run it"
+                              onConfirm={() => runJob(j)}
+                              trigger={(open) => (
+                                <Button size="xs" variant="outline" onClick={open} disabled={running === j.id}>
+                                  {running === j.id ? <Loader2 className="animate-spin" /> : <Play />} Run
+                                </Button>
+                              )}
+                            />
+                          ) : (
+                            <Button size="xs" variant="outline" onClick={() => runJob(j)} disabled={running === j.id}>
+                              {running === j.id ? <Loader2 className="animate-spin" /> : <Play />} Run
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

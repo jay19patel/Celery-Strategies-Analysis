@@ -14,8 +14,7 @@ numbers, which is the only property that makes a level countable later.
   extension     Where the leg projects to beyond its own end: 1.272 1.414 1.618 2.0 2.618.
                 This is the one that earns its place here. Everything else in the system says
                 where price might REACT; an extension says how FAR a move that keeps going would
-                travel — and `options/zerohero.py` needs a distance, not a direction, to answer
-                whether a contract can multiply before the clock takes it.
+                travel.
 
 Nothing here is predictive and nothing is fitted. It is one leg, measured, divided by constants.
 Whether price respects any of it is `nearby.py`'s confluence count and the verdict record's
@@ -142,23 +141,3 @@ def read(candles: list[Candle], lookback: int = DEFAULT_LOOKBACK) -> Fib:
         retraced=None if retraced is None else round(retraced, 4),
         in_golden=retraced is not None and GOLDEN[0] <= retraced <= GOLDEN[1],
     )
-
-
-def next_extension(fib: Fib, direction: int, price: float) -> Level | None:
-    """The first extension beyond `price` in `direction` (+1 up, -1 down): how far a move that
-    keeps going would travel before it meets the leg's own projection.
-
-    None when the leg points the other way — an up leg projects upward only, and inventing a
-    downward target from it would be drawing a line to suit the trade.
-    """
-    if not fib.ready or fib.leg is None or direction == 0:
-        return None
-    if (fib.leg.direction == "up") != (direction > 0):
-        return None
-    beyond = [v for v in fib.levels if v.kind == "extension" and (v.price > price if direction > 0 else v.price < price)]
-    return min(beyond, key=lambda v: abs(v.price - price)) if beyond else None
-
-
-def nearest(fib: Fib, price: float, kind: str = "") -> Level | None:
-    pool = [v for v in fib.levels if not kind or v.kind == kind]
-    return min(pool, key=lambda v: abs(v.price - price)) if pool else None

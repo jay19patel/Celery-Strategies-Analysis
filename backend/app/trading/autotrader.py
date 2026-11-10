@@ -1,15 +1,16 @@
-"""The auto-trader: one decision per underlying every `auto_interval_minutes`.
+"""The options auto-trader: one decision per underlying every `INTERVAL_MINUTES`.
 
-  1. expiry   the nearest between `expiry_min_hours` and `expiry_max_hours`
-  2. regime   volatility premium and direction, a rule score per strategy (`options.regime`)
-  3. build    every enabled strategy scoring at least the bar, assessed at one lot. The bar is
-              `min_score`, eased towards `min_score_floor` as a day with no entry on this
-              underlying runs out — the one number pacing towards about a trade a day
-
-  4. filter   only those passing every required check (liquidity, POP, edge at realised vol, ...);
-              the best by score, then edge, is the one — the rules decide, no model reviews it
-  5. size     lots whose worst case is `risk_per_trade_pct` of that broker's equity
-  6. open     through `TradingService.open` — the same gate a dashboard click goes through
+  1. room     a broker already holding an automatic position on the underlying is skipped
+  2. each     every option strategy switched on for the underlying (`app/strategies/`) picks its
+              expiry, scores the regime there, and builds its structure if the score clears
+              `MIN_SCORE`; a credit is not sold through a scheduled event
+  3. filter   only structures passing every check the strategy binds (liquidity, POP, edge at
+              realised vol, ...); the best by score, then edge, is the one — the rules decide, no
+              model reviews it
+  4. size     lots whose worst case is `risk_per_trade_pct` of that broker's equity, scaled by the
+              strategy's measured edge and the broker's drawdown (`TradingService.risk_scale`)
+  5. open     through `TradingService.open` — the same gate a dashboard click goes through, plus the
+              portfolio rules (`trading.risk`)
 
 A cycle that reached a broker is a `Decision` row: what it saw, every strategy it considered and why
 each was dropped, and what each broker did. The latest cycle per underlying, skips included, is kept
@@ -29,30 +30,24 @@ from app.core.db import session
 from app.core.events import EventHub
 from app.core.models import Decision, Structure
 from app.errors import AppError, BrokerError, Refused
-from app.market import options as chain
-from app.options.strategies import CATALOG, ZERO_HERO, Plan
+from app.options.assess import unit_risk
+from app.options.strategies import Plan
 from app.settings import Settings
+from app.strategies import registry
 from app.trading.desk import Desk
-from app.trading.risk import day_start, trading_day
-from app.trading.service import HELD, TradingService, is_directional
+from app.trading.risk import AUTO_SOURCES, day_start, trading_day
+from app.trading.service import HELD, TradingService
 
 log = logging.getLogger(__name__)
+INTERVAL_MINUTES = 15
+MIN_SCORE = 60  # the regime fit a strategy needs before it is built
 MAX_CANDIDATES = 3
-
-
-def unit_risk(assessment: dict[str, Any], s: Settings) -> float:
-    """The worst case of one lot: the max loss when it is bounded. Unbounded, the larger of the loss
-    at the stop and the loss after a move of `STRESS_MOVES` expected moves — a stop on a gap fills
-    where the market is, not where it was set."""
-    a = assessment["analysis"]
-    if a["max_loss"] is not None:
-        return a["max_loss"] + a["round_trip_fees"]
-    at_stop = abs(a["net_premium"]) * s.credit_stop_loss_pct / 100
-    return max(at_stop, a.get("stress_loss") or 0.0) + a["round_trip_fees"]
+REGIME_KEYS = ("label", "direction", "direction_parts", "metrics", "notes", "gamma")
 
 
 def lots_for_risk(equity: float, assessment: dict[str, Any], s: Settings) -> int:
-    risk = unit_risk(assessment, s)
+    """Lots whose worst case (`unit_risk` of a one-lot assessment) is `risk_per_trade_pct` of equity."""
+    risk = unit_risk(assessment)
     if risk <= 0:
         return 0
     return min(s.max_lots, math.floor(equity * s.risk_per_trade_pct / 100 / risk))
@@ -85,62 +80,28 @@ class AutoTrader:
         return [b for b in s.active_brokers if s.auto_on(b)]
 
     async def cycle(self) -> str:
-        if not self.settings().auto_options:
-            return "options auto-trading is switched off"
         brokers = self.brokers()
         if not brokers:
             return "auto-trading is off on every active broker"
+        if not registry.enabled(self.settings(), "options"):
+            return "no option strategy is switched on"
         out = []
         for underlying in self.settings().underlyings:
             d = await self.decide(underlying, brokers)
             out.append(f"{underlying}: {d['action']}{' ' + d['strategy'] if d['strategy'] else ''}")
         return "; ".join(out)
 
-    def _room(self, broker: str, underlying: str, s: Settings) -> str:
-        """Why `broker` cannot take another auto entry on `underlying`, or "".
-
-        Only option structures are counted. A position on the perpetual holds its own slot, gated
-        per symbol in `TradingService.gate_directional`, so BTC futures never block a BTC option
-        structure and neither one blocks the other underlying — the same split `gate` already makes.
-        """
-        with session() as db:
-            rows = db.exec(select(Structure).where(Structure.broker == broker, col(Structure.status).in_(HELD))).all()
-        held = [st for st in rows if st.source == "auto" and not is_directional(st)]  # a dashboard ticket is not an auto slot
-        if len(held) >= s.max_open_structures:
-            return f"holds {len(held)} option structures (max {s.max_open_structures})"
-        if sum(st.underlying == underlying for st in held) >= s.max_per_underlying:
-            return f"already holds {underlying} options (max {s.max_per_underlying})"
-        return ""
-
-    def _bar(self, underlying: str, s: Settings, now: float | None = None) -> tuple[int, str]:
-        """The score a strategy must beat this cycle, and the note that explains it.
-
-        `min_score` is the bar at the start of the trading day. With `min_score_floor` set and
-        nothing opened on this underlying yet today, it eases towards that floor as the day runs
-        out — hold out for a good fit early, take the best there is late. The first entry of the day
-        puts the bar back up: the floor paces the desk to about one entry a day, it never licenses a
-        second one. Only this bar moves; every hard check runs at full strength at any hour.
-        """
-        if s.min_score_floor <= 0 or s.min_score_floor >= s.min_score:  # 0 is off, as the setting says
-            return s.min_score, ""
-        now = time.time() if now is None else now
-        day = trading_day(s.day_timezone, now)
-        start = day_start(s.day_timezone, day)
-        if self._opened_today(underlying, start):
-            return s.min_score, ""
-        through = min(max((now - start) / 86_400, 0.0), 1.0)
-        bar = round(s.min_score - (s.min_score - s.min_score_floor) * through)
-        return bar, f"nothing opened on {underlying} today: the bar has eased from {s.min_score} to {bar} ({through:.0%} through {day})"
-
     @staticmethod
-    def _opened_today(underlying: str, since: float) -> bool:
-        """Has an option structure on this underlying been opened since the day began? Failed and
-        closed ones count: the desk took its shot, whatever became of it."""
+    def _room(broker: str, underlying: str) -> str:
+        """Why `broker` cannot take another automatic entry on `underlying`, or "" — checked before
+        anything is built, so a full broker is a skip that is not written down. The heat cap needs
+        the size, so it is the gate's (`trading.risk.portfolio_refusal`)."""
         with session() as db:
-            rows = db.exec(
-                select(Structure).where(Structure.underlying == underlying, Structure.opened_at >= since)
-            ).all()
-        return any(not is_directional(st) for st in rows)
+            held = db.exec(select(Structure).where(
+                Structure.broker == broker, Structure.underlying == underlying, col(Structure.status).in_(HELD),
+                col(Structure.source).in_(AUTO_SOURCES),
+            )).first()
+        return f"already holds an automatic {underlying} position ({held.strategy})" if held else ""
 
     @staticmethod
     def _stopped_today(underlying: str, since: float) -> set[str]:
@@ -180,45 +141,49 @@ class AutoTrader:
         return dec.model_dump()
 
     async def _decide(self, dec: Decision, underlying: str, brokers: list[str], s: Settings) -> None:
-        open_to = {b: why for b in brokers if (why := self._room(b, underlying, s))}
-        if len(open_to) == len(brokers):
-            dec.reason = "no room: " + "; ".join(f"{b} {why}" for b, why in open_to.items())
+        no_room = {b: why for b in brokers if (why := self._room(b, underlying))}
+        if len(no_room) == len(brokers):
+            dec.reason = "no room: " + "; ".join(f"{b} {why}" for b, why in no_room.items())
+            return
+        strategies = {n: p for n, p in registry.enabled(s, "options").items() if s.strategy_on(n, underlying)}
+        if not strategies:
+            dec.reason = f"no option strategy is switched on for {underlying}"
             return
         dec.spot = self.desk.spot(underlying)
-        expiry = chain.pick_expiry(self.desk.feed.quotes(underlying), s.expiry_min_hours, s.expiry_max_hours)
-        if expiry is None:
-            dec.reason = f"no {underlying} expiry between {s.expiry_min_hours:g}h and {s.expiry_max_hours:g}h away"
+        quotes = self.desk.feed.quotes(underlying)
+        if not quotes:
+            dec.reason = f"no fresh {underlying} options"
             return
-        dec.expiry = expiry
-        regime = self.desk.regime(underlying, expiry)
-        regime["hours_to_expiry"] = round((expiry - time.time()) / 3600, 2)
-        dec.regime = {k: regime.get(k) for k in ("label", "direction", "direction_parts", "metrics", "scores", "notes", "hours_to_expiry", "gamma")}
-
-        bar, pacing = self._bar(underlying, s)
-        dec.regime["min_score"] = bar  # what the bar actually was, so a past decision reads back straight
-        if pacing:
-            dec.regime["pacing"] = pacing
-
-        event = s.event_between(time.time(), expiry)  # a seller is not paid enough to hold through one
-        considered, passing, plans = [], [], {}
+        ctx = self.desk.option_context(underlying, await self.desk.fee_rate(quotes[0].symbol))
         stopped = self._stopped_today(underlying, day_start(s.day_timezone, trading_day(s.day_timezone)))
-        for key in s.auto_strategies:
-            score = regime["scores"][key]
-            entry: dict[str, Any] = {"strategy": key, "label": CATALOG[key].label, "score": score["score"], "reasons": score["reasons"]}
+        considered: list[dict[str, Any]] = []
+        passing: list[dict[str, Any]] = []
+        plans: dict[str, Plan] = {}
+        for name, plugin in strategies.items():
+            entry: dict[str, Any] = {"strategy": name, "label": plugin.label}
             considered.append(entry)
-            if key in stopped:
+            expiry = plugin.expiry(ctx)
+            if expiry is None:
+                entry["status"] = plugin.expiry_note()
+                continue
+            score, reasons = plugin.score(ctx.regime(expiry))
+            entry |= {"score": score, "reasons": reasons, "expiry": expiry}
+            if name in stopped:
                 entry["status"] = "stopped out on this underlying earlier today: not re-entered until tomorrow"
                 continue
-            if event and CATALOG[key].premium == "credit":
+            if plugin.premium == "credit" and (event := s.event_between(ctx.now, expiry)):
                 entry["status"] = f"scheduled event at {event} UTC before expiry"
                 continue
-            if score["score"] < bar:
-                entry["status"] = f"score {score['score']} under {bar}"
+            if score < MIN_SCORE:
+                entry["status"] = f"score {score} under {MIN_SCORE}"
                 continue
             try:
-                plan = self.desk.plan(underlying, key, expiry)
+                plan = plugin.build(ctx, expiry)
             except Refused as exc:
                 entry["status"] = str(exc)
+                continue
+            if plan is None:
+                entry["status"] = f"the chain for that expiry cannot make a {plugin.label}"
                 continue
             assessment = await self.desk.assess(plan, 1)
             entry.update(_compact(assessment))
@@ -227,21 +192,26 @@ class AutoTrader:
                 entry["status"] = "failed " + ", ".join(failed)
                 continue
             entry["status"] = "candidate"
-            plans[key] = plan
-            passing.append(assessment | {"score": score["score"], "reasons": score["reasons"]})
+            plans[name] = plan
+            passing.append(assessment | {"score": score, "reasons": reasons})
         passing.sort(key=lambda c: (c["score"], _edge(c)), reverse=True)
-        top = passing[:MAX_CANDIDATES]
         dec.candidates = considered
-        if not top:
-            dec.reason = "no strategy passed: " + "; ".join(f"{c['label']} {c.get('status', '')}" for c in considered) if considered else "no strategy enabled"
-            if pacing:
-                dec.reason += f" ({pacing})"
+        top = passing[:MAX_CANDIDATES]
+        chosen = top[0] if top else None
+        expiry = plans[chosen["strategy"]].expiry if chosen else next((c["expiry"] for c in considered if c.get("expiry")), None)
+        if expiry is not None:
+            dec.expiry = expiry
+            dec.regime = {k: ctx.regime(expiry).get(k) for k in REGIME_KEYS} | {
+                "hours_to_expiry": round((expiry - ctx.now) / 3600, 2),
+                "scores": {c["strategy"]: {"score": c["score"], "reasons": c["reasons"]} for c in considered if "score" in c},
+                "min_score": MIN_SCORE,
+            }
+        if chosen is None:
+            dec.reason = "no strategy passed: " + "; ".join(f"{c['label']} {c.get('status', '')}" for c in considered)
             return
-
-        choice = top[0]
-        why = f"rules chose {choice['label']} (score {choice['score']}{f', bar eased to {bar}' if pacing else ''})"
-        dec.strategy = choice["strategy"]
-        await self._open(dec, plans[choice["strategy"]], choice, brokers, open_to, why, s)
+        dec.strategy = chosen["strategy"]
+        why = f"rules chose {chosen['label']} (score {chosen['score']})"
+        await self._open(dec, plans[chosen["strategy"]], chosen, brokers, no_room, why, s)
 
     async def _open(
         self, dec: Decision, plan: Plan, choice: dict[str, Any], brokers: list[str], no_room: dict[str, str], why: str, s: Settings,
@@ -250,10 +220,14 @@ class AutoTrader:
             db.add(dec)
             db.commit()
             db.refresh(dec)
+        allowed = s.strategy_brokers(plan.strategy)
         orders: dict[str, Any] = {}
         for broker in brokers:
             if broker in no_room:
                 orders[broker] = {"refused": no_room[broker]}
+                continue
+            if broker not in allowed:
+                orders[broker] = {"refused": f"{choice['label']} is not switched to trade on {broker}"}
                 continue
             try:
                 account = await self.trading.brokers[broker].account()
@@ -262,7 +236,7 @@ class AutoTrader:
                     raise Refused(sized)
                 qty = lots_for_risk(account.equity * x, choice, s)
                 if qty < 1:
-                    raise Refused(f"{x * s.risk_per_trade_pct:g}% of equity {account.equity:,.2f} does not cover one lot's worst case {unit_risk(choice, s):,.2f}")
+                    raise Refused(f"{x * s.risk_per_trade_pct:g}% of equity {account.equity:,.2f} does not cover one lot's worst case {unit_risk(choice):,.2f}")
                 view = await self.trading.open(broker, plan, qty, "auto", f"auto-{dec.id}", dec.id)
                 orders[broker] = {"structure_id": view["id"], "status": view["status"], "qty": qty, "error": view["error"], "sized": sized}
             except (Refused, BrokerError) as exc:
@@ -276,7 +250,7 @@ class AutoTrader:
     @staticmethod
     def decisions(underlying: str = "", action: str = "", limit: int = 50) -> list[dict[str, Any]]:
         with session() as db:
-            q = select(Decision).where(Decision.strategy != ZERO_HERO)  # zero-hero has its own page
+            q = select(Decision)
             if underlying:
                 q = q.where(Decision.underlying == underlying)
             if action:

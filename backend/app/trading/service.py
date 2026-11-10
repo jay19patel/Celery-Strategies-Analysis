@@ -29,15 +29,31 @@ from app.core.events import EventHub
 from app.core.models import Bar, Decision, Leg, OrderRecord, Structure
 from app.errors import BrokerError, BrokerTimeout, NotFound, Refused
 from app.market.feed import MarketFeed
-from app.market.options import PERP_SLIPPAGE, PERPETUALS, UNDERLYING_OF
-from app.options.assess import leg_fee
+from app.market.options import OPTION_SLIPPAGE, PERP_SLIPPAGE, PERPETUALS, UNDERLYING_OF
+from app.options.assess import (
+    CREDIT_STOP_LOSS_PCT,
+    CREDIT_TAKE_PROFIT_PCT,
+    DEBIT_STOP_LOSS_PCT,
+    DEBIT_TAKE_PROFIT_PCT,
+    leg_fee,
+    unit_risk,
+)
 from app.options.pricing import LegSpec, analyze, intrinsic, margin_required, net_premium
-from app.options.strategies import ZERO_HERO, Plan, describe, single, spec_for
+from app.options.strategies import Plan, describe
 from app.settings import Settings
-from app.strategies import REGISTRY
+from app.strategies import registry
+from app.strategies.base import DEFAULT_HOLD_HOURS
 from app.trading import edge
 from app.trading.desk import Desk
-from app.trading.risk import halt_reason, trading_day
+from app.trading.risk import (
+    AUTO_SOURCES,
+    halt_reason,
+    kill_state,
+    portfolio_refusal,
+    reconcile_reason,
+    set_kill,
+    trading_day,
+)
 
 log = logging.getLogger(__name__)
 ENTRY_SLACK = 0.05  # an entry fills at most 5% worse than the quote it was priced at, or not at all
@@ -54,6 +70,7 @@ PERP_ENTRY_SLACK = 0.002
 # 0.25R so an exchange-held stop is not re-placed on every tick. It only ever tightens.
 TRAIL_START_R, TRAIL_DISTANCE_R, TRAIL_STEP_R = 1.0, 1.0, 0.25
 PERP_CLOSE_SLACK = 0.01
+TRADE_MARGIN_PCT = 25.0  # the most of the available margin one perpetual position may take
 
 
 def is_perp(symbol: str) -> bool:
@@ -65,29 +82,25 @@ def is_directional(st: Structure) -> bool:
     return st.stop_price is not None
 
 
-def is_zerohero(st: Structure) -> bool:
-    return st.strategy == ZERO_HERO
-
-
 def held_to_settlement(st: Structure) -> bool:
     """A credit whose loss is capped (spreads, condors, butterflies): the guard leaves it to expiry."""
-    return st.entry_cash > 0 and st.max_loss is not None and not is_directional(st) and not is_zerohero(st)
-
-
-def is_zerohero_plan(plan: Plan) -> bool:
-    return plan.strategy == ZERO_HERO
+    return st.entry_cash > 0 and st.max_loss is not None and not is_directional(st)
 
 
 def label_of(st: Structure, legs: list[Leg] | None = None) -> str:
+    if name := registry.label(st.strategy):
+        return name
     if is_directional(st):
-        strategy = REGISTRY.get(st.strategy)
-        return strategy.label if strategy else "Perpetual"
-    if spec := spec_for(st.strategy):
-        return spec.label
+        return "Perpetual"
     if legs is None:
         with session() as s:
             legs = list(s.exec(select(Leg).where(Leg.structure_id == st.id).order_by(Leg.idx)).all())
     return describe(legs)
+
+
+def _version(strategy: str) -> int | None:
+    cls = registry.get(strategy)
+    return cls.version if cls else None
 
 
 def structure_id(broker: str, request_id: str) -> str:
@@ -105,18 +118,6 @@ def leg_sign(side: str) -> int:
     return 1 if side == "buy" else -1
 
 
-def _tp_pct(plan: Plan, credit: bool, cfg: Settings) -> float:
-    """A zero-hero buy takes profit at a multiple of the debit, not at the 60% a long straddle does:
-    the whole position is the tail, and a 60% target throws away what pays for the losers."""
-    if is_zerohero_plan(plan):
-        return cfg.zh_take_profit_pct
-    return cfg.credit_take_profit_pct if credit else cfg.debit_take_profit_pct
-
-
-def _sl_pct(plan: Plan, credit: bool, cfg: Settings) -> float:
-    if is_zerohero_plan(plan):
-        return cfg.zh_stop_loss_pct
-    return cfg.credit_stop_loss_pct if credit else cfg.debit_stop_loss_pct
 
 
 def exit_thresholds(st: Structure) -> tuple[float | None, float | None]:
@@ -170,7 +171,7 @@ class TradingService:
         return (q.bid, q.ask, q.mark) if q and q.mark else None
 
     def slippage(self, symbol: str) -> float:
-        return PERP_SLIPPAGE if is_perp(symbol) else self.settings().paper_slippage_pct / 100
+        return PERP_SLIPPAGE if is_perp(symbol) else OPTION_SLIPPAGE
 
     # -- reads ---------------------------------------------------------------------------------
 
@@ -200,17 +201,33 @@ class TradingService:
             by_id.setdefault(leg.structure_id, []).append(leg)
         return [self.view(st, by_id.get(st.id, [])) for st in rows]
 
+    def structures_by_id(self, ids: list[str]) -> list[dict[str, Any]]:
+        """Exactly these structures, newest first, however old."""
+        if not ids:
+            return []
+        with session() as s:
+            rows = s.exec(select(Structure).where(col(Structure.id).in_(ids)).order_by(col(Structure.opened_at).desc())).all()
+            legs = s.exec(select(Leg).where(col(Leg.structure_id).in_(ids)).order_by(Leg.idx, Leg.id)).all()
+        by_id: dict[str, list[Leg]] = {}
+        for leg in legs:
+            by_id.setdefault(leg.structure_id, []).append(leg)
+        return [self.view(st, by_id.get(st.id, [])) for st in rows]
+
     def structure(self, sid: str) -> dict[str, Any]:
         st, legs = self._load(sid)
         with session() as s:
             orders = s.exec(select(OrderRecord).where(OrderRecord.structure_id == sid).order_by(OrderRecord.created_at)).all()
         return self.view(st, legs) | {"orders": [o.model_dump() for o in orders]}
 
-    def orders(self, broker: str = "", limit: int = 300) -> list[dict[str, Any]]:
+    def orders(self, broker: str = "", limit: int = 300, since: float = 0.0, until: float = 0.0) -> list[dict[str, Any]]:
         with session() as s:
             q = select(OrderRecord)
             if broker:
                 q = q.where(OrderRecord.broker == broker)
+            if since:
+                q = q.where(col(OrderRecord.created_at) >= since)
+            if until:
+                q = q.where(col(OrderRecord.created_at) < until)
             return [o.model_dump() for o in s.exec(q.order_by(col(OrderRecord.created_at).desc()).limit(min(max(limit, 1), 2000))).all()]
 
     def order_page(self, broker: str = "", status: str = "", page: int = 1, size: int = 20) -> dict[str, Any]:
@@ -345,8 +362,12 @@ class TradingService:
     def _ready(self, broker: str, s: Settings) -> tuple[Broker, list[Structure]]:
         """The rules every entry passes first: an active, ready, unhalted broker with nothing unresolved.
         Returns the broker and what it holds."""
+        if kill := kill_state():
+            raise Refused(f"every entry is stopped: {kill['reason']} (resume it on the dashboard)")
         if broker not in s.active_brokers or broker not in self.brokers:
             raise Refused(f"{broker} is not an active broker")
+        if why := reconcile_reason(broker):
+            raise Refused(f"{broker} does not match the exchange: {why}")
         b = self.brokers[broker]
         if reason := b.not_ready():
             raise Refused(f"{broker}: {reason}")
@@ -362,29 +383,11 @@ class TradingService:
         and the assessment at `qty`; raises Refused naming the first rule that fails."""
         s: Settings = self.settings()
         b, held = self._ready(broker, s)
-        # Each family holds its own slots. A position on the perpetual is gated per symbol in
-        # `gate_directional`, and a zero-hero buy by its daily budget and attempt count, so neither
-        # blocks a condor and a condor blocks neither — the same split, extended.
-        if is_zerohero_plan(plan):
-            if any(is_zerohero(st) and st.underlying == plan.underlying for st in held):
-                raise Refused(f"{broker} already holds a {plan.underlying} zero-hero position: one per symbol")
-            if not 1 <= qty <= s.zh_max_lots:
-                raise Refused(f"quantity must be 1 to {s.zh_max_lots} lots")
-        else:
-            # The caps pace the auto-trader and count only its own structures: a ticket from the
-            # dashboard is the user's call, held beside them, and never takes an auto slot.
-            if source == "auto":
-                held = [st for st in held if st.source == "auto" and not is_directional(st) and not is_zerohero(st)]
-                if len(held) >= s.max_open_structures:
-                    raise Refused(f"{broker} already holds {len(held)} auto structures (max {s.max_open_structures})")
-                if sum(st.underlying == plan.underlying for st in held) >= s.max_per_underlying:
-                    raise Refused(f"{broker} already holds {s.max_per_underlying} auto {plan.underlying} structure(s) (max per underlying)")
-            if not 1 <= qty <= s.max_lots:
-                raise Refused(f"quantity must be 1 to {s.max_lots} lots")
+        if not 1 <= qty <= s.max_lots:
+            raise Refused(f"quantity must be 1 to {s.max_lots} lots")
         hours = (plan.expiry - time.time()) / 3600
-        floor = s.expiry_min_hours if source == "auto" else MIN_MANUAL_HOURS
-        if hours < floor:
-            raise Refused(f"{hours:.1f}h to expiry is under the {floor:g}h minimum")
+        if hours < MIN_MANUAL_HOURS:
+            raise Refused(f"{hours:.1f}h to expiry is under the {MIN_MANUAL_HOURS:g}h minimum")
         if stale := [leg.symbol for leg in plan.legs if self.feed.quote(leg.symbol) is None]:
             raise Refused(f"no fresh quote for {', '.join(stale)}")
         assessment = await self.desk.assess(plan, qty)
@@ -394,6 +397,9 @@ class TradingService:
             account = await b.account()
         except BrokerError as exc:
             raise Refused(f"{broker}: cannot read the account, so no trade ({exc})") from exc
+        self._check_drawdown(broker, account.equity)
+        if source in AUTO_SOURCES and (why := portfolio_refusal(held, plan.underlying, unit_risk(assessment), account.equity)):
+            raise Refused(f"{broker} {why}")
         need = assessment["analysis"]["margin"] + assessment["analysis"]["entry_fees"]
         if need > account.available:
             raise Refused(f"{broker} needs {need:,.2f} of margin, {account.available:,.2f} is available")
@@ -411,14 +417,14 @@ class TradingService:
                 if s.get(Structure, sid) is not None:
                     return self.structure(sid)
             b, assessment = await self.gate(broker, plan, qty, source)
-            cfg: Settings = self.settings()
             credit = assessment["analysis"]["net_premium"] > 0
             st = Structure(
-                id=sid, broker=broker, underlying=plan.underlying, strategy=plan.strategy, source=source, status="opening",
+                id=sid, broker=broker, underlying=plan.underlying, strategy=plan.strategy, strategy_version=_version(plan.strategy),
+                source=source, status="opening",
                 expiry=plan.expiry, qty=qty, entry_spot=plan.spot, opened_at=time.time(), decision_id=decision_id,
                 request_id=request_id, margin=assessment["analysis"]["margin"],
-                take_profit_pct=_tp_pct(plan, credit, cfg),
-                stop_loss_pct=_sl_pct(plan, credit, cfg),
+                take_profit_pct=CREDIT_TAKE_PROFIT_PCT if credit else DEBIT_TAKE_PROFIT_PCT,
+                stop_loss_pct=CREDIT_STOP_LOSS_PCT if credit else DEBIT_STOP_LOSS_PCT,
             )
             legs = [
                 Leg(structure_id=sid, idx=i, symbol=leg.symbol, kind=leg.kind, strike=leg.strike, side=leg.side,
@@ -490,16 +496,18 @@ class TradingService:
 
     # -- directional (the perpetual) -----------------------------------------------------------
 
-    def perp_size(self, equity: float, available: float, entry: float, stop: float, contract_value: float, fee_rate: float) -> int:
+    def perp_size(
+        self, equity: float, available: float, entry: float, stop: float, contract_value: float, fee_rate: float, leverage: float,
+    ) -> int:
         """Contracts whose loss at the strategy's stop, fees both ways included, is `risk_per_trade_pct`
-        of equity — a wider stop buys a smaller position, never a bigger loss — and whose margin fits
-        `trade_margin_pct` of what is available."""
+        of equity — a wider stop buys a smaller position, never a bigger loss — and whose margin at the
+        broker's `leverage` fits `TRADE_MARGIN_PCT` of what is available."""
         s: Settings = self.settings()
         per_contract = abs(entry - stop) * contract_value + 2 * fee_rate * entry * contract_value
         if per_contract <= 0 or entry <= 0:
             return 0
         by_risk = math.floor(equity * s.risk_per_trade_pct / 100 / per_contract)
-        by_margin = math.floor(available * s.trade_margin_pct / 100 * s.paper_leverage / (entry * contract_value))
+        by_margin = math.floor(available * TRADE_MARGIN_PCT / 100 * leverage / (entry * contract_value))
         return max(0, min(by_risk, by_margin, s.max_lots))
 
     def risk_scale(self, broker: str, strategy: str, equity: float) -> tuple[float, str]:
@@ -517,8 +525,32 @@ class TradingService:
         d, why_dd = edge.drawdown_scale(edge.drawdown(equity, [p or 0.0 for p in pnls]))
         return e * d, "; ".join(w for w in (why_edge, why_dd) if w)
 
-    async def gate_directional(self, broker: str, symbol: str, side: str, qty: int, stop: float, target: float) -> tuple[Broker, float, float]:
-        """The rules a position on the perpetual passes. Returns the broker, the price and the contract value."""
+    def _check_drawdown(self, broker: str, equity: float) -> None:
+        """Equity `max_drawdown_pct` below its peak stops every entry on every broker."""
+        if why := self.drawdown_breach(broker, equity):
+            self.engage_kill(why)
+            raise Refused(f"every entry is stopped: {why}")
+
+    def drawdown_breach(self, broker: str, equity: float) -> str:
+        s: Settings = self.settings()
+        if s.max_drawdown_pct <= 0:
+            return ""
+        with session() as db:
+            pnls = db.exec(select(Structure.pnl).where(Structure.broker == broker, Structure.status == "closed")
+                           .order_by(col(Structure.closed_at))).all()
+        dd = 100 * edge.drawdown(equity, [p or 0.0 for p in pnls])
+        return f"{broker} equity is {dd:.1f}% below its peak (limit {s.max_drawdown_pct:g}%)" if dd >= s.max_drawdown_pct else ""
+
+    def engage_kill(self, reason: str) -> None:
+        if kill_state() is None:
+            set_kill(reason)
+            self.hub.publish("KillSwitch", f"every entry stopped: {reason}", "warning", reason=reason)
+
+    async def gate_directional(
+        self, broker: str, symbol: str, side: str, qty: int, stop: float, target: float, source: str = "manual",
+    ) -> tuple[Broker, float, float, float]:
+        """The rules a position on the perpetual passes. Returns the broker, the price, the contract
+        value and the broker's leverage."""
         s: Settings = self.settings()
         b, held = self._ready(broker, s)
         if any(is_directional(st) and PERPETUALS[st.underlying] == symbol for st in held):
@@ -536,19 +568,24 @@ class TradingService:
         cv = await self.desk.contract_value(symbol)
         try:
             account = await b.account()
+            leverage = await b.leverage(symbol)
         except BrokerError as exc:
             raise Refused(f"{broker}: cannot read the account, so no trade ({exc})") from exc
-        margin = price * qty * cv / s.paper_leverage
-        if margin > account.available * s.trade_margin_pct / 100:
-            raise Refused(f"{qty} contracts need {margin:,.2f} of margin, over {s.trade_margin_pct:g}% of the {account.available:,.2f} available")
-        return b, price, cv
+        self._check_drawdown(broker, account.equity)
+        underlying = UNDERLYING_OF[symbol]
+        if source in AUTO_SOURCES and (why := portfolio_refusal(held, underlying, abs(price - stop) * qty * cv, account.equity)):
+            raise Refused(f"{broker} {why}")
+        margin = price * qty * cv / leverage
+        if margin > account.available * TRADE_MARGIN_PCT / 100:
+            raise Refused(f"{qty} contracts need {margin:,.2f} of margin at {leverage:g}x, over {TRADE_MARGIN_PCT:g}% of the {account.available:,.2f} available")
+        return b, price, cv, leverage
 
     async def open_directional(
         self, broker: str, underlying: str, side: str, qty: int, stop: float, target: float,
         strategy: str, source: str, request_id: str, reason: str = "", hold_hours: float | None = None,
     ) -> dict[str, Any]:
         """A position on the perpetual with its strategy's own stop and target. The guard closes it
-        when the mark reaches either, or after `hold_hours` (the strategy's own), else `perp_max_hold_hours`."""
+        when the mark reaches either, or after `hold_hours` (the strategy's own), else `DEFAULT_HOLD_HOURS`."""
         if underlying not in PERPETUALS:
             raise NotFound(f"unknown underlying {underlying!r}")
         if side not in ("buy", "sell"):
@@ -559,15 +596,15 @@ class TradingService:
             with session() as s:
                 if s.get(Structure, sid) is not None:
                     return self.structure(sid)
-            b, price, cv = await self.gate_directional(broker, symbol, side, qty, stop, target)
-            cfg: Settings = self.settings()
+            b, price, cv, leverage = await self.gate_directional(broker, symbol, side, qty, stop, target, source)
             now = time.time()
             st = Structure(
-                id=sid, broker=broker, underlying=underlying, strategy=strategy, source=source, status="opening",
-                expiry=now + (hold_hours or cfg.perp_max_hold_hours) * 3600, qty=qty, entry_spot=price, opened_at=now, request_id=request_id,
+                id=sid, broker=broker, underlying=underlying, strategy=strategy, strategy_version=_version(strategy),
+                source=source, status="opening",
+                expiry=now + (hold_hours or DEFAULT_HOLD_HOURS) * 3600, qty=qty, entry_spot=price, opened_at=now, request_id=request_id,
                 stop_price=stop, target_price=target, reason=reason[:500], take_profit_pct=0.0, stop_loss_pct=0.0,
                 initial_stop=stop, peak_price=price,
-                margin=round(price * qty * cv / cfg.paper_leverage, 6),
+                margin=round(price * qty * cv / leverage, 6),
             )
             leg = Leg(structure_id=sid, idx=0, symbol=symbol, kind="perp", strike=0.0, side=side, size=qty, contract_value=cv)
             self._save(st)
@@ -577,7 +614,7 @@ class TradingService:
             if fill:
                 leg.entry_price, leg.entry_fee, leg.size = fill.price, fill.fee, fill.size
                 self._save(leg)
-                self._opened_directional(st, leg)
+                self._opened_directional(st, leg, leverage)
                 await self._protect(b, st, leg)
             elif unknown:
                 st.status, st.error = "error", f"{error} — the order's outcome is unknown; check the exchange, then close this position"
@@ -589,7 +626,7 @@ class TradingService:
                                  structure_id=st.id, broker=broker, source=source, pnl=st.pnl)
             return self.structure(sid)  # read back: a refused exchange stop has closed it since
 
-    def _opened_directional(self, st: Structure, leg: Leg) -> None:
+    def _opened_directional(self, st: Structure, leg: Leg, leverage: float) -> None:
         units = leg.size * leg.contract_value
         entry = leg.entry_price or 0.0
         exit_fee = leg.entry_fee  # the close pays about what the entry did
@@ -600,7 +637,7 @@ class TradingService:
         st.fees = round(leg.entry_fee, 6)
         st.max_loss = round(abs(entry - (st.stop_price or entry)) * units + leg.entry_fee + exit_fee, 6)
         st.max_profit = round(abs((st.target_price or entry) - entry) * units - leg.entry_fee - exit_fee, 6)
-        st.margin = round(entry * units / self.settings().paper_leverage, 6)
+        st.margin = round(entry * units / leverage, 6)
         self._save(st)
         self.hub.publish(
             "StructureOpened",
@@ -651,6 +688,10 @@ class TradingService:
         if (wanted - st.stop_price if long else st.stop_price - wanted) < TRAIL_STEP_R * risk:
             return
         async with self.lock:
+            fresh = self._load(st.id)[0]
+            if fresh.status != "open" or fresh.stop_price != st.stop_price:
+                return  # closed, or moved, since it was read: the next check starts from what is there
+            st = fresh
             b = self.brokers[st.broker]
             if st.stop_order_id:
                 if await b.lookup(stop_cid(st)) is not None:
@@ -795,11 +836,11 @@ class TradingService:
         return {"closed": closed, "errors": errors}
 
     async def open_test_set(self) -> list[dict[str, Any]]:
-        """Paper only: everything that may be held at once — per underlying one option structure,
-        one zero-hero buy and one perpetual position (sell and buy alternate, so both are seen) —
+        """Paper only: everything that may be held at once — per underlying one option structure and
+        one perpetual position (sell and buy alternate, so both are seen) —
         each at the smallest size and through the same gates as any entry. A slot already taken is
         reported as refused, never forced."""
-        broker, s, stamp = "paper", self.settings(), time.time_ns()
+        broker, stamp = "paper", time.time_ns()
         out: list[dict[str, Any]] = []
 
         async def attempt(underlying: str, kind: str, opening: Any) -> None:
@@ -813,21 +854,10 @@ class TradingService:
 
         for i, underlying in enumerate(PERPETUALS):
             async def structure(u: str = underlying) -> dict[str, Any]:
-                if any(st.underlying == u and not is_directional(st) and not is_zerohero(st) for st in self._held(broker)):
+                if any(st.underlying == u and not is_directional(st) for st in self._held(broker)):
                     raise Refused(f"{broker} already holds a {u} option structure")
                 plan = self.desk.plan(u, "iron_condor")
                 return await self.open(broker, plan, 1, "manual", f"test-{u}-options-{stamp}")
-
-            async def zerohero(u: str = underlying) -> dict[str, Any]:
-                spot = self.desk.spot(u)
-                # The nearest expiry the guard would not close at once on its time exit.
-                after = time.time() + max(s.zh_exit_minutes * 60 + 1800, MIN_MANUAL_HOURS * 3600)
-                quote = next((q for q in sorted(self.feed.quotes(u), key=lambda q: (q.expiry, q.strike))
-                              if q.expiry > after and q.kind == "call" and q.strike > spot and q.ask), None)
-                plan = single(quote, "buy", spot, ZERO_HERO) if quote else None
-                if plan is None:
-                    raise Refused(f"no out-of-the-money {u} call to buy")
-                return await self.open(broker, plan, 1, "manual", f"test-{u}-zerohero-{stamp}")
 
             async def perp(u: str = underlying, side: str = "buy" if i % 2 else "sell") -> dict[str, Any]:
                 quote = self.book(PERPETUALS[u])
@@ -840,19 +870,52 @@ class TradingService:
                 )
 
             await attempt(underlying, "options", structure)
-            await attempt(underlying, "zero-hero", zerohero)
             await attempt(underlying, "perpetual", perp)
         return out
 
-    def update_exits(self, sid: str, take_profit_pct: float, stop_loss_pct: float) -> dict[str, Any]:
+    async def update_exits(self, sid: str, take_profit_pct: float, stop_loss_pct: float) -> dict[str, Any]:
         if not (5 <= take_profit_pct <= 1000 and 5 <= stop_loss_pct <= 500):
             raise Refused("take profit must be 5-1000% and stop loss 5-500%")
-        st, legs = self._load(sid)
-        if st.status not in ("open", "error"):
-            raise Refused(f"structure {sid} is {st.status}")
-        st.take_profit_pct, st.stop_loss_pct = take_profit_pct, stop_loss_pct
-        self._save(st)
-        return self.view(st, legs)
+        async with self.lock:  # the guard writes the same row
+            st, legs = self._load(sid)
+            if st.status not in ("open", "error"):
+                raise Refused(f"structure {sid} is {st.status}")
+            st.take_profit_pct, st.stop_loss_pct = take_profit_pct, stop_loss_pct
+            self._save(st)
+            return self.view(st, legs)
+
+    def recover(self) -> list[str]:
+        """At start: a structure the last process left `opening` or `closing` was interrupted mid-way.
+        Fills it recorded are put on their legs, orders it sent and never heard back from are marked
+        unknown, and it goes to `error` — so the guard looks the orders up and gets it flat, and the
+        broker takes no new entry until then. Returns the ids it recovered."""
+        out = []
+        with session() as s:
+            stuck = list(s.exec(select(Structure).where(col(Structure.status).in_(("opening", "closing")))).all())
+        for st in stuck:
+            legs = self._load(st.id)[1]
+            with session() as s:
+                records = list(s.exec(select(OrderRecord).where(OrderRecord.structure_id == st.id)).all())
+            for rec in records:
+                if rec.purpose not in ("open", "close", "unwind"):
+                    continue
+                idx = rec.client_order_id[len(st.id): len(st.id) + 1]
+                leg = next((leg for leg in legs if str(leg.idx) == idx and leg.symbol == rec.symbol), None)
+                if rec.status == "pending":
+                    self._mark_order(rec.client_order_id, status="unknown", error="interrupted by a restart")
+                elif rec.status == "filled" and leg is not None and rec.fill_price is not None:
+                    if rec.purpose == "open" and leg.entry_price is None:
+                        leg.entry_price, leg.entry_fee, leg.size = rec.fill_price, rec.fee, rec.filled_size or leg.size
+                    elif rec.purpose != "open" and leg.entry_price is not None and leg.exit_price is None:
+                        leg.exit_price, leg.exit_fee = rec.fill_price, rec.fee
+                    self._save(leg)
+            was = st.status
+            st.status = "error"
+            st.error = f"interrupted by a restart while {was}: its orders are being looked up and it will be closed"
+            self._save(st)
+            self.hub.publish("StructureError", f"{self._title(st)} on {st.broker}: {st.error}", "error", structure_id=st.id, broker=st.broker)
+            out.append(st.id)
+        return out
 
     async def _exit(self, b: Broker, st: Structure, legs: list[Leg], purpose: str, slack: float) -> list[str]:
         """Exit every held leg, sold ones first. A short that cannot be bought back stops the rest:

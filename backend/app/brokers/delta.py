@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.brokers.base import Account, Fill, LegOrder
-from app.errors import BrokerError
+from app.errors import BrokerError, BrokerTimeout
 from app.market.delta import DeltaClient
 
 
@@ -51,6 +51,18 @@ class DeltaBroker:
             margin_used=margin, cash=balance,
             extra={"assets": [{"asset": b.get("asset_symbol"), "balance": _num(b.get("balance"))} for b in balances if _num(b.get("balance"))]},
         )
+
+    async def leverage(self, symbol: str) -> float:
+        """The account's order leverage on this product, as set on the exchange. Unreadable, 1x:
+        margin is then over-counted, never under-counted."""
+        try:
+            return max(1.0, _num(await self.client.order_leverage(symbol), 1.0))
+        except (BrokerError, BrokerTimeout):
+            return 1.0
+
+    async def positions(self) -> dict[str, int]:
+        """Signed contracts held per symbol (positive long), as the exchange reports them."""
+        return {str(p.get("product_symbol")): int(_num(p.get("size"))) for p in await self.client.positions() if p.get("product_symbol")}
 
     async def execute(self, order: LegOrder) -> Fill:
         raw = await self.client.place_order(order.symbol, order.side, order.size, order.client_order_id, order.limit_price, order.reduce_only)

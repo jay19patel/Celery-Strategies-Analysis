@@ -20,17 +20,34 @@ function useBook() {
   // Valued the way the Positions page values them: what closing every leg now would book.
   const priced = list.filter((s) => s.live?.pnl != null);
   const unrealised = priced.reduce((a, s) => a + (s.live?.pnl ?? 0), 0);
-  let today: number | null = null;
-  let margin = 0;
+  // Per broker, never added together: paper dollars and real dollars are not one number.
+  const brokers: { name: string; today: number | null; margin: number }[] = [];
   for (const acc of Object.values(accounts?.accounts ?? {})) {
     if (!acc || "error" in acc) continue;
     const a = acc as Account;
-    margin += a.margin_used;
     const start = accounts?.today[a.broker]?.start_equity;
-    if (start != null) today = (today ?? 0) + a.equity - start;
+    brokers.push({ name: a.broker, today: start != null ? a.equity - start : null, margin: a.margin_used });
   }
-  return { list, loaded: open !== undefined, unrealised: priced.length ? unrealised : null, unpriced: list.length - priced.length, today, margin };
+  return { list, loaded: open !== undefined, unrealised: priced.length ? unrealised : null, unpriced: list.length - priced.length, brokers };
 }
+
+/** "Today +1.20" with one broker, "Today paper +1.20 · delta −0.40" with two. */
+function Today({ brokers, className }: { brokers: { name: string; today: number | null }[]; className?: string }) {
+  return (
+    <>
+      {brokers.map((b, i) => (
+        <span key={b.name}>
+          {i > 0 && " · "}
+          {brokers.length > 1 && <span className="text-muted-foreground">{b.name} </span>}
+          <Money v={b.today} className={className} />
+        </span>
+      ))}
+    </>
+  );
+}
+
+const margins = (brokers: { name: string; margin: number }[]) =>
+  brokers.map((b) => (brokers.length > 1 ? `${b.name} ${usd(b.margin)}` : usd(b.margin))).join(" · ");
 
 const Money = ({ v, className }: { v: number | null; className?: string }) => (
   <span className={cn("num font-semibold", pnlClass(v), className)}>{v === null ? "—" : <Rolling text={arrowSigned(v)} />}</span>
@@ -77,11 +94,11 @@ function DesktopBar() {
       </span>
       <span className="inline-flex items-baseline gap-1.5">
         <span className="text-muted-foreground">Today</span>
-        <Money v={b.today} />
+        <Today brokers={b.brokers} />
       </span>
       <span className="inline-flex items-baseline gap-1.5">
         <span className="text-muted-foreground">Margin</span>
-        <span className="num font-medium">{usd(b.margin)}</span>
+        <span className="num font-medium">{margins(b.brokers)}</span>
       </span>
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto no-scrollbar">
         {b.list.map((s) => (
@@ -126,7 +143,7 @@ function PhoneBar() {
             {b.list.length} open trade{b.list.length === 1 ? "" : "s"}
           </span>
           <span className="block truncate text-[12.5px] text-muted-foreground">
-            Today <Money v={b.today} className="font-medium" />
+            Today <Today brokers={b.brokers} className="font-medium" />
             {b.unpriced > 0 && <span className="text-warn"> · {b.unpriced} unpriced</span>}
           </span>
         </span>
@@ -144,7 +161,7 @@ function PhoneBar() {
             <div>
               <SheetTitle className="text-[20px] font-bold tracking-[-0.02em]">Open trades</SheetTitle>
               <div className="text-[13px] text-muted-foreground">
-                Today <Money v={b.today} className="font-medium" /> · margin <span className="num">{usd(b.margin)}</span>
+                Today <Today brokers={b.brokers} className="font-medium" /> · margin <span className="num">{margins(b.brokers)}</span>
               </div>
             </div>
             <div className="text-right">

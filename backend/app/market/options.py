@@ -15,6 +15,7 @@ YEAR_HOURS = 365 * 24
 PERPETUALS = {"BTC": "BTCUSD", "ETH": "ETHUSD", "XAUT": "XAUTUSD"}
 UNDERLYING_OF = {perp: u for u, perp in PERPETUALS.items()}
 PERP_SLIPPAGE = 0.0005  # applied to a perpetual's mark when a side of its book is empty
+OPTION_SLIPPAGE = 0.02  # applied to an option's mark when the side it trades has no quote (paper, and valuation)
 PULLED, PULLED_SPOT = 0.6, 0.0005  # a book side this far from the mark is a pulled market (`fair_side`)
 CHAIN_WIDTH = 0.15  # strikes within ±15% of spot are sent to the dashboard
 CHAIN_EXPIRIES = 4  # nearest expiries sent with their chain in a summary

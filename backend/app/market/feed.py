@@ -140,8 +140,11 @@ def parse_perp(msg: dict[str, Any], now: float) -> PerpQuote | None:
 class MarketFeed:
     SILENCE_TIMEOUT = 60.0
 
-    def __init__(self, rest_url: str, ws_url: str, underlyings: list[str]) -> None:
+    def __init__(self, rest_url: str, ws_url: str, underlyings: list[str], record: bool = True) -> None:
         self.rest = DeltaClient(rest_url)
+        # Store bars, tape and chains? Only from the live exchange: the history is keyed by symbol,
+        # and testnet prints stored under BTCUSD would be read as the real market for a year.
+        self.record = record
         self.ws_url = ws_url
         self.underlyings = list(underlyings)
         self.perps: dict[str, PerpQuote] = {}
@@ -167,14 +170,16 @@ class MarketFeed:
             self._task = None
         await self.rest.aclose()
 
-    async def reconfigure(self, rest_url: str, ws_url: str, underlyings: list[str]) -> None:
-        """Another exchange environment or set of underlyings: every price from the old one is dropped."""
+    async def reconfigure(self, rest_url: str, ws_url: str, underlyings: list[str], record: bool = True) -> None:
+        """Another exchange environment or set of underlyings: every price and print from the old one is dropped."""
         running = self._task is not None
         await self.stop()
         self.rest = DeltaClient(rest_url)
-        self.ws_url, self.underlyings = ws_url, list(underlyings)
+        self.ws_url, self.underlyings, self.record = ws_url, list(underlyings), record
         self.perps.clear()
         self.book.clear()
+        self.tape = Tape()
+        self._latest_bar_times.clear()
         if running:
             self.start()
 
@@ -256,6 +261,8 @@ class MarketFeed:
         the newest stored, and older than the oldest back to the history's start. Resumable and
         idempotent — a stored bar is never rewritten, because a silently revised past is worse for
         a base rate than a missing one. Holes in the middle are left as holes."""
+        if not self.record:
+            return "not stored: the feed is on the demo exchange"
         step, days = SERIES_SECONDS[interval], SERIES[interval]
         now = int(time.time())
         horizon = now - days * 86_400
@@ -420,7 +427,8 @@ class MarketFeed:
                 cv = quote.contract_value if quote else (0.01 if parsed[1] == "ETH" else 0.001)
                 self.tape.option_trade(parsed[1], parsed[0], price, size * cv, taker_buy)
         elif symbol in UNDERLYING_OF:
-            self.tape.trade(symbol, price, size, taker_buy, ts)
+            perp = self.perp(UNDERLYING_OF[symbol])
+            self.tape.trade(symbol, price, size, taker_buy, ts, perp.mark if perp else None)
 
     async def _run_ws(self) -> None:
         backoff = 1.0
@@ -433,7 +441,11 @@ class MarketFeed:
                     while True:
                         raw = await asyncio.wait_for(ws.recv(), timeout=self.SILENCE_TIMEOUT)
                         if self.wanted(raw):
-                            self.handle(json.loads(raw))
+                            try:
+                                self.handle(json.loads(raw))
+                            except (ValueError, KeyError, TypeError) as exc:  # one bad message is not a dead socket
+                                self.ws["bad_messages"] = self.ws.get("bad_messages", 0) + 1
+                                log.debug("websocket_bad_message error=%r", exc)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

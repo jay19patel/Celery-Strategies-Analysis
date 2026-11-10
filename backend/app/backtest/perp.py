@@ -6,8 +6,12 @@ runner trades, bar by bar, with nothing from the future.
     EXIT     the strategy's own stop and target, read on each later bar's range. A bar that touches
              both is a stop (the order inside a bar is unknown, so the worse one is assumed); a bar
              that opens past the stop fills at its open. Or the open after `max_hold_hours`.
-    COSTS    `cost_pct` per round trip (fees both ways and the spread) and `funding_pct` for every
-             eight hours held, both taken off every trade.
+    TRAIL    the live trailing stop (`trading.service.TRAIL_*`): from 1R in profit the stop is at
+             least break-even and follows the best price 1R behind, in 0.25R steps. Moved only at a
+             bar's close, from that bar's extreme — the guard moves it every five seconds, so this is
+             the slower, more conservative version of the same rule.
+    COSTS    `cost_pct` per round trip (fees both ways and the spread), `stop_slippage_pct` on every
+             stop (a stop-market fills past its trigger), and `funding_pct` for every eight hours held.
 
 Results are in % of notional per trade and in R (multiples of the planned risk). Walk-forward folds
 show whether the result holds across time, and a Monte Carlo reshuffle of the trades what drawdown
@@ -28,6 +32,7 @@ from app.analysis import resample
 from app.analysis.service import candles
 from app.market.options import PERPETUALS
 from app.strategies.base import Context, Strategy
+from app.trading.service import TRAIL_DISTANCE_R, TRAIL_START_R, TRAIL_STEP_R
 
 FUNDING_HOURS = 8.0
 
@@ -48,9 +53,17 @@ class Trade:
         return self.pnl_pct / self.risk_pct if self.risk_pct > 0 else 0.0
 
 
+def trailed(side: int, entry: float, risk: float, stop: float, best: float) -> float:
+    """The stop after the price has reached `best`: the live rule, never loosened."""
+    if risk <= 0 or (best - entry) * side < TRAIL_START_R * risk:
+        return stop
+    wanted = max(best - TRAIL_DISTANCE_R * risk, entry) if side > 0 else min(best + TRAIL_DISTANCE_R * risk, entry)
+    return wanted if (wanted - stop) * side >= TRAIL_STEP_R * risk else stop
+
+
 def simulate(
     strategy: Strategy, bars: list[dict[str, Any]], symbol: str, underlying: str,
-    cost_pct: float, funding_pct: float = 0.0, max_hold_hours: float = 24.0,
+    cost_pct: float, funding_pct: float = 0.0, max_hold_hours: float = 24.0, stop_slippage_pct: float = 0.0,
 ) -> list[Trade]:
     """Every trade `strategy` would have taken on `bars` (its own interval, oldest first), one at a time."""
     span = resample.seconds(strategy.interval)
@@ -71,16 +84,20 @@ def simulate(
             continue
         exit_price, reason, j = None, "", entry_bar
         last = min(len(bars) - 1, entry_bar + max_bars)
+        risk, stop, best = abs(entry - d.stop), d.stop, entry
+        slip = 1 - side * stop_slippage_pct / 100
         while j <= last:
             bar = bars[j]
-            if (bar["open"] - d.stop) * side <= 0 and j > entry_bar:
-                exit_price, reason = bar["open"], "gap through the stop"
-            elif (bar["low"] if side > 0 else bar["high"]) * side <= d.stop * side:
-                exit_price, reason = d.stop, "stop"
+            if (bar["open"] - stop) * side <= 0 and j > entry_bar:
+                exit_price, reason = bar["open"] * slip, "gap through the stop"
+            elif (bar["low"] if side > 0 else bar["high"]) * side <= stop * side:
+                exit_price, reason = stop * slip, "trailing stop" if stop != d.stop else "stop"
             elif (bar["high"] if side > 0 else bar["low"]) * side >= d.target * side:
                 exit_price, reason = d.target, "target"
             if exit_price is not None:
                 break
+            best = max(best, bar["high"]) if side > 0 else min(best, bar["low"])
+            stop = trailed(side, entry, risk, stop, best)
             j += 1
         if exit_price is None:
             if last + 1 >= len(bars):
@@ -143,16 +160,19 @@ def monte_carlo(trades: list[Trade], runs: int = 2000, seed: int = 7) -> dict[st
     return {"drawdown_p50_pct": round(dds[runs // 2], 3), "drawdown_p95_pct": round(dds[int(runs * 0.95)], 3)}
 
 
-def report(strategy: Strategy, bars: list[dict[str, Any]], underlying: str, cost_pct: float, funding_pct: float, max_hold_hours: float) -> dict[str, Any]:
-    trades = simulate(strategy, bars, PERPETUALS[underlying], underlying, cost_pct, funding_pct, max_hold_hours)
+def report(
+    strategy: Strategy, bars: list[dict[str, Any]], underlying: str, cost_pct: float, funding_pct: float, max_hold_hours: float,
+    stop_slippage_pct: float = 0.0,
+) -> dict[str, Any]:
+    trades = simulate(strategy, bars, PERPETUALS[underlying], underlying, cost_pct, funding_pct, max_hold_hours, stop_slippage_pct)
     return {
         "strategy": strategy.name, "underlying": underlying, "interval": strategy.interval, "bars": len(bars),
         "from": bars[0]["time"] if bars else None, "to": bars[-1]["time"] if bars else None,
-        "costs": {"round_trip_pct": cost_pct, "funding_pct_per_8h": funding_pct},
+        "costs": {"round_trip_pct": cost_pct, "funding_pct_per_8h": funding_pct, "stop_slippage_pct": stop_slippage_pct},
         "overall": summary(trades),
         "walk_forward": walk_forward(trades),
         "monte_carlo": monte_carlo(trades),
-        "exits": {r: sum(t.reason == r for t in trades) for r in ("target", "stop", "gap through the stop", "max hold")},
+        "exits": {r: sum(t.reason == r for t in trades) for r in ("target", "stop", "trailing stop", "gap through the stop", "max hold")},
     }
 
 
@@ -169,24 +189,27 @@ def stored_bars(underlying: str, interval: str) -> list[dict[str, Any]]:
 def main() -> None:
     from app.config import get_config
     from app.core.db import init_db
-    from app.strategies import REGISTRY
+    from app.strategies import registry
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("strategy", choices=sorted(REGISTRY))
+    parser.add_argument("strategy", choices=registry.names("perp"))
     parser.add_argument("--underlying", default="BTC", choices=sorted(PERPETUALS))
     # Delta India perpetual taker fee 0.05% each way, 18% GST on it, plus about a tick of spread.
     parser.add_argument("--cost-pct", type=float, default=0.13, help="round trip: fees both ways and the spread, %% of notional")
     parser.add_argument("--funding-pct", type=float, default=0.01, help="paid per 8h held, %% of notional")
-    parser.add_argument("--max-hold-hours", type=float, default=None, help="default: the strategy's own, else 24")
+    parser.add_argument("--stop-slippage-pct", type=float, default=0.05, help="how far past its trigger a stop fills, %% of price")
+    parser.add_argument("--max-hold-hours", type=float, default=None, help="default: the strategy's own")
+    parser.add_argument("--params", type=json.loads, default={}, help='the strategy\'s params as JSON, e.g. \'{"reward_r": 3}\'')
     args = parser.parse_args()
 
-    strategy = REGISTRY[args.strategy]
-    if strategy.wants_outlook or strategy.wants_structure or strategy.wants_options_history or strategy.wants_flow or strategy.wants_bias:
+    strategy = registry.make(args.strategy, args.params)
+    assert isinstance(strategy, Strategy)
+    if strategy.wants_outlook or strategy.wants_structure or strategy.wants_flow or strategy.wants_bias:
         parser.error(f"{args.strategy} reads the market desk, the options history, the tape or the day's bias, which this backtest does not replay")
     init_db(get_config().db_path)
     bars = stored_bars(args.underlying, strategy.interval)
-    hold = args.max_hold_hours or strategy.max_hold_hours or 24.0
-    print(json.dumps(report(strategy, bars, args.underlying, args.cost_pct, args.funding_pct, hold), indent=2))
+    hold = args.max_hold_hours or strategy.max_hold_hours
+    print(json.dumps(report(strategy, bars, args.underlying, args.cost_pct, args.funding_pct, hold, args.stop_slippage_pct), indent=2))
 
 
 if __name__ == "__main__":

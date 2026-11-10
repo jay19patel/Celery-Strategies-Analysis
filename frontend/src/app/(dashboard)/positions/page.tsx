@@ -177,10 +177,10 @@ export default function PositionsPage() {
       {data && data.length === 0 && (
         <Card>
           <Empty title="No open structures">
-            Open one from the <Link href="/" className="text-primary hover:underline">Options Desk</Link>, or let the <Link href="/auto" className="text-primary hover:underline">Auto Trader</Link> find one.
+            Open one from the <Link href="/desk" className="text-primary hover:underline">Options Desk</Link>, or switch a strategy on in <Link href="/strategies" className="text-primary hover:underline">Strategies</Link>.
           </Empty>
           <div className="flex justify-center pb-6">
-            <Button asChild variant="outline" size="sm"><Link href="/"><Layers /> Open the desk</Link></Button>
+            <Button asChild variant="outline" size="sm"><Link href="/desk"><Layers /> Open the desk</Link></Button>
           </div>
         </Card>
       )}

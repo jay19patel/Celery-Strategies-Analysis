@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useApi } from "@/lib/live";
-import type { Regime, StrategySpec } from "@/lib/types";
+import type { Regime, StrategyInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const LABEL_TONE: Record<string, "profit" | "loss" | "warn" | "primary" | "default"> = {
@@ -29,13 +29,13 @@ export function RegimeCard({
 }: {
   underlying: string;
   expiry: number;
-  strategies: StrategySpec[];
+  strategies: StrategyInfo[];
   minScore: number;
   selected: string;
   onPick: (key: string) => void;
 }) {
   const { data, error, isLoading } = useApi<Regime>(`/market/regime?underlying=${underlying}&expiry=${expiry}`, { refreshInterval: 60_000 });
-  const ranked = data ? strategies.filter((s) => data.scores[s.key]).sort((a, b) => data.scores[b.key].score - data.scores[a.key].score) : [];
+  const ranked = data ? strategies.filter((s) => data.scores[s.name]).sort((a, b) => data.scores[b.name].score - data.scores[a.name].score) : [];
 
   return (
     <Card>
@@ -68,13 +68,13 @@ export function RegimeCard({
             </div>
             <div className="space-y-1.5">
               {ranked.map((s) => {
-                const sc = data.scores[s.key];
+                const sc = data.scores[s.name];
                 return (
-                  <Tooltip key={s.key}>
+                  <Tooltip key={s.name}>
                     <TooltipTrigger asChild>
                       <button
-                        onClick={() => onPick(s.key)}
-                        className={cn("group w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-slate-50", selected === s.key && "bg-accent")}
+                        onClick={() => onPick(s.name)}
+                        className={cn("group w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-slate-50", selected === s.name && "bg-accent")}
                       >
                         <div className="flex items-center justify-between text-[12.5px]">
                           <span className="font-medium">{s.label}</span>

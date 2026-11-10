@@ -55,6 +55,10 @@ class Broker(Protocol):
 
     async def account(self) -> Account: ...
 
+    async def leverage(self, symbol: str) -> float:
+        """The leverage a new position on this perpetual is opened at."""
+        ...
+
     async def execute(self, order: LegOrder) -> Fill:
         """Fill now at `limit_price` or better, or raise BrokerError. A partial fill returns the filled size."""
         ...

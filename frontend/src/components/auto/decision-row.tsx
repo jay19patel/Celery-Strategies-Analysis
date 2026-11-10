@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { Pnl, Premium } from "@/components/shared/money";
-import { Notice } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { dateTime, pct, price, signedPct } from "@/lib/format";
@@ -31,7 +30,6 @@ export function DecisionRow({ d }: { d: Decision }) {
             {d.reason}
           </span>
         </div>
-        {d.ai?.used && <Bot className="size-4 shrink-0 text-primary" aria-label="AI reviewed" />}
       </button>
       {open && (
         <div className="animate-in fade-in duration-150 space-y-4 bg-slate-50/50 px-4 pb-4 sm:pl-11">
@@ -49,9 +47,6 @@ export function DecisionRow({ d }: { d: Decision }) {
               )}
             </div>
           )}
-
-          {/* The bar moves while a day goes by with no entry, so say when it has. */}
-          {d.regime?.pacing && <Notice tone="warn">{d.regime.pacing}</Notice>}
 
           {d.candidates && d.candidates.length > 0 && (
             <div className="overflow-hidden rounded-xl bg-card">
@@ -83,26 +78,6 @@ export function DecisionRow({ d }: { d: Decision }) {
                   ))}
                 </TableBody>
               </Table>
-            </div>
-          )}
-
-          {d.ai && (
-            <div className="rounded-xl bg-card p-3 text-[12.5px]">
-              <div className="mb-1.5 flex flex-wrap items-center gap-2 font-medium">
-                <Bot className="size-4 text-primary" /> AI review
-                {d.ai.used ? (
-                  <>
-                    <Badge variant={d.ai.decision === "trade" ? "profit" : "default"}>{d.ai.decision}</Badge>
-                    {d.ai.confidence && <Badge variant="outline">{d.ai.confidence} confidence</Badge>}
-                    <span className="text-[11.5px] font-normal text-muted-foreground">{d.ai.model} · {d.ai.ms}ms{d.ai.fallback ? " · fallback model" : ""}</span>
-                  </>
-                ) : (
-                  <span className="font-normal text-muted-foreground">not used — {d.ai.note || d.ai.error}</span>
-                )}
-              </div>
-              {d.ai.invalid_choice && <p className="text-warn">The model named a structure that was not offered; treated as a skip.</p>}
-              {d.ai.reasons?.map((r) => <p key={r} className="text-slate-700">· {r}</p>)}
-              {d.ai.risks?.length ? <p className="mt-1 text-muted-foreground">Risks: {d.ai.risks.join(" · ")}</p> : null}
             </div>
           )}
 

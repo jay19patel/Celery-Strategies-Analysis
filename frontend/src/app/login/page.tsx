@@ -21,7 +21,8 @@ function LoginForm() {
     setError("");
     try {
       await api("/auth/login", "POST", { pin });
-      router.replace(next.startsWith("/") ? next : "/");
+      // Only a path on this site: "//host" would leave it.
+      router.replace(next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "login failed");
       setPin("");

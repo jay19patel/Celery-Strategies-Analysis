@@ -33,6 +33,7 @@ class Structure(SQLModel, table=True):
     broker: str = Field(index=True)
     underlying: str
     strategy: str
+    strategy_version: int | None = None  # the strategy's `version` when it opened: a changed rule shows in history
     source: str  # "auto" | "manual"
     status: str = Field(index=True)  # opening | open | closing | closed | failed | error
     expiry: float

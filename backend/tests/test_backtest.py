@@ -78,3 +78,16 @@ def test_the_summary_folds_and_monte_carlo() -> None:
     assert sum(f["trades"] for f in walk_forward(trades, 4)) == 8
     mc = monte_carlo(trades, runs=500)
     assert mc["drawdown_p95_pct"] >= mc["drawdown_p50_pct"] > 0
+
+
+def test_the_backtest_trails_the_stop_as_the_live_guard_does() -> None:
+    """Up 1.5R, then back: live, the stop has trailed to +0.5R and books a gain. A backtest without
+    the trail books the full 1R loss, so it was testing a different strategy from the one trading."""
+    data = bars((100, 100, 100, 100), (100, 100.2, 99.9, 100.1), (100.1, 101.5, 100.0, 101.4), (101.4, 101.4, 98.0, 98.5))
+    [t] = run(LongOnce(), data)
+    assert t.reason == "trailing stop" and t.exit == pytest.approx(100.5) and t.pnl_pct > 0
+
+
+def test_a_stop_fills_past_its_trigger() -> None:
+    [t] = simulate(LongOnce(), bars((100, 100, 100, 100), (100, 103, 98, 101)), "BTCUSD", "BTC", 0.0, stop_slippage_pct=0.1)
+    assert t.reason == "stop" and t.exit == pytest.approx(99 * 0.999)

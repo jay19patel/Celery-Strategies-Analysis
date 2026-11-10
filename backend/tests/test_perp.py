@@ -8,8 +8,10 @@ from typing import Any
 
 import pytest
 
+import app.trading.runner as runner_mod
 from app.analysis.service import MarketDesk
 from app.errors import Refused
+from app.settings import StrategyConfig
 from app.strategies.base import Context, Decision, Strategy
 from app.trading.guard import Guard
 from app.trading.runner import StrategyRunner
@@ -25,7 +27,7 @@ def perp(env: Any) -> Any:
 
 async def test_a_long_fills_at_the_ask_and_keeps_its_strategys_levels(perp: Any) -> None:
     start = await perp.paper.account()
-    view = await perp.trading.open_directional("paper", "BTC", "buy", 10, 79_500, 81_000, "supertrend", "auto", "req-perp-1", "why")
+    view = await perp.trading.open_directional("paper", "BTC", "buy", 10, 79_500, 81_000, "trend_4h_short", "auto", "req-perp-1", "why")
     assert view["status"] == "open" and view["instrument"] == "perp" and view["kind"] == "long"
     leg = view["legs"][0]
     assert leg["kind"] == "perp" and leg["entry_price"] == PRICE + 0.5
@@ -39,7 +41,7 @@ async def test_a_long_fills_at_the_ask_and_keeps_its_strategys_levels(perp: Any)
 
 async def test_the_guard_closes_at_the_stop_and_at_the_target(perp: Any) -> None:
     guard = Guard(perp.trading, perp.settings, perp.hub)
-    stop = await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-perp-sl", "")
+    stop = await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 81_000, "trend_4h_short", "auto", "req-perp-sl", "")
     perp.feed.set_perp(79_400, bid=79_399.5, ask=79_400.5)
     await guard.check_structures()
     closed = perp.trading.structure(stop["id"])
@@ -57,7 +59,7 @@ async def test_the_guard_closes_after_the_maximum_hold(perp: Any) -> None:
     from app.core.db import session
     from app.core.models import Structure
 
-    view = await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-perp-hold", "")
+    view = await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 81_000, "trend_4h_short", "auto", "req-perp-hold", "")
     with session() as s:
         row = s.get(Structure, view["id"])
         row.expiry = time.time() - 1
@@ -70,22 +72,22 @@ async def test_the_guard_closes_after_the_maximum_hold(perp: Any) -> None:
 async def test_levels_on_the_wrong_side_and_a_second_position_are_refused(perp: Any) -> None:
     with pytest.raises(Refused, match="stop below"):
         await perp.trading.open_directional("paper", "BTC", "buy", 5, 80_500, 81_000, "manual", "manual", "req-perp-bad", "")
-    await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-perp-one", "")
+    await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 81_000, "trend_4h_short", "auto", "req-perp-one", "")
     with pytest.raises(Refused, match="one per symbol"):
         await perp.trading.open_directional("paper", "BTC", "sell", 5, 80_500, 79_000, "ema_vwap", "auto", "req-perp-two", "")
 
 
 async def test_an_options_structure_and_a_perp_position_do_not_block_each_other(perp: Any) -> None:
     perp.configure(max_spread_pct=100)
-    await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-mix-1", "")
+    await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 81_000, "trend_4h_short", "auto", "req-mix-1", "")
     condor = await perp.trading.open("paper", perp.desk.plan("BTC", "iron_condor"), 1, "manual", "req-mix-2")
     assert condor["status"] == "open"
 
 
 def test_the_stop_sizes_the_position(perp: Any) -> None:
     size = perp.trading.perp_size
-    narrow = size(1000, 1000, PRICE, PRICE - 200, 0.001, 0.0005)
-    wide = size(1000, 1000, PRICE, PRICE - 800, 0.001, 0.0005)
+    narrow = size(1000, 1000, PRICE, PRICE - 200, 0.001, 0.0005, 10)
+    wide = size(1000, 1000, PRICE, PRICE - 800, 0.001, 0.0005, 10)
     assert narrow > wide > 0  # a wider stop buys a smaller position, never a bigger loss
     loss_at_stop = wide * (800 * 0.001 + 2 * 0.0005 * PRICE * 0.001)
     assert loss_at_stop <= 1000 * perp.settings().risk_per_trade_pct / 100
@@ -102,6 +104,7 @@ class Always(Strategy):
     lookback = 10
 
     def __init__(self, name: str, reward: float) -> None:
+        super().__init__()
         self.name, self.reward = name, reward  # type: ignore[misc]
         self.calls = 0
 
@@ -109,6 +112,13 @@ class Always(Strategy):
         self.calls += 1
         price = PRICE
         return Decision("buy", f"{self.name} fired", entry=price, stop=price - 200, target=price + 200 * self.reward)
+
+
+def use(monkeypatch: pytest.MonkeyPatch, perp: Any, *strategies: Strategy, symbols: list[str] | None = None) -> Any:
+    """The runner given exactly these strategies, switched on: what the registry would hand it."""
+    monkeypatch.setattr(runner_mod.registry, "enabled", lambda s, family: {st.name: st for st in strategies} if family == "perp" else {})
+    # model_copy, not validation: the setting only admits the real strategies' names
+    return perp.settings().model_copy(update={"strategies": {st.name: StrategyConfig(enabled=True, underlyings=symbols or []) for st in strategies}})
 
 
 @pytest.fixture(autouse=True)
@@ -123,15 +133,13 @@ def no_day_bias(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_a_signal_against_a_strong_day_bias_is_shown_and_not_taken(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.trading.runner as runner_mod
     from app.analysis.service import MarketDesk
 
     async def sold_hard(self: Any, underlying: str) -> dict[str, Any]:
         return {"ready": True, "label": "bearish", "score": -0.7}
 
     monkeypatch.setattr(MarketDesk, "bias", sold_hard)
-    monkeypatch.setattr(runner_mod, "REGISTRY", {"long": Always("long", 3.0)})
-    s = perp.settings().model_copy(update={"directional_strategies": ["long"]})
+    s = use(monkeypatch, perp, Always("long", 3.0))
     runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)
     assert await runner._symbol("BTC", s) == "BTCUSD: no signal"
     assert not perp.trading.structures("open") and runner.signals() == []
@@ -139,12 +147,8 @@ async def test_a_signal_against_a_strong_day_bias_is_shown_and_not_taken(perp: A
 
 
 async def test_the_runner_trades_the_best_signal_once_per_bar(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.trading.runner as runner_mod
-
     slow, best = Always("slow", 1.5), Always("best", 3.0)
-    monkeypatch.setattr(runner_mod, "REGISTRY", {"slow": slow, "best": best})
-    # model_copy, not validation: the setting's type only admits the real strategies' names
-    s = perp.settings().model_copy(update={"directional_strategies": ["slow", "best"]})
+    s = use(monkeypatch, perp, slow, best)
     runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)
     await runner._symbol("BTC", s)
     held = perp.trading.structures("open")
@@ -157,11 +161,8 @@ async def test_the_runner_trades_the_best_signal_once_per_bar(perp: Any, monkeyp
 
 
 async def test_a_strategy_switched_off_for_a_symbol_is_not_evaluated_there(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.trading.runner as runner_mod
-
     only_eth = Always("only_eth", 3.0)
-    monkeypatch.setattr(runner_mod, "REGISTRY", {"only_eth": only_eth})
-    s = perp.settings().model_copy(update={"directional_strategies": ["only_eth"], "strategy_symbols": {"only_eth": ["ETH"]}})
+    s = use(monkeypatch, perp, only_eth, symbols=["ETH"])
     runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)
     assert await runner._symbol("BTC", s) == "BTCUSD: no signal"
     assert only_eth.calls == 0 and not perp.trading.structures("open")
@@ -170,8 +171,6 @@ async def test_a_strategy_switched_off_for_a_symbol_is_not_evaluated_there(perp:
 async def test_a_long_lookback_is_folded_from_the_15m_store_and_held_for_its_own_time(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """The 1m base reaches back ~56 hours; a 4h strategy needs weeks. It gets 4h bars folded from the
     stored 15m series, and its position is held for the strategy's own time, not the setting's."""
-    import app.trading.runner as runner_mod
-
     class Slow(Always):
         interval = "4h"
         lookback = 40  # the fake store's 800 15m bars hold 50 4h ones
@@ -182,8 +181,7 @@ async def test_a_long_lookback_is_folded_from_the_15m_store_and_held_for_its_own
             return super().decide(ctx)
 
     slow = Slow("slow", 3.0)
-    monkeypatch.setattr(runner_mod, "REGISTRY", {"slow": slow})
-    s = perp.settings().model_copy(update={"directional_strategies": ["slow"]})
+    s = use(monkeypatch, perp, slow)
     runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)
     await runner._symbol("BTC", s)
     assert len(slow.seen) == 40 and all(c.time % 14_400 == 0 for c in slow.seen)
@@ -193,16 +191,13 @@ async def test_a_long_lookback_is_folded_from_the_15m_store_and_held_for_its_own
 
 
 async def test_the_funding_rate_is_part_of_a_signals_cost(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.trading.runner as runner_mod
-
-    monkeypatch.setattr(runner_mod, "REGISTRY", {"costs": Always("costs", 3.0)})
-    s = perp.settings().model_copy(update={"directional_strategies": ["costs"]})
+    strategy = Always("costs", 3.0)
+    s = use(monkeypatch, perp, strategy)
     runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)
-    strategy = runner_mod.REGISTRY["costs"]
     calm = (await runner._context(strategy, "BTC", "BTCUSD", [{"time": 0, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}])).cost_pct
     perp.feed.perps["BTCUSD"].stats["funding_rate_pct"] = -0.05  # either sign: the side is not known yet
     paid = (await runner._context(strategy, "BTC", "BTCUSD", [{"time": 0, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}])).cost_pct
-    assert paid == pytest.approx(calm + 0.05)
+    assert paid == pytest.approx(calm + 3 * 0.05)  # a 24h hold meets three eight-hourly payments
 
 
 # -- stops held by the exchange ----------------------------------------------------------------------
@@ -224,6 +219,9 @@ class Exchange:
 
     async def account(self) -> Any:
         return await self.paper.account()
+
+    async def leverage(self, symbol: str) -> float:
+        return 10.0
 
     async def execute(self, order: Any) -> Any:
         self.sent.append(order)
@@ -265,14 +263,14 @@ def exchange(perp: Any) -> Exchange:
 
 
 async def test_an_entry_leaves_its_stop_with_the_exchange(perp: Any, exchange: Exchange) -> None:
-    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-ex-1", "")
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "trend_4h_short", "auto", "req-ex-1", "")
     [stop] = exchange.stops.values()
     assert stop == {"symbol": "BTCUSD", "side": "sell", "size": 5, "stop": 79_500, "id": "ex-0"}
     assert perp.trading.structure(view["id"])["stop_order_id"] == "ex-0"
 
 
 async def test_a_close_cancels_the_exchange_stop_first(perp: Any, exchange: Exchange) -> None:
-    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-ex-2", "")
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "trend_4h_short", "auto", "req-ex-2", "")
     closed = await perp.trading.close(view["id"], "test")
     assert closed["status"] == "closed" and exchange.cancelled == ["ex-0"]
     assert closed["stop_order_id"] == ""
@@ -280,7 +278,7 @@ async def test_a_close_cancels_the_exchange_stop_first(perp: Any, exchange: Exch
 
 async def test_a_stop_the_exchange_filled_is_booked_not_sold_again(perp: Any, exchange: Exchange) -> None:
     guard = Guard(perp.trading, perp.settings, perp.hub)
-    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-ex-3", "")
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "trend_4h_short", "auto", "req-ex-3", "")
     exchange.trigger(79_480.0)  # the process was away; the mark is back above the stop by now
     sent = len(exchange.sent)
     await guard.check_structures()
@@ -294,7 +292,7 @@ async def test_a_position_the_exchange_will_not_protect_is_closed(perp: Any) -> 
     ex = Exchange(perp.paper, refuse=True)
     perp.brokers["delta"] = ex
     perp.configure(delta_active=True)
-    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "supertrend", "auto", "req-ex-4", "")
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 81_000, "trend_4h_short", "auto", "req-ex-4", "")
     assert view["status"] == "closed" and "exchange stop could not be placed" in view["close_reason"]
 
 
@@ -303,7 +301,7 @@ async def test_a_position_the_exchange_will_not_protect_is_closed(perp: Any) -> 
 
 async def test_the_stop_trails_from_one_r_never_loosens_and_locks_the_gain_in(perp: Any) -> None:
     guard = Guard(perp.trading, perp.settings, perp.hub)
-    view = await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 82_000, "supertrend", "auto", "req-trail-1", "")
+    view = await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 82_000, "trend_4h_short", "auto", "req-trail-1", "")
     entry = view["legs"][0]["entry_price"]
     risk = entry - 79_500
 
@@ -333,7 +331,7 @@ async def test_the_stop_trails_from_one_r_never_loosens_and_locks_the_gain_in(pe
 
 
 async def test_a_trailed_exchange_stop_is_placed_before_the_old_one_is_cancelled(perp: Any, exchange: Exchange) -> None:
-    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 82_000, "supertrend", "auto", "req-trail-2", "")
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 82_000, "trend_4h_short", "auto", "req-trail-2", "")
     entry = view["legs"][0]["entry_price"]
     up = entry + 1.5 * (entry - 79_500)
     perp.feed.set_perp(up, bid=up - 0.5, ask=up + 0.5)
@@ -350,7 +348,7 @@ async def test_a_trailed_exchange_stop_is_placed_before_the_old_one_is_cancelled
 
 
 async def test_a_stop_that_just_filled_is_not_moved(perp: Any, exchange: Exchange) -> None:
-    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 82_000, "supertrend", "auto", "req-trail-3", "")
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 82_000, "trend_4h_short", "auto", "req-trail-3", "")
     st, legs = perp.trading._load(view["id"])
     exchange.trigger(79_480.0)
     up = 81_500.0
@@ -370,10 +368,7 @@ def test_a_pulled_perpetual_book_is_no_price() -> None:
 
 async def test_a_strategy_stopped_out_today_is_not_re_entered_on_that_symbol(perp: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """4 Nov: the 9/15 cross on BTC was stopped at 21:40 and bought back fifteen minutes later."""
-    import app.trading.runner as runner_mod
-
-    monkeypatch.setattr(runner_mod, "REGISTRY", {"again": Always("again", 3.0)})
-    s = perp.settings().model_copy(update={"directional_strategies": ["again"]})
+    s = use(monkeypatch, perp, Always("again", 3.0))
     first = await perp.trading.open_directional("paper", "BTC", "buy", 1, 79_500, 82_000, "again", "auto", "req-again-1", "")
     await perp.trading.close(first["id"], "stop loss: mark 79,500.00 reached the strategy's stop 79,500.00")
     runner = StrategyRunner(perp.trading, MarketDesk(perp.feed, lambda: s, perp.hub), lambda: s, perp.hub)

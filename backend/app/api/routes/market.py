@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter
@@ -11,8 +10,8 @@ from pydantic import BaseModel, Field
 from app.api.deps import EngineDep
 from app.errors import BrokerError
 from app.market.options import PERPETUALS
-from app.options.strategies import CATALOG
-from app.trading.autotrader import lots_for_risk, unit_risk
+from app.options.assess import unit_risk
+from app.trading.autotrader import lots_for_risk
 
 router = APIRouter(tags=["market"])
 
@@ -43,31 +42,25 @@ def bars(engine: EngineDep, underlying: str = "BTC", limit: int = 672) -> dict[s
     return {"symbol": symbol, "interval": "15m", "bars": engine.feed.bars(symbol, min(max(limit, 10), 3000))}
 
 
-@router.get("/strategies")
-def strategies() -> list[dict[str, Any]]:
-    return [asdict(s) for s in CATALOG.values()]
-
-
 class Preview(BaseModel):
     underlying: str = "BTC"
     strategy: str
     expiry: float | None = None
     legs: list[dict[str, Any]] | None = None  # for "custom": [{"symbol", "side", "ratio"}]
     qty: int = Field(1, ge=1, le=10_000)
-    short_delta: float | None = Field(None, ge=0.05, le=0.45)
-    wing_width_pct: float | None = Field(None, ge=0.25, le=15)
+    params: dict[str, Any] | None = None  # the strategy's own params for this ticket, over its configured ones
 
 
 @router.post("/strategies/preview")
 async def preview(body: Preview, engine: EngineDep) -> dict[str, Any]:
     """The structure, priced and checked at `qty`, and what each active broker would size it at."""
     desk, s = engine.desk, engine.settings()
-    plan = desk.plan(body.underlying, body.strategy, body.expiry, body.legs, body.short_delta, body.wing_width_pct)
+    plan = desk.plan(body.underlying, body.strategy, body.expiry, body.legs, body.params)
     out = await desk.assess(plan, body.qty)
     unit = await desk.assess(plan, 1)
     sizing = []
     for name in s.active_brokers:
-        row: dict[str, Any] = {"broker": name, "unit_risk": round(unit_risk(unit, s), 4)}
+        row: dict[str, Any] = {"broker": name, "unit_risk": round(unit_risk(unit), 4)}
         try:
             account = await engine.brokers[name].account()
             worst = out["analysis"]["max_loss"]

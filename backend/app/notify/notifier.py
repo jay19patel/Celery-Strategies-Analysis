@@ -1,7 +1,7 @@
 """Notifications: Telegram and email, fed by the event hub.
 
 The notifier is a hub subscriber with its own queue, so a slow SMTP server never delays the
-dashboard or a trade. Which events go out is a setting (trades, auto decisions, risk halts); every
+dashboard or a trade. Fills, failures and risk stops always go out (`SENT_EVENTS`); every
 send's outcome is kept per channel for the System page. A failed send is logged, never retried in
 a loop and never turned into another notification.
 """
@@ -24,8 +24,11 @@ from app.settings import Settings
 
 log = logging.getLogger(__name__)
 
-TRADE_EVENTS = {"StructureOpened", "StructureClosed", "StructureFailed", "StructureError"}
-RISK_EVENTS = {"RiskHalt"}
+# Every fill, every failure and every risk stop goes out: none of them is something to opt out of.
+SENT_EVENTS = {
+    "StructureOpened", "StructureClosed", "StructureFailed", "StructureError",
+    "RiskHalt", "KillSwitch", "ReconcileMismatch",
+}
 SMTP_TIMEOUT = 20
 
 
@@ -42,18 +45,8 @@ class Notifier:
             "email": {"sent": 0, "failed": 0, "last_at": None, "last_error": ""},
         }
 
-    def wants(self, event: Event, s: Settings) -> bool:
-        if event.type in TRADE_EVENTS:
-            return s.notify_trades
-        if event.type in RISK_EVENTS:
-            return s.notify_risk
-        if event.type == "AutoDecision":
-            return s.notify_decisions
-        return False
-
     async def on_event(self, event: Event) -> None:
-        s: Settings = self.settings()
-        if self.wants(event, s):
+        if event.type in SENT_EVENTS:
             await self.send(event.type, event.message)
 
     def enabled(self, s: Settings) -> list[str]:

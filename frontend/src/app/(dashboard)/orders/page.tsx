@@ -61,7 +61,7 @@ export default function OrdersPage() {
         {isLoading && !data ? (
           <Loading className="p-4" rows={6} />
         ) : !rows.length ? (
-          <Empty title="No orders">Orders appear here once a structure is opened, manually or by the auto-trader.</Empty>
+          <Empty title="No orders">Orders appear here once a structure is opened, manually or by a strategy.</Empty>
         ) : (
           <>
           <div className="divide-y divide-slate-100 md:hidden">

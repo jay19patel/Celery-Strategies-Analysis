@@ -1,106 +1,26 @@
-"""The option structures this desk trades, and how each is built from one expiry's chain.
+"""How an option structure is built from one expiry's chain: the strike pickers every structure
+shares, the `Plan` they produce, and a structure hand-picked leg by leg.
 
-A builder picks strikes, nothing else: sold strikes by |delta| (or at the money), protective wings
-a fixed share of spot further out. It returns a `Plan` whose legs carry the quotes they were picked
-from, priced where they would trade — a sale at the bid, a purchase at the ask, the mark only when
-that side of the book is empty. Pure, so the dashboard, the auto-trader and the tests build
-exactly the same structure from the same chain.
+Which structures exist is not decided here: each is one file in `app/strategies/` that picks its
+strikes with these helpers. A plan's legs carry the quotes they were picked from, priced where they
+would trade — a sale at the bid, a purchase at the ask, the mark only when that side of the book is
+empty. Pure, so the dashboard, the auto-trader and the tests build exactly the same structure from
+the same chain.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
 from app.market.options import OptionQuote
 from app.options.pricing import LegSpec
 
-# The checks in `assess` that a premium seller must pass. They are the right gate for everything
-# in CATALOG and the wrong one for a long momentum buy, whose whole proposition is a low
-# probability of a large payoff — so which checks bind is a property of the strategy, not a
-# constant. A spec that does not say otherwise is gated as a seller.
+# The checks in `assess` that a premium seller must pass. A strategy says which bind for it
+# (`OptionStrategy.required_checks`); a hand-built structure is gated as a seller.
 SELLER_CHECKS = ("liquidity", "credit / width", "probability of profit", "edge at realised vol")
 
-# The strategies outside CATALOG that other modules name directly.
-ZERO_HERO = "zero_hero"
-EXPIRY_DECAY = "expiry_decay"
-
-
-@dataclass(frozen=True)
-class StrategySpec:
-    key: str
-    label: str
-    view: str  # neutral | bullish | bearish | volatile | momentum
-    premium: str  # credit | debit
-    risk: str  # defined | undefined
-    summary: str
-    required_checks: tuple[str, ...] = SELLER_CHECKS
-
-
-CATALOG: dict[str, StrategySpec] = {s.key: s for s in (
-    StrategySpec("iron_condor", "Iron Condor", "neutral", "credit", "defined",
-                 "Sell an OTM call and put, buy further wings. Profits while price stays between the short strikes."),
-    # Its breakevens sit close to the strike, so its probability of profit is under 50% by
-    # construction; the credit it takes for that is what credit / width and the edge judge.
-    StrategySpec("iron_butterfly", "Iron Butterfly", "neutral", "credit", "defined",
-                 "Sell the ATM straddle, buy wings. More credit than a condor, needs price to pin near the strike.",
-                 required_checks=("liquidity", "credit / width", "edge at realised vol")),
-    StrategySpec("bull_put_spread", "Bull Put Spread", "bullish", "credit", "defined",
-                 "Sell an OTM put, buy a lower put. Profits if price holds above the short strike."),
-    StrategySpec("bear_call_spread", "Bear Call Spread", "bearish", "credit", "defined",
-                 "Sell an OTM call, buy a higher call. Profits if price stays below the short strike."),
-    # One side of the strangle, for a market already moving: sell the calls it is falling away from,
-    # or the puts it is rising away from. No wing, so no credit / width; the edge still has to be there.
-    StrategySpec("short_call", "Short Call", "bearish", "credit", "undefined",
-                 "Sell an OTM call. Keeps the premium if price stays below the strike; unlimited risk above it.",
-                 required_checks=("liquidity", "probability of profit", "edge at realised vol")),
-    StrategySpec("short_put", "Short Put", "bullish", "credit", "undefined",
-                 "Sell an OTM put. Keeps the premium if price stays above the strike; large risk below it.",
-                 required_checks=("liquidity", "probability of profit", "edge at realised vol")),
-    StrategySpec("short_strangle", "Short Strangle", "neutral", "credit", "undefined",
-                 "Sell an OTM call and put with no wings. Wide profit zone, unlimited risk beyond it."),
-    StrategySpec("short_straddle", "Short Straddle", "neutral", "credit", "undefined",
-                 "Sell the ATM call and put. Maximum theta, unlimited risk; needs a very quiet market."),
-    # A buyer: it loses a little most of the time and wins big sometimes, so its probability of
-    # profit is low by construction. Whether realised volatility pays for the premium is its gate.
-    StrategySpec("long_straddle", "Long Straddle", "volatile", "debit", "defined",
-                 "Buy the ATM call and put. Pays when price moves further than the premium, either way.",
-                 required_checks=("liquidity", "edge at realised vol")),
-)}
-
-# Structures the system can price, hold and exit, but the options auto-trader does not pick and the
-# Settings page does not offer. CATALOG is that menu; this is everything else with a payoff.
-#
-# zero_hero is deliberately out of CATALOG: it is not scored by `regime`, not built by a `build()`
-# call, and its gate is its own (`options/zerohero.py`). Putting it in the menu would have the
-# condor desk's regime score decide when to buy lottery tickets, which is not a question that
-# score can answer.
-EXTRA: dict[str, StrategySpec] = {s.key: s for s in (
-    StrategySpec(
-        ZERO_HERO, "Zero-Hero Buy", "momentum", "debit", "defined",
-        "One OTM option bought on an expiry-day momentum break, out of a daily budget. Most expire "
-        "worthless; the few that do not are what pays for them.",
-        # A long buy cannot pass a seller's gate and should not be asked to: its POP is low by
-        # construction and its expected value at realised vol is negative on a fairly priced chain.
-        # What it must still pass is a two-sided book — an 8/10 quote is a 20% loss on contact.
-        required_checks=("liquidity",),
-    ),
-    # The zero-hero window's other side (`options/decay.py`): sell what is still bid far out of the
-    # money, buy the next strike for next to nothing, hold to settlement. The scanner has already
-    # demanded a bid on the sold leg and the edge; the bought wing near expiry often has no bid at
-    # all, so a two-sided-quote rule would refuse the very contract that caps the loss.
-    StrategySpec(
-        EXPIRY_DECAY, "Expiry Decay Spread", "neutral", "credit", "defined",
-        "Sell an option still bid far out of the money in the last hours, buy the next strike beyond it, hold to settlement.",
-        required_checks=("edge at realised vol",),
-    ),
-)}
-
-
-def spec_for(key: str) -> StrategySpec | None:
-    """The spec of anything the system can hold, whether or not the auto-trader may pick it."""
-    return CATALOG.get(key) or EXTRA.get(key)
+Picked = list[tuple[OptionQuote | None, str]]
 
 
 def describe(legs: Any) -> str:
@@ -166,18 +86,18 @@ def leg_from_quote(q: OptionQuote, side: str, ratio: int = 1) -> PlanLeg | None:
 # -- strike pickers ---------------------------------------------------------------------------
 
 
-def _priced(quotes: list[OptionQuote], kind: str) -> list[OptionQuote]:
+def priced(quotes: list[OptionQuote], kind: str) -> list[OptionQuote]:
     return [q for q in quotes if q.kind == kind and q.mark and q.mark > 0]
 
 
-def _otm_by_delta(quotes: list[OptionQuote], kind: str, spot: float, target: float) -> OptionQuote | None:
-    side = [q for q in _priced(quotes, kind) if q.delta is not None and (q.strike > spot if kind == "call" else q.strike < spot)]
+def otm_by_delta(quotes: list[OptionQuote], kind: str, spot: float, target: float) -> OptionQuote | None:
+    side = [q for q in priced(quotes, kind) if q.delta is not None and (q.strike > spot if kind == "call" else q.strike < spot)]
     return min(side, key=lambda q: abs(abs(q.delta or 0) - target)) if side else None
 
 
-def _atm(quotes: list[OptionQuote], spot: float) -> tuple[OptionQuote, OptionQuote] | None:
-    calls = {q.strike: q for q in _priced(quotes, "call")}
-    puts = {q.strike: q for q in _priced(quotes, "put")}
+def atm(quotes: list[OptionQuote], spot: float) -> tuple[OptionQuote, OptionQuote] | None:
+    calls = {q.strike: q for q in priced(quotes, "call")}
+    puts = {q.strike: q for q in priced(quotes, "put")}
     both = set(calls) & set(puts)
     if not both:
         return None
@@ -185,97 +105,32 @@ def _atm(quotes: list[OptionQuote], spot: float) -> tuple[OptionQuote, OptionQuo
     return calls[strike], puts[strike]
 
 
-def _wing(quotes: list[OptionQuote], kind: str, short_strike: float, width: float) -> OptionQuote | None:
+def wing(quotes: list[OptionQuote], kind: str, short_strike: float, width: float) -> OptionQuote | None:
     """The protective option `width` beyond the short strike: the nearest listed strike to that distance,
     and always at least one strike out."""
     if kind == "call":
-        out = [q for q in _priced(quotes, kind) if q.strike > short_strike]
+        out = [q for q in priced(quotes, kind) if q.strike > short_strike]
         target = short_strike + width
     else:
-        out = [q for q in _priced(quotes, kind) if q.strike < short_strike]
+        out = [q for q in priced(quotes, kind) if q.strike < short_strike]
         target = short_strike - width
     return min(out, key=lambda q: abs(q.strike - target)) if out else None
 
 
-# -- builders ---------------------------------------------------------------------------------
-
-Picked = list[tuple[OptionQuote | None, str]]
+# -- plans ------------------------------------------------------------------------------------
 
 
-def _iron_condor(qs: list[OptionQuote], spot: float, delta: float, width: float) -> Picked:
-    sc, sp = _otm_by_delta(qs, "call", spot, delta), _otm_by_delta(qs, "put", spot, delta)
-    if not sc or not sp:
-        return [(None, "")]
-    return [(_wing(qs, "put", sp.strike, width), "buy"), (sp, "sell"), (sc, "sell"), (_wing(qs, "call", sc.strike, width), "buy")]
-
-
-def _iron_butterfly(qs: list[OptionQuote], spot: float, _delta: float, width: float) -> Picked:
-    atm = _atm(qs, spot)
-    if not atm:
-        return [(None, "")]
-    c, p = atm
-    return [(_wing(qs, "put", p.strike, width), "buy"), (p, "sell"), (c, "sell"), (_wing(qs, "call", c.strike, width), "buy")]
-
-
-def _short_strangle(qs: list[OptionQuote], spot: float, delta: float, _width: float) -> Picked:
-    return [(_otm_by_delta(qs, "put", spot, delta), "sell"), (_otm_by_delta(qs, "call", spot, delta), "sell")]
-
-
-def _short_straddle(qs: list[OptionQuote], spot: float, _delta: float, _width: float) -> Picked:
-    atm = _atm(qs, spot)
-    return [(atm[1], "sell"), (atm[0], "sell")] if atm else [(None, "")]
-
-
-def _long_straddle(qs: list[OptionQuote], spot: float, _delta: float, _width: float) -> Picked:
-    atm = _atm(qs, spot)
-    return [(atm[1], "buy"), (atm[0], "buy")] if atm else [(None, "")]
-
-
-def _bull_put_spread(qs: list[OptionQuote], spot: float, delta: float, width: float) -> Picked:
-    sp = _otm_by_delta(qs, "put", spot, delta)
-    return [(_wing(qs, "put", sp.strike, width), "buy"), (sp, "sell")] if sp else [(None, "")]
-
-
-def _bear_call_spread(qs: list[OptionQuote], spot: float, delta: float, width: float) -> Picked:
-    sc = _otm_by_delta(qs, "call", spot, delta)
-    return [(sc, "sell"), (_wing(qs, "call", sc.strike, width), "buy")] if sc else [(None, "")]
-
-
-def _short_call(qs: list[OptionQuote], spot: float, delta: float, _width: float) -> Picked:
-    return [(_otm_by_delta(qs, "call", spot, delta), "sell")]
-
-
-def _short_put(qs: list[OptionQuote], spot: float, delta: float, _width: float) -> Picked:
-    return [(_otm_by_delta(qs, "put", spot, delta), "sell")]
-
-
-BUILDERS: dict[str, Callable[[list[OptionQuote], float, float, float], Picked]] = {
-    "short_call": _short_call,
-    "short_put": _short_put,
-    "iron_condor": _iron_condor,
-    "iron_butterfly": _iron_butterfly,
-    "short_strangle": _short_strangle,
-    "short_straddle": _short_straddle,
-    "long_straddle": _long_straddle,
-    "bull_put_spread": _bull_put_spread,
-    "bear_call_spread": _bear_call_spread,
-}
-
-
-def build(strategy: str, quotes: list[OptionQuote], spot: float, short_delta: float, wing_width_pct: float) -> Plan | None:
-    """The structure from one expiry's quotes, or None when the chain cannot make it."""
-    if strategy not in BUILDERS:
-        raise ValueError(f"unknown strategy {strategy!r}")
-    if not quotes or spot <= 0:
+def build_plan(strategy: str, picked: Picked, spot: float) -> Plan | None:
+    """The structure from the strikes a strategy picked on one expiry, or None when one is missing."""
+    if not picked or spot <= 0 or any(q is None for q, _ in picked):
         return None
-    expiry = quotes[0].expiry
-    if any(q.expiry != expiry for q in quotes):
-        raise ValueError("build() takes the quotes of one expiry")
-    picked = BUILDERS[strategy](quotes, spot, short_delta, spot * wing_width_pct / 100)
-    legs = [leg_from_quote(q, side) if q else None for q, side in picked]
-    if not legs or any(leg is None for leg in legs):
+    quotes = [q for q, _ in picked if q is not None]
+    if len({q.expiry for q in quotes}) != 1:
+        raise ValueError("a structure takes the quotes of one expiry")
+    legs = [leg_from_quote(q, side) for q, side in picked if q is not None]
+    if any(leg is None for leg in legs):
         return None
-    return Plan(strategy=strategy, underlying=quotes[0].underlying, expiry=expiry, spot=spot, legs=tuple(legs))  # type: ignore[arg-type]
+    return Plan(strategy=strategy, underlying=quotes[0].underlying, expiry=quotes[0].expiry, spot=spot, legs=tuple(legs))  # type: ignore[arg-type]
 
 
 def custom(quotes: dict[str, OptionQuote], legs: list[dict[str, Any]], spot: float) -> Plan:
@@ -307,10 +162,3 @@ def custom(quotes: dict[str, OptionQuote], legs: list[dict[str, Any]], spot: flo
     if len({leg.symbol for leg in out}) != len(out):
         raise ValueError("each contract can appear once")
     return Plan(strategy="custom", underlying=underlyings.pop(), expiry=expiries.pop(), spot=spot, legs=tuple(out))
-
-
-def single(q: OptionQuote, side: str, spot: float, strategy: str) -> Plan | None:
-    """A one-leg structure on a quote the caller already chose. The zero-hero scanner picks its own
-    contract from the whole chain against five tests; there is no strike rule to put in BUILDERS."""
-    leg = leg_from_quote(q, side)
-    return None if leg is None else Plan(strategy=strategy, underlying=q.underlying, expiry=q.expiry, spot=spot, legs=(leg,))

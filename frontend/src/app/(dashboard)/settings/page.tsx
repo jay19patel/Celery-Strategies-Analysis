@@ -6,7 +6,7 @@ import { Loader2, RotateCcw, Save } from "lucide-react";
 import { toast } from "sonner";
 
 import { FormContext, type FormState } from "@/components/settings/fields";
-import { AiTab, AutoTab, BrokersTab, NotifyTab, PaperTab, RiskTab, SecurityTab, ZeroHeroTab } from "@/components/settings/sections";
+import { AiTab, AutomationTab, BrokersTab, NotifyTab, PaperTab, RiskTab, SecurityTab } from "@/components/settings/sections";
 import { PageHeader } from "@/components/shared/page";
 import { LoadError, Loading, Notice } from "@/components/shared/states";
 import { Button } from "@/components/ui/button";
@@ -25,9 +25,8 @@ const DERIVED = ["active_brokers", "is_real_money", "data_env", "has_delta_crede
 const TABS = [
   { value: "brokers", label: "Brokers" },
   { value: "paper", label: "Paper" },
-  { value: "auto", label: "Auto-trader" },
-  { value: "zerohero", label: "Zero-Hero" },
-  { value: "risk", label: "Risk & exits" },
+  { value: "auto", label: "Automation" },
+  { value: "risk", label: "Risk" },
   { value: "ai", label: "AI" },
   { value: "notifications", label: "Notifications" },
   { value: "security", label: "Security" },
@@ -51,6 +50,7 @@ export default function SettingsPage() {
   const [generation, setGeneration] = useState(0);
   const [saving, setSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [armOpen, setArmOpen] = useState(false);
   const [phrase, setPhrase] = useState("");
 
   useEffect(() => {
@@ -104,6 +104,7 @@ export default function SettingsPage() {
       await mutate("/settings", response, { revalidate: false });
       reset(response);
       setConfirmOpen(false);
+      setArmOpen(false);
       setPhrase("");
       toast.success("Settings saved", { description: Object.keys(changes).join(", ") });
     } catch (e) {
@@ -116,7 +117,9 @@ export default function SettingsPage() {
   const save = () => {
     if (!data || !current) return;
     const goesLive = Boolean(current.delta_active) && current.delta_env === "live" && !data.values.is_real_money;
+    const armsDelta = changes.auto_delta === true;
     if (goesLive) setConfirmOpen(true);
+    else if (armsDelta) setArmOpen(true);
     else void send();
   };
 
@@ -155,10 +158,7 @@ export default function SettingsPage() {
                   <PaperTab />
                 </TabsContent>
                 <TabsContent value="auto">
-                  <AutoTab strategies={data.strategies} />
-                </TabsContent>
-                <TabsContent value="zerohero">
-                  <ZeroHeroTab />
+                  <AutomationTab />
                 </TabsContent>
                 <TabsContent value="risk">
                   <RiskTab />
@@ -179,7 +179,7 @@ export default function SettingsPage() {
       )}
 
       {dirty && (
-        <div className="sticky bottom-4 z-10 flex flex-wrap items-center justify-between gap-3 material rounded-2xl border border-separator px-4 py-3">
+        <div className="sticky bottom-[calc(9.5rem+env(safe-area-inset-bottom))] z-40 flex lg:bottom-4 flex-wrap items-center justify-between gap-3 material rounded-2xl border border-separator px-4 py-3">
           <div className="min-w-0 text-[13px]">
             <span className="font-medium">Unsaved changes: </span>
             <span className="text-muted-foreground">{Object.keys(changes).join(", ")}</span>
@@ -195,6 +195,26 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      <Dialog open={armOpen} onOpenChange={(o) => !saving && setArmOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Switch on automatic entries on Delta?</DialogTitle>
+            <DialogDescription>
+              Every strategy switched to live opens positions on your Delta {data?.values.delta_env === "live" ? "live account, with real money" : "demo account"} without asking.
+              A strategy not yet proven on paper is still given no size on real money.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArmOpen(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button variant={data?.values.delta_env === "live" ? "destructive" : "default"} onClick={() => send()} disabled={saving}>
+              {saving && <Loader2 className="animate-spin" />} Switch on and save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={confirmOpen} onOpenChange={(o) => !saving && setConfirmOpen(o)}>
         <DialogContent>

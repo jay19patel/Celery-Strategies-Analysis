@@ -1,4 +1,4 @@
-import { Activity, Bell, Bot, CalendarDays, Crosshair, Layers, LineChart, ListChecks, Radar, Settings, Sparkles, Zap, type LucideIcon } from "lucide-react";
+import { Activity, Bell, Bot, CalendarDays, Crosshair, Gauge, Layers, LineChart, ListChecks, Radar, Settings, Sparkles, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -12,12 +12,12 @@ export const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: "Trading",
     items: [
-      { href: "/", label: "Options Desk", icon: Sparkles, tint: "bg-[#007aff]" },
-      { href: "/market", label: "Market Desk", icon: Radar, tint: "bg-[#5856d6]" },
-      { href: "/strategies", label: "Strategies", icon: Crosshair, tint: "bg-[#ff9500]" },
-      { href: "/auto", label: "Auto Options", icon: Bot, tint: "bg-[#34c759]" },
-      { href: "/zero-hero", label: "Zero-Hero", icon: Zap, tint: "bg-[#ffcc00]" },
+      { href: "/", label: "Overview", icon: Gauge, tint: "bg-[#1c1c1e]" },
       { href: "/positions", label: "Positions", icon: Layers, tint: "bg-[#30b0c7]" },
+      { href: "/strategies", label: "Strategies", icon: Crosshair, tint: "bg-[#ff9500]" },
+      { href: "/auto", label: "Option Decisions", icon: Bot, tint: "bg-[#34c759]" },
+      { href: "/desk", label: "Options Desk", icon: Sparkles, tint: "bg-[#007aff]" },
+      { href: "/market", label: "Market Desk", icon: Radar, tint: "bg-[#5856d6]" },
     ],
   },
   {

@@ -105,22 +105,26 @@ def test_going_live_needs_the_phrase_over_http(client: TestClient) -> None:
     assert r.status_code == 422 and "confirmation phrase" in r.json()["error"]
 
 
-def test_the_strategies_page_can_switch_a_strategy_per_symbol(client: TestClient) -> None:
-    """The Strategies page writes both switches through the settings endpoint, and reads the result
-    back from /strategies/directional."""
+def test_every_strategy_is_listed_with_its_form_and_switched_on_its_own(client: TestClient) -> None:
+    """The Strategies page draws each form from the strategy's own schema and writes one strategy
+    at a time: a strategy file needs no page code."""
     login(client)
     assert client.patch("/api/settings", json={"changes": {"underlyings": ["BTC", "ETH"]}}).status_code == 200
+    rows = {r["name"]: r for r in client.get("/api/strategies").json()["strategies"]}
+    assert {"iron_condor", "trend_4h_short", "expiry_decay"} <= set(rows) and "zero_hero" not in rows and "supertrend" not in rows
+    condor = rows["iron_condor"]
+    assert condor["family"] == "options" and "short_delta" in condor["schema"]["properties"]
+    assert condor["params"]["short_delta"] == 0.18 and condor["underlyings_on"] == ["BTC", "ETH"]
+    assert condor["record"]["verdict"] == "unproven"
 
-    before = {s["name"]: s["symbols"] for s in client.get("/api/strategies/directional").json()["strategies"]}
-    assert before["ema_vwap"] == ["BTC", "ETH"]  # unmapped: every enabled underlying
+    r = client.patch("/api/strategies/iron_condor", json={"underlyings": ["ETH"], "params": {"short_delta": 0.25}})
+    assert r.status_code == 200 and r.json()["params"]["short_delta"] == 0.25
+    rows = {r["name"]: r for r in client.get("/api/strategies").json()["strategies"]}
+    assert rows["iron_condor"]["underlyings_on"] == ["ETH"] and rows["iron_condor"]["config"]["enabled"]
 
-    assert client.patch("/api/settings", json={"changes": {"strategy_symbols": {"ema_vwap": ["ETH"]}}}).status_code == 200
-    body = client.get("/api/strategies/directional").json()
-    assert body["underlyings"] == ["BTC", "ETH"]
-    assert {s["name"]: s["symbols"] for s in body["strategies"]}["ema_vwap"] == ["ETH"]
-
-    bad = client.patch("/api/settings", json={"changes": {"strategy_symbols": {"ema_vwap": ["DOGE"]}}})
-    assert bad.status_code == 422 and "strategy_symbols" in bad.json()["error"]
+    bad = client.patch("/api/strategies/iron_condor", json={"params": {"short_delta": 2}})
+    assert bad.status_code == 422 and "short_delta" in bad.json()["error"]
+    assert client.patch("/api/strategies/nope", json={"enabled": True}).status_code == 404
 
 
 def test_a_brief_is_asked_for_by_desk(client: TestClient) -> None:
@@ -130,31 +134,46 @@ def test_a_brief_is_asked_for_by_desk(client: TestClient) -> None:
     assert client.post("/api/ai/brief", json={"underlying": "BTC", "kind": "nope"}).status_code == 409
 
 
-def test_the_zero_hero_surface_is_reachable_and_off_by_default(client: TestClient) -> None:
+def test_stop_all_refuses_every_entry_until_resumed_and_survives_a_restart(client: TestClient) -> None:
     login(client)
-    status = client.get("/api/zerohero/status").json()
-    assert status["enabled"] is False  # fail closed: it does not run until switched on
-    assert status["record"]["hit_rate_pct"] is None
-    assert client.get("/api/zerohero/decisions").json() == []
-    assert client.post("/api/zerohero/run").json()["note"].startswith("zero-hero is off")
+    assert client.get("/api/system/status").json()["stopped"] is None
+    r = client.post("/api/trading/stop-all")
+    assert r.status_code == 200 and r.json()["stopped"]["reason"] == "stopped from the dashboard"
+    assert client.get("/api/system/status").json()["stopped"]["reason"]  # kept in the database, not in memory
+    refused = client.post("/api/trading/perp", json={"broker": "paper", "side": "buy", "qty": 1, "stop": 1.0, "target": 2.0,
+                                                     "request_id": "req-after-stop"})
+    assert refused.status_code == 409 and "every entry is stopped" in refused.json()["error"]
+    assert client.post("/api/trading/resume").json() == {"stopped": None}
+    assert client.get("/api/system/status").json()["stopped"] is None
 
 
-def test_zero_hero_settings_round_trip_and_refuse_an_impossible_window(client: TestClient) -> None:
+def test_a_structure_is_read_with_its_orders(client: TestClient) -> None:
+    from app.core.db import session
+    from app.core.models import Structure
+
     login(client)
-    assert client.patch("/api/settings", json={"changes": {"zh_min_multiple": 8.0}}).status_code == 200
-    assert client.get("/api/settings").json()["values"]["zh_min_multiple"] == 8.0
-    # A window that opens inside its own time stop is a trade that cannot work, not a preference.
-    bad = client.patch("/api/settings", json={"changes": {"zh_window_end_hours": 0.5}})
-    assert bad.status_code == 422 and "time stop" in bad.json()["error"]
+    with session() as s:
+        s.add(Structure(id="one", broker="paper", underlying="BTC", strategy="iron_condor", source="auto", status="closed",
+                        expiry=0.0, qty=1, pnl=1.0, take_profit_pct=50.0, stop_loss_pct=100.0, opened_at=0.0))
+        s.commit()
+    body = client.get("/api/trading/structures/one").json()
+    assert body["id"] == "one" and body["label"] == "Iron Condor" and body["orders"] == []
+    assert client.get("/api/trading/structures/nope").status_code == 404
 
 
-def test_the_strategy_menu_does_not_offer_zero_hero(client: TestClient) -> None:
-    """It is priced, held and exited like any structure, but the options auto-trader must never
-    pick it: its gate is its own and the regime score cannot answer for it."""
+def test_a_new_pin_ends_every_other_session(client: TestClient) -> None:
     login(client)
-    keys = {s["key"] for s in client.get("/api/settings").json()["strategies"]}
-    assert "zero_hero" not in keys
-    assert "iron_condor" in keys
+    old = client.cookies.get(security.COOKIE)
+    assert client.post("/api/auth/pin", json={"current": PIN, "new": "246802"}).status_code == 200
+    assert client.get("/api/settings").status_code == 200  # this session got a fresh cookie
+    assert not security.valid_session(old)
+
+
+def test_the_api_docs_are_behind_the_pin(client: TestClient) -> None:
+    assert client.get("/api/openapi.json").status_code == 401
+    assert client.get("/docs").status_code == 404
+    login(client)
+    assert client.get("/api/openapi.json").status_code == 200
 
 
 def test_accounts_carry_the_fees_of_closed_structures(client: TestClient) -> None:
@@ -227,7 +246,7 @@ def test_reset_data_needs_the_pin_keeps_settings_and_spares_open_positions(clien
                          expiry=0.0, qty=1, pnl=-1.0, take_profit_pct=50.0, stop_loss_pct=100.0, opened_at=0.0)
 
     login(client)
-    assert client.patch("/api/settings", json={"changes": {"min_score": 70}}).status_code == 200
+    assert client.patch("/api/settings", json={"changes": {"max_spread_pct": 10}}).status_code == 200
     with session() as s:
         s.add(structure("done", "closed"))
         s.add(Decision(ts=0.0, underlying="BTC", action="skip"))
@@ -246,7 +265,7 @@ def test_reset_data_needs_the_pin_keeps_settings_and_spares_open_positions(clien
     assert r.status_code == 200 and r.json()["deleted"]["structure"] == 1
     with session() as s:
         assert not s.exec(select(Structure)).all() and not s.exec(select(Decision)).all()
-    assert client.get("/api/settings").json()["values"]["min_score"] == 70
+    assert client.get("/api/settings").json()["values"]["max_spread_pct"] == 10
     assert client.get("/api/portfolio/stats").json()["overall"]["trades"] == 0
 
 
@@ -275,3 +294,15 @@ def test_the_overview_reads_equity_funnel_and_a_per_broker_journal(client: TestC
     assert client.get(f"/api/portfolio/funnel?since={now + 60}").json()["orders"] == 0
     j = client.get("/api/portfolio/journal?broker=delta").json()
     assert (j["trades"], j["pnl"]) == (1, 1.0)
+
+
+def test_a_log_line_is_one_json_object_with_its_ids() -> None:
+    import json
+    import logging
+
+    from app.main import JsonFormatter
+
+    record = logging.LogRecord("app.trading", logging.WARNING, "f.py", 1, "stop moved on %s", ("s1",), None)
+    record.structure_id = "s1"
+    line = json.loads(JsonFormatter().format(record))
+    assert line["message"] == "stop moved on s1" and line["structure_id"] == "s1" and line["level"] == "warning"

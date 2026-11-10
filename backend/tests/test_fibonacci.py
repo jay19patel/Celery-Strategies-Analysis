@@ -44,24 +44,6 @@ def test_a_down_leg_mirrors_exactly() -> None:
     assert by_label["1.618"].price == 38.2  # projects DOWN, below the leg's end
 
 
-def test_an_extension_is_only_offered_in_the_legs_own_direction() -> None:
-    """An up leg projects up. Reading a downward target off it would be drawing a line to suit
-    the trade, which is the one thing this module must not let a caller do."""
-    out = fib.read(up_then_pullback(), lookback=70)
-    assert out.leg is not None and out.leg.direction == "up"
-    assert fib.next_extension(out, 1, 205) is not None
-    assert fib.next_extension(out, -1, 205) is None
-    assert fib.next_extension(out, 0, 205) is None
-
-
-def test_the_next_extension_is_the_nearest_one_beyond_price() -> None:
-    out = fib.read(up_then_pullback(), lookback=70)
-    first = fib.next_extension(out, 1, 205)
-    assert first is not None
-    beyond = fib.next_extension(out, 1, first.price + 0.01)
-    assert beyond is not None and beyond.price > first.price
-
-
 def test_too_few_bars_and_a_flat_window_report_not_ready_rather_than_guessing() -> None:
     assert not fib.read(ramp(100, 110, 5)).ready
     flat = [Candle(i * 900, 100.0, 100.0, 100.0, 100.0, 1.0) for i in range(80)]

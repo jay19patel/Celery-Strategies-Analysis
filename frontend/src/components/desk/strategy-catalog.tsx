@@ -4,7 +4,7 @@ import { Layers } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { StrategySpec } from "@/lib/types";
+import type { StrategyInfo } from "@/lib/types";
 
 /** Every structure the desk can build. Clicking one loads it into the builder above — it belongs
  *  next to the chain and the builder that use it, not on the directional Strategies page. */
@@ -13,7 +13,7 @@ export function StrategyCatalog({
   selected,
   onPick,
 }: {
-  strategies: StrategySpec[];
+  strategies: StrategyInfo[];
   selected: string;
   onPick: (key: string) => void;
 }) {
@@ -28,12 +28,12 @@ export function StrategyCatalog({
       <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {strategies.map((spec) => (
           <button
-            key={spec.key}
+            key={spec.name}
             type="button"
-            onClick={() => onPick(spec.key)}
-            aria-pressed={selected === spec.key}
+            onClick={() => onPick(spec.name)}
+            aria-pressed={selected === spec.name}
             className={`rounded-lg border p-3 text-left transition-colors ${
-              selected === spec.key ? "border-primary bg-primary/5" : "hover:bg-muted/40"
+              selected === spec.name ? "border-primary bg-primary/5" : "hover:bg-muted/40"
             }`}
           >
             <div className="flex items-center justify-between gap-2">

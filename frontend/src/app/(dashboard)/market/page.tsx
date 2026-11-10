@@ -202,8 +202,11 @@ function SymbolPriceCard({
 export default function MarketDeskPage() {
   const { mutate } = useSWRConfig();
   const { data: settings } = useApi<SettingsResponse>("/settings");
-  const underlyings = settings?.values.underlyings ?? ["BTC", "ETH", "XAUT"];
-  const [underlying, setUnderlying] = useState("BTC");
+  const underlyings = settings?.values.underlyings ?? ["BTC"];
+  const [chosen, setUnderlying] = useState<string | null>(null);
+  // The one chosen while it is still enabled, else the first enabled one: never a market not streamed.
+  const underlying = chosen && underlyings.includes(chosen) ? chosen : underlyings[0];
+  const watched = (u: string) => (underlyings.includes(u) ? `/market/overview?underlying=${u}` : null);
   const [chartInterval, setChartInterval] = useState<"15m" | "1h" | "1d">("15m");
   const [timezone, setTimezone] = useState<"Local" | "UTC" | "IST">("IST");
   const [analysing, setAnalysing] = useState(false);
@@ -294,15 +297,9 @@ export default function MarketDeskPage() {
     { refreshInterval: 30_000 },
   );
 
-  const { data: btcOverview } = useApi<Overview>("/market/overview?underlying=BTC", {
-    refreshInterval: 10_000,
-  });
-  const { data: ethOverview } = useApi<Overview>("/market/overview?underlying=ETH", {
-    refreshInterval: 10_000,
-  });
-  const { data: xautOverview } = useApi<Overview>("/market/overview?underlying=XAUT", {
-    refreshInterval: 10_000,
-  });
+  const { data: btcOverview } = useApi<Overview>(watched("BTC"), { refreshInterval: 10_000 });
+  const { data: ethOverview } = useApi<Overview>(watched("ETH"), { refreshInterval: 10_000 });
+  const { data: xautOverview } = useApi<Overview>(watched("XAUT"), { refreshInterval: 10_000 });
 
   async function handleAnalyseNow() {
     setAnalysing(true);
@@ -488,24 +485,11 @@ export default function MarketDeskPage() {
 
       {/* 24h Dual Rolling Price Cards (from v3) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <SymbolPriceCard
-          sym="BTC"
-          active={underlying === "BTC"}
-          data={btcOverview}
-          onSelect={() => setUnderlying("BTC")}
-        />
-        <SymbolPriceCard
-          sym="ETH"
-          active={underlying === "ETH"}
-          data={ethOverview}
-          onSelect={() => setUnderlying("ETH")}
-        />
-        <SymbolPriceCard
-          sym="XAUT"
-          active={underlying === "XAUT"}
-          data={xautOverview}
-          onSelect={() => setUnderlying("XAUT")}
-        />
+        {([["BTC", btcOverview], ["ETH", ethOverview], ["XAUT", xautOverview]] as const)
+          .filter(([sym]) => underlyings.includes(sym))
+          .map(([sym, data]) => (
+            <SymbolPriceCard key={sym} sym={sym} active={underlying === sym} data={data} onSelect={() => setUnderlying(sym)} />
+          ))}
       </div>
 
       {/* Market Pulse Banner */}

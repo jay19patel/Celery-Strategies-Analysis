@@ -3,11 +3,12 @@
 import { Minus, Plus, Trash2 } from "lucide-react";
 
 import type { PickedLeg } from "@/components/desk/chain-table";
+import { ParamsForm } from "@/components/strategies/params-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { StrategySpec } from "@/lib/types";
+import type { StrategyInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const VIEW_TONE = { neutral: "default", bullish: "profit", bearish: "loss", volatile: "warn" } as const;
@@ -15,26 +16,24 @@ const VIEW_TONE = { neutral: "default", bullish: "profit", bearish: "loss", vola
 export interface TicketParams {
   strategy: string;
   qty: number;
-  shortDelta: number;
-  wingWidth: number;
+  /** this ticket's own values for the strategy's params, over what it is configured with */
+  overrides: Record<string, number | boolean | string>;
   legs: PickedLeg[];
 }
 
-export function StrategyPicker({ strategies, params, onChange }: { strategies: StrategySpec[]; params: TicketParams; onChange: (p: Partial<TicketParams>) => void }) {
-  const spec = strategies.find((s) => s.key === params.strategy);
-  const usesDelta = ["iron_condor", "short_strangle", "bull_put_spread", "bear_call_spread"].includes(params.strategy);
-  const usesWings = ["iron_condor", "iron_butterfly", "bull_put_spread", "bear_call_spread"].includes(params.strategy);
+export function StrategyPicker({ strategies, params, onChange }: { strategies: StrategyInfo[]; params: TicketParams; onChange: (p: Partial<TicketParams>) => void }) {
+  const spec = strategies.find((s) => s.name === params.strategy);
 
   return (
     <div className="space-y-4">
       <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar sm:flex-wrap sm:pb-0 -mx-1 px-1">
         {strategies.map((s) => (
           <button
-            key={s.key}
-            onClick={() => onChange({ strategy: s.key })}
+            key={s.name}
+            onClick={() => onChange({ strategy: s.name, overrides: {} })}
             className={cn(
               "shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-[color,background-color,transform] duration-150 active:scale-95",
-              params.strategy === s.key ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground hover:bg-secondary/70",
+              params.strategy === s.name ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground hover:bg-secondary/70",
             )}
           >
             {s.label}
@@ -53,7 +52,7 @@ export function StrategyPicker({ strategies, params, onChange }: { strategies: S
 
       {spec && (
         <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-muted-foreground">
-          <Badge variant={VIEW_TONE[spec.view]} className="capitalize">{spec.view}</Badge>
+          {spec.view && <Badge variant={VIEW_TONE[spec.view]} className="capitalize">{spec.view}</Badge>}
           <Badge variant="outline">{spec.premium}</Badge>
           <Badge variant={spec.risk === "defined" ? "primary" : "warn"}>{spec.risk === "defined" ? "defined risk" : "unlimited risk"}</Badge>
           <span>{spec.summary}</span>
@@ -92,20 +91,26 @@ export function StrategyPicker({ strategies, params, onChange }: { strategies: S
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">
           <Label htmlFor="qty">Lots</Label>
           <Input id="qty" type="number" min={1} max={10000} value={params.qty} onChange={(e) => onChange({ qty: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} className="num" />
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="delta" className={cn(!usesDelta && "opacity-50")}>Short delta</Label>
-          <Input id="delta" type="number" step={0.01} min={0.05} max={0.45} disabled={!usesDelta} value={params.shortDelta} onChange={(e) => onChange({ shortDelta: Number(e.target.value) })} className="num" />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="wing" className={cn(!usesWings && "opacity-50")}>Wing width %</Label>
-          <Input id="wing" type="number" step={0.25} min={0.25} max={15} disabled={!usesWings} value={params.wingWidth} onChange={(e) => onChange({ wingWidth: Number(e.target.value) })} className="num" />
-        </div>
       </div>
+      {spec && (
+        <details className="rounded-lg border px-3 py-2">
+          <summary className="cursor-pointer select-none text-[13px] font-medium">This ticket&apos;s settings</summary>
+          <p className="mt-1 text-[11.5px] text-muted-foreground">Start from how the strategy is configured; a change here applies to this ticket only.</p>
+          <div className="mt-3">
+            <ParamsForm
+              idPrefix="ticket"
+              schema={spec.schema}
+              values={{ ...spec.params, ...params.overrides }}
+              onChange={(name, value) => onChange({ overrides: { ...params.overrides, [name]: value } })}
+            />
+          </div>
+        </details>
+      )}
     </div>
   );
 }

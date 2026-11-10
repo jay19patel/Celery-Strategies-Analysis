@@ -5,13 +5,64 @@ export type Broker = "paper" | "delta";
 export type Side = "buy" | "sell";
 export type OptionKind = "call" | "put";
 
-export interface StrategySpec {
-  key: string;
+/** A strategy's measured record in R (`trading/edge.py`). */
+export interface StrategyRecord {
+  trades_r: number;
+  expectancy_r: number | null;
+  ci_low_r: number | null;
+  ci_high_r: number | null;
+  kelly: number | null;
+  verdict: "unproven" | "positive" | "negative" | "unclear";
+}
+
+/** A Pydantic model's JSON schema, as far as a form needs it. */
+export interface ParamSchema {
+  properties: Record<string, { type?: string; title?: string; description?: string; default?: unknown; minimum?: number; maximum?: number }>;
+}
+
+export interface StrategyConfig {
+  enabled: boolean;
+  live: boolean;
+  underlyings: string[];
+  params: Record<string, unknown>;
+}
+
+/** One strategy as GET /strategies describes it: one file in backend/app/strategies. */
+export interface StrategyInfo {
+  name: string;
+  family: "perp" | "options";
+  version: number;
   label: string;
-  view: "neutral" | "bullish" | "bearish" | "volatile";
-  premium: "credit" | "debit";
-  risk: "defined" | "undefined";
   summary: string;
+  // options
+  view?: "neutral" | "bullish" | "bearish" | "volatile";
+  premium?: "credit" | "debit";
+  risk?: "defined" | "undefined";
+  required_checks?: string[];
+  // perpetual
+  stop_rule?: string;
+  target_rule?: string;
+  interval?: string;
+  lookback?: number;
+  max_hold_hours?: number;
+  config: StrategyConfig;
+  params: Record<string, number | boolean | string>;
+  schema: ParamSchema;
+  /** the enabled underlyings it runs on, both switches applied */
+  underlyings_on: string[];
+  /** the brokers its automatic entries go to */
+  brokers: Broker[];
+  record: StrategyRecord;
+  latest: { strategy?: string; symbol?: string; bar_time?: number; at?: number; reason: string; decision?: DirectionalDecision | null }[];
+}
+
+export interface StrategiesResponse {
+  strategies: StrategyInfo[];
+  underlyings: string[];
+  brokers: BrokerStatus[];
+  jobs: { perp: JobStatus | null; options: JobStatus | null };
+  /** the regime score an option strategy needs before it is built */
+  min_score: number;
 }
 
 export interface PerpStats {
@@ -356,6 +407,14 @@ export interface BrokerStatus {
   halted: string;
   real_money: boolean;
   env: string;
+  /** why its positions do not match the exchange, which blocks its entries */
+  reconcile?: string;
+}
+
+/** Every entry stopped (Stop all, or the drawdown limit), until resumed. */
+export interface StopState {
+  reason: string;
+  at: number;
 }
 
 export interface Accounts {
@@ -363,6 +422,7 @@ export interface Accounts {
   brokers: BrokerStatus[];
   /** each broker's trading day: the equity the daily loss limit measures from, and any halt */
   today: Partial<Record<Broker, { day: string; start_equity: number | null; halted: string }>>;
+  stopped: StopState | null;
 }
 
 export interface Summary {
@@ -435,21 +495,6 @@ export interface Candidate {
   ok?: boolean;
 }
 
-export interface AiReview {
-  used: boolean;
-  note?: string;
-  error?: string;
-  decision?: "trade" | "skip";
-  candidate?: string;
-  confidence?: "high" | "medium" | "low";
-  reasons?: string[];
-  risks?: string[];
-  invalid_choice?: boolean;
-  model?: string;
-  ms?: number;
-  fallback?: boolean;
-}
-
 export interface Decision {
   id: number;
   ts: number;
@@ -459,11 +504,9 @@ export interface Decision {
   reason: string;
   expiry: number | null;
   spot: number | null;
-  /** plus what the auto-trader recorded about this cycle: the score a strategy had to beat, and
-   *  the pacing note when that bar had eased because the day had produced no entry yet */
-  regime: (Omit<Regime, "underlying" | "expiry"> & { min_score?: number; pacing?: string }) | null;
+  /** plus what the auto-trader recorded about this cycle: the score a strategy had to beat */
+  regime: (Omit<Regime, "underlying" | "expiry"> & { min_score?: number; hours_to_expiry?: number }) | null;
   candidates: Candidate[] | null;
-  ai: AiReview | null;
   orders: Record<string, { structure_id?: string; status?: string; qty?: number; error?: string; refused?: string }> | null;
 }
 
@@ -483,7 +526,15 @@ export interface JobStatus {
 export interface AutoStatus {
   brokers: BrokerStatus[];
   job: JobStatus | null;
-  config: Record<string, unknown> & { auto_strategies: string[]; auto_interval_minutes: number };
+  config: {
+    interval_minutes: number;
+    min_score: number;
+    underlyings: string[];
+    strategies: string[];
+    risk_per_trade_pct: number;
+    max_spread_pct: number;
+    exit_before_expiry_minutes: number;
+  };
   now: Decision[]; // the latest decision per underlying, skips included: live, not stored
 }
 
@@ -544,6 +595,7 @@ export interface LiveEvent {
 
 export interface SystemStatus {
   started_at: number;
+  stopped: StopState | null;
   uptime_seconds: number;
   feed: {
     ws_url: string;
@@ -569,7 +621,6 @@ export type SettingsValues = Record<string, unknown> & {
   is_real_money: boolean;
   active_brokers: Broker[];
   underlyings: string[];
-  auto_strategies: string[];
   ai_fallback_models: string[];
   day_timezone: string;
 };
@@ -578,7 +629,6 @@ export interface SettingsResponse {
   values: SettingsValues;
   limits: Record<string, { minimum?: number; maximum?: number }>;
   live_confirm_phrase: string;
-  strategies: StrategySpec[];
 }
 
 export interface JournalMonth {
@@ -631,30 +681,6 @@ export interface DirectionalDecision {
   stop: number | null;
   target: number | null;
   rr: number | null;
-}
-
-export interface DirectionalStrategy {
-  name: string;
-  label: string;
-  summary: string;
-  stop_rule: string;
-  target_rule: string;
-  interval: string;
-  lookback: number;
-  enabled: boolean;
-  /** the enabled underlyings this strategy actually runs on — both switches applied */
-  symbols: string[];
-  /** what it decided on the last closed bar, per symbol */
-  latest: { strategy: string; symbol: string; bar_time: number; at: number; reason: string; decision: DirectionalDecision | null }[];
-}
-
-export interface DirectionalStatus {
-  strategies: DirectionalStrategy[];
-  job: JobStatus | null;
-  auto_options: boolean;
-  /** every underlying the engine is running, whatever each strategy is set to */
-  underlyings: string[];
-  brokers: BrokerStatus[];
 }
 
 export interface SignalRow {
@@ -900,165 +926,6 @@ export interface MarketAnalysisResponse {
   } | null;
 }
 
-
-// -- zero hero ------------------------------------------------------------------------------
-
-/** A named test with the sentence that explains its verdict. The same shape the assessment uses. */
-export interface ZhCheck {
-  name: string;
-  ok: boolean;
-  detail: string;
-}
-
-export interface ZhTrigger {
-  direction: number;
-  kind: string;
-  level: number | null;
-  bars_ago: number | null;
-  displacement: number;
-  volume_ratio: number;
-  pulse_state: string;
-  squeeze: boolean;
-  flow: string;
-  flow_agrees: boolean;
-  target: number | null;
-  target_pct: number | null;
-  checks: ZhCheck[];
-  ok: boolean;
-}
-
-export interface ZhPositioning {
-  max_pain: number | null;
-  call_wall: number | null;
-  put_wall: number | null;
-  wall_ahead: number | null;
-  wall_distance_pct: number | null;
-  pcr_oi: number | null;
-  skew_25d: number | null;
-  atm_iv: number | null;
-  implied_move_pct: number | null;
-  away_from_pin: boolean;
-  detail: string;
-}
-
-export interface ZhCandidate {
-  symbol: string;
-  kind: string;
-  strike: number;
-  distance_pct: number;
-  /** the ask: what a buy actually costs, not the mark */
-  paid: number;
-  mark: number | null;
-  bid: number | null;
-  iv: number | null;
-  delta: number | null;
-  gamma: number | null;
-  theta: number | null;
-  spread_pct: number | null;
-  oi: number;
-  volume: number;
-  contract_value: number;
-  hold_minutes: number;
-  target_pct: number;
-  /** what one unit is worth at the target, over what it cost, after the exit haircut */
-  multiple: number | null;
-  value_at_target: number | null;
-  /** the other half of the trade: the same unit if nothing happens */
-  decay_if_flat: number | null;
-  p_touch: number | null;
-  ev: number | null;
-  capacity_lots: number;
-  checks: ZhCheck[];
-  ok: boolean;
-}
-
-export interface ZhScan {
-  underlying: string;
-  at: number;
-  spot: number;
-  expiry: number | null;
-  hours_left: number | null;
-  window_open: boolean;
-  note: string;
-  hold_minutes: number | null;
-  realised_vol: number | null;
-  trigger: ZhTrigger | null;
-  positioning: ZhPositioning | null;
-  gates: ZhCheck[];
-  candidates: ZhCandidate[];
-  rejected: { symbol: string; strike: number; paid: number; why: string; detail: string }[];
-  best: ZhCandidate | null;
-  ok: boolean;
-  decay: DecaySpread[]; // the other side of the window: premium still bid far out of the money
-}
-
-/** An expiry-decay spread worth selling now (`options/decay.py`). */
-export interface DecaySpread {
-  sell: string;
-  buy: string;
-  kind: "call" | "put";
-  strike: number;
-  wing: number;
-  expiry: number;
-  hours_left: number;
-  sigmas: number;
-  credit: number;
-  width: number;
-  pop: number;
-  ev: number;
-  max_loss: number;
-  ev_per_lot: number;
-  max_loss_per_lot: number;
-  ev_on_risk_pct: number | null;
-  why: string;
-}
-
-export interface ZhRecord {
-  days: number;
-  scans: number;
-  proposed: number;
-  opened: number;
-  closed: number;
-  wins: number;
-  hit_rate_pct: number | null;
-  premium_paid: number;
-  pnl: number | null;
-  note: string;
-}
-
-export interface ZhWindowSchedule {
-  window_open: boolean;
-  window_start: number;
-  window_end: number;
-  seconds_to_window: number;
-  hours_to_window: number;
-  description: string;
-}
-
-export interface ZhStatus {
-  enabled: boolean;
-  underlying: string;
-  budget: { broker: string; spent: number; attempts: number; max_attempts: number; auto: boolean }[];
-  config: Record<string, number> & { exit_minutes: number };
-  job: JobStatus | null;
-  record: ZhRecord;
-  window_schedule?: ZhWindowSchedule;
-}
-
-/** A zero-hero decision reuses the Decision row; `regime` carries the scan instead of a regime. */
-export interface ZhDecision extends Omit<Decision, "action" | "regime" | "candidates"> {
-  action: "open" | "skip" | "error";
-  regime: {
-    hours_left: number | null;
-    hold_minutes: number | null;
-    realised_vol: number | null;
-    window_open: boolean;
-    trigger: ZhTrigger | null;
-    positioning: ZhPositioning | null;
-    gates: ZhCheck[];
-  } | null;
-  candidates: ZhCandidate[] | null;
-}
 
 // -- fibonacci ------------------------------------------------------------------------------
 

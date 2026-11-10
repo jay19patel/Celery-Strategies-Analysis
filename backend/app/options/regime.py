@@ -8,9 +8,10 @@ Two measurements decide almost everything for an options seller:
   - **Direction**: whether price is trending (hourly EMA alignment, the 24h move measured in its own
     expected moves, hourly RSI). A neutral structure loses to a trend; a credit spread wants one.
 
-Each strategy gets a rule score from 50, moved by named components — every point is written down
-in `reasons`, so a score can be checked rather than trusted. The scores are heuristics over measured
-numbers, not fitted probabilities; the probability of profit is the pricing module's job.
+Each option strategy scores itself from these (its `score()` in `app/strategies/`), from 50, moved
+by named components — every point is written down, so a score can be checked rather than trusted.
+The scores are heuristics over measured numbers, not fitted probabilities; the probability of profit
+is the pricing module's job.
 Pure: bars and a chain summary in, numbers out.
 """
 
@@ -114,93 +115,44 @@ def label(m: dict[str, Any], d: float) -> str:
     return "range"
 
 
-def score(m: dict[str, Any], d: float, regime: str, gamma: str | None = None) -> dict[str, dict[str, Any]]:
-    expanding = bool(m["rv_ratio"] and m["rv_ratio"] > 1.3)
-    compressed = bool(m["rv_ratio"] and m["rv_ratio"] < 0.75)
-    near_pain = (
+Part = tuple[str, float]
+
+
+def scored(parts: list[Part]) -> tuple[int, list[str]]:
+    """A rule score from 50, moved by named components; every point that moved it is listed."""
+    total = 50 + sum(p for _, p in parts)
+    return round(_clamp(total, 0, 100)), [f"{text} ({points:+.0f})" for text, points in parts if abs(points) >= 0.5]
+
+
+def premium(m: dict[str, Any], sell: bool, weight: float = 2.5) -> list[Part]:
+    """IV against realised: a seller judged on the highest reading, a buyer on the lowest."""
+    vp = m["vol_premium" if sell else "vol_premium_floor"]
+    if vp is None:
+        return [("no realised volatility yet to compare IV with", -10 if sell else -5)]
+    vp_pts = 100 * vp
+    pts = _clamp(vp_pts * weight * (1 if sell else -1), -25, 25)
+    word = "premium" if vp_pts >= 0 else "discount"
+    return [(f"IV {100 * m['atm_iv']:.1f}% vs realised {100 * (m['atm_iv'] - vp):.1f}%: {abs(vp_pts):.1f} vol pts {word}", pts)]
+
+
+def pinned(gamma: str | None) -> list[Part]:
+    """The option book's own hedging (`options.gex`): positive gamma damps moves, negative chases them."""
+    return [("positive gamma: hedgers damp moves", 8)] if gamma == "positive" else [("negative gamma: hedgers chase moves", -12)] if gamma == "negative" else []
+
+
+def expanding(m: dict[str, Any]) -> bool:
+    return bool(m["rv_ratio"] and m["rv_ratio"] > 1.3)
+
+
+def compressed(m: dict[str, Any]) -> bool:
+    return bool(m["rv_ratio"] and m["rv_ratio"] < 0.75)
+
+
+def near_pain(m: dict[str, Any]) -> bool:
+    return bool(
         m["max_pain_distance_pct"] is not None and m["implied_move_pct"]
         and abs(m["max_pain_distance_pct"]) < 0.5 * m["implied_move_pct"]
     )
-    out: dict[str, dict[str, Any]] = {}
-
-    def add(key: str, parts: list[tuple[str, float]]) -> None:
-        total = 50 + sum(p for _, p in parts)
-        out[key] = {
-            "score": round(_clamp(total, 0, 100)),
-            "reasons": [f"{text} ({points:+.0f})" for text, points in parts if abs(points) >= 0.5],
-        }
-
-    def premium(sell: bool, weight: float = 2.5) -> list[tuple[str, float]]:
-        vp = m["vol_premium" if sell else "vol_premium_floor"]
-        if vp is None:
-            return [("no realised volatility yet to compare IV with", -10 if sell else -5)]
-        vp_pts = 100 * vp
-        pts = _clamp(vp_pts * weight * (1 if sell else -1), -25, 25)
-        word = "premium" if vp_pts >= 0 else "discount"
-        return [(f"IV {100 * m['atm_iv']:.1f}% vs realised {100 * (m['atm_iv'] - vp):.1f}%: {abs(vp_pts):.1f} vol pts {word}", pts)]
-
-    trend = abs(d)
-    # The option book's own hedging (`options.gex`): positive gamma damps moves, negative chases them.
-    pinned = [("positive gamma: hedgers damp moves", 8)] if gamma == "positive" else [("negative gamma: hedgers chase moves", -12)] if gamma == "negative" else []
-    released = [("negative gamma: hedgers chase moves", 10)] if gamma == "negative" else [("positive gamma: hedgers damp moves", -6)] if gamma == "positive" else []
-    add("iron_condor", [
-        *pinned,
-        *premium(True),
-        ("trend against a neutral structure", -trend * 35),
-        ("price ranging", 10 if regime in ("range", "quiet range") else 0),
-        ("realised volatility expanding", -10 if expanding else 0),
-    ])
-    add("iron_butterfly", [
-        *pinned,
-        *premium(True),
-        ("trend against a pinned structure", -trend * 45),
-        ("price near max pain", 8 if near_pain else 0),
-        ("volatility compressed", 6 if compressed else 0),
-        ("realised volatility expanding", -15 if expanding else 0),
-    ])
-    add("short_strangle", [
-        *pinned,
-        *premium(True),
-        ("trend against a neutral structure", -trend * 35),
-        ("price ranging", 8 if regime in ("range", "quiet range") else 0),
-        ("unbounded risk while volatility expands", -18 if expanding else 0),
-    ])
-    add("short_straddle", [
-        *pinned,
-        *premium(True),
-        ("trend against a pinned structure", -trend * 50),
-        ("price near max pain", 6 if near_pain else 0),
-        ("unbounded risk while volatility expands", -22 if expanding else 0),
-    ])
-    add("bull_put_spread", [
-        *premium(True, 1.2),
-        ("uptrend", d * 40 if d > 0 else 0),
-        ("downtrend against a bullish spread", d * 45 if d < 0 else 0),
-    ])
-    add("bear_call_spread", [
-        *premium(True, 1.2),
-        ("downtrend", -d * 40 if d < 0 else 0),
-        ("uptrend against a bearish spread", -d * 45 if d > 0 else 0),
-    ])
-    add("short_call", [
-        *premium(True, 1.5),
-        ("downtrend: the market is moving away from the strike", -d * 40 if d < 0 else 0),
-        ("uptrend into a sold call", -d * 50 if d > 0 else 0),
-        ("unbounded risk while volatility expands", -12 if expanding else 0),
-    ])
-    add("short_put", [
-        *premium(True, 1.5),
-        ("uptrend: the market is moving away from the strike", d * 40 if d > 0 else 0),
-        ("downtrend into a sold put", d * 50 if d < 0 else 0),
-        ("unbounded risk while volatility expands", -12 if expanding else 0),
-    ])
-    add("long_straddle", [
-        *released,
-        *premium(False),
-        ("volatility compressed, often released", 10 if compressed else 0),
-        ("movement under way", trend * 10),
-    ])
-    return out
 
 
 def analyze(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any], gamma: str | None = None, forecast: float | None = None) -> dict[str, Any]:
@@ -217,7 +169,6 @@ def analyze(bars: list[dict[str, Any]], spot: float, summary: dict[str, Any], ga
         "direction": round(d, 3),
         "direction_parts": parts,
         "metrics": {k: (round(v, 6) if isinstance(v, float) else v) for k, v in m.items()},
-        "scores": score(m, d, regime, gamma),
         "gamma": gamma,
         "notes": notes,
     }

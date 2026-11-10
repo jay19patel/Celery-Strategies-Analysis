@@ -8,16 +8,17 @@ import { useSWRConfig } from "swr";
 import { AlertTriangle, Check, Loader2, PlugZap, Send, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { FieldGrid, NumberField, SecretField, Section, SelectField, SwitchField, TextField, useForm } from "@/components/settings/fields";
+import Link from "next/link";
+
+import { Advanced, FieldGrid, NumberField, SecretField, Section, SelectField, SwitchField, TextField, useForm } from "@/components/settings/fields";
 import { Confirm } from "@/components/shared/confirm";
 import { Notice } from "@/components/shared/states";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useApi } from "@/lib/live";
-import type { AiStatus, SettingsResponse, StrategySpec } from "@/lib/types";
+import type { AiStatus, SettingsResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 function message(e: unknown): string {
@@ -108,15 +109,6 @@ export function BrokersTab({ onCleared }: { onCleared: (r: SettingsResponse) => 
               { value: "live", label: "Live (real money)" },
             ]}
           />
-          <SelectField
-            name="market_data"
-            label="Market data while Delta is inactive"
-            hint="Live public data needs no keys."
-            options={[
-              { value: "live", label: "Live exchange" },
-              { value: "demo", label: "Testnet" },
-            ]}
-          />
           <div className="space-y-1.5">
             <Label>Underlyings</Label>
             <Toggles name="underlyings" options={[{ value: "BTC", label: "BTC" }, { value: "ETH", label: "ETH" }, { value: "XAUT", label: "XAUT (gold)" }]} />
@@ -162,19 +154,19 @@ export function PaperTab() {
   };
   return (
     <div className="space-y-6">
-      <Section title="Paper account" description="The starting balance applies to a fresh paper account (reset it on the Performance page).">
+      <Section title="Paper account" description="Fills at the live bid and ask with the exchange's fees. The starting balance applies to a fresh account (reset it on the Performance page).">
         <FieldGrid>
           <NumberField name="paper_starting_balance" label="Starting balance (USD)" />
-          <NumberField name="paper_slippage_pct" label="Slippage when a side is empty (%)" hint="Applied to the mark only when the leg has no bid or ask." />
+          <NumberField name="paper_leverage" label="Perpetual leverage (x)" hint="Paper only: Delta positions use the leverage set on your Delta account." />
         </FieldGrid>
       </Section>
       <Section
         title="Test all positions"
-        description="On paper only: for BTC, ETH and XAUT, one iron condor, one zero-hero call and one perpetual (BTC sell, ETH buy, XAUT sell), all at the smallest size and through the normal gates. A slot already taken is reported, not forced."
+        description="On paper only: for each underlying, one iron condor and one perpetual, at the smallest size and through the normal gates. A slot already taken is reported, not forced."
       >
         <Confirm
           title="Open test positions on paper?"
-          description="Up to nine paper positions open now and are managed by the guard like any other. Close them from Positions."
+          description="Up to six paper positions open now and are managed by the guard like any other. Close them from Positions."
           confirmLabel="Open them"
           onConfirm={() => testAll().catch((e) => toast.error(message(e)))}
           trigger={(open) => (
@@ -188,89 +180,39 @@ export function PaperTab() {
   );
 }
 
-// -- auto-trader --------------------------------------------------------------------------
+// -- automation ---------------------------------------------------------------------------
 
-const VIEW_TONE: Record<StrategySpec["view"], "default" | "profit" | "loss" | "primary"> = {
-  neutral: "default",
-  bullish: "profit",
-  bearish: "loss",
-  volatile: "primary",
-};
-
-export function AutoTab({ strategies }: { strategies: StrategySpec[] }) {
-  const { draft, set } = useForm();
-  const enabled = (draft.auto_strategies as string[] | undefined) ?? [];
+export function AutomationTab() {
   return (
     <div className="space-y-6">
-      <Section title="Auto-trading" description="One decision per underlying every interval; each one is recorded on the Auto Trader page, skips included.">
-        <FieldGrid>
-          <SwitchField name="auto_paper" label="Auto-trade on paper" />
-          <SwitchField name="auto_delta" label="Auto-trade on Delta" hint="Switched off at every engine start and on any Delta account change." />
-          <NumberField name="auto_interval_minutes" label="Decision interval (minutes)" integer />
-        </FieldGrid>
-      </Section>
-      <Section title="Strategies" description="Only the checked structures are considered. Defined-risk ones have a known worst case before entry.">
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {strategies.map((s) => {
-            const on = enabled.includes(s.key);
-            return (
-              <label
-                key={s.key}
-                className={cn("flex cursor-pointer gap-3 rounded-lg border p-3 transition-colors", on ? "border-primary bg-accent/40" : "hover:bg-muted/50")}
-              >
-                <input
-                  type="checkbox"
-                  className="mt-0.5 size-4 accent-[var(--primary)]"
-                  checked={on}
-                  onChange={() => set("auto_strategies", on ? enabled.filter((k) => k !== s.key) : [...enabled, s.key])}
-                />
-                <span className="min-w-0 space-y-1">
-                  <span className="flex flex-wrap items-center gap-1.5 text-[13px] font-semibold">
-                    {s.label}
-                    <Badge variant={VIEW_TONE[s.view]}>{s.view}</Badge>
-                    <Badge variant="outline">{s.premium}</Badge>
-                    {s.risk === "undefined" ? <Badge variant="warn">unlimited risk</Badge> : <Badge variant="default">defined risk</Badge>}
-                  </span>
-                  <span className="block text-xs leading-snug text-muted-foreground">{s.summary}</span>
-                </span>
-              </label>
-            );
-          })}
-        </div>
-      </Section>
-      <Section title="Expiry and strikes">
-        <FieldGrid>
-          <NumberField name="expiry_min_hours" label="Nearest expiry at least (hours)" />
-          <NumberField name="expiry_max_hours" label="…and at most (hours)" />
-          <NumberField name="short_delta" label="Sold strike |delta|" step={0.01} />
-          <NumberField name="wing_width_pct" label="Wing distance (% of spot)" />
-        </FieldGrid>
-      </Section>
-      <Section title="Entry filters" description="A candidate must pass every one of these to be traded automatically.">
-        <FieldGrid>
-          <NumberField name="min_score" label="Minimum regime score" integer />
-          <NumberField name="min_pop_pct" label="Minimum probability of profit (%)" />
-          <NumberField name="min_credit_width_pct" label="Minimum credit / width (%)" />
-          <NumberField name="max_spread_pct" label="Maximum leg bid/ask spread (%)" />
-        </FieldGrid>
-      </Section>
       <Section
-        title="Scheduled events"
-        description="No credit structure is opened whose life holds one of these, from the buffer before now until its expiry. Add FOMC, CPI and other release times as they are announced."
+        title="Automatic trading"
+        description="The master switch per broker. Which strategies run, on which underlyings, and with what numbers is set on the Strategies page."
       >
         <FieldGrid>
+          <SwitchField name="auto_paper" label="Automatic entries on paper" />
+          <SwitchField
+            name="auto_delta"
+            label="Automatic entries on Delta"
+            hint="Off at every engine start and after any Delta account change. Only strategies switched to live trade there."
+          />
+        </FieldGrid>
+        <Link href="/strategies" className="text-[13px] font-medium text-primary hover:underline">
+          Choose strategies
+        </Link>
+      </Section>
+      <Advanced title="Option entries and exits">
+        <FieldGrid>
+          <NumberField name="max_spread_pct" label="Widest leg bid/ask spread (% of mark)" hint="A leg quoted wider is not traded." />
+          <NumberField
+            name="exit_before_expiry_minutes"
+            label="Close before expiry (minutes)"
+            integer
+            hint="Debits and hand-built unlimited credits. Spreads and condors are held to settlement."
+          />
           <EventTimes />
-          <NumberField name="event_buffer_hours" label="Stand aside after an event (hours)" />
         </FieldGrid>
-      </Section>
-      <Section
-        title="Pacing"
-        description="Towards about one entry a day. While nothing has opened on an underlying today the regime score above eases towards this floor as the day runs out, and the first entry puts it back. 0 switches it off. The filters above never ease: a thin premium is refused at any hour."
-      >
-        <FieldGrid>
-          <NumberField name="min_score_floor" label="Regime score floor (0 = off)" integer />
-        </FieldGrid>
-      </Section>
+      </Advanced>
     </div>
   );
 }
@@ -292,23 +234,31 @@ function EventTimes() {
           set("event_times", e.target.value.split(",").map((t) => t.trim()).filter(Boolean));
         }}
       />
-      <p className="text-[11.5px] text-muted-foreground">Comma-separated, YYYY-MM-DD HH:MM in UTC.</p>
+      <p className="text-[11.5px] text-muted-foreground">
+        Scheduled releases (FOMC, CPI, …) in UTC as YYYY-MM-DD HH:MM, comma-separated. No credit structure is opened whose life holds one.
+      </p>
     </div>
   );
 }
 
-// -- risk and exits -----------------------------------------------------------------------
+// -- risk -------------------------------------------------------------------------------
 
 export function RiskTab() {
   return (
     <div className="space-y-6">
-      <Section title="Sizing and limits" description="Applied to every entry, manual or automatic, on each broker separately.">
+      <Section
+        title="Risk"
+        description="Each broker on its own. A strategy proven to lose gets no size, one proven to win up to twice this; a drawdown halves or quarters it."
+      >
         <FieldGrid>
-          <NumberField name="risk_per_trade_pct" label="Worst case per structure (% of equity)" hint="Auto-trader lot sizing." />
-          <NumberField name="max_lots" label="Maximum lots per structure" integer />
-          <NumberField name="max_open_structures" label="Maximum open structures" integer hint="Auto-trader only: manual tickets are not counted or capped." />
-          <NumberField name="max_per_underlying" label="Maximum per underlying" integer hint="Auto-trader only." />
-          <NumberField name="daily_loss_limit_pct" label="Daily loss limit (% of equity)" hint="0 switches it off." />
+          <NumberField name="risk_per_trade_pct" label="Risk per automatic entry (% of equity)" hint="Its worst case: the stop, or the wings." />
+          <NumberField name="daily_loss_limit_pct" label="Daily loss limit (% of equity)" hint="Closes that broker's positions for the day. 0 is off." />
+          <NumberField name="max_drawdown_pct" label="Stop everything at a drawdown of (%)" hint="From the equity peak. Every entry stops until you resume it. 0 is off." />
+        </FieldGrid>
+      </Section>
+      <Advanced title="Limits and the trading day">
+        <FieldGrid>
+          <NumberField name="max_lots" label="Most lots in one order" integer hint="A typing-error guard, not the sizing rule." />
           <SelectField
             name="day_timezone"
             label="Trading day starts in"
@@ -318,80 +268,7 @@ export function RiskTab() {
             ]}
           />
         </FieldGrid>
-      </Section>
-      <Section title="Exits" description="The guard checks every open structure every few seconds, reading what closing would actually book.">
-        <FieldGrid>
-          <NumberField name="credit_take_profit_pct" label="Credit: take profit (% of max profit)" hint="Unlimited-risk credits only (strangles, straddles, naked calls and puts). Spreads and condors are held to settlement." />
-          <NumberField name="credit_stop_loss_pct" label="Credit: stop loss (% of credit)" hint="Unlimited-risk credits only: a spread's worst case is its wings, so it is not stopped on noise." />
-          <NumberField name="debit_take_profit_pct" label="Debit: take profit (% of debit)" />
-          <NumberField name="debit_stop_loss_pct" label="Debit: stop loss (% of debit)" />
-          <NumberField name="exit_before_expiry_minutes" label="Close before expiry (minutes)" integer hint="Debits and unlimited-risk credits. 0 holds them to settlement too; spreads and condors always are." />
-          <NumberField
-            name="stop_confirm_checks"
-            label="Stop loss holds for (checks)"
-            integer
-            hint="5s apart. A spread spike is not a loss; with the spot past a breakeven it closes at once."
-          />
-        </FieldGrid>
-      </Section>
-    </div>
-  );
-}
-
-// -- zero hero ----------------------------------------------------------------------------
-
-export function ZeroHeroTab() {
-  const { draft } = useForm();
-  const budget = Number(draft.zh_daily_budget_pct ?? 20);
-  const attempts = Number(draft.zh_max_attempts_day ?? 3);
-  return (
-    <div className="space-y-6">
-      <Notice tone="warn">
-        <strong>When on, this sends real orders</strong> on every broker whose auto-trading is on: the momentum buy, and the
-        expiry-decay spread sold on the other side of the window. A long OTM buy in the last hours before expiry loses its
-        whole premium most of the time. That is the design, not a fault; the daily budget below is what bounds it.
-      </Notice>
-      <Section
-        title="Zero-hero"
-        description="A long OTM option bought on an expiry-day momentum break. It is the opposite trade to everything on the Auto Options page and is gated separately, because a premium seller's filters would refuse it every time — correctly, and uselessly."
-      >
-        <FieldGrid>
-          <SwitchField name="zh_enabled" label="Run the expiry-day scan" />
-          <NumberField name="zh_window_start_hours" label="Window opens (hours before expiry)" />
-          <NumberField name="zh_window_end_hours" label="Window closes (hours before expiry)" hint="Must leave room before the time stop." />
-          <NumberField name="zh_scan_seconds" label="Scan every (seconds)" integer hint="A break is a one-bar event; a slow scan finds the same entry after it has run." />
-        </FieldGrid>
-      </Section>
-      <Section
-        title="Sizing"
-        description={`The budget is for the whole DAY and is split across the attempts the day has left — not per trade. At ${budget}% over ${attempts} attempts that is about ${(budget / attempts).toFixed(1)}% of equity each.`}
-      >
-        <FieldGrid>
-          <NumberField name="zh_daily_budget_pct" label="Daily budget (% of equity)" />
-          <NumberField name="zh_max_attempts_day" label="Maximum attempts per day" integer />
-          <NumberField name="zh_max_lots" label="Maximum lots per attempt" integer hint="A backstop, not the sizing rule: one lot of an 8-dollar BTC option is 0.008 dollars of premium." />
-          <NumberField name="zh_capacity_share_pct" label="Share of a strike's traded size (%)" hint="What actually limits size. A proxy from OI and volume — Delta's ticker carries no book depth." />
-          <NumberField name="zh_min_oi" label="Minimum open interest (underlying)" />
-        </FieldGrid>
-      </Section>
-      <Section title="Entry filters" description="A contract must pass every one of these, and the market must pass the scan's own gates on top.">
-        <FieldGrid>
-          <NumberField name="zh_min_multiple" label="Minimum payoff at the target (x)" hint="Repriced with the clock advanced, not just the spot." />
-          <NumberField name="zh_min_ev" label="Minimum expected value (per unit paid)" />
-          <NumberField name="zh_min_distance_pct" label="Minimum distance OTM (%)" />
-          <NumberField name="zh_max_distance_pct" label="Maximum distance OTM (%)" />
-          <NumberField name="zh_max_spread_pct" label="Maximum bid/ask spread (%)" hint="An 8/10 quote is a 20% loss on contact." />
-          <NumberField name="zh_displacement_atr" label="Minimum displacement (x mean range)" />
-          <NumberField name="zh_max_pain_buffer_pct" label="Past max pain by (% of spot)" hint="A trade running into the pin is refused outright." />
-        </FieldGrid>
-      </Section>
-      <Section title="Exits" description="Whichever time stop comes first applies — this one or the global 'close before expiry'. A broken premise closes the position before either.">
-        <FieldGrid>
-          <NumberField name="zh_take_profit_pct" label="Take profit (% of the debit)" hint="300% means the contract at 4x." />
-          <NumberField name="zh_stop_loss_pct" label="Stop loss (% of the debit)" />
-          <NumberField name="zh_time_stop_minutes" label="Time stop (minutes before expiry)" integer />
-        </FieldGrid>
-      </Section>
+      </Advanced>
     </div>
   );
 }
@@ -455,7 +332,6 @@ export function AiTab() {
           <SwitchField name="ai_enabled" label="Use AI" hint="The market brief. Trades are decided by the rules alone." />
           <TextField name="ai_model" label="Primary model" placeholder="mistral/mistral-small-latest" />
           <FallbackModels key={generation} />
-          <NumberField name="ai_brief_minutes" label="Market brief every (minutes)" integer />
         </FieldGrid>
         <Notice>
           Examples: {EXAMPLE_MODELS.map((m, i) => <span key={m}><code className="num text-[12px]">{m}</code>{i < EXAMPLE_MODELS.length - 1 ? ", " : ""}</span>)}.
@@ -515,21 +391,8 @@ export function NotifyTab() {
           <TextField name="telegram_chat_id" label="Chat id" />
         </FieldGrid>
       </Section>
-      <Section title="Email">
+      <Section title="What is sent" description="Every fill, failure, loss halt, stop-all and exchange mismatch, always. Plus the daily report if it is on.">
         <FieldGrid>
-          <SwitchField name="notify_email" label="Send email" />
-          <TextField name="email_to" label="To" placeholder="you@example.com, desk@example.com" />
-          <TextField name="email_smtp_host" label="SMTP host" placeholder="smtp.gmail.com" />
-          <NumberField name="email_smtp_port" label="SMTP port" integer hint="465 uses SSL, anything else STARTTLS." />
-          <TextField name="email_smtp_user" label="SMTP user" />
-          <SecretField name="email_smtp_pass" label="SMTP password" />
-        </FieldGrid>
-      </Section>
-      <Section title="What to send">
-        <FieldGrid>
-          <SwitchField name="notify_trades" label="Trades" hint="Opened, closed, failed, needs attention." />
-          <SwitchField name="notify_decisions" label="Every auto decision" hint="Skips included: can be noisy." />
-          <SwitchField name="notify_risk" label="Risk halts" />
           <SwitchField name="daily_report" label="Daily report" />
           <NumberField name="daily_report_hour" label="Daily report hour" integer hint="In the trading-day timezone." />
         </FieldGrid>
@@ -538,6 +401,16 @@ export function NotifyTab() {
         </Button>
         <p className="text-[11.5px] text-muted-foreground">The test uses the saved settings: save first.</p>
       </Section>
+      <Advanced title="Email">
+        <FieldGrid>
+          <SwitchField name="notify_email" label="Send email" />
+          <TextField name="email_to" label="To" placeholder="you@example.com, desk@example.com" />
+          <TextField name="email_smtp_host" label="SMTP host" placeholder="smtp.gmail.com" />
+          <NumberField name="email_smtp_port" label="SMTP port" integer hint="465 uses SSL, anything else STARTTLS." />
+          <TextField name="email_smtp_user" label="SMTP user" />
+          <SecretField name="email_smtp_pass" label="SMTP password" />
+        </FieldGrid>
+      </Advanced>
     </div>
   );
 }

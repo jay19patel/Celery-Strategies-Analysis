@@ -29,6 +29,8 @@ fi
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
+# One JSON object per line in production: every line about a trade can be found by its ids.
+export LOG_JSON="${LOG_JSON:-true}"
 # Downcase LOG_LEVEL for uvicorn
 LOG_LEVEL_LOWER="$(echo "$LOG_LEVEL" | tr '[:upper:]' '[:lower:]')"
 

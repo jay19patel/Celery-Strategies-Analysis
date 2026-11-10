@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.api.deps import EngineDep
-from app.options.strategies import CATALOG
 from app.settings import LIVE_CONFIRM_PHRASE, Settings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -40,7 +38,6 @@ def _view(engine: Any) -> dict[str, Any]:
         "values": engine.settings().public(),
         "limits": _limits(),
         "live_confirm_phrase": LIVE_CONFIRM_PHRASE,
-        "strategies": [asdict(s) for s in CATALOG.values()],
     }
 
 

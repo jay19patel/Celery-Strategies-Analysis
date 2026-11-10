@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from typing import Any
 
@@ -31,8 +32,8 @@ from app.core.models import SignalLog, Structure
 from app.errors import BrokerError, Refused
 from app.market.options import PERPETUALS
 from app.settings import Settings
-from app.strategies import REGISTRY
-from app.strategies.base import Context, Decision, net_rr
+from app.strategies import registry
+from app.strategies.base import Context, Decision, Strategy, net_rr
 from app.trading.risk import day_start, trading_day
 from app.trading.service import TradingService
 
@@ -41,6 +42,7 @@ log = logging.getLogger(__name__)
 BASE_READ = 3_400  # minutes: enough for the longest lookback (200 x 15m) plus slack for holes
 FLOW_MINUTES = 5  # the tape is read in 5-minute bars, the timeframe the flow strategies trade
 BIAS_GATE = 0.5  # a day's bias this strong refuses a signal against it
+FUNDING_HOURS = 8.0  # Delta charges funding every eight hours
 
 
 class StrategyRunner:
@@ -55,8 +57,8 @@ class StrategyRunner:
 
     async def run(self) -> str:
         s: Settings = self.settings()
-        if not s.directional_strategies:
-            return "no directional strategy is enabled"
+        if not registry.enabled(s, "perp"):
+            return "no perpetual strategy is switched on"
         out = []
         for underlying in s.underlyings:
             out.append(await self._symbol(underlying, s))
@@ -69,12 +71,12 @@ class StrategyRunner:
             return f"{symbol}: no 1m bars yet"
         now = time.time()
         frames: dict[str, list[dict[str, Any]]] = {}
-        fired: list[tuple[str, Decision, int]] = []
+        fired: list[tuple[Strategy, Decision, int]] = []
         stopped = self._stopped_today(underlying, day_start(s.day_timezone, trading_day(s.day_timezone)))
-        for name in s.directional_strategies:
+        strategies = registry.enabled(s, "perp")
+        for name, strategy in strategies.items():
             if not s.strategy_on(name, underlying):
                 continue  # enabled, but not for this underlying
-            strategy = REGISTRY[name]
             if strategy.interval not in frames:
                 frames[strategy.interval] = await self._bars(symbol, strategy, base)
             bars = frames[strategy.interval]
@@ -93,7 +95,7 @@ class StrategyRunner:
             except Exception as exc:
                 log.exception("strategy_failed strategy=%s symbol=%s", name, symbol)
                 self._readout(name, symbol, bar_time, None, f"error: {type(exc).__name__}: {exc}")
-                self._log(name, symbol, strategy.interval, bar_time, Decision(None, str(exc)[:500]), "error")
+                self._log(strategy, symbol, bar_time, Decision(None, str(exc)[:500]), "error")
                 continue
             if decision.side and name in stopped:
                 self._readout(name, symbol, bar_time, decision, f"{decision.reason} — not taken: stopped out on {symbol} earlier today")
@@ -103,7 +105,7 @@ class StrategyRunner:
                 continue
             self._readout(name, symbol, bar_time, decision, decision.reason)
             if decision.side:
-                fired.append((name, decision, bar_time))
+                fired.append((strategy, decision, bar_time))
         if not fired:
             return f"{symbol}: no signal"
         return await self._trade(underlying, symbol, fired, s)
@@ -132,10 +134,9 @@ class StrategyRunner:
             candles=candles(bars[-strategy.lookback:]),
             outlook=await self.market.outlook(underlying) if strategy.wants_outlook else {},
             structure=await self.market.structure(underlying) if strategy.wants_structure else {},
-            options_history=self.market.options_history(underlying, 8) if strategy.wants_options_history else [],
             flow=await self.market.flow(underlying, FLOW_MINUTES) if strategy.wants_flow else {},
             bias=await self.market.bias(underlying) if strategy.wants_bias else {},
-            cost_pct=2 * rate.taker * 100 + spread + self._funding_pct(underlying),
+            cost_pct=2 * rate.taker * 100 + spread + self._funding_pct(underlying, strategy.max_hold_hours),
         )
 
     @staticmethod
@@ -160,52 +161,64 @@ class StrategyRunner:
             return f"not taken: today's bias is {b['label']} ({score:+.2f}), and this trade is against it"
         return ""
 
-    def _funding_pct(self, underlying: str) -> float:
-        """One funding payment at the current rate, as % of notional. A position held for hours pays
-        it at least once, and which side pays is not known before the side is, so it is charged as a cost."""
+    def _funding_pct(self, underlying: str, hold_hours: float) -> float:
+        """Funding at the current rate for every payment a position held up to `hold_hours` could
+        meet, at least one, as % of notional. Which side pays is not known before the side is, so it
+        is charged as a cost — a days-long hold pays it many times."""
         perp = self.trading.feed.perp(underlying)
-        return abs((perp.stats.get("funding_rate_pct") if perp else None) or 0.0)
+        rate = abs((perp.stats.get("funding_rate_pct") if perp else None) or 0.0)
+        return rate * max(1.0, math.ceil(hold_hours / FUNDING_HOURS))
 
-    async def _trade(self, underlying: str, symbol: str, fired: list[tuple[str, Decision, int]], s: Settings) -> str:
+    async def _trade(self, underlying: str, symbol: str, fired: list[tuple[Strategy, Decision, int]], s: Settings) -> str:
         """The best signal on this symbol gets the slot; every other one is refused by name."""
-        cost = 2 * self.trading.desk.cached_fee(symbol).taker * 100 + self._funding_pct(underlying)
+        fee = 2 * self.trading.desk.cached_fee(symbol).taker * 100
 
-        def edge(d: Decision) -> float:
+        def edge(f: tuple[Strategy, Decision, int]) -> float:
+            strategy, d = f[0], f[1]
             entry = d.entry or 1.0
+            cost = fee + self._funding_pct(underlying, strategy.max_hold_hours)
             return net_rr(100 * abs((d.target or entry) - entry) / entry, 100 * abs(entry - (d.stop or entry)) / entry, cost)
 
-        fired.sort(key=lambda f: edge(f[1]), reverse=True)
-        best_name, best, bar_time = fired[0]
+        fired.sort(key=edge, reverse=True)
+        best_strategy, best, bar_time = fired[0]
+        best_name = best_strategy.name
         # A signal that does not trade is shown live and not stored: only opens and errors are kept.
-        for name, decision, bt in fired[1:]:
-            self._readout(name, symbol, bt, decision,
-                          f"{decision.reason} — {REGISTRY[best_name].label} had the better trade ({edge(best):.2f}:1 against {edge(decision):.2f}:1)")
+        for other in fired[1:]:
+            strategy, decision, bt = other
+            self._readout(strategy.name, symbol, bt, decision,
+                          f"{decision.reason} — {best_strategy.label} had the better trade ({edge(fired[0]):.2f}:1 against {edge(other):.2f}:1)")
 
-        brokers = [b for b in s.active_brokers if s.auto_on(b)]
+        auto_on = [b for b in s.active_brokers if s.auto_on(b)]
+        allowed = s.strategy_brokers(best_name)
         orders: dict[str, Any] = {}
-        for broker in brokers:
+        for broker in auto_on:
+            if broker not in allowed:
+                orders[broker] = {"refused": f"{best_strategy.label} is not switched to trade on {broker}"}
+                continue
             try:
-                account = await self.trading.brokers[broker].account()
+                b = self.trading.brokers[broker]
+                account = await b.account()
                 x, sized = self.trading.risk_scale(broker, best_name, account.equity)
                 if x <= 0:
                     raise Refused(sized)
                 cv = await self.trading.desk.contract_value(symbol)
                 rate = self.trading.desk.cached_fee(symbol).taker
-                qty = self.trading.perp_size(account.equity * x, account.available, best.entry or 0.0, best.stop or 0.0, cv, rate)
+                qty = self.trading.perp_size(account.equity * x, account.available, best.entry or 0.0, best.stop or 0.0, cv, rate,
+                                             await b.leverage(symbol))
                 if qty < 1:
                     raise Refused(f"{x * s.risk_per_trade_pct:g}% of equity {account.equity:,.2f} does not cover one contract's loss at the stop")
                 view = await self.trading.open_directional(
                     broker, underlying, best.side or "", qty, best.stop or 0.0, best.target or 0.0,
-                    best_name, "auto", f"{best_name}:{symbol}:{bar_time}", best.reason, REGISTRY[best_name].max_hold_hours,
+                    best_name, "auto", f"{best_name}:{symbol}:{bar_time}", best.reason, best_strategy.max_hold_hours,
                 )
                 orders[broker] = {"structure_id": view["id"], "status": view["status"], "qty": qty, "error": view["error"], "sized": sized}
             except (Refused, BrokerError) as exc:
                 orders[broker] = {"refused": str(exc)}
-        if not brokers:
+        if not auto_on:
             orders["-"] = {"refused": "auto-trading is off on every active broker"}
         opened = any(o.get("status") == "open" for o in orders.values())
         if opened:
-            self._log(best_name, symbol, REGISTRY[best_name].interval, bar_time, best, "open", orders=orders)
+            self._log(best_strategy, symbol, bar_time, best, "open", orders=orders)
         else:
             refusals = "; ".join(f"{b}: {o.get('refused') or o.get('error') or o.get('status')}" for b, o in orders.items())
             self._readout(best_name, symbol, bar_time, best, f"{best.reason} — not opened: {refusals}")
@@ -217,8 +230,9 @@ class StrategyRunner:
             "decision": decision.to_dict() if decision and decision.side else None,
         }
 
-    def _log(self, name: str, symbol: str, interval: str, bar_time: int, d: Decision, action: str,
+    def _log(self, strategy: Strategy, symbol: str, bar_time: int, d: Decision, action: str,
              note: str = "", orders: dict[str, Any] | None = None) -> None:
+        name, interval = strategy.name, strategy.interval
         refusals = "; ".join(f"{b}: {o['refused']}" for b, o in (orders or {}).items() if o.get("refused"))
         reason = " — ".join(x for x in (d.reason, note, refusals) if x)
         with session() as s:
@@ -230,20 +244,13 @@ class StrategyRunner:
             s.commit()
         level = "error" if action == "error" else "info"
         self.hub.publish(
-            "Signal", f"{REGISTRY[name].label} {d.side or ''} {symbol}: {action} — {reason[:300]}", level,
+            "Signal", f"{strategy.label} {d.side or ''} {symbol}: {action} — {reason[:300]}", level,
             strategy=name, symbol=symbol, action=action, side=d.side,
         )
 
-    def status(self) -> list[dict[str, Any]]:
-        s: Settings = self.settings()
-        out = []
-        for name, strategy in REGISTRY.items():
-            out.append(strategy.describe() | {
-                "enabled": name in s.directional_strategies,
-                "symbols": s.strategy_underlyings(name),  # the enabled underlyings it runs on
-                "latest": [v for (n, _sym), v in self.latest.items() if n == name],
-            })
-        return out
+    def latest_for(self, name: str) -> list[dict[str, Any]]:
+        """The live readout per symbol: what it decided on its last bar, and why."""
+        return [v for (n, _sym), v in self.latest.items() if n == name]
 
     @staticmethod
     def signals(strategy: str = "", action: str = "", limit: int = 100) -> list[dict[str, Any]]:

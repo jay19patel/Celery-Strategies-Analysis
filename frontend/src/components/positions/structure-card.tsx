@@ -94,6 +94,8 @@ export function ExitsDialog({ s, open, onOpenChange }: { s: Structure; open: boo
   const [tp, setTp] = useState(String(s.take_profit_pct));
   const [sl, setSl] = useState(String(s.stop_loss_pct));
   const [busy, setBusy] = useState(false);
+  const tpOk = Number(tp) >= 5 && Number(tp) <= 1000;
+  const slOk = Number(sl) >= 5 && Number(sl) <= 500;
   const base = s.kind === "credit" ? "max profit" : "debit paid";
   const save = async () => {
     setBusy(true);
@@ -118,16 +120,18 @@ export function ExitsDialog({ s, open, onOpenChange }: { s: Structure; open: boo
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="tp">Take profit % of {base}</Label>
-            <Input id="tp" type="number" value={tp} onChange={(e) => setTp(e.target.value)} className="num" />
+            <Input id="tp" type="number" min={5} max={1000} value={tp} onChange={(e) => setTp(e.target.value)} className="num" aria-invalid={!tpOk} />
+            <p className="text-[11px] text-muted-foreground">5 – 1000</p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="sl">Stop loss % of {s.kind === "credit" ? "credit" : "debit"}</Label>
-            <Input id="sl" type="number" value={sl} onChange={(e) => setSl(e.target.value)} className="num" />
+            <Input id="sl" type="number" min={5} max={500} value={sl} onChange={(e) => setSl(e.target.value)} className="num" aria-invalid={!slOk} />
+            <p className="text-[11px] text-muted-foreground">5 – 500</p>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={save} disabled={busy}>{busy && <Loader2 className="animate-spin" />} Save</Button>
+          <Button onClick={save} disabled={busy || !tpOk || !slOk}>{busy && <Loader2 className="animate-spin" />} Save</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -1,90 +1,13 @@
-"""Tests for the EventWindowTrigger and reusable market timing schedules."""
+"""The engine's schedule: every guard is on it, a run never overlaps itself, one engine per database."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import asyncio
 from pathlib import Path
 
 import pytest
 
-from app.core.scheduler import EventWindowTrigger
-from app.trading.timing import get_zerohero_window, next_daily_settlement_utc
-
-
-def test_next_daily_settlement_utc_returns_future_12utc() -> None:
-    """Verifies that next settlement is strictly in future at 12:00 UTC."""
-    # 2026-10-31 10:00:00 UTC -> next settlement is 2026-10-31 12:00:00 UTC
-    dt_morning = datetime(2026, 10, 31, 10, 0, 0, tzinfo=UTC).timestamp()
-    target_today = next_daily_settlement_utc(dt_morning)
-    expected_today = datetime(2026, 10, 31, 12, 0, 0, tzinfo=UTC).timestamp()
-    assert target_today == expected_today
-
-    # 2026-10-31 13:00:00 UTC (after 12:00 UTC) -> next settlement is 2026-11-01 12:00:00 UTC
-    dt_afternoon = datetime(2026, 10, 31, 13, 0, 0, tzinfo=UTC).timestamp()
-    target_tomorrow = next_daily_settlement_utc(dt_afternoon)
-    expected_tomorrow = datetime(2026, 11, 1, 12, 0, 0, tzinfo=UTC).timestamp()
-    assert target_tomorrow == expected_tomorrow
-
-
-def test_zerohero_window_bounds_match_start_and_end_hours() -> None:
-    """Zero-hero window should span exactly window_start_hours to window_end_hours before expiry."""
-    from types import SimpleNamespace
-
-    dt_now = datetime(2026, 10, 31, 6, 0, 0, tzinfo=UTC).timestamp()
-    fake_settings = SimpleNamespace(zh_window_start_hours=4.0, zh_window_end_hours=2.0)
-    w_start, w_end, desc = get_zerohero_window(
-        now_ts=dt_now,
-        settings=fake_settings,  # type: ignore[arg-type]
-    )
-    settlement = datetime(2026, 10, 31, 12, 0, 0, tzinfo=UTC).timestamp()
-    assert w_start == settlement - 4.0 * 3600.0
-    assert w_end == settlement - 2.0 * 3600.0
-    assert "13:30–15:30 IST" in desc
-
-
-def test_event_window_trigger_schedules_at_window_start_when_outside() -> None:
-    """When outside window, next fire time should be precisely the window start."""
-    now_dt = datetime(2026, 10, 31, 6, 0, 0, tzinfo=UTC)
-    now_ts = now_dt.timestamp()
-
-    w_start_ts = now_ts + 7200.0  # window opens in 2 hours
-    w_end_ts = w_start_ts + 3600.0
-
-    def mock_window(t: float) -> tuple[float, float, str]:
-        return w_start_ts, w_end_ts, "test window"
-
-    trigger = EventWindowTrigger(
-        get_window=mock_window,
-        active_interval=60.0,
-        idle_heartbeat=14400.0,
-    )
-
-    next_fire = trigger.get_next_fire_time(None, now_dt)
-    assert next_fire is not None
-    assert next_fire.timestamp() == pytest.approx(w_start_ts, abs=1.0)
-
-
-def test_event_window_trigger_schedules_at_active_interval_when_inside() -> None:
-    """When inside window, next fire time should be now + active_interval."""
-    now_dt = datetime(2026, 10, 31, 8, 30, 0, tzinfo=UTC)
-    now_ts = now_dt.timestamp()
-
-    w_start_ts = now_ts - 1800.0  # opened 30m ago
-    w_end_ts = now_ts + 1800.0    # closes in 30m
-
-    def mock_window(t: float) -> tuple[float, float, str]:
-        return w_start_ts, w_end_ts, "active window"
-
-    trigger = EventWindowTrigger(
-        get_window=mock_window,
-        active_interval=45.0,
-        idle_heartbeat=1800.0,
-    )
-
-    prev_fire = datetime(2026, 10, 31, 8, 29, 30, tzinfo=UTC)
-    next_fire = trigger.get_next_fire_time(prev_fire, now_dt)
-    assert next_fire is not None
-    assert next_fire.timestamp() == pytest.approx(now_dt.timestamp() + 45.0, abs=1.0)
+from app.core.scheduler import Scheduler
 
 
 async def test_the_engine_schedules_every_guard(tmp_path: Path) -> None:
@@ -96,6 +19,47 @@ async def test_the_engine_schedules_every_guard(tmp_path: Path) -> None:
     engine = Engine(Config(db_path=str(tmp_path / "test.db"), engine_enabled=False))
     engine._schedule()
     try:
-        assert {"guard.structures", "guard.daily", "auto.cycle", "housekeeping"} <= set(engine.scheduler.jobs)
+        assert {"guard.structures", "guard.daily", "auto.cycle", "strategies.run", "reconcile", "housekeeping"} <= set(engine.scheduler.jobs)
     finally:
         engine.scheduler.shutdown()
+
+
+async def test_a_manual_run_never_runs_beside_the_scheduled_one() -> None:
+    """A "Run now" click while the auto-trader is mid-cycle would be a second cycle on the same
+    decision: it waits for the one in progress instead."""
+    runs, gate = [], asyncio.Event()
+
+    async def job() -> None:
+        runs.append("start")
+        await gate.wait()
+
+    sch = Scheduler()
+    sch.every("slow", "slow job", 3600, job)
+    sch.start()
+    try:
+        first = asyncio.create_task(sch.run_now("slow"))
+        await asyncio.sleep(0)
+        second = asyncio.create_task(sch.run_now("slow"))
+        await asyncio.sleep(0)
+        gate.set()
+        await asyncio.gather(first, second)
+        assert runs == ["start"]
+        assert sch.jobs["slow"].runs == 1
+    finally:
+        sch.shutdown()
+
+
+async def test_a_second_engine_on_the_same_database_refuses_to_start(tmp_path: Path) -> None:
+    from app.config import Config
+    from app.engine import AlreadyRunning, Engine
+
+    cfg = Config(db_path=str(tmp_path / "test.db"), engine_enabled=False)
+    first, second = Engine(cfg), Engine(cfg)
+    first._take_lock()
+    try:
+        with pytest.raises(AlreadyRunning, match="single worker"):
+            second._take_lock()
+    finally:
+        await first.stop()
+    second._take_lock()  # the first one's stop released it
+    await second.stop()

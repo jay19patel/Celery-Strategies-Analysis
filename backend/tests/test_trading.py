@@ -13,7 +13,8 @@ from app.brokers.base import Fill, LegOrder
 from app.core.db import session
 from app.core.models import OrderRecord, PaperAccount, Structure
 from app.errors import BrokerError, BrokerTimeout, Refused
-from app.trading.guard import Guard
+from app.options.strategies import atm, otm_by_delta
+from app.trading.guard import STOP_CONFIRM_CHECKS, Guard
 from app.trading.risk import halt_reason
 
 QTY = 3
@@ -57,9 +58,19 @@ def condor(env: Any) -> Any:
 
 
 def strangle(env: Any) -> Any:
-    """A credit with no cap on its loss: the guard's stops and time exit apply to it."""
+    """A credit with no cap on its loss, built by hand (no strategy sells one): the guard's stops and
+    time exit apply to it."""
     env.configure(max_spread_pct=100)
-    return env.desk.plan("BTC", "short_strangle")
+    quotes, spot = env.feed.quotes("BTC"), env.feed.spot("BTC")
+    legs = [otm_by_delta(quotes, kind, spot, 0.18) for kind in ("put", "call")]
+    return env.desk.plan("BTC", "custom", legs=[{"symbol": q.symbol, "side": "sell"} for q in legs])
+
+
+def straddle(env: Any) -> Any:
+    """The ATM call and put bought, by hand: a debit."""
+    env.configure(max_spread_pct=100)
+    call, put = atm(env.feed.quotes("BTC"), env.feed.spot("BTC"))
+    return env.desk.plan("BTC", "custom", legs=[{"symbol": put.symbol, "side": "buy"}, {"symbol": call.symbol, "side": "buy"}])
 
 
 async def cash(env: Any) -> float:
@@ -134,11 +145,10 @@ async def test_an_unknown_outcome_blocks_the_broker_until_resolved(env: Any) -> 
 async def test_gates_refuse_with_the_rule_named(env: Any) -> None:
     plan = condor(env)
     await env.trading.open("paper", plan, QTY, "auto", "req-gate-1")
-    with pytest.raises(Refused, match="max per underlying"):
+    with pytest.raises(Refused, match="one per underlying"):
         await env.trading.open("paper", plan, QTY, "auto", "req-gate-2")
-    # The caps pace the auto-trader only: a dashboard ticket opens beside its structure and takes no slot.
+    # The portfolio rules pace automatic entries only: a dashboard ticket opens beside them.
     assert (await env.trading.open("paper", plan, QTY, "manual", "req-gate-manual"))["status"] == "open"
-    env.configure(max_per_underlying=5)
     with pytest.raises(Refused, match="quantity"):
         await env.trading.open("paper", plan, 10_000, "manual", "req-gate-3")
     with pytest.raises(Refused, match="not an active broker"):
@@ -148,10 +158,26 @@ async def test_gates_refuse_with_the_rule_named(env: Any) -> None:
         await env.trading.open("paper", plan, QTY, "manual", "req-gate-5")
 
 
-async def test_auto_entries_respect_the_minimum_time_to_expiry(env: Any) -> None:
-    env.feed.load(hours=6)
-    with pytest.raises(Refused, match="minimum"):
-        await env.trading.open("paper", condor(env), QTY, "auto", "req-auto-near")
+async def test_no_entry_opens_inside_the_last_half_hour(env: Any) -> None:
+    """Which expiry an automatic entry takes is its strategy's (`expiry()`); the gate keeps the floor
+    under every entry, a click included."""
+    env.feed.load(hours=0.3)
+    plan = condor(env)
+    for source in ("auto", "manual"):
+        with pytest.raises(Refused, match="minimum"):
+            await env.trading.open("paper", plan, QTY, source, f"req-near-{source}")
+
+
+async def test_automatic_risk_is_capped_across_the_portfolio(env: Any) -> None:
+    """Heat: the worst cases of a broker's automatic positions stay under MAX_HEAT_PCT of equity."""
+    from app.trading.risk import MAX_HEAT_PCT
+
+    plan = condor(env)
+    one = await env.desk.assess(plan, 1)
+    too_many = int(1000 * MAX_HEAT_PCT / 100 / one["analysis"]["max_loss"]) + 2
+    with pytest.raises(Refused, match="open automatic risk"):
+        await env.trading.open("paper", plan, too_many, "auto", "req-heat-1")
+    assert (await env.trading.open("paper", plan, 1, "auto", "req-heat-2"))["status"] == "open"
 
 
 async def test_guard_takes_profit_and_stops_out(env: Any) -> None:
@@ -165,7 +191,7 @@ async def test_guard_takes_profit_and_stops_out(env: Any) -> None:
     env.feed.load()
     lose = await env.trading.open("paper", strangle(env), QTY, "manual", "req-sl-1")
     env.feed.scale_marks(4.0)  # the book blew out with the spot standing still
-    for _ in range(env.settings().stop_confirm_checks - 1):
+    for _ in range(STOP_CONFIRM_CHECKS - 1):
         await guard.check_structures()
         assert env.trading.structure(lose["id"])["status"] == "open"  # not yet: one wide ask is not a loss
     await guard.check_structures()
@@ -180,7 +206,7 @@ async def test_a_defined_risk_credit_is_held_to_settlement_through_noise(env: An
     guard = Guard(env.trading, env.settings, env.hub)
     view = await env.trading.open("paper", condor(env), QTY, "manual", "req-hold-1")
     env.feed.scale_marks(4.0)  # the book blows out: under the old stop this was closed after 3 checks
-    for _ in range(env.settings().stop_confirm_checks + 2):
+    for _ in range(STOP_CONFIRM_CHECKS + 2):
         await guard.check_structures()
     held = env.trading.structure(view["id"])
     assert held["status"] == "open" and held["mark_pnl"] is not None and held["mark_pnl"] < 0  # still valued
@@ -348,7 +374,7 @@ def _exit_fees(env: Any, view: dict[str, Any]) -> float:
 async def test_a_stop_that_clears_starts_its_count_again(env: Any) -> None:
     guard = Guard(env.trading, env.settings, env.hub)
     view = await env.trading.open("paper", condor(env), QTY, "manual", "req-sl-reset")
-    for _ in range(env.settings().stop_confirm_checks - 1):
+    for _ in range(STOP_CONFIRM_CHECKS - 1):
         env.feed.scale_marks(4.0)
         await guard.check_structures()
         env.feed.load()  # the spike passes before the stop is confirmed
@@ -399,26 +425,25 @@ async def test_an_open_structure_carries_its_greeks(env: Any) -> None:
 
 
 async def test_an_unbounded_sale_is_sized_on_a_stress_move_not_its_stop(env: Any) -> None:
-    from app.trading.autotrader import unit_risk
+    from app.options.assess import CREDIT_STOP_LOSS_PCT, unit_risk
 
-    env.configure(max_spread_pct=100)
-    a = await env.desk.assess(env.desk.plan("BTC", "short_strangle"), 1)
+    a = await env.desk.assess(strangle(env), 1)
     analysis = a["analysis"]
-    at_stop = abs(analysis["net_premium"]) * env.settings().credit_stop_loss_pct / 100
+    at_stop = abs(analysis["net_premium"]) * CREDIT_STOP_LOSS_PCT / 100
     assert analysis["max_loss"] is None and analysis["stress_loss"] > at_stop
-    assert unit_risk(a, env.settings()) == pytest.approx(analysis["stress_loss"] + analysis["round_trip_fees"])
+    assert unit_risk(a) == pytest.approx(analysis["stress_loss"] + analysis["round_trip_fees"])
     bounded = await env.desk.assess(condor(env), 1)
-    assert unit_risk(bounded, env.settings()) == pytest.approx(bounded["analysis"]["max_loss"] + bounded["analysis"]["round_trip_fees"])
+    assert unit_risk(bounded) == pytest.approx(bounded["analysis"]["max_loss"] + bounded["analysis"]["round_trip_fees"])
 
 
 async def test_real_money_refuses_a_structure_without_a_bounded_loss(env: Any) -> None:
     env.brokers["delta"] = Recording(env.paper)
     env.configure(max_spread_pct=100, paper_active=False, delta_active=True, delta_env="live")
     with pytest.raises(Refused, match="not on real money"):
-        await env.trading.gate("delta", env.desk.plan("BTC", "short_strangle"), 1, "manual")
+        await env.trading.gate("delta", strangle(env), 1, "manual")
     await env.trading.gate("delta", condor(env), 1, "manual")  # a defined-risk structure passes
     env.configure(delta_env="demo")
-    await env.trading.gate("delta", env.desk.plan("BTC", "short_strangle"), 1, "manual")  # demo is not money
+    await env.trading.gate("delta", strangle(env), 1, "manual")  # demo is not money
 
 
 async def test_the_valuation_splits_fees_paid_exit_fees_and_the_spread(env: Any) -> None:
@@ -431,15 +456,15 @@ async def test_the_valuation_splits_fees_paid_exit_fees_and_the_spread(env: Any)
 
 
 async def test_the_test_set_opens_one_of_each_family_side_by_side_on_paper(env: Any) -> None:
-    """Settings' "open test positions": an option structure, a zero-hero buy and a perpetual on each
-    underlying, all held at once; a second press finds every slot taken and opens nothing."""
+    """Settings' "open test positions": an option structure and a perpetual on each underlying, both
+    held at once; a second press finds every slot taken and opens nothing."""
     rows = await env.trading.open_test_set()
     btc = {r["kind"]: r for r in rows if r["underlying"] == "BTC"}
-    assert {k: r.get("status") for k, r in btc.items()} == {"options": "open", "zero-hero": "open", "perpetual": "open"}, rows
+    assert {k: r.get("status") for k, r in btc.items()} == {"options": "open", "perpetual": "open"}, rows
     assert all(r.get("refused") for r in rows if r["underlying"] == "ETH")  # no ETH market in the fixture: said, not forced
     with session() as s:
         held = s.exec(select(Structure).where(Structure.status == "open")).all()
-    assert len(held) == 3 and {st.broker for st in held} == {"paper"}
+    assert len(held) == 2 and {st.broker for st in held} == {"paper"}
 
     again = await env.trading.open_test_set()
     assert not [r for r in again if r.get("status") == "open"]
@@ -447,15 +472,13 @@ async def test_the_test_set_opens_one_of_each_family_side_by_side_on_paper(env: 
 
 
 async def test_each_side_is_judged_on_the_realised_volatility_least_kind_to_it(env: Any, monkeypatch: Any) -> None:
-    """A seller's edge is measured at the highest realised volatility, a buyer's at the lowest: with
-    the measures far apart, neither a long straddle nor a condor passes on the number that flatters it."""
-    env.configure(max_spread_pct=100, min_credit_width_pct=0, min_pop_pct=0)
+    """A seller's edge is measured at the highest realised volatility: a condor does not pass on the
+    quiet reading that flatters it."""
+    env.configure(max_spread_pct=100)
     monkeypatch.setattr(env.desk, "realised", lambda u: {"reference": 0.90, "floor": 0.05})
     edge = lambda a: next(c for c in a["checks"] if c["name"] == "edge at realised vol")["ok"]  # noqa: E731
-    assert not edge(await env.desk.assess(env.desk.plan("BTC", "long_straddle"), 1))  # bought at 5%, it does not pay
-    assert not edge(await env.desk.assess(env.desk.plan("BTC", "iron_condor"), 1))  # sold at 90%, neither does this
-    monkeypatch.setattr(env.desk, "realised", lambda u: {"reference": 0.05, "floor": 0.90})  # the numbers each would pick
-    assert edge(await env.desk.assess(env.desk.plan("BTC", "long_straddle"), 1))
+    assert not edge(await env.desk.assess(env.desk.plan("BTC", "iron_condor"), 1))  # sold at 90%, it does not pay
+    monkeypatch.setattr(env.desk, "realised", lambda u: {"reference": 0.05, "floor": 0.90})
     assert edge(await env.desk.assess(env.desk.plan("BTC", "iron_condor"), 1))
 
 
@@ -476,13 +499,13 @@ async def test_a_long_straddle_is_not_sold_into_a_pulled_book(env: Any) -> None:
     book is no price: the guard waits, and values it again when the quotes come back."""
     guard = Guard(env.trading, env.settings, env.hub)
     env.configure(max_spread_pct=100)
-    view = await env.trading.open("paper", env.desk.plan("BTC", "long_straddle"), QTY, "manual", "req-pulled-1")
+    view = await env.trading.open("paper", straddle(env), QTY, "manual", "req-pulled-1")
     spot = env.feed.spot("BTC")
     for leg in view["legs"]:
         q = env.feed.quote(leg["symbol"])
         env.feed.handle({"type": "v2/ticker", "symbol": leg["symbol"], "mark_price": str(q.mark), "spot_price": str(spot),
                          "quotes": {"best_bid": "0.01", "best_ask": str(q.mark * 4)}, "contract_value": q.contract_value})
-    for _ in range(env.settings().stop_confirm_checks + 2):
+    for _ in range(STOP_CONFIRM_CHECKS + 2):
         await guard.check_structures()
     held = env.trading.structure(view["id"])
     debit = -view["entry_cash"]
