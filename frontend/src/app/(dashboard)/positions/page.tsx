@@ -80,14 +80,14 @@ function AccountRow({
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
         <Stat
           label="Unrealised P&L"
-          value={open.length ? arrowSigned(c.net, 4) : "—"}
+          value={open.length ? arrowSigned(c.net) : "—"}
           valueClass={pnlClass(c.net)}
           hint={open.length ? "net, if closed now" : "no open position"}
         />
-        <Stat label="Gross move" value={open.length ? arrowSigned(c.gross, 4) : "—"} valueClass={pnlClass(c.gross)} hint="at the marks, before any fee" />
-        <Stat label="Charges paid" value={usd(c.paid, 4)} valueClass={c.paid ? "text-warn" : undefined} hint="entry fees on open positions" />
-        <Stat label="Exit charges" value={open.length ? usd(c.exit, 4) : "—"} valueClass={c.exit ? "text-warn" : undefined} hint="fees to close now (est.)" />
-        <Stat label="Spread cost" value={open.length ? usd(c.spread, 4) : "—"} valueClass={c.spread ? "text-warn" : undefined} hint="bid/ask against the marks" />
+        <Stat label="Gross move" value={open.length ? arrowSigned(c.gross) : "—"} valueClass={pnlClass(c.gross)} hint="at the marks, before any fee" />
+        <Stat label="Charges paid" value={usd(c.paid)} valueClass={c.paid ? "text-warn" : undefined} hint="entry fees on open positions" />
+        <Stat label="Exit charges" value={open.length ? usd(c.exit) : "—"} valueClass={c.exit ? "text-warn" : undefined} hint="fees to close now (est.)" />
+        <Stat label="Spread cost" value={open.length ? usd(c.spread) : "—"} valueClass={c.spread ? "text-warn" : undefined} hint="bid/ask against the marks" />
         <Stat label="Margin in use" value={usd(account.margin_used)} hint={usedPct === null ? undefined : `${usedPct.toFixed(1)}% · ${usd(account.available)} free`} />
       </div>
       <Card className="space-y-2 px-4 py-3">

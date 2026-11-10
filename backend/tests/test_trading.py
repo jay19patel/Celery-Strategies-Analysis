@@ -403,13 +403,12 @@ def test_sharpe_and_sortino_of_the_daily_pnl() -> None:
     assert ratios([1.0, 2.0])["sortino"] is None  # no losing day: no downside to divide by
 
 
-async def test_results_are_split_by_the_score_they_were_opened_on(env: Any) -> None:
+async def test_results_carry_the_overall_ratios_and_the_daily_series(env: Any) -> None:
     view = await env.trading.open("paper", condor(env), QTY, "manual", "req-stats-1")
     await env.trading.close(view["id"], "test")
     stats = env.trading.stats()
-    assert [g["score"] for g in stats["by_score"]] == ["manual"]
     assert {"sharpe", "sortino", "max_drawdown", "profit_factor"} <= set(stats["overall"])
-    assert {"sharpe", "max_drawdown"} <= set(stats["by_strategy"][0])  # the leaderboard ranks on them per strategy
+    assert len(stats["curve"]) == 1 and sum(stats["daily"].values()) == pytest.approx(stats["overall"]["pnl"], abs=1e-3)
 
 
 async def test_an_open_structure_carries_its_greeks(env: Any) -> None:

@@ -5,8 +5,8 @@ import { arrowSigned } from "@/lib/format";
 
 describe("arrowSigned", () => {
   it("says the sign with an arrow and a true minus, so colour is never the only cue", () => {
-    expect(arrowSigned(12.3)).toBe("▲ +12.30");
-    expect(arrowSigned(-4.1)).toBe("▼ −4.10");
+    expect(arrowSigned(12.3)).toBe("+12.30");
+    expect(arrowSigned(-4.1)).toBe("−4.10");
     expect(arrowSigned(0)).toBe("0.00");
     expect(arrowSigned(null)).toBe("—");
   });

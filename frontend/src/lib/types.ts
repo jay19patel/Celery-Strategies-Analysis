@@ -277,7 +277,7 @@ export interface OrderRecord {
   client_order_id: string;
   structure_id: string;
   broker: Broker;
-  purpose: "open" | "close" | "unwind" | "settle";
+  purpose: "open" | "close" | "unwind" | "settle" | "stop";
   symbol: string;
   side: Side;
   size: number;
@@ -297,6 +297,8 @@ export interface Structure {
   broker: Broker;
   underlying: string;
   strategy: string;
+  /** the strategy's `version` when it opened */
+  strategy_version?: number | null;
   label: string;
   source: "auto" | "manual";
   status: StructureStatus;
@@ -455,30 +457,10 @@ export interface Summary {
 export type EdgeVerdict = "unproven" | "positive" | "negative" | "unclear";
 
 /** a broker's equity at the start of a trading day */
-export interface EquityPoint {
-  broker: Broker;
-  day: string;
-  equity: number;
-}
-
 /** from what the rules said to what paid, in [since, until) */
-export interface Funnel {
-  since: number;
-  until: number;
-  signals: number;
-  passed: number;
-  orders: number;
-  filled: number;
-  profitable: number;
-}
-
 export interface Stats {
   overall: Summary & { max_drawdown: number; sharpe?: number | null; sortino?: number | null };
   /** auto trades by the regime score they were opened on ("60-69"), plus "manual" */
-  by_score?: (Summary & { score: string })[];
-  by_strategy: (Summary & { strategy: string })[];
-  by_source: (Summary & { source: string })[];
-  by_broker: (Summary & { broker: string })[];
   curve: { ts: number; pnl: number; trade: number; strategy: string; id: string }[];
   daily: Record<string, number>;
 }
@@ -629,16 +611,6 @@ export interface SettingsResponse {
   values: SettingsValues;
   limits: Record<string, { minimum?: number; maximum?: number }>;
   live_confirm_phrase: string;
-}
-
-export interface JournalMonth {
-  year: number;
-  month: number;
-  timezone: string;
-  days: Record<string, { pnl: number; trades: number; wins: number; decisions: number; opened: number }>;
-  pnl: number;
-  trades: number;
-  wins: number;
 }
 
 export interface JournalDay {

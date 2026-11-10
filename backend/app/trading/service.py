@@ -26,7 +26,7 @@ from sqlmodel import col, func, select
 from app.brokers.base import Broker, Fill, LegOrder
 from app.core.db import session
 from app.core.events import EventHub
-from app.core.models import Bar, Decision, Leg, OrderRecord, Structure
+from app.core.models import Bar, Leg, OrderRecord, Structure
 from app.errors import BrokerError, BrokerTimeout, NotFound, Refused
 from app.market.feed import MarketFeed
 from app.market.options import OPTION_SLIPPAGE, PERP_SLIPPAGE, PERPETUALS, UNDERLYING_OF
@@ -409,7 +409,7 @@ class TradingService:
     # -- open ----------------------------------------------------------------------------------
 
     async def open(
-        self, broker: str, plan: Plan, qty: int, source: str, request_id: str, decision_id: int | None = None,
+        self, broker: str, plan: Plan, qty: int, source: str, request_id: str, decision_id: int | None = None, reason: str = "",
     ) -> dict[str, Any]:
         sid = structure_id(broker, request_id)
         async with self.lock:
@@ -422,7 +422,7 @@ class TradingService:
                 id=sid, broker=broker, underlying=plan.underlying, strategy=plan.strategy, strategy_version=_version(plan.strategy),
                 source=source, status="opening",
                 expiry=plan.expiry, qty=qty, entry_spot=plan.spot, opened_at=time.time(), decision_id=decision_id,
-                request_id=request_id, margin=assessment["analysis"]["margin"],
+                request_id=request_id, margin=assessment["analysis"]["margin"], reason=reason[:500],
                 take_profit_pct=CREDIT_TAKE_PROFIT_PCT if credit else DEBIT_TAKE_PROFIT_PCT,
                 stop_loss_pct=CREDIT_STOP_LOSS_PCT if credit else DEBIT_STOP_LOSS_PCT,
             )
@@ -1083,18 +1083,6 @@ class TradingService:
             if broker:
                 q = q.where(Structure.broker == broker)
             rows = list(s.exec(q.order_by(Structure.closed_at)).all())
-            ids = {t.decision_id for t in rows if t.decision_id}
-            decisions = {d.id: d for d in s.exec(select(Decision).where(col(Decision.id).in_(ids))).all()} if ids else {}
-
-        def score_of(t: Structure) -> str:
-            """The regime score the auto-trader opened `t` on, in buckets of ten — so whether a higher
-            score earned more can be read off the results instead of trusted."""
-            d = decisions.get(t.decision_id) if t.decision_id else None
-            score = next((c.get("score") for c in (d.candidates or []) if c.get("strategy") == t.strategy), None) if d else None
-            if not isinstance(score, int | float):
-                return "manual" if t.source != "auto" else "unknown"
-            lo = min(int(score) // 10 * 10, 90)
-            return f"{lo}-{lo + 9}"
 
         def summary(trades: list[Structure]) -> dict[str, Any]:
             pnls = [t.pnl or 0.0 for t in trades]
@@ -1134,18 +1122,9 @@ class TradingService:
             day = trading_day(tz, t.closed_at)
             daily[day] = round(daily.get(day, 0.0) + (t.pnl or 0.0), 4)
 
-        def grouped(key: str, of: Any = None) -> list[dict[str, Any]]:
-            groups: dict[str, list[Structure]] = {}
-            for t in rows:
-                groups.setdefault(of(t) if of else getattr(t, key), []).append(t)
-            return sorted(({key: k} | summary(v) for k, v in groups.items()), key=lambda g: -g["pnl"])
-
+        # Cut by strategy, symbol, side or time on the Analysis page, from the trades themselves.
         return {
             "overall": summary(rows),
-            "by_score": sorted(grouped("score", score_of), key=lambda g: g["score"]),
-            "by_strategy": grouped("strategy"),
-            "by_source": grouped("source"),
-            "by_broker": grouped("broker"),
             "curve": curve,
             "daily": daily,
         }

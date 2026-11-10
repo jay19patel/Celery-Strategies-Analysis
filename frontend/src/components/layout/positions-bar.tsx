@@ -142,7 +142,7 @@ function PhoneBar() {
           <span className="block text-[15px] font-semibold leading-tight">
             {b.list.length} open trade{b.list.length === 1 ? "" : "s"}
           </span>
-          <span className="block truncate text-[12.5px] text-muted-foreground">
+          <span className="block text-[12.5px] leading-snug text-muted-foreground">
             Today <Today brokers={b.brokers} className="font-medium" />
             {b.unpriced > 0 && <span className="text-warn"> · {b.unpriced} unpriced</span>}
           </span>

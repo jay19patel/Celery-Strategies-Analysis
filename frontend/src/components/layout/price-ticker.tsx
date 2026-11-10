@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 
-import { Rolling } from "@/components/shared/rolling";
 import { num, price, signedPct } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import type { LivePrice } from "@/lib/types";
@@ -32,20 +31,21 @@ function Item({ symbol, p, dir, tick, stale }: { symbol: string; p: LivePrice; d
     <Link
       href="/market"
       tabIndex={-1}
-      className="inline-flex shrink-0 items-center gap-4 border-r border-separator px-5 text-[12.5px] transition-colors hover:bg-secondary/60"
+      className="inline-flex shrink-0 items-center gap-4 whitespace-nowrap border-r border-separator px-5 text-[12.5px] leading-none transition-colors hover:bg-secondary/60"
     >
       <span className="inline-flex items-center gap-2">
         <span className="font-semibold tracking-[0.01em]">{symbol}</span>
         <span className={cn("relative rounded-md px-1 font-semibold", stale && "text-muted-foreground")}>
           {dir && !stale && <span key={tick} aria-hidden className={cn("absolute inset-0 rounded-md", dir === "up" ? "ticker-flash-up" : "ticker-flash-down")} />}
-          <span className="relative">{p.spot === null || stale ? "—" : <Rolling text={price(p.spot)} />}</span>
+          {/* Plain digits: rolling digits inside a strip that is itself sliding read as overlapping text. */}
+          <span className="num relative">{p.spot === null || stale ? "—" : price(p.spot)}</span>
         </span>
         {stale ? (
           <span className="rounded-full bg-warn-soft px-1.5 text-[11px] font-semibold text-warn">stale</span>
         ) : (
           chg !== null && (
-            <span className={cn("num inline-flex items-center font-medium", up ? "text-profit" : "text-loss")}>
-              {up ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
+            <span className={cn("num inline-flex items-center gap-px font-medium", up ? "text-profit" : "text-loss")}>
+              {up ? <ArrowUpRight className="size-3" strokeWidth={2.5} /> : <ArrowDownRight className="size-3" strokeWidth={2.5} />}
               {signedPct(chg)}
             </span>
           )
@@ -104,7 +104,7 @@ export function PriceTicker() {
   useEffect(() => {
     const el = track.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setSeconds(Math.max(20, el.scrollWidth / 2 / 45)));
+    const ro = new ResizeObserver(() => setSeconds(Math.max(30, el.scrollWidth / 2 / 30))); // 30px a second: readable
     ro.observe(el);
     return () => ro.disconnect();
   }, [symbols.length]);

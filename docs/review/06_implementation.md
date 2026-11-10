@@ -120,3 +120,37 @@ backtest both ways.
 | mypy | the codebase has never been typed-checked; enabling it is its own clean-up |
 | Unused `export`s in the frontend | harmless; listed in `05_ui_review.md` |
 | Backup databases in `backend/data/` | your data: delete `tradebuddy.before-dummy.db` and `tradebuddy.pre-trend4h.db` yourself if unneeded |
+
+## 9. Dashboard round two (after review in the browser)
+
+Checked with a headless browser on every page at desktop and phone width, with a script that lists
+every element whose text is clipped. Result: no clipped text left (one intentional two-line clamp
+on System).
+
+- **Numbers no longer cut:** `Stat` sizes its figure to the card's own width (container query)
+  instead of truncating with "…"; labels and hints wrap. Summary money shows cents; per-trade tables
+  keep four decimals.
+- **Arrows:** the ▲/▼ characters are gone (the number font has no such glyph, so a much larger
+  fallback was drawn); P&L shows its sign and colour, with one small arrow icon in `Pnl`.
+- **Price strip:** plain digits (rolling digits inside a sliding strip read as overlapping text),
+  soft fades at both edges, slower, smaller arrows, and the header no longer sits on its border.
+- **Home is Performance, one page for results.** At the top a day: today by default, any day from
+  `?date=YYYY-MM-DD`, with previous/next; today adds the account move and what is open now. Below it
+  every closed trade cut by period, strategy, symbol and side: headline figures, P&L day by day, a
+  calendar heatmap, a weekday × hour heatmap, P&L by strategy, symbol and side (tap to filter), the
+  biggest losses. Then the trades table. The Overview, `/analysis` and `/journal/<date>` pages are gone.
+- **The Journal page is gone, folded into Performance.** Its month calendar is the "Day by day"
+  card: a cell per day coloured by what it made or lost, with the amount and trade count, month by
+  month; a tap opens the day at the top and nothing else on the page moves (the open day is outlined).
+  The weekday × hour heatmap became P&L by weekday and a column per hour of the day. Performance and
+  Positions sit under Portfolio in the sidebar. `/portfolio/journal` (the month) is removed;
+  `/portfolio/journal/day` takes a `broker`.
+- **One position detail everywhere** (`positions/position-detail.tsx`): from Positions, the trades
+  table, the day's closed trades and the biggest losses alike. Why it opened and closed, its numbers
+  (stop/target for a perpetual, premium and exits for options), every leg, every order with its fill,
+  fee and error, Greeks while open. An option structure now stores why the rules chose it
+  (`Structure.reason`, from the auto-trader).
+- **Removed as repeated or unused:** on Performance the duplicate figure rows, account details,
+  protection rules (they are settings), per-strategy table (now in the results breakdown), equity by day, signal
+  funnel, score and source tables; the Journal's paper-account tile; the components behind them,
+  the `/portfolio/funnel` and `/portfolio/equity` endpoints and the stats breakdowns nothing reads.

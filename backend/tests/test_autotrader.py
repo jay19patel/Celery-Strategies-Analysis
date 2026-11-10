@@ -62,6 +62,7 @@ async def test_rules_alone_open_the_best_candidate_sized_by_risk(env: Any) -> No
     [st] = opened()
     assert st.source == "auto" and st.strategy == d["strategy"] and st.decision_id == d["id"]
     assert st.strategy_version == registry.get(st.strategy).version  # type: ignore[union-attr]
+    assert st.reason.startswith("rules chose") and "score" in st.reason  # why it opened, kept on the position
     risk_budget = 1000 * env.settings().risk_per_trade_pct / 100
     assert st.max_loss <= risk_budget  # the worst case fits the risk budget
     assert d["orders"]["paper"]["qty"] == st.qty
@@ -158,17 +159,6 @@ async def test_a_scheduled_event_before_expiry_keeps_every_seller_out(env: Any) 
 
     auto = make(env, event_times=[])
     assert (await auto.decide("BTC", ["paper"]))["action"] == "open"  # no event, the same desk trades
-
-
-async def test_an_auto_trade_is_reported_under_the_score_it_was_opened_on(env: Any) -> None:
-    auto = make(env)
-    d = await auto.decide("BTC", ["paper"])
-    [st] = opened()
-    await env.trading.close(st.id, "test")
-    score = next(c["score"] for c in d["candidates"] if c["strategy"] == d["strategy"])
-    lo = min(score // 10 * 10, 90)
-    [bucket] = env.trading.stats()["by_score"]
-    assert bucket["score"] == f"{lo}-{lo + 9}" and bucket["trades"] == 1
 
 
 async def test_a_strategy_stopped_out_today_is_not_bought_again_on_that_underlying(env: Any) -> None:

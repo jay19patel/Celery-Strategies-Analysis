@@ -1,12 +1,13 @@
 "use client";
 
 import { type ReactNode, useState } from "react";
-import { Loader2, Pencil, X } from "lucide-react";
+import { ListTree, Loader2, Pencil, X } from "lucide-react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 
 import { openCosts } from "@/components/positions/derive";
 import { Confirm } from "@/components/shared/confirm";
+import { PositionDetail } from "@/components/positions/position-detail";
 import { Pnl, Premium } from "@/components/shared/money";
 import { Notice } from "@/components/shared/states";
 import { KV } from "@/components/shared/stat";
@@ -37,9 +38,9 @@ function cost(v: number | null): ReactNode {
 function Tile({ label, hint, className, children }: { label: string; hint: string; className?: string; children: ReactNode }) {
   return (
     <div className={cn("min-w-0 rounded-xl border px-3 py-2", className)}>
-      <div className="truncate text-[11.5px] text-muted-foreground">{label}</div>
-      <div className="mt-0.5 truncate text-[15px] font-semibold">{children}</div>
-      <div className="truncate text-[10.5px] text-muted-foreground">{hint}</div>
+      <div className="text-[11.5px] leading-snug text-muted-foreground">{label}</div>
+      <div className="mt-0.5 whitespace-nowrap text-[15px] font-semibold">{children}</div>
+      <div className="text-[10.5px] leading-snug text-muted-foreground">{hint}</div>
     </div>
   );
 }
@@ -150,6 +151,7 @@ export async function closeStructure(s: Structure): Promise<void> {
 
 export function StructureCard({ s }: { s: Structure }) {
   const [editing, setEditing] = useState(false);
+  const [details, setDetails] = useState(false);
   const pnl = s.live?.pnl ?? null;
   const costs = openCosts(s);
   // A position on the perpetual exits at its strategy's prices, not at a share of a premium: it has
@@ -170,8 +172,12 @@ export function StructureCard({ s }: { s: Structure }) {
           <Badge variant={s.broker === "delta" ? "primary" : "default"}>{s.broker}</Badge>
           <Badge variant={s.source === "auto" ? "primary" : "outline"}>{s.source}</Badge>
           {s.status !== "open" && <Badge variant={s.status === "error" ? "loss" : "warn"}>{s.status}</Badge>}
+          <Button variant="outline" size="xs" onClick={() => setDetails(true)}>
+            <ListTree /> Details &amp; orders
+          </Button>
         </div>
       </CardHeader>
+      <PositionDetail id={details ? s.id : null} onClose={() => setDetails(false)} />
       <CardContent className="space-y-4">
         {s.error && <Notice tone="loss">{s.error}</Notice>}
         {/* What closing now would book, and what it is made of. */}

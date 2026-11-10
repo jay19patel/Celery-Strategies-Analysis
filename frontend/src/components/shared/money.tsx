@@ -1,12 +1,19 @@
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+
 import { Rolling } from "@/components/shared/rolling";
 import { arrowSigned, pnlClass, usd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-/** A P&L figure: signed and coloured. */
+/** A P&L figure: signed, coloured, and a small arrow sized to the digits. */
 export function Pnl({ value, digits = 2, className }: { value: number | null | undefined; digits?: number; className?: string }) {
-  return <span className={cn("num font-semibold", pnlClass(value), className)}>
+  const v = value ?? 0;
+  const Arrow = v > 0 ? ArrowUpRight : v < 0 ? ArrowDownRight : null;
+  return (
+    <span className={cn("num inline-flex items-center gap-0.5 whitespace-nowrap font-semibold", pnlClass(value), className)}>
+      {Arrow && value != null && <Arrow aria-hidden className="size-[0.85em] shrink-0" strokeWidth={2.5} />}
       <Rolling text={arrowSigned(value, digits)} />
-    </span>;
+    </span>
+  );
 }
 
 /** Credit or debit, said in words rather than a sign. */

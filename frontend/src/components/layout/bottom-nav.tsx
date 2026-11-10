@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight, Gauge, Layers, LayoutGrid, LineChart, Sparkles } from "lucide-react";
+import { ChevronRight, Crosshair, Layers, LayoutGrid, LineChart, Sparkles } from "lucide-react";
 
 import { isActive, NAV } from "@/components/layout/nav";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -12,10 +12,10 @@ import type { Structure } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const PRIMARY_TABS = [
-  { href: "/", label: "Overview", icon: Gauge },
-  { href: "/desk", label: "Desk", icon: Sparkles },
+  { href: "/performance", label: "Today", icon: LineChart },
   { href: "/positions", label: "Positions", icon: Layers, badge: true },
-  { href: "/performance", label: "P&L", icon: LineChart },
+  { href: "/strategies", label: "Strategies", icon: Crosshair },
+  { href: "/desk", label: "Desk", icon: Sparkles },
 ];
 
 /** The phone's tab bar: the four pages used most, and every other page in a sheet that slides up. */

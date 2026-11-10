@@ -74,9 +74,10 @@ export function titleCase(s: string): string {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-/** A P&L with its sign said twice, so colour is never the only cue: "▲ +12.30", "▼ −4.10". */
+/** A P&L with its sign, so colour is never the only cue: "+12.30", "−4.10". No arrow glyph: the
+ *  number font has none, and the fallback one draws far larger than the digits. `Pnl` adds an icon. */
 export function arrowSigned(v: number | null | undefined, digits = 2): string {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
   if (v === 0) return usd(0, digits);
-  return `${v > 0 ? "▲ +" : "▼ −"}${usd(Math.abs(v), digits)}`;
+  return `${v > 0 ? "+" : "−"}${usd(Math.abs(v), digits)}`;
 }

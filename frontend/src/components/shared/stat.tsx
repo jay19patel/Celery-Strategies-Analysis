@@ -3,14 +3,21 @@ import type { ReactNode } from "react";
 import { Rolling } from "@/components/shared/rolling";
 import { cn } from "@/lib/utils";
 
+/** One figure in a card. The number is never cut: its size follows the card's own width (a container
+ *  query), so a long figure in a narrow column gets smaller instead of losing digits to "…". */
 export function Stat({ label, value, hint, className, valueClass }: { label: ReactNode; value: ReactNode; hint?: ReactNode; className?: string; valueClass?: string }) {
   return (
-    <div className={cn("min-w-0 rounded-2xl bg-card px-3.5 py-3", className)}>
-      <div className="truncate text-[12px] font-medium text-muted-foreground">{label}</div>
-      <div className={cn("num mt-1 truncate text-[19px] font-semibold leading-tight tracking-[-0.02em] sm:text-[21px]", valueClass)}>
+    <div className={cn("@container min-w-0 rounded-2xl bg-card px-3.5 py-3", className)}>
+      <div className="text-[12px] font-medium leading-snug text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          "num mt-1 whitespace-nowrap text-[15px] font-semibold leading-tight tracking-[-0.02em] @[150px]:text-[17px] @[190px]:text-[19px] @[240px]:text-[21px]",
+          valueClass,
+        )}
+      >
         {typeof value === "string" || typeof value === "number" ? <Rolling text={value} /> : value}
       </div>
-      {hint !== undefined && <div className="mt-0.5 truncate text-[11.5px] text-muted-foreground">{hint}</div>}
+      {hint !== undefined && <div className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">{hint}</div>}
     </div>
   );
 }

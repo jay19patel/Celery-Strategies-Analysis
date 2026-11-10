@@ -1,7 +1,6 @@
 // Numbers the old Account page had the server compute, derived here from closed structures.
 
-import { arrowSigned, titleCase } from "@/lib/format";
-import type { Stats, Structure } from "@/lib/types";
+import type { Structure } from "@/lib/types";
 
 /** The close reason without its numbers: "take profit: +0.21 reached ..." -> "Take profit". */
 export function reasonKind(reason: string): string {
@@ -76,56 +75,4 @@ export function dayStart(date: string, tz: string): number {
   );
   const asLocal = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
   return (guess - (asLocal - guess)) / 1000;
-}
-
-export interface Insight {
-  tone: "profit" | "loss" | "neutral";
-  title: string;
-  body: string;
-}
-
-const MIN_TRADES = 5;
-
-/** Up to three things worth knowing from the closed results, each from a plain rule. */
-export function buildInsights(stats: Stats): Insight[] {
-  const out: Insight[] = [];
-  const o = stats.overall;
-  if (!o.trades) return out;
-  const enough = stats.by_strategy.filter((g) => g.trades >= MIN_TRADES);
-  const best = enough.filter((g) => g.pnl > 0).sort((a, b) => b.pnl - a.pnl)[0];
-  if (best) {
-    out.push({
-      tone: "profit",
-      title: `${titleCase(best.strategy)} carries the book`,
-      body: `${arrowSigned(best.pnl)} over ${best.trades} trades${best.profit_factor ? `, profit factor ${best.profit_factor}` : ""}.`,
-    });
-  }
-  const leak = enough.filter((g) => g.pnl < 0).sort((a, b) => a.pnl - b.pnl)[0];
-  if (leak) {
-    out.push({
-      tone: "loss",
-      title: `${titleCase(leak.strategy)} is losing`,
-      body: `${arrowSigned(leak.pnl)} over ${leak.trades} trades at a ${Math.round(leak.win_rate ?? 0)}% win rate. Worth switching off until it is understood.`,
-    });
-  }
-  const gross = Math.abs(o.gross_pnl ?? 0);
-  if (gross > 0 && o.fees / gross >= 0.3) {
-    out.push({
-      tone: "loss",
-      title: "Fees eat the edge",
-      body: `Fees took ${Math.round((100 * o.fees) / gross)}% of the gross result. Fewer, larger trades or tighter books would keep more of it.`,
-    });
-  }
-  const scored = (stats.by_score ?? []).filter((g) => /^\d/.test(g.score) && g.trades >= MIN_TRADES && g.expectancy !== null);
-  if (scored.length >= 2) {
-    const lo = scored[0];
-    const hi = scored[scored.length - 1];
-    const better = (hi.expectancy ?? 0) > (lo.expectancy ?? 0);
-    out.push({
-      tone: better ? "profit" : "neutral",
-      title: better ? "Higher scores earn more" : "The score is not paying",
-      body: `Trades opened at ${hi.score} averaged ${arrowSigned(hi.expectancy)} against ${arrowSigned(lo.expectancy)} at ${lo.score}.`,
-    });
-  }
-  return out.slice(0, 3);
 }

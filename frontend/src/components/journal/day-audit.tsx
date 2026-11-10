@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, BarChart2, Ban, CheckCircle2, Clock, Cpu, ListChecks, Send, Sparkles } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Clock, Cpu, ListChecks, Send, Sparkles } from "lucide-react";
 
 import { dayStart, reasonKind } from "@/components/performance/derive";
+import { PositionDetail } from "@/components/positions/position-detail";
 import { Pnl } from "@/components/shared/money";
 import { Empty, LoadError, Loading } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { arrowSigned, pct, price, signed, time, titleCase, usd } from "@/lib/format";
@@ -105,12 +105,14 @@ function Count({ n }: { n: number }) {
   return <span className="num rounded bg-slate-100 px-1.5 text-[10.5px] text-slate-600">{n}</span>;
 }
 
-export function DayAudit({ date, onClose }: { date: string | null; onClose: () => void }) {
+/** Everything about one trading day: its P&L, every trade, order, decision and event. */
+export function DayView({ date, broker = "" }: { date: string; broker?: string }) {
+  const [detail, setDetail] = useState<string | null>(null);
   const [tab, setTab] = useState("overview");
-  const { data, error, isLoading } = useApi<JournalDay>(date ? `/portfolio/journal/day?date=${date}` : null);
+  const { data, error, isLoading } = useApi<JournalDay>(date ? `/portfolio/journal/day?date=${date}&broker=${broker}` : null);
   const start = data && date ? dayStart(date, data.timezone) : 0;
   // That day's orders only, asked of the server: any day, however long ago, however busy.
-  const { data: dayOrders } = useApi<OrderRecord[]>(start ? `/trading/orders?limit=2000&since=${start}&until=${start + 86_400}` : null);
+  const { data: dayOrders } = useApi<OrderRecord[]>(start ? `/trading/orders?limit=2000&broker=${broker}&since=${start}&until=${start + 86_400}` : null);
   const orders = [...(dayOrders ?? [])].sort((a, b) => a.created_at - b.created_at);
   const closed = (data?.structures ?? []).filter((s) => s.status === "closed" && s.closed_at && s.closed_at >= start && s.closed_at < start + 86_400);
   const decisions = data?.decisions ?? [];
@@ -133,20 +135,9 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
     }, {}),
   ).sort((a, b) => b.pnl - a.pnl);
   const maxAbs = Math.max(...byStrategy.map((g) => Math.abs(g.pnl)), 1e-9);
-  const human = date ? new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : "";
 
   return (
-    <Dialog open={!!date} onOpenChange={(o) => { if (!o) { onClose(); setTab("overview"); } }}>
-      <DialogContent className="max-w-5xl gap-0 bg-background p-0 sm:max-w-5xl sm:p-0">
-        <DialogHeader className="flex-row items-center gap-3 border-b border-separator bg-card px-4 py-4 pr-12 sm:px-6">
-          <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-blue-100 bg-accent text-primary">
-            <BarChart2 className="size-5" />
-          </div>
-          <div className="min-w-0">
-            <DialogTitle className="text-base sm:text-lg">Session audit — {human}</DialogTitle>
-            <DialogDescription>{date} · all times {data?.timezone ?? "…"}</DialogDescription>
-          </div>
-        </DialogHeader>
+    <div className="overflow-hidden rounded-2xl border border-separator bg-card">
         <LoadError error={error} className="m-4 sm:m-6" />
         {isLoading && !data && <Loading rows={6} className="p-4 sm:p-6" />}
         {data && story && (
@@ -170,7 +161,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
                 ))}
               </TabsList>
             </div>
-            <div className="max-h-[68vh] overflow-y-auto bg-slate-50/50 p-4 sm:p-6">
+            <div className="bg-slate-50/50 p-4 sm:p-6">
               <TabsContent value="overview" className="space-y-6">
                 <div className="grid grid-cols-2 gap-2.5 sm:gap-4 md:grid-cols-4">
                   <Kpi
@@ -380,7 +371,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
                       </TableHeader>
                       <TableBody>
                         {closed.map((s) => (
-                          <TableRow key={s.id}>
+                          <TableRow key={s.id} className="cursor-pointer" onClick={() => setDetail(s.id)}>
                             <TableCell className="num text-xs text-slate-400">{time(s.closed_at)}</TableCell>
                             <TableCell className="font-medium">{s.underlying} {s.expiry_label}</TableCell>
                             <TableCell>{s.label}</TableCell>
@@ -389,7 +380,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
                             <TableCell className="num text-right text-xs">{signed(s.entry_cash, 4)} · {signed(s.exit_cash, 4)}</TableCell>
                             <TableCell className="num text-right text-slate-400">{usd(s.fees, 4)}</TableCell>
                             <TableCell className="text-right"><Pnl value={s.pnl} /></TableCell>
-                            <TableCell className="max-w-64 truncate text-slate-500" title={s.close_reason}>{s.close_reason || "—"}</TableCell>
+                            <TableCell className="min-w-56 whitespace-normal text-slate-500">{s.close_reason || "—"}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -402,7 +393,7 @@ export function DayAudit({ date, onClose }: { date: string | null; onClose: () =
             </div>
           </Tabs>
         )}
-      </DialogContent>
-    </Dialog>
+      <PositionDetail id={detail} onClose={() => setDetail(null)} />
+    </div>
   );
 }

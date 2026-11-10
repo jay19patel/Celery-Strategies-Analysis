@@ -1,48 +1,64 @@
 "use client";
 
-import { useState } from "react";
+// The home page, one place for results: a day at the top (today, or the day opened from the calendar
+// or a chart: ?date=YYYY-MM-DD), then every closed trade cut any way, then the trades themselves.
+// Any trade, here or anywhere, opens the same detail.
+
+import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
-import { Filter, Gauge, LineChart, PieChart, RotateCcw, Trophy, Users, Wallet } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
-import { AccountSection } from "@/components/performance/account-section";
-import { buildInsights, duration } from "@/components/performance/derive";
-import { EquityByDay } from "@/components/performance/equity-by-day";
-import { EquityCurve } from "@/components/performance/equity-curve";
-import { ExitReasons } from "@/components/performance/exit-reasons";
-import { Insights } from "@/components/performance/insights";
-import { SignalFlow } from "@/components/performance/signal-flow";
-import { StrategySection } from "@/components/performance/strategy-section";
-import { SummaryTable } from "@/components/performance/summary-table";
+import { AnalysisSection } from "@/components/analysis/section";
+import { dayKey } from "@/components/performance/derive";
+import { DaySection } from "@/components/performance/today-section";
 import { TradesTable } from "@/components/performance/trades-table";
+import { PositionDetail } from "@/components/positions/position-detail";
 import { Confirm } from "@/components/shared/confirm";
-import { PageHeader, SectionLabel } from "@/components/shared/page";
-import { Stat } from "@/components/shared/stat";
+import { PageHeader } from "@/components/shared/page";
 import { Empty, LoadError, Loading } from "@/components/shared/states";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { arrowSigned, num, pct, pnlClass, usd } from "@/lib/format";
+import { pct, signedPct, titleCase, usd } from "@/lib/format";
 import { useApi } from "@/lib/live";
-import type { Accounts, Broker, EquityPoint, SettingsResponse, Stats, Structure } from "@/lib/types";
+import type { Accounts, Broker, SettingsResponse, Stats, StrategiesResponse, Structure } from "@/lib/types";
 
-export default function PerformancePage() {
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function Performance() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
   const [broker, setBroker] = useState<Broker>("paper");
   const [strategy, setStrategy] = useState("");
-  // Only booked results live here; they change when a trade closes. Live figures are on Positions.
+  const [detail, setDetail] = useState<string | null>(null);
   const accounts = useApi<Accounts>("/portfolio/accounts", { refreshInterval: 15_000 });
   const settings = useApi<SettingsResponse>("/settings");
+  const catalog = useApi<StrategiesResponse>("/strategies");
   const stats = useApi<Stats>(`/portfolio/stats?broker=${broker}`, { refreshInterval: 15_000 });
-  const equity = useApi<EquityPoint[]>(`/portfolio/equity?broker=${broker}`, { refreshInterval: 60_000 });
   const closed = useApi<Structure[]>(`/trading/structures?status=closed&broker=${broker}&limit=1000`, { refreshInterval: 15_000 });
 
-  const account = accounts.data?.accounts[broker];
-  const real = account && !("error" in account) ? account : undefined;
-  const start = broker === "paper" && real && typeof real.extra.starting_balance === "number" ? real.extra.starting_balance : 0;
-  const opened = real && typeof real.extra.created_at === "number" ? real.extra.created_at : null;
+  const tz = String(settings.data?.values.day_timezone ?? "Asia/Kolkata");
+  const today = dayKey(tz);
+  const asked = params.get("date") ?? "";
+  const date = DATE.test(asked) && asked <= today ? asked : today;
+  const openDay = (day: string) => {
+    router.replace(day === today ? pathname : `${pathname}?date=${day}`, { scroll: false });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const raw = accounts.data?.accounts[broker];
+  const account = raw && !("error" in raw) ? raw : undefined;
+  const start = broker === "paper" && account && typeof account.extra.starting_balance === "number" ? account.extra.starting_balance : 0;
   const o = stats.data?.overall;
-  const rows = closed.data ?? [];
+  const rows = useMemo(() => closed.data ?? [], [closed.data]);
+  const labels = useMemo(() => {
+    const out: Record<string, string> = Object.fromEntries((catalog.data?.strategies ?? []).map((s) => [s.name, s.label]));
+    for (const s of rows) out[s.strategy] ??= s.strategy === "custom" || s.strategy === "manual" ? `Hand-built (${s.strategy})` : titleCase(s.strategy);
+    return out;
+  }, [catalog.data, rows]);
 
   const reset = async () => {
     try {
@@ -59,7 +75,14 @@ export default function PerformancePage() {
     <>
       <PageHeader
         title="Performance"
-        description="Realised results only: what each broker's closed trades booked after every fee, and where it came from. Open positions, unrealised P&L and their charges are on Positions."
+        description={
+          o ? (
+            <>
+              {start ? <>Realised balance <b className="num text-foreground">{usd(start + o.pnl)}</b> ({signedPct((100 * o.pnl) / start)} on {usd(start, 0)}) · </> : null}
+              {o.trades} closed trades · max drawdown <b className="num text-foreground">{start ? pct((100 * o.max_drawdown) / start, 1) : usd(o.max_drawdown)}</b>
+            </>
+          ) : "A day at a time, then every closed trade after every fee."
+        }
         actions={
           <Tabs value={broker} onValueChange={(v) => { setBroker(v as Broker); setStrategy(""); }}>
             <TabsList>
@@ -70,155 +93,51 @@ export default function PerformancePage() {
         }
       />
 
-      <LoadError error={accounts.error} />
+      <LoadError error={accounts.error ?? (raw && "error" in raw ? raw.error : undefined)} />
       {!accounts.data ? (
-        <Loading rows={2} />
-      ) : !account ? (
+        <Loading rows={3} />
+      ) : !raw ? (
         <Empty title={`${broker === "paper" ? "Paper" : "Delta"} is not active`}>
           Switch it on in <Link href="/settings" className="text-primary hover:underline">Settings</Link>.
         </Empty>
       ) : (
-        <AccountSection
-          broker={broker}
-          account={account}
-          status={accounts.data.brokers.find((b) => b.name === broker)}
-          stats={stats.data}
-          settings={settings.data?.values}
-        />
+        <>
+          <DaySection broker={broker} date={date} today={today} tz={tz} accounts={accounts.data} onDay={openDay} />
+          <LoadError error={closed.error ?? stats.error} />
+          {closed.data && <AnalysisSection trades={rows} tz={tz} labels={labels} date={date} today={today} onDay={openDay} onOpen={(s) => setDetail(s.id)} />}
+          <div id="trades">
+            <TradesTable rows={rows} loading={closed.isLoading} strategy={strategy} onStrategy={setStrategy} onOpen={(s) => setDetail(s.id)} />
+          </div>
+        </>
       )}
 
-      <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
-        <p className="max-w-3xl text-xs leading-relaxed text-slate-500">
-          {broker === "paper"
-            ? "The paper broker fills each leg at the live bid or ask (the mark plus slippage only when that side is empty), charges the fee from Delta's product spec, and settles anything still open at expiry on the index. Configure it in "
-            : "Results of every structure closed on Delta. Configure the account in "}
-          <Link className="underline" href="/settings">Settings</Link>.
-        </p>
-        {broker === "paper" && (
+      {broker === "paper" && account && (
+        <div className="flex justify-end">
           <Confirm
             title="Reset the paper account?"
-            description="The whole paper trade history is deleted and the balance goes back to the starting balance from Settings. Refused while a paper structure is open."
+            description="The whole paper trade history is deleted and the balance goes back to the starting balance from Settings. Refused while a paper position is open."
             confirmLabel="Reset"
             destructive
             onConfirm={reset}
             trigger={(openDialog) => (
-              <Button variant="destructive-outline" size="sm" onClick={openDialog} className="self-start sm:self-auto">
+              <Button variant="ghost" size="sm" onClick={openDialog} className="text-muted-foreground">
                 <RotateCcw /> Reset paper account
               </Button>
             )}
           />
-        )}
-      </div>
-
-      <SectionLabel title="Closed trades" hint="booked results, after every fee; they change only when a trade closes" />
-      <LoadError error={stats.error} />
-      {!o ? (
-        <Loading rows={2} />
-      ) : (
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
-          <Stat
-            label="Gross P&L"
-            value={o.gross_pnl !== undefined ? arrowSigned(o.gross_pnl, 4) : arrowSigned(o.pnl + o.fees, 4)}
-            valueClass={pnlClass(o.gross_pnl !== undefined ? o.gross_pnl : o.pnl + o.fees)}
-            hint="before fees"
-          />
-          <Stat
-            label="Charges"
-            value={usd(o.fees, 4)}
-            valueClass={o.fees ? "text-warn" : undefined}
-            hint="broker & exchange, closed trades"
-          />
-          <Stat label="Net realised" value={arrowSigned(o.pnl, 4)} valueClass={pnlClass(o.pnl)} hint="after all fees" />
-          <Stat label="Trades" value={num(o.trades, 0)} hint={`${o.wins} won · ${o.losses} lost`} />
-          <Stat label="Win rate" value={pct(o.win_rate)} />
-          <Stat label="Profit factor" value={num(o.profit_factor)} valueClass={o.profit_factor !== null && o.profit_factor < 1 ? "text-loss" : undefined} />
-          <Stat label="Expectancy" value={arrowSigned(o.expectancy, 4)} valueClass={pnlClass(o.expectancy)} hint="per trade" />
-          <Stat label="Avg win" value={arrowSigned(o.avg_win, 4)} valueClass="text-profit" hint={o.avg_loss === null ? undefined : `avg loss ${arrowSigned(o.avg_loss, 4)}`} />
-          <Stat label="Best trade" value={arrowSigned(o.best, 4)} valueClass="text-profit" hint={`worst ${arrowSigned(o.worst, 4)}`} />
-          <Stat
-            label="Max drawdown"
-            value={start ? pct((100 * o.max_drawdown) / start, 2) : usd(o.max_drawdown, 4)}
-            valueClass={o.max_drawdown ? "text-loss" : undefined}
-            hint={o.avg_hold_hours === null ? undefined : `held ${duration(o.avg_hold_hours * 3600)} on avg`}
-          />
-          <Stat label="Sharpe" value={num(o.sharpe ?? null)} valueClass={o.sharpe != null && o.sharpe < 0 ? "text-loss" : undefined} hint="daily realised P&L, annualised" />
-          <Stat label="Sortino" value={num(o.sortino ?? null)} valueClass={o.sortino != null && o.sortino < 0 ? "text-loss" : undefined} hint="downside days only" />
         </div>
       )}
-      {stats.data && <Insights items={buildInsights(stats.data)} />}
 
-      <div className="grid gap-5 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
-          <CardHeader>
-            <CardTitle>
-              <LineChart className="size-4 text-slate-400" /> Equity curve <span className="text-xs font-normal text-muted-foreground">after every closed trade</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>{stats.data?.curve.length ? <EquityCurve curve={stats.data.curve} start={start} opened={opened} /> : <Empty title="No closed structures yet" />}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle><PieChart className="size-4 text-slate-400" /> Exit reasons</CardTitle>
-          </CardHeader>
-          <CardContent><ExitReasons rows={rows} /></CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              <Wallet className="size-4 text-slate-400" /> Equity by day <span className="text-xs font-normal text-muted-foreground">at each day&apos;s start, open positions included</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>{equity.data && equity.data.length > 1 ? <EquityByDay rows={equity.data} /> : <Empty title="Fewer than two trading days recorded yet" />}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle><Filter className="size-4 text-slate-400" /> Signal flow <span className="text-xs font-normal text-muted-foreground">from a signal to a profit</span></CardTitle>
-          </CardHeader>
-          <CardContent><SignalFlow broker={broker} /></CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            <Trophy className="size-4 text-slate-400" /> Performance by strategy
-            <span className="text-xs font-normal text-muted-foreground">best first · click a row to see its trades</span>
-          </CardTitle>
-        </CardHeader>
-        {stats.data?.by_strategy.length ? (
-          <StrategySection rows={stats.data.by_strategy} closed={rows} selected={strategy} onSelect={setStrategy} />
-        ) : (
-          <Empty title={`No closed ${broker} trades yet`} />
-        )}
-      </Card>
-
-      {!!stats.data?.by_score?.some((g) => g.score !== "manual") && (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              <Gauge className="size-4 text-slate-400" /> By regime score
-              <span className="text-xs font-normal text-muted-foreground">auto trades by the score they opened on — does a higher score earn more?</span>
-            </CardTitle>
-          </CardHeader>
-          <SummaryTable rows={stats.data.by_score} keyName="score" label="Score" />
-        </Card>
-      )}
-
-      {!!stats.data?.by_source.length && (
-        <Card>
-          <CardHeader>
-            <CardTitle><Users className="size-4 text-slate-400" /> Auto vs manual</CardTitle>
-          </CardHeader>
-          <SummaryTable rows={stats.data.by_source} keyName="source" label="Source" />
-        </Card>
-      )}
-
-      <div id="trades">
-        <TradesTable rows={rows} loading={closed.isLoading} strategy={strategy} onStrategy={setStrategy} />
-      </div>
+      <PositionDetail id={detail} onClose={() => setDetail(null)} />
     </>
+  );
+}
+
+export default function PerformancePage() {
+  // The selected day lives in the address (?date=), which a static page reads only in the browser.
+  return (
+    <Suspense fallback={<Loading rows={4} />}>
+      <Performance />
+    </Suspense>
   );
 }

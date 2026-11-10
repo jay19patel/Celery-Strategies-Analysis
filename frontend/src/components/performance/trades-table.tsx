@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { ChevronRight, History } from "lucide-react";
 
 import { duration, grossPnl, holdSeconds, reasonKind, returnPct, tally } from "@/components/performance/derive";
@@ -13,99 +13,22 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { arrowSigned, dateTime, num, pct, pnlClass, price, signed, titleCase, usd } from "@/lib/format";
-import { useApi } from "@/lib/live";
+import { arrowSigned, dateTime, num, pct, pnlClass, titleCase, usd } from "@/lib/format";
 import type { Structure } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Outcome = "" | "win" | "loss";
-const ORDER_TONE = { filled: "profit", failed: "loss", unknown: "warn", pending: "default" } as const;
 const ALL = "__all__";
 
-function Field({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
-  return (
-    <div className="min-w-0 break-words">
-      <div className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
-      <div className={cn("num text-[12px]", className)}>{children}</div>
-    </div>
-  );
-}
-
-/** The expanded row: every number of the trade, then its legs and every order sent for it. */
-function Detail({ s }: { s: Structure }) {
-  const { data } = useApi<Structure>(`/trading/structures/${s.id}`);
-  const legs = data?.legs ?? s.legs;
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7">
-        <Field label="Opened">{dateTime(s.opened_at)}</Field>
-        <Field label="Closed">{dateTime(s.closed_at)}</Field>
-        <Field label="Held">{duration(holdSeconds(s))}</Field>
-        <Field label="Premium in → out">{`${signed(s.entry_cash, 4)} → ${signed(s.exit_cash, 4)}`}</Field>
-        <Field label="Max loss (margin)">{s.max_loss === null ? "unlimited" : usd(s.max_loss, 4)} ({usd(s.margin, 4)})</Field>
-        <Field label="Spot in → out">{`${price(s.entry_spot)} → ${price(s.exit_spot)}`}</Field>
-        <Field label="Exit reason">{reasonKind(s.close_reason)}</Field>
-        <Field label="Gross P&L" className={pnlClass(grossPnl(s))}>{arrowSigned(grossPnl(s), 4)}</Field>
-        <Field label="Fees">{usd(s.fees, 4)}</Field>
-        <Field label="Net P&L" className={pnlClass(s.pnl)}>{arrowSigned(s.pnl, 4)}</Field>
-        <Field label="Return on margin" className={pnlClass(s.pnl)}>{returnPct(s) === null ? "—" : pct(returnPct(s), 2)}</Field>
-        <Field label="Take profit · stop">{`${s.take_profit_pct}% · ${s.stop_loss_pct}%`}</Field>
-        <Field label="Source">{s.source}{s.decision_id ? ` · decision #${s.decision_id}` : ""}</Field>
-      </div>
-      <p className="break-words text-[12px] text-slate-600">{s.close_reason}</p>
-      <div>
-        <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Legs</div>
-        <div className="overflow-x-auto">
-        <table className="w-full max-w-3xl text-[11.5px] [&_td]:whitespace-nowrap">
-          <tbody>
-            {legs.map((l) => (
-              <tr key={l.id} className="border-t border-slate-100">
-                <td className={cn("py-1 pr-3 font-semibold uppercase", l.side === "buy" ? "text-profit" : "text-loss")}>{l.side} {l.size}</td>
-                <td className="num pr-3">{l.symbol}</td>
-                <td className="num pr-3 text-right">{price(l.entry_price)} → {price(l.exit_price)}</td>
-                <td className="num text-right text-muted-foreground">fees {usd(l.entry_fee + l.exit_fee, 4)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        </div>
-      </div>
-      {!!data?.orders?.length && (
-        <div>
-          <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Leg orders</div>
-          <div className="overflow-x-auto">
-          <table className="w-full max-w-3xl text-[11.5px] [&_td]:whitespace-nowrap">
-            <tbody>
-              {data.orders.map((o) => (
-                <tr key={o.client_order_id} className="border-t border-slate-100">
-                  <td className="num py-1 pr-3 text-muted-foreground">{dateTime(o.created_at)}</td>
-                  <td className="pr-3">{o.purpose}</td>
-                  <td className={cn("pr-3 font-semibold uppercase", o.side === "buy" ? "text-profit" : "text-loss")}>{o.side} {o.filled_size || o.size}</td>
-                  <td className="num pr-3">{o.symbol}</td>
-                  <td className="num pr-3 text-right">@ {price(o.fill_price)}</td>
-                  <td className="pr-3"><Badge variant={ORDER_TONE[o.status]} title={o.error || undefined}>{o.status}</Badge></td>
-                  <td className="num text-muted-foreground">{o.client_order_id}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        </div>
-      )}
-      <div className="num break-all text-[11px] text-muted-foreground">structure {s.id}</div>
-    </div>
-  );
-}
-
-/** A closed trade on a phone: the row's numbers stacked, tapped open for the same detail. */
-function TradeCard({ s, expanded, onToggle }: { s: Structure; expanded: boolean; onToggle: () => void }) {
+/** A closed trade on a phone: the row's numbers stacked; a tap opens its detail. */
+function TradeCard({ s, onOpen }: { s: Structure; onOpen: () => void }) {
   const ret = returnPct(s);
   return (
-    <div className={cn("transition-colors", expanded && "bg-slate-50/70")}>
-      <button type="button" onClick={onToggle} className="block w-full px-4 py-3 text-left active:bg-slate-50" aria-expanded={expanded}>
+    <div>
+      <button type="button" onClick={onOpen} className="block w-full px-4 py-3 text-left active:bg-slate-50">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="truncate text-[13.5px] font-semibold text-slate-900">{s.label}</div>
+            <div className="text-[13.5px] font-semibold leading-snug text-slate-900">{s.label}</div>
             <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11.5px] text-muted-foreground">
               <span className="font-medium text-slate-700">{s.underlying}</span> {s.expiry_label}
               <Badge variant="primary">{s.broker}</Badge>
@@ -123,28 +46,30 @@ function TradeCard({ s, expanded, onToggle }: { s: Structure; expanded: boolean;
           <div className="min-w-0"><div className="text-muted-foreground">Fees</div><span className="num">{usd(s.fees, 4)}</span></div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-          <span className="num truncate">{dateTime(s.closed_at)} · {s.qty} lot{s.qty === 1 ? "" : "s"} · {duration(holdSeconds(s))}</span>
+          <span className="num leading-snug">{dateTime(s.closed_at)} · {s.qty} lot{s.qty === 1 ? "" : "s"} · {duration(holdSeconds(s))}</span>
           <span className="flex shrink-0 items-center gap-1">
             <Badge title={s.close_reason}>{reasonKind(s.close_reason)}</Badge>
-            <ChevronRight className={cn("size-3.5 text-slate-400 transition-transform duration-200", expanded && "rotate-90")} />
+            <ChevronRight className="size-3.5 text-slate-400" />
           </span>
         </div>
       </button>
-      {expanded && (
-        <div className="animate-in fade-in duration-150 border-t border-slate-100 px-4 py-3">
-          <Detail s={s} />
-        </div>
-      )}
     </div>
   );
 }
 
-export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Structure[]; loading: boolean; strategy: string; onStrategy: (s: string) => void }) {
+export function TradesTable({
+  rows, loading, strategy, onStrategy, onOpen,
+}: {
+  rows: Structure[];
+  loading: boolean;
+  strategy: string;
+  onStrategy: (s: string) => void;
+  onOpen: (s: Structure) => void;
+}) {
   const [outcome, setOutcome] = useState<Outcome>("");
   const [q, setQ] = useState("");
   const [per, setPer] = useState(10);
   const [page, setPage] = useState(1);
-  const [open, setOpen] = useState<Set<string>>(new Set());
 
   const strategies = useMemo(() => [...new Set(rows.map((r) => r.strategy))].sort(), [rows]);
   const filtered = useMemo(() => {
@@ -162,13 +87,6 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
   const sum = tally(filtered);
   const filtering = !!(strategy || outcome || q);
 
-  const toggle = (id: string) =>
-    setOpen((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   const go = (p: number) => setPage(Math.min(pages, Math.max(1, p)));
   const nums: number[] = [];
   for (let p = Math.max(1, current - 2); p <= Math.min(pages, current + 2); p++) nums.push(p);
@@ -230,7 +148,7 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
         <>
         <div className="divide-y divide-slate-100 md:hidden">
           {shown.map((s) => (
-            <TradeCard key={s.id} s={s} expanded={open.has(s.id)} onToggle={() => toggle(s.id)} />
+            <TradeCard key={s.id} s={s} onOpen={() => onOpen(s)} />
           ))}
         </div>
         <Table className="hidden md:table">
@@ -253,16 +171,14 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
           </TableHeader>
           <TableBody>
             {shown.map((s) => {
-              const expanded = open.has(s.id);
               const ret = returnPct(s);
               return (
-                <Fragment key={s.id}>
-                  <TableRow className="cursor-pointer" onClick={() => toggle(s.id)}>
+                  <TableRow key={s.id} className="cursor-pointer" onClick={() => onOpen(s)}>
                     <TableCell className="pr-0">
-                      <ChevronRight className={cn("size-3.5 text-slate-400 transition-transform", expanded && "rotate-90")} />
+                      <ChevronRight className="size-3.5 text-slate-400" />
                     </TableCell>
                     <TableCell className="num text-[11.5px] text-slate-500">{dateTime(s.closed_at)}</TableCell>
-                    <TableCell className="max-w-56 truncate font-medium" title={s.label}>{s.label}</TableCell>
+                    <TableCell className="min-w-44 max-w-64 whitespace-normal font-medium leading-snug">{s.label}</TableCell>
                     <TableCell>
                       <span className="font-medium">{s.underlying}</span> <span className="text-muted-foreground">{s.expiry_label}</span>
                     </TableCell>
@@ -281,15 +197,6 @@ export function TradesTable({ rows, loading, strategy, onStrategy }: { rows: Str
                     <TableCell className="text-muted-foreground">{duration(holdSeconds(s))}</TableCell>
                     <TableCell><Badge title={s.close_reason}>{reasonKind(s.close_reason)}</Badge></TableCell>
                   </TableRow>
-                  {expanded && (
-                    <TableRow className="bg-slate-50/70 hover:bg-slate-50/70">
-                      <TableCell />
-                      <TableCell colSpan={12} className="whitespace-normal py-3">
-                        <Detail s={s} />
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </Fragment>
               );
             })}
           </TableBody>
