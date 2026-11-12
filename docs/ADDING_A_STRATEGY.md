@@ -21,8 +21,10 @@ Then, in the new file:
 3. Write `decide(ctx)`: closed bars in, a `Decision` out. Pure: no clock, network, database or
    orders. Return `none("why")` when it does nothing. When it trades, the stop is where the idea is
    wrong and the target a price beyond the entry.
-4. Ask for more than bars only through the flags `wants_outlook`, `wants_structure`, `wants_flow`
-   and `wants_bias`. A strategy that uses them cannot be backtested yet.
+4. Ask for more than bars only through the flags `wants_structure`, `wants_flow` and `wants_bias`.
+   A strategy that uses them cannot be backtested yet.
+5. A strategy held for days sets `trails = False`: the guard's trailing stop (from +1R, 1R behind)
+   gave back most of a 4h trend's edge in backtests. Its stop then stays where `decide()` set it.
 
 ## An option structure
 

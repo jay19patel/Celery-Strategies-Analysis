@@ -4,7 +4,8 @@ A position on the perpetual leaves when the mark reaches its strategy's stop or 
 its strategy's hold time. On an exchange that holds stops, the stop is also left there at entry; when
 that one fills first, the close books its fill. Per options structure, strongest reason first:
   1. past expiry and still open  -> settle at intrinsic on the index
-  2. inside `exit_before_expiry_minutes` -> close (settlement and pin risk are not worth the last hour)
+  2. inside `exit_before_expiry_minutes` -> close (settlement and pin risk are not worth the last hour);
+     a bought structure with a bounded loss has no pin risk and settles at intrinsic instead
   3. P&L at the take-profit or the stop-loss -> close. A stop must hold `STOP_CONFIRM_CHECKS` checks
      in a row: a thin wing's ask can jump for a few seconds with the underlying standing still, and
      that is the book's spread, not the trade's loss. On a credit structure whose expiry payoff at
@@ -115,7 +116,8 @@ class Guard:
         # wide ask to buy back on noise: a 1x-credit stop cut win rates from about 80% to 14-50% and
         # turned bull puts and condors that settled +2.5% to +5.5% into losses. A manual close still works.
         settle = held_to_settlement(st)
-        floor = 0 if settle else s.exit_before_expiry_minutes
+        bought = st.entry_cash < 0 and st.max_loss is not None  # a long option: settles at intrinsic, nothing to pin
+        floor = 0 if settle or bought else s.exit_before_expiry_minutes
         if floor and minutes_left <= floor:
             return f"time exit: {minutes_left:.0f} min to expiry"
         value = self.trading.valuation(st, legs)

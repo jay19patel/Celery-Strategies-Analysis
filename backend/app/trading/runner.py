@@ -132,7 +132,6 @@ class StrategyRunner:
         return Context(
             symbol=symbol, underlying=underlying, interval=strategy.interval,
             candles=candles(bars[-strategy.lookback:]),
-            outlook=await self.market.outlook(underlying) if strategy.wants_outlook else {},
             structure=await self.market.structure(underlying) if strategy.wants_structure else {},
             flow=await self.market.flow(underlying, FLOW_MINUTES) if strategy.wants_flow else {},
             bias=await self.market.bias(underlying) if strategy.wants_bias else {},

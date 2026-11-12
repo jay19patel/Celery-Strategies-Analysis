@@ -9,6 +9,7 @@ from app.strategies.base import Context, Decision, Strategy, bracket, none
 
 class ExhaustionFade(Strategy):
     name = "exhaustion_fade"
+    version = 2  # v2: a stop inside the costs is refused
     label = "Exhaustion fade"
     summary = "A climax at one of the day's levels that could not hold: fade it back to the point of control."
     stop_rule = f"past the climax extreme, plus {STOP_BUFFER_ATR:g} ATR"

@@ -44,7 +44,11 @@ def any_score(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def make(env: Any, only: list[str] | None = None, **settings: Any) -> AutoTrader:
     names = only or [n for n in registry.names("options") if registry.option(n).default_on]  # type: ignore[union-attr]
-    strategies = {n: StrategyConfig(enabled=n in names, params=OPEN_GATE if n != "expiry_decay" else {}) for n in registry.names("options")}
+    def gate(n: str) -> dict[str, Any]:  # the seller's gate, opened, on every strategy whose Params have it
+        fields = registry.option(n).Params.model_fields  # type: ignore[union-attr]
+        return {k: v for k, v in OPEN_GATE.items() if k in fields}
+
+    strategies = {n: StrategyConfig(enabled=n in names, params=gate(n)) for n in registry.names("options")}
     env.configure(max_spread_pct=100, strategies=strategies, **settings)
     return AutoTrader(env.desk, env.trading, env.settings, env.hub)
 

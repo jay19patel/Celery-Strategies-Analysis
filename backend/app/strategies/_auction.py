@@ -1,7 +1,7 @@
 """Shared by the four auction strategies (value, tape, gamma). Not a strategy (leading "_").
 
 Each one says why it did nothing, sets its stop where its idea stops being true, and refuses a
-trade whose reward after the round trip is under `min_rr` times the risk. None is known to have an
+trade whose stop sits inside the costs or whose reward after the round trip is under `min_rr` times the risk. None is known to have an
 edge yet: the tape is recorded from the day it was switched on, and these are measured on paper
 before anything else is said about them.
 """
@@ -13,11 +13,12 @@ from typing import Any
 from pydantic import Field
 
 from app.market.indicators import atr
-from app.strategies.base import Context, Decision, Params, net_rr, none
+from app.strategies.base import Context, Decision, Params, min_stop_pct, net_rr, none
 
 NEAR_PCT = 0.3  # how close to a level an event counts as "at" it
 STOP_BUFFER_ATR = 0.25
 FRESH_BARS = 2  # a flow event older than this many bars is history, not a signal
+MIN_STOP_PCT = 0.15  # a stop closer than this, or than 3 round trips, is inside the noise and the fees
 
 
 class AuctionParams(Params):
@@ -34,6 +35,9 @@ def trade(ctx: Context, side: int, stop: float, target: float, why: str, min_rr:
     entry = ctx.candles[-1].close
     if (side > 0 and not stop < entry < target) or (side < 0 and not target < entry < stop):
         return none(f"{why}, but the target is not past the entry")
+    stop_pct, floor = 100 * abs(entry - stop) / entry, min_stop_pct(ctx.cost_pct, MIN_STOP_PCT)
+    if stop_pct < floor:
+        return none(f"{why}, but the stop is only {stop_pct:.2f}% away, inside the {floor:.2f}% the costs need")
     rr = net_rr(100 * abs(target - entry) / entry, 100 * abs(entry - stop) / entry, ctx.cost_pct)
     if rr < min_rr:
         return none(f"{why}, but {rr:.2f}:1 after costs is under {min_rr:g}:1")

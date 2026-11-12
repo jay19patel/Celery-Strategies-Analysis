@@ -71,12 +71,12 @@ def test_a_strategys_params_are_validated_by_the_strategy_and_only_changes_are_k
 
 
 def test_a_strategy_runs_on_an_underlying_only_when_both_switches_are_on() -> None:
-    s = Settings(underlyings=["BTC", "ETH"], strategies={"ema_vwap": StrategyConfig(enabled=True, underlyings=["ETH"])})
-    assert s.strategy_on("ema_vwap", "ETH") and not s.strategy_on("ema_vwap", "BTC")
-    off = s.model_copy(update={"strategies": {"ema_vwap": StrategyConfig(enabled=False, underlyings=["ETH"])}})
-    assert not off.strategy_on("ema_vwap", "ETH")  # the strategy switch wins over its symbols
+    s = Settings(underlyings=["BTC", "ETH"], strategies={"flow_breakout": StrategyConfig(enabled=True, underlyings=["ETH"])})
+    assert s.strategy_on("flow_breakout", "ETH") and not s.strategy_on("flow_breakout", "BTC")
+    off = s.model_copy(update={"strategies": {"flow_breakout": StrategyConfig(enabled=False, underlyings=["ETH"])}})
+    assert not off.strategy_on("flow_breakout", "ETH")  # the strategy switch wins over its symbols
     with pytest.raises(SettingsError, match="strategies"):
-        apply_changes(s, {"strategies": {"ema_vwap": {"underlyings": ["DOGE"]}}})
+        apply_changes(s, {"strategies": {"flow_breakout": {"underlyings": ["DOGE"]}}})
 
 
 def test_delta_takes_a_strategy_only_when_the_strategy_is_switched_to_live() -> None:
@@ -106,7 +106,7 @@ def test_the_old_global_strategy_settings_become_per_strategy_configs() -> None:
     assert s.config("trend_4h_short").enabled and s.config("trend_4h_short").underlyings == ["ETH"]
     assert s.config("iron_condor").enabled and s.config("iron_condor").params == {"min_credit_width_pct": 10.0, "short_delta": 0.2}
     assert s.config("iron_butterfly").params == {"min_credit_width_pct": 10.0}  # it has no short_delta to take
-    assert not s.config("ema_vwap").enabled  # it was off before
+    assert not s.config("flow_breakout").enabled  # it was off before
     assert s.config("expiry_decay").enabled  # it rode on the zero-hero switch
     assert s.risk_per_trade_pct == 2.0  # the owner's own number is kept
 

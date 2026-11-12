@@ -65,7 +65,7 @@ async def test_outside_its_window_the_decay_spread_says_so(env: Any) -> None:
         n: StrategyConfig(enabled=False) for n in ("iron_condor", "iron_butterfly", "bull_put_spread", "bear_call_spread")
     })
     d = await AutoTrader(env.desk, env.trading, env.settings, env.hub).decide("BTC", ["paper"])  # the fixture is ~17h out
-    assert d["action"] == "skip" and "no expiry 2h to 4h away" in d["reason"]
+    assert d["action"] == "skip" and "no expiry 1h to 8h away" in d["reason"]
 
 
 def test_the_guard_holds_a_decay_spread_to_settlement(env: Any) -> None:

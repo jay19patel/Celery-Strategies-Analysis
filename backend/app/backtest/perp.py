@@ -7,7 +7,7 @@ runner trades, bar by bar, with nothing from the future.
              both is a stop (the order inside a bar is unknown, so the worse one is assumed); a bar
              that opens past the stop fills at its open. Or the open after `max_hold_hours`.
     TRAIL    the live trailing stop (`trading.service.TRAIL_*`): from 1R in profit the stop is at
-             least break-even and follows the best price 1R behind, in 0.25R steps. Moved only at a
+             least break-even after costs and follows the best price 1R behind, in 0.25R steps. Moved only at a
              bar's close, from that bar's extreme — the guard moves it every five seconds, so this is
              the slower, more conservative version of the same rule.
     COSTS    `cost_pct` per round trip (fees both ways and the spread), `stop_slippage_pct` on every
@@ -53,11 +53,12 @@ class Trade:
         return self.pnl_pct / self.risk_pct if self.risk_pct > 0 else 0.0
 
 
-def trailed(side: int, entry: float, risk: float, stop: float, best: float) -> float:
+def trailed(side: int, entry: float, risk: float, stop: float, best: float, cost_pct: float = 0.0) -> float:
     """The stop after the price has reached `best`: the live rule, never loosened."""
     if risk <= 0 or (best - entry) * side < TRAIL_START_R * risk:
         return stop
-    wanted = max(best - TRAIL_DISTANCE_R * risk, entry) if side > 0 else min(best + TRAIL_DISTANCE_R * risk, entry)
+    even = entry * (1 + side * cost_pct / 100)  # break-even after the round trip
+    wanted = max(best - TRAIL_DISTANCE_R * risk, even) if side > 0 else min(best + TRAIL_DISTANCE_R * risk, even)
     return wanted if (wanted - stop) * side >= TRAIL_STEP_R * risk else stop
 
 
@@ -97,7 +98,8 @@ def simulate(
             if exit_price is not None:
                 break
             best = max(best, bar["high"]) if side > 0 else min(best, bar["low"])
-            stop = trailed(side, entry, risk, stop, best)
+            if strategy.trails:
+                stop = trailed(side, entry, risk, stop, best, cost_pct)
             j += 1
         if exit_price is None:
             if last + 1 >= len(bars):
@@ -204,7 +206,7 @@ def main() -> None:
 
     strategy = registry.make(args.strategy, args.params)
     assert isinstance(strategy, Strategy)
-    if strategy.wants_outlook or strategy.wants_structure or strategy.wants_flow or strategy.wants_bias:
+    if strategy.wants_structure or strategy.wants_flow or strategy.wants_bias:
         parser.error(f"{args.strategy} reads the market desk, the options history, the tape or the day's bias, which this backtest does not replay")
     init_db(get_config().db_path)
     bars = stored_bars(args.underlying, strategy.interval)

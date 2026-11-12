@@ -12,7 +12,7 @@ from app.strategies.iron_condor import IronCondor
 from tests.conftest import load_quotes
 
 SPOT = 80_331.1
-STRIKE_RULES = [n for n in registry.names("options") if n != "expiry_decay"]  # the decay spread scans, see test_decay
+STRIKE_RULES = [n for n in registry.names("options") if n not in ("expiry_decay", "long_option", "expiry_hero")]  # these build from the context: test_decay, test_option_buyers
 
 
 def build(key: str, quotes: list, spot: float = SPOT) -> Plan | None:

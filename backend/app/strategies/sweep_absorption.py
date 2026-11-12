@@ -9,6 +9,7 @@ from app.strategies.base import Context, Decision, Strategy, bracket, next_level
 
 class SweepAbsorption(Strategy):
     name = "sweep_absorption"
+    version = 2  # v2: a stop inside the costs is refused
     label = "Sweep + absorption"
     summary = "A liquidity pool was swept and the tape shows the aggressors absorbed right there: trade the reversal."
     stop_rule = "past the sweep's extreme, plus 0.25 ATR"

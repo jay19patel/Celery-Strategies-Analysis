@@ -22,8 +22,8 @@ SCORE = 60
 
 
 class DecayParams(Params):
-    window_start_hours: float = Field(4.0, ge=0.5, le=12, description="Start selling this long before expiry")
-    window_end_hours: float = Field(2.0, ge=0.25, le=11, description="Stop selling this long before expiry")
+    window_start_hours: float = Field(8.0, ge=0.5, le=12, description="Start selling this long before expiry")
+    window_end_hours: float = Field(1.0, ge=0.25, le=11, description="Stop selling this long before expiry")
 
     @model_validator(mode="after")
     def _window(self) -> DecayParams:

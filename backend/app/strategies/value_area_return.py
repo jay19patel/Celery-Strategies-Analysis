@@ -10,6 +10,7 @@ from app.strategies.base import Context, Decision, Strategy, none
 
 class ValueAreaReturn(Strategy):
     name = "value_area_return"
+    version = 2  # v2: a stop inside the costs is refused
     label = "Value area return (80%)"
     summary = "Opened outside yesterday's value, two 15m closes back inside: trade to the other edge."
     stop_rule = "beyond the two re-entry bars' extreme, plus 0.25 ATR"

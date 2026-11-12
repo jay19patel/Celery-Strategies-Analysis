@@ -71,3 +71,14 @@ def test_each_says_why_it_waits_without_a_tape_or_a_bias() -> None:
     c = bars([100.0] * 30)
     assert "tape" in (SweepAbsorption().decide(ctx(c, flow={"ready": False, "note": "needs 21 bars of 5m tape"})).reason)
     assert ValueAreaReturn().decide(ctx(c, bias={"ready": False, "note": "needs yesterday"})).reason == "needs yesterday"
+
+
+def test_a_stop_inside_the_costs_is_refused() -> None:
+    """11 Nov: a flow breakout short with its stop 0.07% away, under one round trip of fees, stopped in seconds."""
+    from app.strategies._auction import trade
+
+    c = bars([73_400.0] * 29 + [73_344.5])
+    tight = trade(Context("BTCUSD", "BTC", "5m", c, cost_pct=0.13), -1, 73_394.5, 71_600.0, "broke down", 1.5)
+    assert tight.side is None and "inside the 0.39%" in tight.reason
+    wide = trade(Context("BTCUSD", "BTC", "5m", c, cost_pct=0.13), -1, 73_700.0, 71_600.0, "broke down", 1.5)
+    assert wide.side == "sell"

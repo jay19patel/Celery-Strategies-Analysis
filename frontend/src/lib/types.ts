@@ -35,7 +35,7 @@ export interface StrategyInfo {
   label: string;
   summary: string;
   // options
-  view?: "neutral" | "bullish" | "bearish" | "volatile";
+  view?: "neutral" | "bullish" | "bearish" | "volatile" | "directional";
   premium?: "credit" | "debit";
   risk?: "defined" | "undefined";
   required_checks?: string[];

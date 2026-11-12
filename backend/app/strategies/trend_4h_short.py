@@ -45,6 +45,7 @@ class Trend4hShort(Strategy):
     interval = "4h"
     lookback = 600
     default_on = True
+    trails = False  # backtested 2019-2026: the 1R trail gave back most of its edge
     Params = TrendParams
 
     def decide(self, ctx: Context) -> Decision:

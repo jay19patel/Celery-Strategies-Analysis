@@ -47,7 +47,6 @@ class Context:
     underlying: str  # BTC
     interval: str
     candles: list[Candle]  # closed bars of `interval`, oldest first; the last one just closed
-    outlook: dict[str, Any] = field(default_factory=dict)  # when the strategy wants_outlook
     structure: dict[str, Any] = field(default_factory=dict)  # when it wants_structure
     flow: dict[str, Any] = field(default_factory=dict)  # the tape's reading (`analysis.flow`), when it wants_flow
     bias: dict[str, Any] = field(default_factory=dict)  # the day's bias (`analysis.bias`), when it wants_bias
@@ -90,17 +89,6 @@ def min_stop_pct(cost_pct: float, floor: float, multiple: float = 3.0) -> float:
     return max(floor, multiple * max(0.0, cost_pct))
 
 
-def way(view: dict[str, Any], interval: str) -> int:
-    """+1, -1 or 0 for one timeframe's read in the engine's outlook."""
-    for row in view.get("summary") or []:
-        if str(row.get("interval")) == interval:
-            return int(row.get("direction") or 0)
-    for frame in view.get("timeframes") or []:
-        if str(frame.get("interval")) == interval:
-            return {"bullish": 1, "bearish": -1}.get(str((frame.get("structure") or {}).get("bias")), 0)
-    return 0
-
-
 def next_level(structure: dict[str, Any], side: int, price: float) -> tuple[float | None, str]:
     """The nearest level the trade is heading into, from `nearby` (every source merged)."""
     near = (structure or {}).get("nearby") or {}
@@ -131,7 +119,9 @@ class Strategy(ABC):
     interval: ClassVar[str]
     lookback: ClassVar[int]  # closed bars of `interval` handed over
     default_on: ClassVar[bool] = False  # a new strategy starts off until it is switched on
-    wants_outlook: ClassVar[bool] = False
+    # The guard's trailing stop (from +1R, 1R behind). A trend that is held for days gives back more
+    # to that trail than it saves: off for those, and their stop stays where the strategy set it.
+    trails: ClassVar[bool] = True
     wants_structure: ClassVar[bool] = False
     wants_flow: ClassVar[bool] = False
     wants_bias: ClassVar[bool] = False

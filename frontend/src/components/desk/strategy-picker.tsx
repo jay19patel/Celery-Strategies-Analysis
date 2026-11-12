@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import type { StrategyInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const VIEW_TONE = { neutral: "default", bullish: "profit", bearish: "loss", volatile: "warn" } as const;
+const VIEW_TONE = { neutral: "default", bullish: "profit", bearish: "loss", volatile: "warn", directional: "primary" } as const;
 
 export interface TicketParams {
   strategy: string;

@@ -20,8 +20,11 @@ STRESS_MOVES = 3.0
 # defined-risk credit is held to settlement and uses none of them.
 CREDIT_TAKE_PROFIT_PCT = 50.0  # of the maximum profit
 CREDIT_STOP_LOSS_PCT = 100.0  # of the credit received
-DEBIT_TAKE_PROFIT_PCT = 60.0  # of the debit paid
-DEBIT_STOP_LOSS_PCT = 50.0  # of the debit paid
+# A bought option's worst case is its premium and it is sized on that: a premium stop only lets theta
+# close it at a loss before the move (the long straddle lost 6 of 6 that way). It takes profit when
+# it has doubled, else it settles at intrinsic.
+DEBIT_TAKE_PROFIT_PCT = 100.0  # of the debit paid
+DEBIT_STOP_LOSS_PCT = 100.0  # of the debit paid: the whole premium, never before it is gone
 
 
 @dataclass(frozen=True)

@@ -48,7 +48,7 @@ async def test_the_guard_closes_at_the_stop_and_at_the_target(perp: Any) -> None
     assert closed["status"] == "closed" and closed["close_reason"].startswith("stop loss") and closed["pnl"] < 0
 
     perp.feed.set_perp(PRICE, bid=PRICE - 0.5, ask=PRICE + 0.5)
-    short = await perp.trading.open_directional("paper", "BTC", "sell", 5, 80_500, 79_000, "ema_vwap", "auto", "req-perp-tp", "")
+    short = await perp.trading.open_directional("paper", "BTC", "sell", 5, 80_500, 79_000, "flow_breakout", "auto", "req-perp-tp", "")
     perp.feed.set_perp(78_990, bid=78_989.5, ask=78_990.5)
     await guard.check_structures()
     won = perp.trading.structure(short["id"])
@@ -74,7 +74,7 @@ async def test_levels_on_the_wrong_side_and_a_second_position_are_refused(perp: 
         await perp.trading.open_directional("paper", "BTC", "buy", 5, 80_500, 81_000, "manual", "manual", "req-perp-bad", "")
     await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 81_000, "trend_4h_short", "auto", "req-perp-one", "")
     with pytest.raises(Refused, match="one per symbol"):
-        await perp.trading.open_directional("paper", "BTC", "sell", 5, 80_500, 79_000, "ema_vwap", "auto", "req-perp-two", "")
+        await perp.trading.open_directional("paper", "BTC", "sell", 5, 80_500, 79_000, "flow_breakout", "auto", "req-perp-two", "")
 
 
 async def test_an_options_structure_and_a_perp_position_do_not_block_each_other(perp: Any) -> None:
@@ -301,7 +301,7 @@ async def test_a_position_the_exchange_will_not_protect_is_closed(perp: Any) -> 
 
 async def test_the_stop_trails_from_one_r_never_loosens_and_locks_the_gain_in(perp: Any) -> None:
     guard = Guard(perp.trading, perp.settings, perp.hub)
-    view = await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 82_000, "trend_4h_short", "auto", "req-trail-1", "")
+    view = await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 82_000, "flow_breakout", "auto", "req-trail-1", "")
     entry = view["legs"][0]["entry_price"]
     risk = entry - 79_500
 
@@ -330,8 +330,31 @@ async def test_the_stop_trails_from_one_r_never_loosens_and_locks_the_gain_in(pe
     assert closed["status"] == "closed" and closed["close_reason"].startswith("trailing stop") and closed["pnl"] > 0
 
 
+async def test_the_trailed_break_even_covers_the_fees(perp: Any) -> None:
+    """11 Nov: a long trailed to its entry closed at "break-even" and booked the fees as a loss."""
+    guard = Guard(perp.trading, perp.settings, perp.hub)
+    view = await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_900, 82_000, "flow_breakout", "auto", "req-trail-fee", "")
+    entry = view["legs"][0]["entry_price"]
+    risk = entry - 79_900
+    even = entry * (1 + 2 * perp.trading.desk.cached_fee("BTCUSD").taker)
+    assert entry + 0.05 * risk < even  # a stop at 1R behind a 1.05R peak would sit under the fees
+    peak = entry + 1.05 * risk
+    perp.feed.set_perp(peak, bid=peak - 0.5, ask=peak + 0.5)
+    await guard.check_structures()
+    assert perp.trading.structure(view["id"])["stop_price"] == pytest.approx(even)
+
+
+async def test_a_strategy_that_holds_its_own_stop_is_never_trailed(perp: Any) -> None:
+    guard = Guard(perp.trading, perp.settings, perp.hub)
+    view = await perp.trading.open_directional("paper", "BTC", "buy", 5, 79_500, 90_000, "breakout_4h_long", "auto", "req-no-trail", "")
+    peak = view["legs"][0]["entry_price"] + 3_000  # +6R
+    perp.feed.set_perp(peak, bid=peak - 0.5, ask=peak + 0.5)
+    await guard.check_structures()
+    assert perp.trading.structure(view["id"])["stop_price"] == 79_500
+
+
 async def test_a_trailed_exchange_stop_is_placed_before_the_old_one_is_cancelled(perp: Any, exchange: Exchange) -> None:
-    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 82_000, "trend_4h_short", "auto", "req-trail-2", "")
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 82_000, "flow_breakout", "auto", "req-trail-2", "")
     entry = view["legs"][0]["entry_price"]
     up = entry + 1.5 * (entry - 79_500)
     perp.feed.set_perp(up, bid=up - 0.5, ask=up + 0.5)
@@ -348,7 +371,7 @@ async def test_a_trailed_exchange_stop_is_placed_before_the_old_one_is_cancelled
 
 
 async def test_a_stop_that_just_filled_is_not_moved(perp: Any, exchange: Exchange) -> None:
-    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 82_000, "trend_4h_short", "auto", "req-trail-3", "")
+    view = await perp.trading.open_directional("delta", "BTC", "buy", 5, 79_500, 82_000, "flow_breakout", "auto", "req-trail-3", "")
     st, legs = perp.trading._load(view["id"])
     exchange.trigger(79_480.0)
     up = 81_500.0

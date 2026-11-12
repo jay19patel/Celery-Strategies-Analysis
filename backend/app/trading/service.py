@@ -341,7 +341,7 @@ class TradingService:
                     "active": moved > 0, "initial_stop": initial, "moved": round(moved, 6),
                     "moved_r": round(moved / risk, 2) if risk else None, "best": st.peak_price,
                     "best_pct": pct(st.peak_price), "locked_in_pct": pct(st.stop_price) if moved > 0 else None,
-                    "rule": f"from +{TRAIL_START_R:g}R the stop is at least break-even and follows the best price {TRAIL_DISTANCE_R:g}R behind",
+                    "rule": f"from +{TRAIL_START_R:g}R the stop is at least break-even after fees and follows the best price {TRAIL_DISTANCE_R:g}R behind",
                 },
             }
         if held or len(legs) != 1:
@@ -673,6 +673,8 @@ class TradingService:
         quote = self.book(leg.symbol) if leg else None
         if leg is None or quote is None or leg.entry_price is None or st.status != "open":
             return
+        if not getattr(registry.get(st.strategy), "trails", True):
+            return  # this strategy holds its own stop (`Strategy.trails`)
         long, mark, entry = leg.side == "buy", quote[2], leg.entry_price
         initial = st.initial_stop or st.stop_price
         risk = abs(entry - (initial or entry))
@@ -684,7 +686,8 @@ class TradingService:
             self._save(st)
         if (peak - entry if long else entry - peak) < TRAIL_START_R * risk:
             return
-        wanted = max(peak - TRAIL_DISTANCE_R * risk, entry) if long else min(peak + TRAIL_DISTANCE_R * risk, entry)
+        even = entry * (1 + (1 if long else -1) * 2 * self.desk.cached_fee(leg.symbol).taker)  # break-even after fees both ways
+        wanted = max(peak - TRAIL_DISTANCE_R * risk, even) if long else min(peak + TRAIL_DISTANCE_R * risk, even)
         if (wanted - st.stop_price if long else st.stop_price - wanted) < TRAIL_STEP_R * risk:
             return
         async with self.lock:

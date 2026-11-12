@@ -9,6 +9,7 @@ from app.strategies.base import Context, Decision, Strategy, bracket, none
 
 class FlowBreakout(Strategy):
     name = "flow_breakout"
+    version = 2  # v2: a stop inside the costs is refused
     label = "Flow breakout"
     summary = "On a trend day, a fresh close beyond yesterday's value with stacked imbalances and delta the same way."
     stop_rule = "back inside value: the broken edge minus 0.25 ATR"
